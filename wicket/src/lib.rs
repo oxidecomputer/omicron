@@ -7,6 +7,7 @@
 
 mod dispatch;
 mod events;
+mod keymap;
 mod runner;
 mod state;
 mod ui;
@@ -16,5 +17,6 @@ mod wicketd;
 pub use crate::dispatch::*;
 pub use crate::runner::*;
 pub use events::{Action, Event, InventoryEvent};
+pub use keymap::{Cmd, KeyHandler};
 pub use state::State;
 pub use ui::Control;

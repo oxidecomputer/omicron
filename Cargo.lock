@@ -2227,6 +2227,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-test-utils"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "dropshot",
+ "gateway-messages",
+ "omicron-gateway",
+ "omicron-test-utils",
+ "slog",
+ "sp-sim",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3877,6 +3892,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "gateway-sp-comms",
+ "gateway-test-utils",
  "hex",
  "http",
  "hyper",
@@ -7947,9 +7963,11 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-test-utils",
  "hex",
  "http",
  "hyper",
+ "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
  "omicron-common",
@@ -7973,6 +7991,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "uuid",
+ "wicketd-client",
 ]
 
 [[package]]
