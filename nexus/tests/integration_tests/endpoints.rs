@@ -1457,15 +1457,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
-        /* Timeseries schema */
-
-        VerifyEndpoint {
-            url: "/timeseries/schema",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
         /* Updates */
 
         VerifyEndpoint {
