@@ -4,7 +4,7 @@
 
 //! Tests for wicketd updates.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use super::setup::WicketdTestContext;
 use camino::Utf8Path;
@@ -13,6 +13,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use tempfile::TempDir;
+use wicketd_client::types::{UpdateEventKind, UpdateTerminalEventKind};
 
 #[tokio::test]
 async fn test_updates() {
@@ -72,12 +73,35 @@ async fn test_updates() {
         .await
         .expect("update started successfully");
 
-    let _status = wicketd_testctx
-        .wicketd_client
-        .get_update_sp(wicketd_client::types::SpType::Sled, 0)
-        .await
-        .expect("get_update successful")
-        .into_inner();
+    let terminal_event = 'outer: loop {
+        let update_log = wicketd_testctx
+            .wicketd_client
+            .get_update_sp(wicketd_client::types::SpType::Sled, 0)
+            .await
+            .expect("get_update_sp successful")
+            .into_inner();
+
+        slog::debug!(log, "received update log"; "update_log" => ?update_log);
+
+        for event in update_log.events {
+            if let UpdateEventKind::Terminal(event) = event.kind {
+                break 'outer event;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    match terminal_event {
+        UpdateTerminalEventKind::ArtifactUpdateFailed { artifact, .. } => {
+            // TODO: obviously we shouldn't stop here, get past more of the
+            // update process in this test.
+            assert_eq!(artifact.kind, "gimlet_sp");
+        }
+        other => {
+            panic!("unexpected terminal event kind: {other:?}");
+        }
+    }
 
     // TODO: This doesn't work yet since sp-sim can't understand update
     // commands.

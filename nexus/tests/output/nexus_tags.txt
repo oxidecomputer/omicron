@@ -83,10 +83,6 @@ login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
-API operations found with tag "metrics"
-OPERATION ID                             URL PATH
-timeseries_schema_get                    /timeseries/schema
-
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
 organization_create                      /organizations

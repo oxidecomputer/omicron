@@ -53,7 +53,7 @@ pub enum UpdateStateKind {
     ArtifactWriteProgress {
         attempt: usize,
         kind: ArtifactKind,
-        #[schemars(schema_with = "path_schema")]
+        #[schemars(schema_with = "path_opt_schema")]
         destination: Option<Utf8PathBuf>,
         written_bytes: u64,
         total_bytes: u64,
@@ -118,6 +118,12 @@ pub struct UpdateLog {
 
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
+
+fn path_opt_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

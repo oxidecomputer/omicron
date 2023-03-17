@@ -6,10 +6,14 @@
 
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 
+use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
 
 pub struct WicketdTestContext {
     pub wicketd_client: wicketd_client::Client,
+    // This is not currently used but is kept here because it's easier to debug
+    // this way.
+    pub wicketd_raw_client: ClientTestContext,
     pub artifact_client: installinator_artifact_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
@@ -67,7 +71,18 @@ impl WicketdTestContext {
             )
         };
 
-        Self { wicketd_client, artifact_client, server, gateway }
+        let wicketd_raw_client = ClientTestContext::new(
+            server.wicketd_server.local_addr(),
+            log.new(slog::o!("component" => "wicketd test, raw client")),
+        );
+
+        Self {
+            wicketd_client,
+            wicketd_raw_client,
+            artifact_client,
+            server,
+            gateway,
+        }
     }
 
     pub fn log(&self) -> &slog::Logger {
