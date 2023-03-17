@@ -8956,7 +8956,7 @@ async fn role_view(
 /// List built-in roles
 #[endpoint {
     method = GET,
-    path = "/v1/roles",
+    path = "/v1/system/roles",
     tags = ["roles"],
 }]
 async fn role_list_v1(
@@ -9003,7 +9003,7 @@ async fn role_list_v1(
 /// Fetch a built-in role
 #[endpoint {
     method = GET,
-    path = "/v1/roles/{role_name}",
+    path = "/v1/system/roles/{role_name}",
     tags = ["roles"],
 }]
 async fn role_view_v1(
