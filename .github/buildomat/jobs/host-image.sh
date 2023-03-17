@@ -18,6 +18,7 @@
 #:	"oxidecomputer/compliance-pilot",
 #:	"oxidecomputer/facade",
 #:	"oxidecomputer/helios",
+#:	"oxidecomputer/helios-omicron-brand",
 #:	"oxidecomputer/helios-omnios-build",
 #:	"oxidecomputer/helios-omnios-extra",
 #:	"oxidecomputer/nanobl-rs",
