@@ -2227,6 +2227,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-test-utils"
+version = "0.1.0"
+dependencies = [
+ "dropshot",
+ "gateway-messages",
+ "omicron-gateway",
+ "omicron-test-utils",
+ "slog",
+ "sp-sim",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3877,6 +3891,7 @@ dependencies = [
  "futures",
  "gateway-messages",
  "gateway-sp-comms",
+ "gateway-test-utils",
  "hex",
  "http",
  "hyper",

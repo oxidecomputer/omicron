@@ -254,7 +254,7 @@ pub async fn create_local_user(
 ) -> User {
     let silo_name = &silo.identity.name;
     let url =
-        format!("/system/silos/{}/identity-providers/local/users", silo_name);
+        format!("/v1/system/identity-providers/local/users?silo={}", silo_name);
     object_create(
         client,
         &url,
@@ -306,7 +306,7 @@ pub async fn create_disk(
     disk_name: &str,
 ) -> Disk {
     let url = format!(
-        "/organizations/{}/projects/{}/disks",
+        "/v1/disks?organization={}&project={}",
         organization_name, project_name
     );
     object_create(
@@ -333,8 +333,8 @@ pub async fn delete_disk(
     disk_name: &str,
 ) {
     let url = format!(
-        "/organizations/{}/projects/{}/disks/{}",
-        organization_name, project_name, disk_name
+        "/v1/disks/{}?organization={}&project={}",
+        disk_name, organization_name, project_name,
     );
     object_delete(client, &url).await
 }
@@ -405,7 +405,7 @@ pub async fn create_vpc(
     object_create(
         &client,
         format!(
-            "/organizations/{}/projects/{}/vpcs",
+            "/v1/vpcs?organization={}&project={}",
             &organization_name, &project_name
         )
         .as_str(),
@@ -435,7 +435,7 @@ pub async fn create_vpc_with_error(
             client,
             Method::POST,
             format!(
-                "/organizations/{}/projects/{}/vpcs",
+                "/v1/vpcs?organization={}&project={}",
                 &organization_name, &project_name
             )
             .as_str(),
@@ -468,7 +468,7 @@ pub async fn create_router(
     NexusRequest::objects_post(
         &client,
         format!(
-            "/organizations/{}/projects/{}/vpcs/{}/routers",
+            "/v1/vpc-routers?organization={}&project={}&vpc={}",
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),
