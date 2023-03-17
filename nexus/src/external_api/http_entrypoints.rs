@@ -8109,7 +8109,7 @@ struct SystemMetricsPathParam {
 /// Access metrics data
 #[endpoint {
      method = GET,
-     path = "/system/metrics/{metric_name}",
+     path = "/v1/system/metrics/{metric_name}",
      tags = ["system"],
 }]
 async fn system_metric(
