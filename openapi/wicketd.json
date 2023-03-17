@@ -1642,6 +1642,7 @@
                     "minimum": 0
                   },
                   "destination": {
+                    "nullable": true,
                     "type": "string",
                     "format": "Utf8PathBuf"
                   },

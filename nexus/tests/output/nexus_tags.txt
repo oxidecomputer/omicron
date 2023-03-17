@@ -81,10 +81,6 @@ login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
-API operations found with tag "metrics"
-OPERATION ID                             URL PATH
-timeseries_schema_get                    /timeseries/schema
-
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
 organization_create                      /organizations
@@ -131,7 +127,9 @@ project_view_v1                          /v1/projects/{project}
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
 role_list                                /roles
+role_list_v1                             /v1/system/roles
 role_view                                /roles/{role_name}
+role_view_v1                             /v1/system/roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH
@@ -264,6 +262,8 @@ system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
 update_deployment_view                   /v1/system/update/deployments/{id}
 update_deployments_list                  /v1/system/update/deployments
+user_builtin_list                        /v1/system/users-builtin
+user_builtin_view                        /v1/system/users-builtin/{user}
 
 API operations found with tag "vpcs"
 OPERATION ID                             URL PATH

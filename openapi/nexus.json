@@ -7417,56 +7417,6 @@
         }
       }
     },
-    "/timeseries/schema": {
-      "get": {
-        "tags": [
-          "metrics"
-        ],
-        "summary": "List timeseries schema",
-        "operationId": "timeseries_schema_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TimeseriesSchemaResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
     "/users": {
       "get": {
         "tags": [
@@ -11834,6 +11784,94 @@
         }
       }
     },
+    "/v1/system/roles": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "List built-in roles",
+        "operationId": "role_list_v1",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoleResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/roles/{role_name}": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "Fetch a built-in role",
+        "operationId": "role_view_v1",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "role_name",
+            "description": "The built-in role's unique name.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Role"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/sagas": {
       "get": {
         "tags": [
@@ -12657,6 +12695,100 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/users-builtin": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List built-in users",
+        "operationId": "user_builtin_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/users-builtin/{user}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a built-in user",
+        "operationId": "user_builtin_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserBuiltin"
                 }
               }
             }
@@ -14789,21 +14921,6 @@
           }
         ]
       },
-      "DatumType": {
-        "description": "The type of an individual datum of a metric.",
-        "type": "string",
-        "enum": [
-          "bool",
-          "i64",
-          "f64",
-          "string",
-          "bytes",
-          "cumulative_i64",
-          "cumulative_f64",
-          "histogram_i64",
-          "histogram_f64"
-        ]
-      },
       "DerEncodedKeyPair": {
         "type": "object",
         "properties": {
@@ -15368,45 +15485,6 @@
         },
         "required": [
           "items"
-        ]
-      },
-      "FieldSchema": {
-        "description": "The name and type information for a field of a timeseries schema.",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "source": {
-            "$ref": "#/components/schemas/FieldSource"
-          },
-          "ty": {
-            "$ref": "#/components/schemas/FieldType"
-          }
-        },
-        "required": [
-          "name",
-          "source",
-          "ty"
-        ]
-      },
-      "FieldSource": {
-        "description": "The source from which a field is derived, the target or metric.",
-        "type": "string",
-        "enum": [
-          "target",
-          "metric"
-        ]
-      },
-      "FieldType": {
-        "description": "The `FieldType` identifies the data type of a target or metric field.",
-        "type": "string",
-        "enum": [
-          "string",
-          "i64",
-          "ip_addr",
-          "uuid",
-          "bool"
         ]
       },
       "FleetRole": {
@@ -18592,61 +18670,6 @@
         "required": [
           "status",
           "version_range"
-        ]
-      },
-      "TimeseriesName": {
-        "title": "The name of a timeseries",
-        "description": "Names are constructed by concatenating the target and metric names with ':'. Target and metric names must be lowercase alphanumeric characters with '_' separating words.",
-        "type": "string",
-        "pattern": "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)"
-      },
-      "TimeseriesSchema": {
-        "description": "The schema for a timeseries.\n\nThis includes the name of the timeseries, as well as the datum type of its metric and the schema for each field.",
-        "type": "object",
-        "properties": {
-          "created": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "datum_type": {
-            "$ref": "#/components/schemas/DatumType"
-          },
-          "field_schema": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/FieldSchema"
-            }
-          },
-          "timeseries_name": {
-            "$ref": "#/components/schemas/TimeseriesName"
-          }
-        },
-        "required": [
-          "created",
-          "datum_type",
-          "field_schema",
-          "timeseries_name"
-        ]
-      },
-      "TimeseriesSchemaResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TimeseriesSchema"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "UpdateDeployment": {
