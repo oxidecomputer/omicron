@@ -248,7 +248,9 @@ fn update_artifact_state(
     new_state: UpdateState,
 ) {
     if let Some(known) = &known {
-        items.get_mut(known).map(|state| *state = new_state);
+        if let Some(state) = items.get_mut(known) {
+            *state = new_state;
+        }
     }
 }
 

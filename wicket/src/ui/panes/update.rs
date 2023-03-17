@@ -80,7 +80,7 @@ impl UpdatePane {
 
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" UPDATE LOGS: {}", selected.to_string()),
+                format!(" UPDATE LOGS: {}", selected),
                 style::header(true),
             )])]),
             body: Text::styled(logs, style::plain_text()),
@@ -105,10 +105,7 @@ impl UpdatePane {
     ) {
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(
-                    " START UPDATE: {}",
-                    state.rack_state.selected.to_string()
-                ),
+                format!(" START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
             )])]),
             body: Text::from(vec![Spans::from(vec![Span::styled(
