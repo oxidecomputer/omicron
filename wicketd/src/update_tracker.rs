@@ -417,7 +417,7 @@ impl UpdateDriver {
         };
 
         info!(self.log, "starting RoT update"; "artifact" => ?rot_artifact.id);
-        self.update_sp_component(rot_artifact, SpComponent::ROT)
+        self.update_sp_component(rot_artifact, SpComponent::ROT.const_as_str())
             .await
             .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: rot_artifact.id.clone(),
@@ -425,12 +425,17 @@ impl UpdateDriver {
             })?;
 
         info!(self.log, "starting SP update"; "artifact" => ?sp_artifact.id);
-        self.update_sp_component(sp_artifact, SpComponent::SP_ITSELF)
-            .await
-            .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
+        self.update_sp_component(
+            sp_artifact,
+            SpComponent::SP_ITSELF.const_as_str(),
+        )
+        .await
+        .map_err(|err| {
+            UpdateTerminalEventKind::ArtifactUpdateFailed {
                 artifact: sp_artifact.id.clone(),
                 reason: format!("{err:#}"),
-            })?;
+            }
+        })?;
         self.push_update_normal_event_now(
             UpdateNormalEventKind::ArtifactUpdateComplete {
                 artifact: sp_artifact.id.clone(),
@@ -974,9 +979,8 @@ impl UpdateDriver {
     async fn update_sp_component(
         &self,
         artifact: &ArtifactIdData,
-        component: SpComponent,
+        component_name: &str,
     ) -> anyhow::Result<()> {
-        let component_name = component.const_as_str();
         let update_id = Uuid::new_v4();
 
         // The SP only has one updateable firmware slot ("the inactive bank") -
