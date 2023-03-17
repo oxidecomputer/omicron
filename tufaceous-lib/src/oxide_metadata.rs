@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! This file is a copy of
-//! https://github.com/oxidecomputer/helios-omicron-brand/blob/d810b76a93c08e36b8e0ff2ce79904232c8ae773/utils/src/metadata.rs.
+//! <https://github.com/oxidecomputer/helios-omicron-brand/blob/d810b76a93c08e36b8e0ff2ce79904232c8ae773/utils/src/metadata.rs>.
 //! Once that is open sourced, we should switch to using that.
 
 /*
