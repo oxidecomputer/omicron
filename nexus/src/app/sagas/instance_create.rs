@@ -424,10 +424,10 @@ async fn sic_add_network_config(
 
     let existing_nat = match target_ip.ip {
         ipnetwork::IpNetwork::V4(network) => {
-            dpd_client.nat_get_ipv4(&network.ip(), *target_ip.first_port).await
+            dpd_client.nat_ipv4_get(&network.ip(), *target_ip.first_port).await
         }
         ipnetwork::IpNetwork::V6(network) => {
-            dpd_client.nat_get_ipv6(&network.ip(), *target_ip.first_port).await
+            dpd_client.nat_ipv6_get(&network.ip(), *target_ip.first_port).await
         }
     };
 
@@ -460,7 +460,7 @@ async fn sic_add_network_config(
     match target_ip.ip {
         ipnetwork::IpNetwork::V4(network) => {
             dpd_client
-                .nat_set_ipv4(
+                .nat_ipv4_create(
                     &network.ip(),
                     *target_ip.first_port,
                     *target_ip.last_port,
@@ -470,7 +470,7 @@ async fn sic_add_network_config(
         }
         ipnetwork::IpNetwork::V6(network) => {
             dpd_client
-                .nat_set_ipv6(
+                .nat_ipv6_create(
                     &network.ip(),
                     *target_ip.first_port,
                     *target_ip.last_port,
@@ -532,12 +532,12 @@ async fn sic_remove_network_config(
     let result = match target_ip.ip {
         ipnetwork::IpNetwork::V4(network) => {
             dpd_client
-                .nat_delete_ipv4(&network.ip(), *target_ip.first_port)
+                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
                 .await
         }
         ipnetwork::IpNetwork::V6(network) => {
             dpd_client
-                .nat_delete_ipv6(&network.ip(), *target_ip.first_port)
+                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
                 .await
         }
     };

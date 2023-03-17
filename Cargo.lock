@@ -1695,6 +1695,7 @@ dependencies = [
  "progenitor",
  "progenitor-client",
  "quote",
+ "regress",
  "reqwest",
  "serde",
  "serde_json",

@@ -109,12 +109,12 @@ async fn sid_delete_network_config(
         let result = match entry.ip {
             ipnetwork::IpNetwork::V4(network) => {
                 dpd_client
-                    .nat_delete_ipv4(&network.ip(), *entry.first_port)
+                    .nat_ipv4_delete(&network.ip(), *entry.first_port)
                     .await
             }
             ipnetwork::IpNetwork::V6(network) => {
                 dpd_client
-                    .nat_delete_ipv6(&network.ip(), *entry.first_port)
+                    .nat_ipv6_delete(&network.ip(), *entry.first_port)
                     .await
             }
         };

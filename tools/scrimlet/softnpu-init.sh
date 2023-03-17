@@ -12,10 +12,10 @@ echo "Using $GATEWAY_IP as gateway ip"
 gateway_mac=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')
 
 # Sidecar Interface facing "sled"
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port add 1:0 100G RS
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port create 1:0 100G RS
 
 # Sidecar Interface facing external network
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port add 2:0 100G RS
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port create 2:0 100G RS
 
 # Configure sidecar local ipv6 addresses
 ./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 1:0 fe80::aae1:deff:fe01:701c

@@ -842,7 +842,13 @@ impl ServiceManager {
                             "config/port_config",
                             "/opt/oxide/dendrite/misc/model_config.toml",
                         )?,
-                        DendriteAsic::Softnpu => {}
+                        DendriteAsic::Softnpu => {
+                            smfh.setprop("config/mgmt", "uds")?;
+                            smfh.setprop(
+                                "config/uds_path",
+                                "/opt/softnpu/stuff",
+                            )?;
+                        }
                     };
                     smfh.refresh()?;
                 }
