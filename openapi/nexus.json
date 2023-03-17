@@ -6722,92 +6722,6 @@
         "deprecated": true
       }
     },
-    "/system/metrics/{metric_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Access metrics data",
-        "operationId": "system_metric",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "metric_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SystemMetricName"
-            }
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
     "/system/policy": {
       "get": {
         "tags": [
@@ -12020,6 +11934,92 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/v1/system/metrics/{metric_name}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Access metrics data",
+        "operationId": "system_metric",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SystemMetricName"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_time",
+            "description": "An exclusive end time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "The UUID of the container being queried",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_time",
+            "description": "An inclusive start time of metrics.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
       }
     },
     "/v1/system/policy": {
