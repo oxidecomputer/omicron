@@ -29,7 +29,7 @@ async fn instance_launch() -> Result<()> {
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
     ctx.client
-        .session_sshkey_create()
+        .current_user_ssh_key_create()
         .body(SshKeyCreate {
             name: generate_name("key")?,
             description: String::new(),

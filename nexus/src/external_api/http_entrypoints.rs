@@ -331,12 +331,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(role_list)?;
         api.register(role_view)?;
 
-        api.register(current_user_view_v1)?;
-        api.register(current_user_groups_v1)?;
-        api.register(current_user_ssh_key_list_v1)?;
-        api.register(current_user_ssh_key_view_v1)?;
-        api.register(current_user_ssh_key_create_v1)?;
-        api.register(current_user_ssh_key_delete_v1)?;
+        api.register(current_user_view)?;
+        api.register(current_user_groups)?;
+        api.register(current_user_ssh_key_list)?;
+        api.register(current_user_ssh_key_view)?;
+        api.register(current_user_ssh_key_create)?;
+        api.register(current_user_ssh_key_delete)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -8891,7 +8891,7 @@ async fn role_view(
    path = "/v1/me",
    tags = ["session"],
 }]
-pub async fn current_user_view_v1(
+pub async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
@@ -8910,7 +8910,7 @@ pub async fn current_user_view_v1(
     path = "/v1/me/groups",
     tags = ["session"],
  }]
-pub async fn current_user_groups_v1(
+pub async fn current_user_groups(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
@@ -8947,7 +8947,7 @@ pub async fn current_user_groups_v1(
     path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_list_v1(
+async fn current_user_ssh_key_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
@@ -8986,7 +8986,7 @@ async fn current_user_ssh_key_list_v1(
     path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_create_v1(
+async fn current_user_ssh_key_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
@@ -9014,7 +9014,7 @@ async fn current_user_ssh_key_create_v1(
     path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_view_v1(
+async fn current_user_ssh_key_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
@@ -9048,7 +9048,7 @@ async fn current_user_ssh_key_view_v1(
     path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_delete_v1(
+async fn current_user_ssh_key_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
