@@ -1,0 +1,16 @@
+[package]
+name = "gateway-test-utils"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+camino.workspace = true
+dropshot.workspace = true
+gateway-messages.workspace = true
+omicron-gateway.workspace = true
+omicron-test-utils.workspace = true
+slog.workspace = true
+sp-sim.workspace = true
+tokio.workspace = true
+uuid.workspace = true

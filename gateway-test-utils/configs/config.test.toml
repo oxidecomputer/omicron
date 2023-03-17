@@ -9,7 +9,9 @@
 host_phase2_recovery_image_cache_max_images = 1
 
 [dropshot]
-request_body_max_bytes = 131072
+# We want to allow uploads of host phase 2 recovery images, which may be
+# measured in the (small) hundreds of MiB. Set this to 512 MiB.
+request_body_max_bytes = 536870912
 
 [switch]
 # For tests, bind to port 0 (i.e., OS chooses an open port) instead of MGS's
