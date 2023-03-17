@@ -8779,10 +8779,13 @@ async fn system_user_view(
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let user_name = &path.user_name;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
+        let user_selector = params::UserBuiltinSelector {
+            user: NameOrId::Name(path.user_name.into()),
+        };
+        let (.., user) =
+            nexus.user_builtin_lookup(&opctx, &user_selector)?.fetch().await?;
         Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -8823,20 +8826,20 @@ async fn user_builtin_list(
 /// Fetch a built-in user
 #[endpoint {
     method = GET,
-    path = "/v1/system/users-builtin/{user_name}",
+    path = "/v1/system/users-builtin/{user}",
     tags = ["system"],
 }]
 async fn user_builtin_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<BuiltinUserPathParam>,
+    path_params: Path<params::UserBuiltinSelector>,
 ) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let user_name = &path.user_name;
     let handler = async {
+        let nexus = &apictx.nexus;
+        let user_selector = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
+        let (.., user) =
+            nexus.user_builtin_lookup(&opctx, &user_selector)?.fetch().await?;
         Ok(HttpResponseOk(user.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -13065,7 +13065,7 @@
         "x-dropshot-pagination": true
       }
     },
-    "/v1/system/users-builtin/{user_name}": {
+    "/v1/system/users-builtin/{user}": {
       "get": {
         "tags": [
           "system"
@@ -13075,11 +13075,10 @@
         "parameters": [
           {
             "in": "path",
-            "name": "user_name",
-            "description": "The built-in user's unique name.",
+            "name": "user",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
