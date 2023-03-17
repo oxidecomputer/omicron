@@ -326,8 +326,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_user_list)?;
         api.register(system_user_view)?;
 
-        api.register(timeseries_schema_get)?;
-
         api.register(role_list)?;
         api.register(role_view)?;
 
@@ -8778,29 +8776,6 @@ async fn system_user_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.user_builtin_fetch(&opctx, &user_name).await?;
         Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List timeseries schema
-#[endpoint {
-    method = GET,
-    path = "/v1/timeseries/schema",
-    tags = ["metrics"],
-}]
-async fn timeseries_schema_get(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
-) -> Result<HttpResponseOk<ResultsPage<oximeter_db::TimeseriesSchema>>, HttpError>
-{
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let limit = rqctx.page_limit(&query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let list = nexus.timeseries_schema_list(&opctx, &query, limit).await?;
-        Ok(HttpResponseOk(list))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
