@@ -17,7 +17,8 @@ use omicron_common::{
     api::{external::SemverVersion, internal::nexus::KnownArtifactKind},
     update::ArtifactKind,
 };
-use serde::{Deserialize, Serialize};
+
+use crate::oxide_metadata;
 
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
@@ -148,36 +149,29 @@ fn write_host_tarball_fake_artifact<W: Write>(
     let phase_2_times = times - phase_1_times;
 
     {
-        let oxide_metadata_json =
-            serde_json::to_string(&OxideMetadata::os_metadata())
-                .expect("oxide metadata should serialize correctly");
-        let mut header = tar::Header::new_gnu();
-        header.set_path(OXIDE_JSON_FILE_NAME).unwrap();
-        header.set_size(oxide_metadata_json.len() as u64);
-        header.set_cksum();
-
-        builder
-            .append(&header, oxide_metadata_json.as_bytes())
-            .with_context(|| format!("error writing {OXIDE_JSON_FILE_NAME}"))?;
+        let metadata = oxide_metadata::MetadataBuilder::new(
+            oxide_metadata::ArchiveType::Os,
+        )
+        .build()
+        .context("error building oxide metadata")?;
+        metadata.append_to_tar(&mut builder)?;
     }
 
     {
-        let mut header = tar::Header::new_gnu();
-        header.set_path(PHASE_1_FILE_NAME).unwrap();
-        header.set_size((phase_1_times * FILLER_TEXT.len()) as u64);
-        header.set_cksum();
-
+        let header = make_tar_header(
+            PHASE_1_FILE_NAME,
+            phase_1_times * FILLER_TEXT.len(),
+        );
         builder
             .append(&header, FillerReader::new(phase_1_times))
             .with_context(|| format!("error writing `{PHASE_1_FILE_NAME}`"))?;
     }
 
     {
-        let mut header = tar::Header::new_gnu();
-        header.set_path(PHASE_2_FILE_NAME).unwrap();
-        header.set_size((phase_2_times * FILLER_TEXT.len()) as u64);
-        header.set_cksum();
-
+        let header = make_tar_header(
+            PHASE_2_FILE_NAME,
+            phase_2_times * FILLER_TEXT.len(),
+        );
         builder
             .append(&header, FillerReader::new(phase_2_times))
             .with_context(|| format!("error writing `{PHASE_1_FILE_NAME}`"))?;
@@ -192,6 +186,16 @@ fn write_host_tarball_fake_artifact<W: Write>(
         .map_err(|_| anyhow::anyhow!("error flushing archive writer"))?;
 
     Ok(())
+}
+
+fn make_tar_header(path: &str, size: usize) -> tar::Header {
+    let mut header = tar::Header::new_ustar();
+    header.set_path(path).unwrap();
+    header.set_size(size as u64);
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_cksum();
+
+    header
 }
 
 /// A simple `Read` implementation used to generate filler text.
@@ -270,20 +274,17 @@ impl HostPhaseImages {
                 .context("error reading path from archive")?;
             if path == Path::new(OXIDE_JSON_FILE_NAME) {
                 let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
-                let oxide_json: OxideMetadata =
+                let metadata: oxide_metadata::Metadata =
                     serde_json::from_slice(&json_bytes).with_context(|| {
                         format!(
-                        "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
-                    )
+                            "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
+                        )
                     })?;
-
-                let expected = OxideMetadata::os_metadata();
-                if oxide_json != expected {
-                    // The metadata didn't match.
+                if !metadata.is_os() {
                     bail!(
-                        "unexpected metadata for {OXIDE_JSON_FILE_NAME}:\
-                         expected {expected:?}, found {oxide_json:?}",
-                    );
+                        "unexpected archive type: expected os, found {:?}",
+                        metadata.archive_type(),
+                    )
                 }
                 oxide_json_found = true;
             } else if path == Path::new(PHASE_1_FILE_NAME) {
@@ -319,6 +320,10 @@ fn read_entry<R: io::Read>(
     mut entry: tar::Entry<R>,
     file_name: &str,
 ) -> Result<Bytes> {
+    let entry_type = entry.header().entry_type();
+    if entry_type != tar::EntryType::Regular {
+        bail!("for {file_name}, expected regular file, found {entry_type:?}");
+    }
     let size = entry.size();
     let mut buf = Vec::with_capacity(size as usize);
     entry
@@ -331,15 +336,3 @@ static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
 static PHASE_1_FILE_NAME: &str = "image/rom";
 static PHASE_2_FILE_NAME: &str = "image/zfs.img";
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-struct OxideMetadata {
-    v: String,
-    t: String,
-}
-
-impl OxideMetadata {
-    fn os_metadata() -> Self {
-        Self { v: "1".to_owned(), t: "os".to_owned() }
-    }
-}
