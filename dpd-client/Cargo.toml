@@ -9,6 +9,7 @@ progenitor-client.workspace = true
 reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"] }
 serde.workspace = true
 slog.workspace = true
+regress.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true

@@ -34,7 +34,7 @@ fi
 # This is the CLI client for dendrite
 if [[ ! -f out/softnpu/swadm ]]; then
     echo "fetching swadm"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GT8QDBN11SWM0CPBWV4J100D/fK83u57UKT3UqadYXs7DyAjoKIDF5OdmACmkswwfCW6hLolf/01GT8QDN7MC6KC93J974W7QFK3/01GT8RVFCKGMA9N32XVP5ZXKG2/swadm
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GVRJ8RKWX9R26DX39KMGYZ3Z/IXahhCNnTV5VY8QPRWC9acX9ZNaDFLnY7TyTOZ0ch3rnHFqs/01GVRJ9QZ278DAD31FVSD5NH2A/01GVRKVC0F833P1XR0W9W8X6N7/swadm
     chmod +x swadm
     mv swadm out/softnpu/
 fi

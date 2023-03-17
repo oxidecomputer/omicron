@@ -4,64 +4,55 @@
 
 // Copyright 2022 Oxide Computer Company
 
-// use anyhow::bail;
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
-// use omicron_zone_package::config::Config;
-// use omicron_zone_package::package::PackageSource;
+use omicron_zone_package::config::Config;
+use omicron_zone_package::package::PackageSource;
 use quote::quote;
 use std::env;
 use std::fs;
 use std::path::Path;
 
 fn main() -> Result<()> {
-    // TODO: pull latest published dendrite specification
-    // We currently have to pull the dendrite openapi specification
-    // because dendrite is a private repository. We're not pulling the
-    // latest specification because the updated API and binary require
-    // some rework in Nexus. For the meantime, we are building from a
-    // local copy of the older api specification (and running against
-    // an older version of dendrite).
-
     // Find the current dendrite repo commit from our package manifest.
-    // let manifest = fs::read("../package-manifest.toml")
-    //     .context("failed to read ../package-manifest.toml")?;
-    // println!("cargo:rerun-if-changed=../package-manifest.toml");
+    let manifest = fs::read_to_string("../package-manifest.toml")
+        .context("failed to read ../package-manifest.toml")?;
+    println!("cargo:rerun-if-changed=../package-manifest.toml");
 
-    // let config: Config = toml::de::from_slice(&manifest)
-    //     .context("failed to parse ../package-manifest.toml")?;
+    let config: Config = toml::from_str(&manifest)
+        .context("failed to parse ../package-manifest.toml")?;
 
-    // let dendrite = config
-    //     .packages
-    //     .get("dendrite-softnpu")
-    //     .context("missing dendrite package in ../package-manifest.toml")?;
+    let dendrite = config
+        .packages
+        .get("dendrite-asic")
+        .context("missing dendrite package in ../package-manifest.toml")?;
 
-    // let local_path = match &dendrite.source {
-    //     PackageSource::Prebuilt { commit, .. } => {
-    //         // Report a relatively verbose error if we haven't downloaded the requisite
-    //         // openapi spec.
-    //         let local_path = format!("../out/downloads/dpd-{commit}.json");
-    //         if !Path::new(&local_path).exists() {
-    //             bail!("{local_path} doesn't exist; rerun `tools/ci_download_dpd_openapi` (after updating `tools/dpd_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
-    //         }
-    //         println!("cargo:rerun-if-changed={local_path}");
-    //         local_path
-    //     }
+    let local_path = match &dendrite.source {
+        PackageSource::Prebuilt { commit, .. } => {
+            // Report a relatively verbose error if we haven't downloaded the requisite
+            // openapi spec.
+            let local_path = format!("../out/downloads/dpd-{commit}.json");
+            if !Path::new(&local_path).exists() {
+                bail!("{local_path} doesn't exist; rerun `tools/ci_download_dendrite_openapi` (after updating `tools/dendrite_openapi_version` if the dendrite commit in package-manifest.toml has changed)");
+            }
+            println!("cargo:rerun-if-changed={local_path}");
+            local_path
+        }
 
-    //     PackageSource::Manual => {
-    //         let local_path = "../out/downloads/dpd-manual.json".to_string();
-    //         if !Path::new(&local_path).exists() {
-    //             bail!("{local_path} doesn't exist, please copy manually built dpd.json there!");
-    //         }
-    //         println!("cargo:rerun-if-changed={local_path}");
-    //         local_path
-    //     }
+        PackageSource::Manual => {
+            let local_path = "../out/downloads/dpd-manual.json".to_string();
+            if !Path::new(&local_path).exists() {
+                bail!("{local_path} doesn't exist, please copy manually built dpd.json there!");
+            }
+            println!("cargo:rerun-if-changed={local_path}");
+            local_path
+        }
 
-    //     _ => {
-    //         bail!("dendrite external package must have type `prebuilt` or `manual`")
-    //     }
-    // };
-    let local_path = "./dpd.json".to_string();
+        _ => {
+            bail!("dendrite external package must have type `prebuilt` or `manual`")
+        }
+    };
 
     let spec = {
         let bytes = fs::read(&local_path)

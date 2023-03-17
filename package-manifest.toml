@@ -265,8 +265,8 @@ source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: @internet-diglett
 # point this back to dendrite `main` before merging
-source.commit = "4a288a85e31c737a5b197dea91e543dd475a0fd0"
-source.sha256 = "046c14c995579a783edf22e19429729a9099e8a2271cd550fa91568a43c5129a"
+source.commit = "5cbf0d49207fa8d321e2fe71a0b202345e094774"
+source.sha256 = "34e82df02434f3ba323a3352f947e9ba9853977cde1ebafc68233bcc8925c50f"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -286,8 +286,8 @@ source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: @internet-diglett
 # point this back to dendrite `main` before merging
-source.commit = "4a288a85e31c737a5b197dea91e543dd475a0fd0"
-source.sha256 = "130df5345ebd7e17ffe9445b564bc5ad020349b8571cc509e8dfad57e678e7dd"
+source.commit = "5cbf0d49207fa8d321e2fe71a0b202345e094774"
+source.sha256 = "6662836481b37e29fd3746696aa3f94b751b327d592bab787eaf46b43b00a2d5"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -307,8 +307,8 @@ source.type = "prebuilt"
 source.repo = "dendrite"
 # TODO: @internet-diglett
 # point this back to dendrite `main` before merging
-source.commit = "0391fbe150bb42167de127304f93974518e8747e"
-source.sha256 = "ac03e2a23dd5a3e8024fde7b54da12002f1798272c6ef4d3d571a6bf96a8df1a"
+source.commit = "5cbf0d49207fa8d321e2fe71a0b202345e094774"
+source.sha256 = "f19191ea0d6685e4212e775d2d262e41260a2597535319cd3a7d4ad20b341639"
 output.type = "zone"
 output.intermediate_only = true
 
