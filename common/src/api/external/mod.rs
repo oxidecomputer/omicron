@@ -690,7 +690,6 @@ pub enum ResourceType {
     ConsoleSession,
     DeviceAuthRequest,
     DeviceAccessToken,
-    GlobalImage,
     Organization,
     Project,
     Dataset,

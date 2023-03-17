@@ -66,7 +66,6 @@ pub async fn make_resources(
     builder.new_resource_with_users(authz::FLEET).await;
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
     builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
@@ -86,14 +85,6 @@ pub async fn make_resources(
         authz::FLEET,
         sled_id,
         LookupType::ById(sled_id),
-    ));
-
-    let global_image_id =
-        "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::GlobalImage::new(
-        authz::FLEET,
-        global_image_id,
-        LookupType::ById(global_image_id),
     ));
 
     let certificate_id =

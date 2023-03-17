@@ -47,7 +47,6 @@ mod dataset;
 mod device_auth;
 mod disk;
 mod external_ip;
-mod global_image;
 mod identity_provider;
 mod image;
 mod instance;

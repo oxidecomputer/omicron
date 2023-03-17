@@ -886,32 +886,6 @@ CREATE UNIQUE INDEX on omicron.public.image (
 ) WHERE
     time_deleted is NULL;
 
-/* TODO-v1: Delete this after migration */
-CREATE TABLE omicron.public.global_image (
-    /* Identity metadata (resource) */
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-
-    volume_id UUID NOT NULL,
-
-    url STRING(8192),
-    distribution STRING(64) NOT NULL,
-    version STRING(64) NOT NULL,
-    digest TEXT,
-    block_size omicron.public.block_size NOT NULL,
-    size_bytes INT NOT NULL
-);
-
-CREATE UNIQUE INDEX on omicron.public.global_image (
-    name
-) WHERE
-    time_deleted is NULL;
-
 CREATE TYPE omicron.public.snapshot_state AS ENUM (
   'creating',
   'ready',

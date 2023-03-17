@@ -15265,26 +15265,6 @@
               "image_id",
               "type"
             ]
-          },
-          {
-            "description": "Create a disk from a global image",
-            "type": "object",
-            "properties": {
-              "image_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "global_image"
-                ]
-              }
-            },
-            "required": [
-              "image_id",
-              "type"
-            ]
           }
         ]
       },

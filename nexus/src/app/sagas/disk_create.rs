@@ -148,16 +148,6 @@ async fn sdc_create_disk_record(
 
                 image.block_size
             }
-            params::DiskSource::GlobalImage { image_id } => {
-                let (.., global_image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .global_image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(ActionError::action_failed)?;
-
-                global_image.block_size
-            }
         };
 
     let disk = db::model::Disk::new(
@@ -390,49 +380,6 @@ async fn sdc_regions_ensure(
                 let volume = osagactx
                     .datastore()
                     .volume_checkout(image.volume_id)
-                    .await
-                    .map_err(ActionError::action_failed)?;
-
-                debug!(
-                    log,
-                    "grabbed volume {}, with data {}",
-                    volume.id(),
-                    volume.data()
-                );
-
-                Some(Box::new(serde_json::from_str(volume.data()).map_err(
-                    |e| {
-                        ActionError::action_failed(Error::internal_error(
-                            &format!(
-                                "failed to deserialize volume data: {}",
-                                e,
-                            ),
-                        ))
-                    },
-                )?))
-            }
-            params::DiskSource::GlobalImage { image_id } => {
-                debug!(log, "grabbing image {}", image_id);
-
-                let (.., global_image) =
-                    LookupPath::new(&opctx, &osagactx.datastore())
-                        .global_image_id(*image_id)
-                        .fetch()
-                        .await
-                        .map_err(ActionError::action_failed)?;
-
-                debug!(log, "retrieved global image {}", global_image.id());
-
-                debug!(
-                    log,
-                    "grabbing global image {} volume {}",
-                    global_image.id(),
-                    global_image.volume_id
-                );
-
-                let volume = osagactx
-                    .datastore()
-                    .volume_checkout(global_image.volume_id)
                     .await
                     .map_err(ActionError::action_failed)?;
 

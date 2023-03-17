@@ -1299,8 +1299,6 @@ pub enum DiskSource {
     Snapshot { snapshot_id: Uuid },
     /// Create a disk from a project image
     Image { image_id: Uuid },
-    /// Create a disk from a global image
-    GlobalImage { image_id: Uuid },
 }
 
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
@@ -1357,24 +1355,6 @@ pub struct Distribution {
     pub name: Name,
     /// The version of the distribution (e.g. "3.10" or "18.04")
     pub version: String,
-}
-
-/// Create-time parameters for an
-/// [`GlobalImage`](crate::external_api::views::GlobalImage)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImageCreate {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-
-    /// OS image distribution
-    pub distribution: Distribution,
-
-    /// block size in bytes
-    pub block_size: BlockSize,
-
-    /// The source of the image's contents.
-    pub source: ImageSource,
 }
 
 /// Create-time parameters for an

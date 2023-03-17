@@ -378,29 +378,6 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if silo in actor.silo and silo.fleet = ip_pool.fleet;
 
-# Describes the policy for accessing "/system/images" (in the API)
-resource GlobalImageList {
-	permissions = [
-	    "list_children",
-	    "modify",
-	    "create_child",
-	];
-
-	# Fleet Administrators can create or modify the global images list.
-	relations = { parent_fleet: Fleet };
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-
-	# Fleet Viewers can list global images.
-	"list_children" if "viewer" on "parent_fleet";
-}
-has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
-	if global_image_list.fleet = fleet;
-
-# Any authenticated user can list and read global images
-has_permission(_actor: AuthenticatedActor, "list_children", _global_image_list: GlobalImageList);
-has_permission(_actor: AuthenticatedActor, "read", _global_image: GlobalImage);
-
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];

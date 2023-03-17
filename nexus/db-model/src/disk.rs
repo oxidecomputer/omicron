@@ -80,7 +80,6 @@ impl Disk {
         // XXX further enum here for different image types?
         let create_image_id = match params.disk_source {
             params::DiskSource::Image { image_id } => Some(image_id),
-            params::DiskSource::GlobalImage { image_id } => Some(image_id),
             _ => None,
         };
 

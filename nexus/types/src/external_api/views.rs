@@ -114,31 +114,6 @@ pub struct Certificate {
 
 // IMAGES
 
-/// Client view of global Images
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImage {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
-
-    /// Image distribution
-    pub distribution: String,
-
-    /// Image version
-    pub version: String,
-
-    /// Hash of the image contents, if applicable
-    pub digest: Option<Digest>,
-
-    /// size of blocks in bytes
-    pub block_size: ByteCount,
-
-    /// total size in bytes
-    pub size: ByteCount,
-}
-
 /// Client view of project Images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {

@@ -79,14 +79,6 @@ impl DataStore {
 
                 Ok(db_image.block_size)
             }
-            params::DiskSource::GlobalImage { image_id } => {
-                let (.., db_global_image) = LookupPath::new(opctx, &self)
-                    .global_image_id(*image_id)
-                    .fetch()
-                    .await?;
-
-                Ok(db_global_image.block_size)
-            }
         }
     }
 
