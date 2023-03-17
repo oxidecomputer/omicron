@@ -227,41 +227,41 @@ pub fn external_api() -> NexusApiDescription {
         api.register(snapshot_view_v1)?;
         api.register(snapshot_delete_v1)?;
 
-        api.register(vpc_list_v1)?;
-        api.register(vpc_create_v1)?;
-        api.register(vpc_view_v1)?;
-        api.register(vpc_update_v1)?;
-        api.register(vpc_delete_v1)?;
+        api.register(vpc_list)?;
+        api.register(vpc_create)?;
+        api.register(vpc_view)?;
+        api.register(vpc_update)?;
+        api.register(vpc_delete)?;
 
-        api.register(vpc_subnet_list_v1)?;
-        api.register(vpc_subnet_view_v1)?;
-        api.register(vpc_subnet_create_v1)?;
-        api.register(vpc_subnet_delete_v1)?;
-        api.register(vpc_subnet_update_v1)?;
-        api.register(vpc_subnet_list_network_interfaces_v1)?;
+        api.register(vpc_subnet_list)?;
+        api.register(vpc_subnet_view)?;
+        api.register(vpc_subnet_create)?;
+        api.register(vpc_subnet_delete)?;
+        api.register(vpc_subnet_update)?;
+        api.register(vpc_subnet_list_network_interfaces)?;
 
-        api.register(instance_network_interface_create_v1)?;
-        api.register(instance_network_interface_list_v1)?;
-        api.register(instance_network_interface_view_v1)?;
-        api.register(instance_network_interface_update_v1)?;
-        api.register(instance_network_interface_delete_v1)?;
+        api.register(instance_network_interface_create)?;
+        api.register(instance_network_interface_list)?;
+        api.register(instance_network_interface_view)?;
+        api.register(instance_network_interface_update)?;
+        api.register(instance_network_interface_delete)?;
 
-        api.register(instance_external_ip_list_v1)?;
+        api.register(instance_external_ip_list)?;
 
-        api.register(vpc_router_list_v1)?;
-        api.register(vpc_router_view_v1)?;
-        api.register(vpc_router_create_v1)?;
-        api.register(vpc_router_delete_v1)?;
-        api.register(vpc_router_update_v1)?;
+        api.register(vpc_router_list)?;
+        api.register(vpc_router_view)?;
+        api.register(vpc_router_create)?;
+        api.register(vpc_router_delete)?;
+        api.register(vpc_router_update)?;
 
-        api.register(vpc_router_route_list_v1)?;
-        api.register(vpc_router_route_view_v1)?;
-        api.register(vpc_router_route_create_v1)?;
-        api.register(vpc_router_route_delete_v1)?;
-        api.register(vpc_router_route_update_v1)?;
+        api.register(vpc_router_route_list)?;
+        api.register(vpc_router_route_view)?;
+        api.register(vpc_router_route_create)?;
+        api.register(vpc_router_route_delete)?;
+        api.register(vpc_router_route_update)?;
 
-        api.register(vpc_firewall_rules_view_v1)?;
-        api.register(vpc_firewall_rules_update_v1)?;
+        api.register(vpc_firewall_rules_view)?;
+        api.register(vpc_firewall_rules_update)?;
 
         api.register(rack_list)?;
         api.register(rack_view)?;
@@ -5229,7 +5229,7 @@ async fn image_delete(
     path = "/v1/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_network_interface_list_v1(
+async fn instance_network_interface_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
@@ -5264,7 +5264,7 @@ async fn instance_network_interface_list_v1(
     path = "/v1/network-interfaces",
     tags = ["instances"],
 }]
-async fn instance_network_interface_create_v1(
+async fn instance_network_interface_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::InstanceSelector>,
     interface_params: TypedBody<params::NetworkInterfaceCreate>,
@@ -5306,7 +5306,7 @@ pub struct NetworkInterfacePathParam {
     path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
-async fn instance_network_interface_delete_v1(
+async fn instance_network_interface_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
@@ -5335,7 +5335,7 @@ async fn instance_network_interface_delete_v1(
     path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
-async fn instance_network_interface_view_v1(
+async fn instance_network_interface_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
@@ -5365,7 +5365,7 @@ async fn instance_network_interface_view_v1(
     path = "/v1/network-interfaces/{interface}",
     tags = ["instances"],
 }]
-async fn instance_network_interface_update_v1(
+async fn instance_network_interface_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
@@ -5404,7 +5404,7 @@ async fn instance_network_interface_update_v1(
     path = "/v1/instances/{instance}/external-ips",
     tags = ["instances"],
 }]
-async fn instance_external_ip_list_v1(
+async fn instance_external_ip_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OptionalProjectSelector>,
     path_params: Path<params::InstancePath>,
@@ -5728,7 +5728,7 @@ async fn snapshot_delete(
     path = "/v1/vpcs",
     tags = ["vpcs"],
 }]
-async fn vpc_list_v1(
+async fn vpc_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
@@ -5764,7 +5764,7 @@ async fn vpc_list_v1(
     path = "/v1/vpcs",
     tags = ["vpcs"],
 }]
-async fn vpc_create_v1(
+async fn vpc_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     body: TypedBody<params::VpcCreate>,
@@ -5790,7 +5790,7 @@ async fn vpc_create_v1(
     path = "/v1/vpcs/{vpc}",
     tags = ["vpcs"],
 }]
-async fn vpc_view_v1(
+async fn vpc_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::VpcPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5826,7 +5826,7 @@ struct VpcPathParam {
     path = "/v1/vpcs/{vpc}",
     tags = ["vpcs"],
 }]
-async fn vpc_update_v1(
+async fn vpc_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::VpcPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5858,7 +5858,7 @@ async fn vpc_update_v1(
     path = "/v1/vpcs/{vpc}",
     tags = ["vpcs"],
 }]
-async fn vpc_delete_v1(
+async fn vpc_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::VpcPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5886,7 +5886,7 @@ async fn vpc_delete_v1(
     path = "/v1/vpc-subnets",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_list_v1(
+async fn vpc_subnet_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
@@ -5920,7 +5920,7 @@ async fn vpc_subnet_list_v1(
     path = "/v1/vpc-subnets",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_create_v1(
+async fn vpc_subnet_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::VpcSelector>,
     create_params: TypedBody<params::VpcSubnetCreate>,
@@ -5945,7 +5945,7 @@ async fn vpc_subnet_create_v1(
     path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_view_v1(
+async fn vpc_subnet_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<params::OptionalVpcSelector>,
@@ -5982,7 +5982,7 @@ struct VpcSubnetPathParam {
     path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_delete_v1(
+async fn vpc_subnet_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<params::OptionalVpcSelector>,
@@ -6011,7 +6011,7 @@ async fn vpc_subnet_delete_v1(
     path = "/v1/vpc-subnets/{subnet}",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_update_v1(
+async fn vpc_subnet_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<params::OptionalVpcSelector>,
@@ -6048,7 +6048,7 @@ async fn vpc_subnet_update_v1(
     path = "/v1/vpc-subnets/{subnet}/network-interfaces",
     tags = ["vpcs"],
 }]
-async fn vpc_subnet_list_network_interfaces_v1(
+async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
@@ -6096,7 +6096,7 @@ async fn vpc_subnet_list_network_interfaces_v1(
     path = "/v1/vpc-firewall-rules",
     tags = ["vpcs"],
 }]
-async fn vpc_firewall_rules_view_v1(
+async fn vpc_firewall_rules_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::VpcSelector>,
 ) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
@@ -6123,7 +6123,7 @@ async fn vpc_firewall_rules_view_v1(
     path = "/v1/vpc-firewall-rules",
     tags = ["vpcs"],
 }]
-async fn vpc_firewall_rules_update_v1(
+async fn vpc_firewall_rules_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::VpcSelector>,
     router_params: TypedBody<VpcFirewallRuleUpdateParams>,
@@ -6155,7 +6155,7 @@ async fn vpc_firewall_rules_update_v1(
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
 }]
-async fn vpc_router_list_v1(
+async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
@@ -6189,7 +6189,7 @@ async fn vpc_router_list_v1(
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_view_v1(
+async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RouterPath>,
     query_params: Query<params::VpcSelector>,
@@ -6226,7 +6226,7 @@ struct VpcRouterPathParam {
     path = "/v1/vpc-routers",
     tags = ["vpcs"],
 }]
-async fn vpc_router_create_v1(
+async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::VpcSelector>,
     create_params: TypedBody<params::VpcRouterCreate>,
@@ -6257,7 +6257,7 @@ async fn vpc_router_create_v1(
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_delete_v1(
+async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RouterPath>,
     query_params: Query<params::OptionalVpcSelector>,
@@ -6286,7 +6286,7 @@ async fn vpc_router_delete_v1(
     path = "/v1/vpc-routers/{router}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_update_v1(
+async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RouterPath>,
     query_params: Query<params::OptionalVpcSelector>,
@@ -6321,7 +6321,7 @@ async fn vpc_router_update_v1(
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_list_v1(
+async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::RouterSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
@@ -6358,7 +6358,7 @@ async fn vpc_router_route_list_v1(
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_view_v1(
+async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RoutePath>,
     query_params: Query<params::RouterSelector>,
@@ -6398,7 +6398,7 @@ struct RouterRoutePathParam {
     path = "/v1/vpc-router-routes",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_create_v1(
+async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::RouterSelector>,
     create_params: TypedBody<params::RouterRouteCreate>,
@@ -6429,7 +6429,7 @@ async fn vpc_router_route_create_v1(
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_delete_v1(
+async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RoutePath>,
     query_params: Query<params::OptionalRouterSelector>,
@@ -6458,7 +6458,7 @@ async fn vpc_router_route_delete_v1(
     path = "/v1/vpc-router-routes/{route}",
     tags = ["vpcs"],
 }]
-async fn vpc_router_route_update_v1(
+async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RoutePath>,
     query_params: Query<params::OptionalRouterSelector>,
