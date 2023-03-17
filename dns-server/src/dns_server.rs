@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap TODO-doc (this whole file)
+/// Guts of the DNS (protocol) server within our DNS server program
+///
+/// The facilities here handle binding a UDP socket, receiving DNS messages on
+/// that socket, and replying to them.
 
 use crate::dns_types::DnsRecord;
 use crate::storage;
@@ -39,6 +42,9 @@ pub struct Config {
     pub bind_address: SocketAddr,
 }
 
+/// Handle to the DNS server
+///
+/// Dropping this handle shuts down the DNS server.
 pub struct ServerHandle {
     local_address: SocketAddr,
     handle: tokio::task::JoinHandle<anyhow::Result<()>>,
@@ -56,6 +62,10 @@ impl ServerHandle {
     }
 }
 
+/// DNS (protocol) server
+///
+/// You construct one of these with [`Server::start()`].  But what you get back
+/// is a [`ServerHandle`].  You don't deal with the Server directly.
 pub struct Server {
     log: Logger,
     store: storage::Store,
@@ -63,6 +73,7 @@ pub struct Server {
 }
 
 impl Server {
+    /// Starts a DNS server whose DNS data comes from the given `store`
     pub async fn start(
         log: Logger,
         store: storage::Store,
@@ -93,6 +104,8 @@ impl Server {
     }
 
     async fn run(self) -> anyhow::Result<()> {
+        // The guts of the DNS server: read packets from the bound socket and
+        // handle them.
         loop {
             let mut buf = vec![0u8; 16384];
             let (n, client_addr) = self
@@ -124,6 +137,7 @@ impl Server {
     }
 }
 
+/// Describes an incoming DNS request
 struct Request {
     log: Logger,
     store: Store,
@@ -176,6 +190,7 @@ async fn handle_dns_packet(request: Request) {
     }
 }
 
+/// Describes how to respond to a particular request failure
 #[derive(Debug, Error)]
 enum RequestError {
     #[error("NXDOMAIN: {0:#}")]
@@ -198,6 +213,7 @@ impl From<QueryError> for RequestError {
     }
 }
 
+/// Handle a well-formed, decoded DNS query
 async fn handle_dns_message(
     request: &Request,
     mr: &MessageRequest,
@@ -248,6 +264,7 @@ async fn handle_dns_message(
     respond_records(request, rb, header, &response_records).await
 }
 
+/// Respond to a DNS query with the given set of DNS records
 async fn respond_records(
     request: &Request,
     rb: MessageResponseBuilder<'_>,
@@ -267,6 +284,10 @@ async fn respond_records(
     })
 }
 
+/// Respond to a DNS query with an NXDOMAIN error
+///
+/// This means that we are authoritative for the parent domain and the requested
+/// name definitely does not exist.
 async fn respond_nxdomain(
     request: &Request,
     rb_nxdomain: MessageResponseBuilder<'_>,
@@ -285,6 +306,11 @@ async fn respond_nxdomain(
     }
 }
 
+/// Respond to a DNS query with a SERVFAIL error
+///
+/// This can be a catch-all for any kind of server-side failure.  We also use it
+/// when we're not authoritative for a domain because this generally causes
+/// clients to try another nameserver (which is usually what's wanted).
 async fn respond_servfail(
     request: &Request,
     rb: MessageResponseBuilder<'_>,
@@ -296,6 +322,8 @@ async fn respond_servfail(
     }
 }
 
+/// Encode the given message (which might describe an error or a collection of
+/// records) as a reply to a request
 fn encode_and_send<'a, Answers, NameServers, Soa, Additionals>(
     request: &'a Request,
     mresp: MessageResponse<'a, 'a, Answers, NameServers, Soa, Additionals>,
