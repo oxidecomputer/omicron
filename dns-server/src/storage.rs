@@ -92,6 +92,9 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
+use crate::dns_types::{
+    DnsConfig, DnsConfigParams, DnsConfigZone, DnsKV, DnsRecord, DnsRecordKey,
+};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
@@ -103,9 +106,6 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use trust_dns_client::rr::LowerName;
 use trust_dns_client::rr::Name;
-
-// XXX-dap
-use crate::dns_types::*;
 
 const KEY_CONFIG: &'static str = "config";
 
@@ -242,6 +242,18 @@ impl Store {
             .zones
             .iter()
             .map(|zone_name| {
+                // TODO-correctness What happens if any of these trees are
+                // removed while we're doing this (as might happen if somebody
+                // does an update)?  In practice this seems unlikely because we
+                // keep the last few generations' trees.  If it does happen, it
+                // seems like we'll wind up bailing with a SERVFAIL.  That's not
+                // great, but it's not the worst.  A retry should work as long
+                // as updates aren't constantly streaming in.  If this becomes a
+                // problem, we could centrally track the generations being read
+                // and avoid deleting trees that we would otherwise prune until
+                // those reads finish.  (That creates a new problem: what if the
+                // read gets stuck for some reason?  We don't want to leave
+                // these trees hanging around forever.)
                 let tree_name =
                     Self::tree_name_for_zone(zone_name, config.generation);
                 let tree = self
@@ -278,8 +290,6 @@ impl Store {
             })
             .collect::<anyhow::Result<_>>()?;
 
-        // XXX-dap what happens if any of these trees are removed while this is
-        // going on?
         Ok(DnsConfig {
             generation: config.generation,
             time_created: config.time_created,
@@ -390,6 +400,13 @@ impl Store {
             for record in &zone_config.records {
                 let DnsRecordKey { name } = &record.key;
                 let name = name.to_lowercase();
+                if record.records.is_empty() {
+                    // There's no distinction between in DNS between a name that
+                    // doesn't exist at all and one with no records associated
+                    // with it.  If there are no records, don't bother inserting
+                    // the name.
+                    continue;
+                }
                 let records_json = serde_json::to_vec(&record.records)
                     .with_context(|| {
                         format!(
@@ -616,8 +633,14 @@ impl Store {
             .map_err(QueryError::ParseFail)?;
 
         if records.is_empty() {
-            // XXX-dap we should make this illegal (by not inserting these) and
-            // then warn here.
+            // This shouldn't be possible because we don't insert names with no
+            // records.
+            warn!(
+                &self.log,
+                "found name with no records: {:?}",
+                "name" => &name_str
+            );
+
             return Err(QueryError::NoName(name_str.clone()));
         }
 
