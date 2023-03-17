@@ -40,7 +40,7 @@ pub enum TargetCommand {
         #[clap(
             short,
             long,
-            default_value_if("image", "standard", "nongimlet")
+            default_value_if("image", "standard", "non-gimlet")
         )]
         machine: Option<crate::target::Machine>,
 
