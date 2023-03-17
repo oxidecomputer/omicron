@@ -593,7 +593,7 @@ impl AllowedMethod {
 
 lazy_static! {
     pub static ref URL_USERS_DB_INIT: String =
-        format!("/system/user/{}", authn::USER_DB_INIT.name);
+        format!("/v1/system/users-builtin/{}", authn::USER_DB_INIT.name);
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
@@ -1372,20 +1372,20 @@ lazy_static! {
         /* IAM */
 
         VerifyEndpoint {
-            url: "/roles",
+            url: "/v1/system/roles",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
-            url: "/roles/fleet.admin",
+            url: "/v1/system/roles/fleet.admin",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
-            url: "/system/user",
+            url: "/v1/system/users-builtin",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],

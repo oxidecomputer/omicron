@@ -20,7 +20,7 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // Success cases
-    let roles = NexusRequest::object_get(&testctx, "/roles")
+    let roles = NexusRequest::object_get(&testctx, "/v1/system/roles")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -53,34 +53,43 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
 
     // This endpoint uses a custom pagination scheme that is easy to get wrong.
     // Let's test that all markers do work.
-    let roles_paginated =
-        NexusRequest::iter_collection_authn(&testctx, "/roles", "", Some(1))
-            .await
-            .expect("failed to iterate all roles");
+    let roles_paginated = NexusRequest::iter_collection_authn(
+        &testctx,
+        "/v1/system/roles",
+        "",
+        Some(1),
+    )
+    .await
+    .expect("failed to iterate all roles");
     assert_eq!(roles, roles_paginated.all_items);
     // There's an empty page at the end of each dropshot scan.
     assert_eq!(roles.len() + 1, roles_paginated.npages);
 
-    // Test GET /roles/$role_name
-    //
+    // Test GET /v1/system/roles/$role_name
 
     // Success cases
     for r in &roles {
-        let one_role =
-            NexusRequest::object_get(&testctx, &format!("/roles/{}", r.name))
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap()
-                .parsed_body::<Role>()
-                .unwrap();
+        let one_role = NexusRequest::object_get(
+            &testctx,
+            &format!("/v1/system/roles/{}", r.name),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body::<Role>()
+        .unwrap();
         assert_eq!(one_role, *r);
     }
 
     // Invalid name: missing "."
     NexusRequest::new(
-        RequestBuilder::new(testctx, Method::GET, "/roles/fleet_admin")
-            .expect_status(Some(StatusCode::NOT_FOUND)),
+        RequestBuilder::new(
+            testctx,
+            Method::GET,
+            "/v1/system/roles/fleet_admin",
+        )
+        .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -89,8 +98,12 @@ async fn test_roles_builtin(cptestctx: &ControlPlaneTestContext) {
 
     // Invalid name: not found
     NexusRequest::new(
-        RequestBuilder::new(testctx, Method::GET, "/roles/fleet.admiral")
-            .expect_status(Some(StatusCode::NOT_FOUND)),
+        RequestBuilder::new(
+            testctx,
+            Method::GET,
+            "/v1/system/roles/fleet.admiral",
+        )
+        .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
