@@ -136,7 +136,6 @@ async fn dns_config_get(
     Ok(dropshot::HttpResponseOk(config))
 }
 
-// XXX-dap tune up maximum input size
 #[endpoint(
     method = PUT,
     path = "/config",
