@@ -2230,6 +2230,7 @@ dependencies = [
 name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "dropshot",
  "gateway-messages",
  "omicron-gateway",
@@ -7962,9 +7963,11 @@ dependencies = [
  "futures",
  "gateway-client",
  "gateway-messages",
+ "gateway-test-utils",
  "hex",
  "http",
  "hyper",
+ "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
  "omicron-common",
@@ -7988,6 +7991,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "uuid",
+ "wicketd-client",
 ]
 
 [[package]]
