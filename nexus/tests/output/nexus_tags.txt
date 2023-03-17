@@ -256,7 +256,7 @@ system_image_delete                      /system/images/{image_name}
 system_image_list                        /system/images
 system_image_view                        /system/images/{image_name}
 system_image_view_by_id                  /system/by-id/images/{id}
-system_metric                            /system/metrics/{metric_name}
+system_metric                            /v1/system/metrics/{metric_name}
 system_update_components_list            /v1/system/update/updates/{version}/components
 system_update_list                       /v1/system/update/updates
 system_update_refresh                    /v1/system/update/refresh

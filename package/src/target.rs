@@ -22,11 +22,13 @@ pub enum Image {
 
 /// Classification of the target machine
 #[derive(Clone, Debug, strum::EnumString, strum::Display, ValueEnum)]
-#[strum(serialize_all = "lowercase")]
-#[clap(rename_all = "lowercase")]
+#[strum(serialize_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
 pub enum Machine {
     /// Use sled agent configuration for a Gimlet
     Gimlet,
+    /// Use sled agent configuration for a Gimlet running in isolation
+    GimletStandalone,
     /// Use sled agent configuration for a device emulating a Gimlet
     ///
     /// Note that this configuration can actually work on real gimlets,
