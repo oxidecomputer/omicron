@@ -2364,7 +2364,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
 
     let url_instances = format!(
         "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
+        org_name, project_name
     );
 
     let builder =
