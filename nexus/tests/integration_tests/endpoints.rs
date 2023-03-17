@@ -1460,7 +1460,7 @@ lazy_static! {
         /* Timeseries schema */
 
         VerifyEndpoint {
-            url: "/timeseries/schema",
+            url: "/v1/timeseries/schema",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],

@@ -22,7 +22,7 @@ async fn test_timeseries_schema(context: &ControlPlaneTestContext) {
         || async {
             let page = objects_list_page_authz::<TimeseriesSchema>(
                 client,
-                "/timeseries/schema",
+                "/v1/timeseries/schema",
             )
             .await;
             if page.items.is_empty() {
@@ -43,7 +43,7 @@ async fn test_timeseries_schema(context: &ControlPlaneTestContext) {
     );
 
     let url = format!(
-        "/timeseries/schema?page_token={}",
+        "/v1/timeseries/schema?page_token={}",
         page.next_page.as_ref().unwrap()
     );
     let page = objects_list_page_authz::<TimeseriesSchema>(client, &url).await;

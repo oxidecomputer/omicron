@@ -85,7 +85,7 @@ login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "metrics"
 OPERATION ID                             URL PATH
-timeseries_schema_get                    /timeseries/schema
+timeseries_schema_get                    /v1/timeseries/schema
 
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH

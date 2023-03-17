@@ -8785,7 +8785,7 @@ async fn system_user_view(
 /// List timeseries schema
 #[endpoint {
     method = GET,
-    path = "/timeseries/schema",
+    path = "/v1/timeseries/schema",
     tags = ["metrics"],
 }]
 async fn timeseries_schema_get(
