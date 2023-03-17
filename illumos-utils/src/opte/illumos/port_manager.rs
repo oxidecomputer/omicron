@@ -23,15 +23,17 @@ use macaddr::MacAddr6;
 use opte_ioctl::OpteHdl;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::IpCfg;
+use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
-use oxide_vpc::api::Ipv4Cidr;
-use oxide_vpc::api::Ipv4PrefixLen;
+use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::MacAddr;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
+use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::SetFwRulesReq;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::warn;
 use slog::Logger;
@@ -178,58 +180,12 @@ impl PortManager {
         external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
-        // virtual IPv6 networks.
-        let private_ip = match nic.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported"),
-            )),
-        }?;
-
-        // Argument checking and conversions into OPTE data types.
-        let subnet = IpNetwork::from(nic.subnet);
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
-        let (vpc_subnet, gateway) = match subnet {
-            IpNetwork::V4(net) => (
-                Ipv4Cidr::new(
-                    net.ip().into(),
-                    Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                ),
-                Gateway::from_subnet(&subnet),
-            ),
-            IpNetwork::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported",
-                ))
-                .into());
-            }
-        };
-        let gateway_ip = match gateway.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported"),
-            )),
-        }?;
+        let subnet = IpNetwork::from(nic.subnet);
+        let vpc_subnet = IpCidr::from(subnet);
+        let gateway = Gateway::from_subnet(&subnet);
         let boundary_services = default_boundary_services();
-
-        // Describe the source NAT for this instance.
-        let snat = match source_nat {
-            Some(snat) => {
-                let external_ip = match snat.ip {
-                    IpAddr::V4(ip) => ip.into(),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
-                    }
-                };
-                let ports = snat.first_port..=snat.last_port;
-                Some(SNat4Cfg { external_ip, ports })
-            }
-            None => None,
-        };
 
         // Describe the external IP addresses for this instance/service.
         //
@@ -240,27 +196,89 @@ impl PortManager {
         //
         // In the case of a service we explicitly only pass in a single
         // address, see `create_svc_port`.
-        let external_ip = match external_ips.get(0) {
-            Some(IpAddr::V4(ipv4)) => Some((*ipv4).into()),
-            Some(IpAddr::V6(_)) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for external addresses",
-                ))
-                .into());
-            }
-            None => None,
-        };
+        let external_ip = external_ips.get(0);
         let externally_visible = external_ip.is_some();
 
-        // TODO-completeness: Add support for IPv6.
+        macro_rules! ip_cfg {
+            ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
+             $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
+                let $cidr_t(vpc_subnet) = vpc_subnet else {
+                    error!(
+                        self.inner.log,
+                        concat!($log_prefix, " subnet");
+                        "subnet" => ?vpc_subnet,
+                    );
+                    return Err(Error::InvalidPortIpConfig);
+                };
+                let $ip_t(gateway_ip) = gateway.ip else {
+                    error!(
+                        self.inner.log,
+                        concat!($log_prefix, " gateway");
+                        "gateway_ip" => ?gateway.ip,
+                    );
+                    return Err(Error::InvalidPortIpConfig);
+                };
+                let snat = match source_nat {
+                    Some(snat) => {
+                        let $ip_t(snat_ip) = snat.ip else {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " SNAT config");
+                                "snat_ip" => ?snat.ip,
+                            );
+                            return Err(Error::InvalidPortIpConfig);
+                        };
+                        let ports = snat.first_port..=snat.last_port;
+                        Some($snat_t { external_ip: snat_ip.into(), ports })
+                    }
+                    None => None,
+                };
+                let external_ip = match external_ip {
+                    Some($ip_t(ip)) => Some((*ip).into()),
+                    Some(_) => {
+                        error!(
+                            self.inner.log,
+                            concat!($log_prefix, " external IP");
+                            "external_ip" => ?external_ip,
+                        );
+                        return Err(Error::InvalidPortIpConfig);
+                    }
+                    None => None,
+                };
+
+                $ipcfg_e($ipcfg_t {
+                    vpc_subnet,
+                    private_ip: $ip.into(),
+                    gateway_ip: gateway_ip.into(),
+                    snat,
+                    external_ips: external_ip,
+                })
+            }}
+        }
+
+        let ip_cfg = match nic.ip {
+            IpAddr::V4(ip) => ip_cfg!(
+                ip,
+                "Expected IPv4",
+                IpAddr::V4,
+                IpCidr::Ip4,
+                IpCfg::Ipv4,
+                Ipv4Cfg,
+                SNat4Cfg
+            ),
+            IpAddr::V6(ip) => ip_cfg!(
+                ip,
+                "Expected IPv6",
+                IpAddr::V6,
+                IpCidr::Ip6,
+                IpCfg::Ipv6,
+                Ipv6Cfg,
+                SNat6Cfg
+            ),
+        };
+
         let vpc_cfg = VpcCfg {
-            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
-                vpc_subnet,
-                private_ip,
-                gateway_ip,
-                snat,
-                external_ips: external_ip,
-            }),
+            ip_cfg,
             guest_mac: MacAddr::from(mac.into_array()),
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
@@ -298,12 +316,13 @@ impl PortManager {
 
         // 1. Create the xde device for the port.
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        hdl.create_xde(&port_name, vpc_cfg, /* passthru= */ false)?;
         debug!(
             self.inner.log,
-            "Created xde device";
+            "Creating xde device";
             "port_name" => &port_name,
+            "vpc_cfg" => ?&vpc_cfg,
         );
+        hdl.create_xde(&port_name, vpc_cfg, /* passthru= */ false)?;
 
         // Initialize firewall rules for the new port.
         let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
@@ -436,9 +455,13 @@ impl PortManager {
         // routing rules the control plane provides.
         //
         // This rule sends all traffic that has no better match to the gateway.
+        let dest = match vpc_subnet {
+            IpCidr::Ip4(_) => "0.0.0.0/0".parse().unwrap(),
+            IpCidr::Ip6(_) => "::/0".parse().unwrap(),
+        };
         let route = AddRouterEntryReq {
             port_name: port_name.clone(),
-            dest: "0.0.0.0/0".parse().unwrap(),
+            dest,
             target: RouterTarget::InternetGateway,
         };
         hdl.add_router_entry(&route)?;

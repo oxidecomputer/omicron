@@ -47,6 +47,9 @@ pub enum Error {
 
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
+
+    #[error("Invalid IP configuration for OPTE port")]
+    InvalidPortIpConfig,
 }
 
 /// Delete all xde devices on the system.

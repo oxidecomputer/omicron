@@ -15,8 +15,8 @@ use crate::addrobj::AddrObject;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
+    #[error("Invalid IP configuration for OPTE port")]
+    InvalidPortIpConfig,
 }
 
 pub fn initialize_xde_driver(

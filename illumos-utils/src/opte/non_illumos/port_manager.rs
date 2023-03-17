@@ -16,7 +16,9 @@ use crate::opte::PortType;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
+use omicron_common::api::external::IpNet;
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -109,52 +111,65 @@ impl PortManager {
         port_type: PortType,
         port_name: Option<String>,
         nic: &NetworkInterface,
-        _source_nat: Option<SourceNatConfig>,
+        source_nat: Option<SourceNatConfig>,
         external_ips: &[IpAddr],
         _firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
-        // virtual IPv6 networks.
-        let ip = match nic.ip {
-            IpAddr::V4(_) => nic.ip,
-            IpAddr::V6(_) => {
-                return Err(Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
-                )))
-            }
-        };
-
-        // Argument checking and conversions into OPTE data types.
         let subnet = IpNetwork::from(nic.subnet);
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
-        let gateway = match subnet {
-            IpNetwork::V4(_) => Gateway::from_subnet(&subnet),
-            IpNetwork::V6(_) => {
-                return Err(Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
-                )));
-            }
-        };
-        let _ = match gateway.ip {
-            IpAddr::V4(ip) => Ok(ip),
-            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
-            ))),
-        }?;
-
+        let gateway = Gateway::from_subnet(&subnet);
         let externally_visible = !external_ips.is_empty();
+
+        // Describe the external IP addresses for this instance/service.
+        //
+        // Note that we're currently only taking the first address, which is all
+        // that OPTE supports. The array is guaranteed to be limited by Nexus.
+        // See https://github.com/oxidecomputer/omicron/issues/1467
+        // See https://github.com/oxidecomputer/opte/issues/196
+        //
+        // In the case of a service we explicitly only pass in a single
+        // address, see `create_svc_port`.
+        let external_ip = external_ips.get(0);
 
         let port_name =
             port_name.unwrap_or_else(|| self.inner.next_port_name());
         let vnic = format!("v{}", port_name);
+
+        let snat_ip = source_nat.map(|sn| sn.ip);
+        match (nic.ip, nic.subnet, snat_ip, external_ip) {
+            (
+                IpAddr::V4(_),
+                IpNet::V4(_),
+                None | Some(IpAddr::V4(_)),
+                None | Some(IpAddr::V4(_)),
+            ) => {}
+            (
+                IpAddr::V6(_),
+                IpNet::V6(_),
+                None | Some(IpAddr::V6(_)),
+                None | Some(IpAddr::V6(_)),
+            ) => {}
+            _ => {
+                error!(
+                    self.inner.log,
+                    "Mismatched IP configuration";
+                    "port_name" => &port_name,
+                    "ip" => ?nic.ip,
+                    "subnet" => ?nic.subnet,
+                    "snat_ip" => ?snat_ip,
+                    "external_ip" => ?external_ip,
+                );
+                return Err(Error::InvalidPortIpConfig);
+            }
+        }
 
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let port = Port::new(
                 port_name.clone(),
                 port_type,
-                ip,
+                nic.ip,
                 mac,
                 nic.slot,
                 vni,
