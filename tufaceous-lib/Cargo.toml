@@ -12,6 +12,7 @@ bytesize = { workspace = true, features = ["serde"] }
 camino.workspace = true
 chrono.workspace = true
 debug-ignore.workspace = true
+flate2.workspace = true
 fs-err.workspace = true
 hex.workspace = true
 itertools.workspace = true

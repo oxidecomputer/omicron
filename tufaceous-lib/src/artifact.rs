@@ -11,11 +11,13 @@ use anyhow::{bail, Context, Result};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
+use flate2::Compression;
 use fs_err::File;
 use omicron_common::{
     api::{external::SemverVersion, internal::nexus::KnownArtifactKind},
     update::ArtifactKind,
 };
+use serde::{Deserialize, Serialize};
 
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
@@ -136,11 +138,28 @@ fn write_host_tarball_fake_artifact<W: Write>(
     size: u64,
     writer: &mut W,
 ) -> Result<()> {
-    let mut builder = tar::Builder::new(BufWriter::new(writer));
+    let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+        BufWriter::new(writer),
+        Compression::fast(),
+    ));
 
     let times = (size as usize) / FILLER_TEXT.len();
     let phase_1_times = times / 8;
     let phase_2_times = times - phase_1_times;
+
+    {
+        let oxide_metadata_json =
+            serde_json::to_string(&OxideMetadata::os_metadata())
+                .expect("oxide metadata should serialize correctly");
+        let mut header = tar::Header::new_gnu();
+        header.set_path(OXIDE_JSON_FILE_NAME).unwrap();
+        header.set_size(oxide_metadata_json.len() as u64);
+        header.set_cksum();
+
+        builder
+            .append(&header, oxide_metadata_json.as_bytes())
+            .with_context(|| format!("error writing {OXIDE_JSON_FILE_NAME}"))?;
+    }
 
     {
         let mut header = tar::Header::new_gnu();
@@ -164,8 +183,10 @@ fn write_host_tarball_fake_artifact<W: Write>(
             .with_context(|| format!("error writing `{PHASE_1_FILE_NAME}`"))?;
     }
 
-    let buf_writer =
+    let gz_encoder =
         builder.into_inner().context("error finalizing archive")?;
+    let buf_writer =
+        gz_encoder.finish().context("error finishing gz encoder")?;
     buf_writer
         .into_inner()
         .map_err(|_| anyhow::anyhow!("error flushing archive writer"))?;
@@ -231,8 +252,11 @@ pub struct HostPhaseImages {
 
 impl HostPhaseImages {
     pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
-        let mut archive = tar::Archive::new(BufReader::new(reader));
+        let uncompressed =
+            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+        let mut archive = tar::Archive::new(uncompressed);
 
+        let mut oxide_json_found = false;
         let mut phase_1 = None;
         let mut phase_2 = None;
         for entry in archive
@@ -244,18 +268,39 @@ impl HostPhaseImages {
                 .header()
                 .path()
                 .context("error reading path from archive")?;
-            if path == Path::new(PHASE_1_FILE_NAME) {
+            if path == Path::new(OXIDE_JSON_FILE_NAME) {
+                let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
+                let oxide_json: OxideMetadata =
+                    serde_json::from_slice(&json_bytes).with_context(|| {
+                        format!(
+                        "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
+                    )
+                    })?;
+
+                let expected = OxideMetadata::os_metadata();
+                if oxide_json != expected {
+                    // The metadata didn't match.
+                    bail!(
+                        "unexpected metadata for {OXIDE_JSON_FILE_NAME}:\
+                         expected {expected:?}, found {oxide_json:?}",
+                    );
+                }
+                oxide_json_found = true;
+            } else if path == Path::new(PHASE_1_FILE_NAME) {
                 phase_1 = Some(read_entry(entry, PHASE_1_FILE_NAME)?);
             } else if path == Path::new(PHASE_2_FILE_NAME) {
                 phase_2 = Some(read_entry(entry, PHASE_2_FILE_NAME)?);
             }
 
-            if phase_1.is_some() && phase_2.is_some() {
+            if oxide_json_found && phase_1.is_some() && phase_2.is_some() {
                 break;
             }
         }
 
         let mut not_found = Vec::new();
+        if !oxide_json_found {
+            not_found.push(OXIDE_JSON_FILE_NAME);
+        }
         if phase_1.is_none() {
             not_found.push(PHASE_1_FILE_NAME);
         }
@@ -283,5 +328,18 @@ fn read_entry<R: io::Read>(
 }
 
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
+static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
 static PHASE_1_FILE_NAME: &str = "image/rom";
 static PHASE_2_FILE_NAME: &str = "image/zfs.img";
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct OxideMetadata {
+    v: String,
+    t: String,
+}
+
+impl OxideMetadata {
+    fn os_metadata() -> Self {
+        Self { v: "1".to_owned(), t: "os".to_owned() }
+    }
+}

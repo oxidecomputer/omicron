@@ -7409,6 +7409,7 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
+ "flate2",
  "fs-err",
  "hex",
  "itertools",
