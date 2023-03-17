@@ -2254,7 +2254,7 @@ mod test {
         .await;
 
         let instances_url = format!(
-            "/organizations/{}/projects/{}/instances",
+            "/v1/instances?organization={}&project={}",
             ORG_NAME, PROJECT_NAME,
         );
         let instance_name = "base-instance";

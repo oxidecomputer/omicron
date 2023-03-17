@@ -49,10 +49,9 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.name, p2_name);
 
     // Verify the list of Projects.
-    let projects_url = format!("/organizations/{}/projects", org_name);
     let projects = NexusRequest::iter_collection_authn::<Project>(
         &client,
-        &projects_url,
+        &format!("/v1/projects?organization={}", org_name),
         "",
         None,
     )
@@ -86,19 +85,30 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(projects[0].identity.name, p1_name);
 }
 
-async fn delete_project_default_subnet(url: &str, client: &ClientTestContext) {
-    NexusRequest::object_delete(
-        &client,
-        &format!("{url}/vpcs/default/subnets/default"),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
+async fn delete_project_default_subnet(
+    org: &str,
+    project: &str,
+    client: &ClientTestContext,
+) {
+    let subnet_url = format!(
+        "/v1/vpc-subnets/default?organization={}&project={}&vpc=default",
+        org, project
+    );
+    NexusRequest::object_delete(&client, &subnet_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
 }
 
-async fn delete_project_default_vpc(url: &str, client: &ClientTestContext) {
-    NexusRequest::object_delete(&client, &format!("{url}/vpcs/default"))
+async fn delete_project_default_vpc(
+    org: &str,
+    project: &str,
+    client: &ClientTestContext,
+) {
+    let vpc_url =
+        format!("/v1/vpcs/default?organization={}&project={}", org, project);
+    NexusRequest::object_delete(&client, &vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -141,7 +151,7 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let url = format!("/v1/projects/{}?organization={}", name, org_name);
 
     // Project deletion will fail while the subnet & VPC remain.
     create_project(&client, &org_name, &name).await;
@@ -149,12 +159,12 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
         "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
-    delete_project_default_subnet(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
     assert_eq!(
         "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
     delete_project(&url, &client).await;
 }
 
@@ -170,15 +180,15 @@ async fn test_project_deletion_with_instance(
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let url = format!("/v1/projects/{}?organization={}", name, org_name);
 
     create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
 
     let _: Instance = object_create(
         client,
-        &format!("{url}/instances"),
+        &format!("/v1/instances?organization={}&project={}", org_name, name),
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-instance".parse().unwrap(),
@@ -204,7 +214,10 @@ async fn test_project_deletion_with_instance(
 
     NexusRequest::object_delete(
         client,
-        &format!("{url}/instances/my-instance"),
+        &format!(
+            "/v1/instances/my-instance?organization={}&project={}",
+            org_name, name
+        ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -224,17 +237,19 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let url = format!("/v1/projects/{}?organization={}", name, org_name);
 
     create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
     create_disk(&client, &org_name, &name, "my-disk").await;
     assert_eq!(
         "project to be deleted contains a disk: my-disk",
         delete_project_expect_fail(&url, &client).await,
     );
-    NexusRequest::object_delete(&client, &format!("{url}/disks/my-disk"))
+    let disk_url =
+        format!("/v1/disks/my-disk?organization={}&project={}", org_name, name);
+    NexusRequest::object_delete(&client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -252,11 +267,11 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let url = format!("/v1/projects/{}?organization={}", name, org_name);
 
     create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
 
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
@@ -325,16 +340,17 @@ async fn test_project_deletion_with_snapshot(
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let project_url =
+        format!("/v1/projects/{}?organization={}", name, org_name);
 
     create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
     create_disk(&client, &org_name, &name, "my-disk").await;
 
     let _: views::Snapshot = object_create(
         client,
-        &format!("{url}/snapshots"),
+        &format!("/v1/snapshots?organization={}&project={}", org_name, name),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-snapshot".parse().unwrap(),
@@ -345,7 +361,9 @@ async fn test_project_deletion_with_snapshot(
     )
     .await;
 
-    NexusRequest::object_delete(&client, &format!("{url}/disks/my-disk"))
+    let disk_url =
+        format!("/v1/disks/my-disk?organization={}&project={}", org_name, name);
+    NexusRequest::object_delete(&client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -353,23 +371,23 @@ async fn test_project_deletion_with_snapshot(
 
     assert_eq!(
         "project to be deleted contains a snapshot: my-snapshot",
-        delete_project_expect_fail(&url, &client).await,
+        delete_project_expect_fail(&project_url, &client).await,
     );
 
+    let snapshot_url = format!(
+        "/v1/snapshots/my-snapshot?organization={}&project={}",
+        org_name, name
+    );
     NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::DELETE,
-            &format!("{url}/snapshots/my-snapshot"),
-        )
-        .expect_status(Some(StatusCode::NO_CONTENT)),
+        RequestBuilder::new(client, Method::DELETE, &snapshot_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .unwrap();
 
-    delete_project(&url, &client).await;
+    delete_project(&project_url, &client).await;
 }
 
 #[nexus_test]
@@ -381,22 +399,29 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/organizations/{}/projects/{}", org_name, name);
+    let project_url =
+        format!("/v1/projects/{}?organization={}", name, org_name);
 
     create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&url, &client).await;
-    delete_project_default_vpc(&url, &client).await;
+    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_vpc(&org_name, &name, &client).await;
 
     let vpc_name = "just-rainsticks";
     create_vpc(&client, org_name, name, vpc_name).await;
 
     assert_eq!(
         "project to be deleted contains a vpc: just-rainsticks",
-        delete_project_expect_fail(&url, &client).await,
+        delete_project_expect_fail(&project_url, &client).await,
     );
 
-    let vpc_url = format!("{url}/vpcs/{vpc_name}");
-    let default_subnet_url = format!("{vpc_url}/subnets/default");
+    let vpc_url = format!(
+        "/v1/vpcs/{vpc_name}?organization={}&project={}",
+        org_name, name
+    );
+    let default_subnet_url = format!(
+        "/v1/vpc-subnets/default?organization={}&project={}&vpc={}",
+        org_name, name, vpc_name
+    );
     NexusRequest::object_delete(client, &default_subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -407,5 +432,5 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .unwrap();
-    delete_project(&url, &client).await;
+    delete_project(&project_url, &client).await;
 }

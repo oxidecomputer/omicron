@@ -44,7 +44,7 @@ source.paths = [
   { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
   # Valid options for "machine" include:
   # - gimlet: Assumes control of real hardware, does not emulate hardware
-  # - nongimlet: Used for testing on development illumos machines
+  # - non-gimlet: Used for testing on development illumos machines
   { from = "smf/sled-agent/{{machine}}", to = "pkg" }
 ]
 output.type = "tarball"
