@@ -537,10 +537,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     populate_ip_pool(&client, "default", None).await;
     let organization_id =
         create_organization(&client, ORGANIZATION_NAME).await.identity.id;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
         .await
         .identity
@@ -712,10 +708,6 @@ async fn test_instances_create_stopped_start(
     let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
@@ -822,11 +814,6 @@ async fn test_instances_invalid_creation_returns_bad_request(
     // passed through properly.
 
     let client = &cptestctx.external_client;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let error = client
         .make_request_with_body(
             Method::POST,
@@ -881,10 +868,6 @@ async fn test_instance_create_saga_removes_instance_database_record(
 
     // Create test IP pool, organization and project
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1000,10 +983,6 @@ async fn test_instance_with_single_explicit_ip_address(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1078,11 +1057,6 @@ async fn test_instance_with_new_custom_network_interfaces(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     // Create a VPC Subnet other than the default.
     //
     // We'll create one interface in the default VPC Subnet and one in this new
@@ -1233,10 +1207,6 @@ async fn test_instance_create_delete_network_interface(
     let instance_name = "nic-attach-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1858,10 +1828,6 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two interfaces, in the same VPC Subnet. This will trigger an
@@ -2054,11 +2020,6 @@ async fn test_instance_fails_to_boot_with_disk(
         start: true,
     };
 
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
@@ -2130,11 +2091,6 @@ async fn test_instance_create_attach_disks(
         ],
         start: true,
     };
-
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -2235,11 +2191,6 @@ async fn test_instance_create_attach_disks_undo(
         start: true,
     };
 
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
@@ -2320,11 +2271,6 @@ async fn test_attach_eight_disks_to_instance(
             .collect(),
         start: true,
     };
-
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -2422,7 +2368,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
     );
 
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &instances_url)
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
 
@@ -2517,11 +2463,6 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             .collect(),
         start: true,
     };
-
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -2863,10 +2804,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // Create test organization and projects.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two IP pools.
