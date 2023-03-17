@@ -10,7 +10,7 @@
 # This is the softnpu ASIC emulator
 if [[ ! -f out/softnpu/softnpu ]]; then
     echo "fetching softnpu"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTCVF6XEWX9QPCAS1NJDG66A/umvT8rwyIctVrqZjqLuq80vMsPVXwuRTgvEYE4Qlri32WpDC/01GTCVG86PRSHCAKJM07RS8D8K/01GTCVX29XP4THAK13DE9VABMP/softnpu
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3CPEENJZ9K1VA0J3GYD5D/WZ2Rw4MGOeSr06SEfmyuMfsp7i5rgwzvENWnAUjShI8FGryp/01GTD3D91TCD903Z0BAYSA31JR/01GTD3T8VFSZTE59Y0SVAR4CWC/softnpu
     chmod +x softnpu
     mkdir -p out/softnpu
     mv softnpu out/softnpu/
@@ -19,7 +19,7 @@ fi
 # This is an ASIC administration program.
 if [[ ! -f out/softnpu/scadm ]]; then
     echo "fetching scadm"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTCVK75XHVVFEEA095F74VZQ/BUIVBgmdTOsvGd8Qpewr6pkjFq88v8Xzxt09kabWOJMI6Hlm/01GTCVKZHBEQZ5JKA70KFFJSS5/01GTCW13WX8M3BM07PYHYSZ2K5/scadm
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3Y38K0Q14F2989R20QCBA/Ny1N0clhEwz2nfbsdTY8ta7pd9IYy1ofxG6ViCDN6Uy4xW3F/01GTD3YZ0TC9SCB4TFNYWP0DEM/01GTD4CCW2F8Q0NQGD7WEY91D0/scadm
     chmod +x scadm
     mv scadm out/softnpu/
 fi
@@ -27,7 +27,7 @@ fi
 # Fetch the pre-compiled sidecar_lite p4 program
 if [[ ! -f out/softnpu/libsidecar_lite.so ]]; then
     echo "fetching libsidecar_lite.so"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTCVK75XHVVFEEA095F74VZQ/BUIVBgmdTOsvGd8Qpewr6pkjFq88v8Xzxt09kabWOJMI6Hlm/01GTCVKZHBEQZ5JKA70KFFJSS5/01GTCW11MBZEJDVDXC4RDRPSSM/libsidecar_lite.so
+    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3Y38K0Q14F2989R20QCBA/Ny1N0clhEwz2nfbsdTY8ta7pd9IYy1ofxG6ViCDN6Uy4xW3F/01GTD3YZ0TC9SCB4TFNYWP0DEM/01GTD4CA8KRGR8HK4S6B0DEEJC/libsidecar_lite.so
     mv libsidecar_lite.so out/softnpu/
 fi
 
