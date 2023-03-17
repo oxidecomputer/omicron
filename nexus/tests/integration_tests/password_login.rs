@@ -171,7 +171,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     .await;
     let admin_password_url = format!(
         "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
-        silo_name, admin_user_obj.id
+        admin_user_obj.id, silo_name
     );
 
     let silo_url = format!("/v1/system/silos/{}", silo_name);
