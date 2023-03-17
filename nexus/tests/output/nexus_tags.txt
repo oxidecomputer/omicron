@@ -89,21 +89,13 @@ timeseries_schema_get                    /timeseries/schema
 
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
-organization_create                      /organizations
-organization_create_v1                   /v1/organizations
-organization_delete                      /organizations/{organization_name}
-organization_delete_v1                   /v1/organizations/{organization}
-organization_list                        /organizations
-organization_list_v1                     /v1/organizations
-organization_policy_update               /organizations/{organization_name}/policy
-organization_policy_update_v1            /v1/organizations/{organization}/policy
-organization_policy_view                 /organizations/{organization_name}/policy
-organization_policy_view_v1              /v1/organizations/{organization}/policy
-organization_update                      /organizations/{organization_name}
-organization_update_v1                   /v1/organizations/{organization}
-organization_view                        /organizations/{organization_name}
-organization_view_by_id                  /by-id/organizations/{id}
-organization_view_v1                     /v1/organizations/{organization}
+organization_create                      /v1/organizations
+organization_delete                      /v1/organizations/{organization}
+organization_list                        /v1/organizations
+organization_policy_update               /v1/organizations/{organization}/policy
+organization_policy_view                 /v1/organizations/{organization}/policy
+organization_update                      /v1/organizations/{organization}
+organization_view                        /v1/organizations/{organization}
 
 API operations found with tag "policy"
 OPERATION ID                             URL PATH

@@ -169,46 +169,6 @@
         "deprecated": true
       }
     },
-    "/by-id/organizations/{id}": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization by id",
-        "description": "Use `GET /v1/organizations/{organization}` instead",
-        "operationId": "organization_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/by-id/projects/{id}": {
       "get": {
         "tags": [
@@ -801,309 +761,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/organizations": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "List organizations",
-        "description": "Use `GET /v1/organizations` instead",
-        "operationId": "organization_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Create an organization",
-        "description": "Use `POST /v1/organizations` instead",
-        "operationId": "organization_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization",
-        "description": "Use `GET /v1/organizations/{organization}` instead",
-        "operationId": "organization_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization",
-        "description": "Use `PUT /v1/organizations/{organization}` instead",
-        "operationId": "organization_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Delete an organization",
-        "description": "Use `DELETE /v1/organizations/{organization}` instead",
-        "operationId": "organization_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/policy": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization's IAM policy",
-        "description": "Use `GET /v1/organizations/{organization}/policy` instead",
-        "operationId": "organization_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization's IAM policy",
-        "description": "Use `PUT /v1/organizations/{organization}/policy` instead",
-        "operationId": "organization_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
       }
     },
     "/organizations/{organization_name}/projects": {
@@ -9777,7 +9434,7 @@
           "organizations"
         ],
         "summary": "List organizations",
-        "operationId": "organization_list_v1",
+        "operationId": "organization_list",
         "parameters": [
           {
             "in": "query",
@@ -9832,7 +9489,7 @@
           "organizations"
         ],
         "summary": "Create an organization",
-        "operationId": "organization_create_v1",
+        "operationId": "organization_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9869,7 +9526,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization",
-        "operationId": "organization_view_v1",
+        "operationId": "organization_view",
         "parameters": [
           {
             "in": "path",
@@ -9904,7 +9561,7 @@
           "organizations"
         ],
         "summary": "Update an organization",
-        "operationId": "organization_update_v1",
+        "operationId": "organization_update",
         "parameters": [
           {
             "in": "path",
@@ -9949,7 +9606,7 @@
           "organizations"
         ],
         "summary": "Delete an organization",
-        "operationId": "organization_delete_v1",
+        "operationId": "organization_delete",
         "parameters": [
           {
             "in": "path",
@@ -9979,7 +9636,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization's IAM policy",
-        "operationId": "organization_policy_view_v1",
+        "operationId": "organization_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -10014,7 +9671,7 @@
           "organizations"
         ],
         "summary": "Update an organization's IAM policy",
-        "operationId": "organization_policy_update_v1",
+        "operationId": "organization_policy_update",
         "parameters": [
           {
             "in": "path",
