@@ -24,15 +24,10 @@ session_me_groups                        /session/me/groups
 
 API operations found with tag "images"
 OPERATION ID                             URL PATH
-image_create                             /organizations/{organization_name}/projects/{project_name}/images
-image_create_v1                          /v1/images
-image_delete                             /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-image_delete_v1                          /v1/images/{image}
-image_list                               /organizations/{organization_name}/projects/{project_name}/images
-image_list_v1                            /v1/images
-image_view                               /organizations/{organization_name}/projects/{project_name}/images/{image_name}
-image_view_by_id                         /by-id/images/{id}
-image_view_v1                            /v1/images/{image}
+image_create                             /v1/images
+image_delete                             /v1/images/{image}
+image_list                               /v1/images
+image_view                               /v1/images/{image}
 
 API operations found with tag "instances"
 OPERATION ID                             URL PATH
