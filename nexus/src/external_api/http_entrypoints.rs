@@ -227,26 +227,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(snapshot_view_v1)?;
         api.register(snapshot_delete_v1)?;
 
-        api.register(vpc_list)?;
-        api.register(vpc_create)?;
-        api.register(vpc_view)?;
-        api.register(vpc_view_by_id)?;
-        api.register(vpc_update)?;
-        api.register(vpc_delete)?;
-
         api.register(vpc_list_v1)?;
         api.register(vpc_create_v1)?;
         api.register(vpc_view_v1)?;
         api.register(vpc_update_v1)?;
         api.register(vpc_delete_v1)?;
-
-        api.register(vpc_subnet_list)?;
-        api.register(vpc_subnet_view)?;
-        api.register(vpc_subnet_view_by_id)?;
-        api.register(vpc_subnet_create)?;
-        api.register(vpc_subnet_delete)?;
-        api.register(vpc_subnet_update)?;
-        api.register(vpc_subnet_list_network_interfaces)?;
 
         api.register(vpc_subnet_list_v1)?;
         api.register(vpc_subnet_view_v1)?;
@@ -255,28 +240,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_subnet_update_v1)?;
         api.register(vpc_subnet_list_network_interfaces_v1)?;
 
-        api.register(instance_network_interface_create)?;
-        api.register(instance_network_interface_list)?;
-        api.register(instance_network_interface_view)?;
-        api.register(instance_network_interface_view_by_id)?;
-        api.register(instance_network_interface_update)?;
-        api.register(instance_network_interface_delete)?;
-
         api.register(instance_network_interface_create_v1)?;
         api.register(instance_network_interface_list_v1)?;
         api.register(instance_network_interface_view_v1)?;
         api.register(instance_network_interface_update_v1)?;
         api.register(instance_network_interface_delete_v1)?;
 
-        api.register(instance_external_ip_list)?;
         api.register(instance_external_ip_list_v1)?;
-
-        api.register(vpc_router_list)?;
-        api.register(vpc_router_view)?;
-        api.register(vpc_router_view_by_id)?;
-        api.register(vpc_router_create)?;
-        api.register(vpc_router_delete)?;
-        api.register(vpc_router_update)?;
 
         api.register(vpc_router_list_v1)?;
         api.register(vpc_router_view_v1)?;
@@ -284,21 +254,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(vpc_router_delete_v1)?;
         api.register(vpc_router_update_v1)?;
 
-        api.register(vpc_router_route_list)?;
-        api.register(vpc_router_route_view)?;
-        api.register(vpc_router_route_view_by_id)?;
-        api.register(vpc_router_route_create)?;
-        api.register(vpc_router_route_delete)?;
-        api.register(vpc_router_route_update)?;
-
         api.register(vpc_router_route_list_v1)?;
         api.register(vpc_router_route_view_v1)?;
         api.register(vpc_router_route_create_v1)?;
         api.register(vpc_router_route_delete_v1)?;
         api.register(vpc_router_route_update_v1)?;
-
-        api.register(vpc_firewall_rules_view)?;
-        api.register(vpc_firewall_rules_update)?;
 
         api.register(vpc_firewall_rules_view_v1)?;
         api.register(vpc_firewall_rules_update_v1)?;
@@ -5298,51 +5258,6 @@ async fn instance_network_interface_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List network interfaces
-/// Use `GET /v1/network-interfaces` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_network_interface_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let instance_selector = params::InstanceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.instance_name.into(),
-        );
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let interfaces = nexus
-            .network_interface_list(
-                &opctx,
-                &instance_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            interfaces,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a network interface
 #[endpoint {
     method = POST,
@@ -5360,43 +5275,6 @@ async fn instance_network_interface_create_v1(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let instance_lookup = nexus.instance_lookup(&opctx, &query)?;
-        let iface = nexus
-            .network_interface_create(
-                &opctx,
-                &instance_lookup,
-                &interface_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(iface.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a network interface
-/// Use `POST /v1/network-interfaces` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_network_interface_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-    interface_params: TypedBody<params::NetworkInterfaceCreate>,
-) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let instance_selector = params::InstanceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.instance_name.into(),
-        );
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
         let iface = nexus
             .network_interface_create(
                 &opctx,
@@ -5451,43 +5329,6 @@ async fn instance_network_interface_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a network interface
-///
-/// Note that the primary interface for an instance cannot be deleted if there
-/// are any secondary interfaces. A new primary interface must be designated
-/// first. The primary interface can be deleted if there are no secondary
-/// interfaces.
-///
-/// Use `DELETE /v1/network-interfaces/{interface}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_network_interface_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<NetworkInterfacePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.instance_name.into()),
-            path.interface_name.into(),
-        );
-        let interface_lookup =
-            nexus.network_interface_lookup(&opctx, &interface_selector)?;
-        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a network interface
 #[endpoint {
     method = GET,
@@ -5508,69 +5349,6 @@ async fn instance_network_interface_view_v1(
         let interface_selector = params::NetworkInterfaceSelector {
             instance_selector: query.instance_selector,
             network_interface: path.interface,
-        };
-        let (.., interface) = nexus
-            .network_interface_lookup(&opctx, &interface_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(interface.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a network interface
-/// Use `GET /v1/network-interfaces/{interface}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_network_interface_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<NetworkInterfacePathParam>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.instance_name.into()),
-            path.interface_name.into(),
-        );
-        let (.., interface) = nexus
-            .network_interface_lookup(&opctx, &interface_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(interface.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a network interface by id
-///
-/// Use `GET /v1/network-interfaces/{interface}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/network-interfaces/{id}",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_network_interface_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector {
-            instance_selector: None,
-            network_interface: path.id.into(),
         };
         let (.., interface) = nexus
             .network_interface_lookup(&opctx, &interface_selector)?
@@ -5618,73 +5396,7 @@ async fn instance_network_interface_update_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a network interface
-/// Use `PUT /v1/network-interfaces/{interface}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/network-interfaces/{interface_name}",
-    tags = ["instances"],
-    deprecated = true
-}]
-async fn instance_network_interface_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<NetworkInterfacePathParam>,
-    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let updated_iface = updated_iface.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.instance_name.into()),
-            path.interface_name.into(),
-        );
-        let interface_lookup =
-            nexus.network_interface_lookup(&opctx, &interface_selector)?;
-        let interface = nexus
-            .network_interface_update(&opctx, &interface_lookup, updated_iface)
-            .await?;
-        Ok(HttpResponseOk(interface.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // External IP addresses for instances
-
-/// List external IP addresses
-/// Use `/v1/instances/{instance}/external-ips` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips",
-    tags = ["instances"],
-    deprecated = true,
-}]
-async fn instance_external_ip_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<InstancePathParam>,
-) -> Result<HttpResponseOk<ResultsPage<views::ExternalIp>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let instance_selector = params::InstanceSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.instance_name.into(),
-        );
-        let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector)?;
-        let ips =
-            nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
-        Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// List external IP addresses
 #[endpoint {
@@ -6046,50 +5758,6 @@ async fn vpc_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List VPCs
-/// Use `GET /v1/vpcs` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Vpc>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let vpcs = nexus
-            .vpc_list(
-                &opctx,
-                &project_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|p| p.into())
-            .collect();
-
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            vpcs,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a VPC
 #[endpoint {
     method = POST,
@@ -6108,38 +5776,6 @@ async fn vpc_create_v1(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let project_lookup = nexus.project_lookup(&opctx, &query)?;
-        let vpc = nexus
-            .project_create_vpc(&opctx, &project_lookup, &new_vpc_params)
-            .await?;
-        Ok(HttpResponseCreated(vpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a VPC
-/// Use `POST /v1/vpcs` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_vpc: TypedBody<params::VpcCreate>,
-) -> Result<HttpResponseCreated<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let new_vpc_params = &new_vpc.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let vpc = nexus
             .project_create_vpc(&opctx, &project_lookup, &new_vpc_params)
             .await?;
@@ -6184,60 +5820,6 @@ struct VpcPathParam {
     vpc_name: Name,
 }
 
-/// Fetch a VPC
-/// Use `GET /v1/vpcs/{vpc}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let (.., vpc) =
-            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
-        Ok(HttpResponseOk(vpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a VPC
-/// Use `GET /v1/vpcs/{id}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpcs/{id}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(None, None, path.id.into());
-        let (.., vpc) =
-            nexus.vpc_lookup(&opctx, &vpc_selector)?.fetch().await?;
-        Ok(HttpResponseOk(vpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Update a VPC
 #[endpoint {
     method = PUT,
@@ -6270,38 +5852,6 @@ async fn vpc_update_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a VPC
-/// Use `PUT /v1/vpcs/{vpc}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-    updated_vpc: TypedBody<params::VpcUpdate>,
-) -> Result<HttpResponseOk<Vpc>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let newvpc = nexus
-            .project_update_vpc(&opctx, &vpc_lookup, &updated_vpc.into_inner())
-            .await?;
-        Ok(HttpResponseOk(newvpc.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a VPC
 #[endpoint {
     method = DELETE,
@@ -6323,35 +5873,6 @@ async fn vpc_delete_v1(
             project_selector: query.project_selector,
             vpc: path.vpc,
         };
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a VPC
-/// Use `DELETE /v1/vpcs/{vpc}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
         let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
         nexus.project_delete_vpc(&opctx, &vpc_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -6393,50 +5914,6 @@ async fn vpc_subnet_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List subnets
-/// Use `GET /v1/vpc-subnets` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_subnet_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VpcSubnet>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let vpcs = nexus
-            .vpc_subnet_list(
-                &opctx,
-                &vpc_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|vpc| vpc.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            vpcs,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a subnet
 #[endpoint {
     method = POST,
@@ -6457,38 +5934,6 @@ async fn vpc_subnet_create_v1(
         let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
         let subnet =
             nexus.vpc_create_subnet(&opctx, &vpc_lookup, &create).await?;
-        Ok(HttpResponseCreated(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a subnet
-/// Use `POST /v1/vpc-subnets` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_subnet_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-    create_params: TypedBody<params::VpcSubnetCreate>,
-) -> Result<HttpResponseCreated<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let subnet = nexus
-            .vpc_create_subnet(&opctx, &vpc_lookup, &create_params.into_inner())
-            .await?;
         Ok(HttpResponseCreated(subnet.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -6531,64 +5976,6 @@ struct VpcSubnetPathParam {
     subnet_name: Name,
 }
 
-/// Fetch a subnet
-/// Use `GET /v1/vpc-subnets/{subnet}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_subnet_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcSubnetPathParam>,
-) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let subnet_selector = params::SubnetSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.subnet_name.into(),
-        );
-        let (.., subnet) =
-            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
-        Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a subnet by id
-/// Use `GET /v1/vpc-subnets/{id}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpc-subnets/{id}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_subnet_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let subnet_selector = params::SubnetSelector {
-            subnet: path.id.into(),
-            vpc_selector: None,
-        };
-        let (.., subnet) =
-            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?.fetch().await?;
-        Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a subnet
 #[endpoint {
     method = DELETE,
@@ -6610,37 +5997,6 @@ async fn vpc_subnet_delete_v1(
             vpc_selector: query.vpc_selector,
             subnet: path.subnet,
         };
-        let subnet_lookup =
-            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
-        nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a subnet
-/// Use `DELETE /v1/vpc-subnets/{subnet}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_subnet_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcSubnetPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let subnet_selector = params::SubnetSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.subnet_name.into(),
-        );
         let subnet_lookup =
             nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         nexus.vpc_delete_subnet(&opctx, &subnet_lookup).await?;
@@ -6678,93 +6034,6 @@ async fn vpc_subnet_update_v1(
             .vpc_update_subnet(&opctx, &subnet_lookup, &subnet_params)
             .await?;
         Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update a subnet
-/// Use `PUT /v1/vpc-subnets/{subnet}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_subnet_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcSubnetPathParam>,
-    subnet_params: TypedBody<params::VpcSubnetUpdate>,
-) -> Result<HttpResponseOk<VpcSubnet>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let subnet_selector = params::SubnetSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.subnet_name.into(),
-        );
-        let subnet_lookup =
-            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
-        let subnet = nexus
-            .vpc_update_subnet(
-                &opctx,
-                &subnet_lookup,
-                &subnet_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseOk(subnet.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List network interfaces for a VPC subnet
-/// Use `/v1/vpc-subnets/{subnet}/network-interfaces` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/subnets/{subnet_name}/network-interfaces",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_subnet_list_network_interfaces(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-    path_params: Path<VpcSubnetPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let subnet_selector = params::SubnetSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.subnet_name.into(),
-        );
-        let subnet_lookup =
-            nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
-        let interfaces = nexus
-            .subnet_list_network_interfaces(
-                &opctx,
-                &subnet_lookup,
-                &paginated_by,
-            )
-            .await?
-            .into_iter()
-            .map(|interfaces| interfaces.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            interfaces,
-            &marker_for_name_or_id,
-        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -6848,40 +6117,6 @@ async fn vpc_firewall_rules_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List firewall rules
-/// Use `GET /v1/vpc-firewall-rules` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_firewall_rules_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
-    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
-    // Without this check, if firewall rules change while someone is listing
-    // the rules, they will see a mix of the old and new rules.
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let rules = nexus.vpc_list_firewall_rules(&opctx, &vpc_lookup).await?;
-        Ok(HttpResponseOk(VpcFirewallRules {
-            rules: rules.into_iter().map(|rule| rule.into()).collect(),
-        }))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Replace firewall rules
 #[endpoint {
     method = PUT,
@@ -6904,46 +6139,6 @@ async fn vpc_firewall_rules_update_v1(
         let vpc_lookup = nexus.vpc_lookup(&opctx, &query)?;
         let rules = nexus
             .vpc_update_firewall_rules(&opctx, &vpc_lookup, &router_params)
-            .await?;
-        Ok(HttpResponseOk(VpcFirewallRules {
-            rules: rules.into_iter().map(|rule| rule.into()).collect(),
-        }))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Replace firewall rules
-/// Use `PUT /v1/vpc-firewall-rules` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/firewall/rules",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_firewall_rules_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-    router_params: TypedBody<VpcFirewallRuleUpdateParams>,
-) -> Result<HttpResponseOk<VpcFirewallRules>, HttpError> {
-    // TODO: Check If-Match and fail if the ETag doesn't match anymore.
-    // TODO: limit size of the ruleset because the GET endpoint is not paginated
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let rules = nexus
-            .vpc_update_firewall_rules(
-                &opctx,
-                &vpc_lookup,
-                &router_params.into_inner(),
-            )
             .await?;
         Ok(HttpResponseOk(VpcFirewallRules {
             rules: rules.into_iter().map(|rule| rule.into()).collect(),
@@ -6988,50 +6183,6 @@ async fn vpc_router_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List routers
-/// Use `GET /v1/vpc-routers` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<VpcPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<VpcRouter>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let routers = nexus
-            .vpc_router_list(
-                &opctx,
-                &vpc_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|s| s.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            routers,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Get a router
 #[endpoint {
     method = GET,
@@ -7069,67 +6220,6 @@ struct VpcRouterPathParam {
     router_name: Name,
 }
 
-/// Get a router
-/// Use `GET /v1/vpc-routers/{router}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcRouterPathParam>,
-) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let router_selector = params::RouterSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.router_name.into(),
-        );
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        let (.., vpc_router) = router_lookup.fetch().await?;
-
-        Ok(HttpResponseOk(vpc_router.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Get a router by id
-/// Use `GET /v1/vpc-routers/{router}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpc-routers/{id}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let router_selector = params::RouterSelector {
-            vpc_selector: None,
-            router: path.id.into(),
-        };
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        let (.., vpc_router) = router_lookup.fetch().await?;
-        Ok(HttpResponseOk(vpc_router.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a VPC router
 #[endpoint {
     method = POST,
@@ -7154,43 +6244,6 @@ async fn vpc_router_create_v1(
                 &vpc_lookup,
                 &db::model::VpcRouterKind::Custom,
                 &create,
-            )
-            .await?;
-        Ok(HttpResponseCreated(router.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a router
-/// Use `POST /v1/vpc-routers` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcPathParam>,
-    create_params: TypedBody<params::VpcRouterCreate>,
-) -> Result<HttpResponseCreated<VpcRouter>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let vpc_selector = params::VpcSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.vpc_name.into(),
-        );
-        let vpc_lookup = nexus.vpc_lookup(&opctx, &vpc_selector)?;
-        let router = nexus
-            .vpc_create_router(
-                &opctx,
-                &vpc_lookup,
-                &db::model::VpcRouterKind::Custom,
-                &create_params.into_inner(),
             )
             .await?;
         Ok(HttpResponseCreated(router.into()))
@@ -7227,37 +6280,6 @@ async fn vpc_router_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a router
-/// Use `DELETE /v1/vpc-routers/{router}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcRouterPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let router_selector = params::RouterSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.router_name.into(),
-        );
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        nexus.vpc_delete_router(&opctx, &router_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Update a router
 #[endpoint {
     method = PUT,
@@ -7285,43 +6307,6 @@ async fn vpc_router_update_v1(
             nexus.vpc_router_lookup(&opctx, &router_selector)?;
         let router = nexus
             .vpc_update_router(&opctx, &router_lookup, &router_params)
-            .await?;
-        Ok(HttpResponseOk(router.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update a router
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}",
-    tags = ["vpcs"],
-    deprecated = true,
-}]
-async fn vpc_router_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcRouterPathParam>,
-    router_params: TypedBody<params::VpcRouterUpdate>,
-) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let router_selector = params::RouterSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.router_name.into(),
-        );
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        let router = nexus
-            .vpc_update_router(
-                &opctx,
-                &router_lookup,
-                &router_params.into_inner(),
-            )
             .await?;
         Ok(HttpResponseOk(router.into()))
     };
@@ -7367,54 +6352,6 @@ async fn vpc_router_route_list_v1(
 
 // Vpc Router Routes
 
-/// List routes
-///
-/// List the routes associated with a router in a particular VPC.
-/// Use `GET /v1/vpc-router-routes` instead.
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<VpcRouterPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<RouterRoute>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let router_selector = params::RouterSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.router_name.into(),
-        );
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        let routes = nexus
-            .vpc_router_route_list(
-                &opctx,
-                &router_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|route| route.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            routes,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a route
 #[endpoint {
     method = GET,
@@ -7455,69 +6392,6 @@ struct RouterRoutePathParam {
     route_name: Name,
 }
 
-/// Fetch a route
-/// Use `GET /v1/vpc-router-routes/{route}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<RouterRoutePathParam>,
-) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let route_selector = params::RouteSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            Some(path.router_name.into()),
-            path.route_name.into(),
-        );
-        let (.., route) = nexus
-            .vpc_router_route_lookup(&opctx, &route_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(route.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a route by id
-/// Use `GET /v1/vpc-router-routes/{route}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/vpc-router-routes/{id}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let route_selector = params::RouteSelector {
-            router_selector: None,
-            route: path.id.into(),
-        };
-        let (.., route) = nexus
-            .vpc_router_route_lookup(&opctx, &route_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(route.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a router
 #[endpoint {
     method = POST,
@@ -7542,45 +6416,6 @@ async fn vpc_router_route_create_v1(
                 &router_lookup,
                 &RouterRouteKind::Custom,
                 &create,
-            )
-            .await?;
-        Ok(HttpResponseCreated(route.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a router
-/// Use `POST /v1/vpc-router-routes` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<VpcRouterPathParam>,
-    create_params: TypedBody<params::RouterRouteCreate>,
-) -> Result<HttpResponseCreated<RouterRoute>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let router_selector = params::RouterSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            path.router_name.into(),
-        );
-        let router_lookup =
-            nexus.vpc_router_lookup(&opctx, &router_selector)?;
-        let route = nexus
-            .router_create_route(
-                &opctx,
-                &router_lookup,
-                &RouterRouteKind::Custom,
-                &create_params.into_inner(),
             )
             .await?;
         Ok(HttpResponseCreated(route.into()))
@@ -7617,37 +6452,6 @@ async fn vpc_router_route_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a route
-/// Use `DELETE /v1/vpc-router-routes/{route}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<RouterRoutePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let route_selector = params::RouteSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            Some(path.router_name.into()),
-            path.route_name.into(),
-        );
-        let route_lookup =
-            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
-        nexus.router_delete_route(&opctx, &route_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 /// Update a route
 #[endpoint {
     method = PUT,
@@ -7675,45 +6479,6 @@ async fn vpc_router_route_update_v1(
             nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
         let route = nexus
             .router_update_route(&opctx, &route_lookup, &router_params)
-            .await?;
-        Ok(HttpResponseOk(route.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update a route
-/// Use `PUT /v1/vpc-router-routes/{route}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/vpcs/{vpc_name}/routers/{router_name}/routes/{route_name}",
-    tags = ["vpcs"],
-    deprecated = true
-}]
-async fn vpc_router_route_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<RouterRoutePathParam>,
-    router_params: TypedBody<params::RouterRouteUpdate>,
-) -> Result<HttpResponseOk<RouterRoute>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let route_selector = params::RouteSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            Some(path.vpc_name.into()),
-            Some(path.router_name.into()),
-            path.route_name.into(),
-        );
-        let route_lookup =
-            nexus.vpc_router_route_lookup(&opctx, &route_selector)?;
-        let route = nexus
-            .router_update_route(
-                &opctx,
-                &route_lookup,
-                &router_params.into_inner(),
-            )
             .await?;
         Ok(HttpResponseOk(route.into()))
     };
