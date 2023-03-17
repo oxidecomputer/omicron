@@ -637,7 +637,7 @@ impl Store {
             // records.
             warn!(
                 &self.log,
-                "found name with no records: {:?}",
+                "found name with no records";
                 "name" => &name_str
             );
 

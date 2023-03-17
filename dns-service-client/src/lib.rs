@@ -23,7 +23,6 @@ pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
 
 use crate::Error as DnsConfigError;
 
-// XXX-dap TODO-coverage
 /// Returns whether an error from this client should be retried
 pub fn is_retryable(
     error: &DnsConfigError<crate::types::Error>,

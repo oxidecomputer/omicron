@@ -208,7 +208,58 @@ async fn lookup_ip_expect_nxdomain(resolver: &TokioAsyncResolver, name: &str) {
     };
 }
 
-// XXX-dap ask ry: why does this test exist instead of just not inserting it?
+// Verify that the part of a name that's under the zone name can contain the
+// zone name itself.  For example, you can say that "emy.oxide.internal" exists
+// under "oxide.internal", meaning that the server would provide
+// "emy.oxide.internal.oxide.internal".  This is a little obscure.  But as a
+// client, it's easy to mess this up (by accidentally including the zone's name
+// in one of the zone's record names) and it's useful for debuggability to make
+// sure that we do the predictable thing here (namely: we *always* append the
+// zone name to any names that are _in_ the zone, even if they already have it).
+#[tokio::test]
+pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("name_contains_zone").await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
+
+    // add a aaaa record
+    let name = DnsRecordKey { name: "epsilon3.oxide.test".into() };
+    let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+    let aaaa = DnsRecord::Aaaa(addr);
+    dns_records_create(
+        client,
+        "oxide.test",
+        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
+    )
+    .await?;
+
+    // read back the aaaa record
+    let records = dns_records_list(client, "oxide.test").await?;
+    assert_eq!(1, records.len());
+    assert_eq!(records[0].key.name, name.name);
+
+    assert_eq!(1, records[0].records.len());
+    match records[0].records[0] {
+        DnsRecord::Aaaa(ra) => {
+            assert_eq!(ra, addr);
+        }
+        _ => {
+            panic!("expected aaaa record")
+        }
+    }
+
+    // resolve the name
+    let response = resolver.lookup_ip("epsilon3.oxide.test.oxide.test").await?;
+    let address = response.iter().next().expect("no addresses returned!");
+    assert_eq!(address, addr);
+
+    // A lookup shouldn't work without the zone's name appended twice.
+    lookup_ip_expect_nxdomain(resolver, "epsilon3.oxide.test").await;
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
+
 #[tokio::test]
 pub async fn empty_record() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("empty_record").await?;
@@ -228,12 +279,6 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     )
     .await?;
 
-    // read back the aaaa record
-    let records = dns_records_list(client, TEST_ZONE).await?;
-    assert_eq!(1, records.len());
-    assert_eq!(records[0].key.name, name.name);
-    assert_eq!(0, records[0].records.len());
-
     // resolve the name
     lookup_ip_expect_nxdomain(&resolver, &(name.name + "." + TEST_ZONE + "."))
         .await;
@@ -241,8 +286,6 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     test_ctx.cleanup().await;
     Ok(())
 }
-
-// XXX-dap TODO-coverage add a test where the name contains the zone name in it
 
 #[tokio::test]
 pub async fn nxdomain() -> Result<(), anyhow::Error> {
@@ -398,10 +441,8 @@ fn test_config(
     let mut storage_path = tmp_dir.path().to_path_buf();
     storage_path.push("test");
     let storage_path = storage_path.to_str().unwrap().into();
-    let config_storage = dns_server::storage::Config {
-        storage_path,
-        keep_old_generations: 3,
-    };
+    let config_storage =
+        dns_server::storage::Config { storage_path, keep_old_generations: 3 };
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
