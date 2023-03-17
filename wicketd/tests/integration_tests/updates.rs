@@ -4,7 +4,7 @@
 
 //! Tests for wicketd updates.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
 use super::setup::WicketdTestContext;
 use camino::Utf8Path;
@@ -74,18 +74,22 @@ async fn test_updates() {
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
-        let status = wicketd_testctx
+        let update_log = wicketd_testctx
             .wicketd_client
             .get_update_sp(wicketd_client::types::SpType::Sled, 0)
             .await
             .expect("get_update_sp successful")
             .into_inner();
 
-        for event in status.events {
+        slog::debug!(log, "received update log"; "update_log" => ?update_log);
+
+        for event in update_log.events {
             if let UpdateEventKind::Terminal(event) = event.kind {
                 break 'outer event;
             }
         }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
     match terminal_event {
