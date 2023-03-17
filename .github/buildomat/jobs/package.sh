@@ -112,7 +112,7 @@ zones=(
 	out/oximeter-collector.tar.gz
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
-	out/switch-stub.tar.gz
+	out/switch-softnpu.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 
