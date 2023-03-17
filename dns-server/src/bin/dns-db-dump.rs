@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/// Dump the sled database backing a DNS server
-///
-/// This is a low-level debugging tool, not something we'd expect people to use
-/// regularly.
+//! Dump the sled database backing a DNS server
+//!
+//! This is a low-level debugging tool, not something we'd expect people to use
+//! regularly.
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;

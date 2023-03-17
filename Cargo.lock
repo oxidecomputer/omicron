@@ -3518,7 +3518,6 @@ dependencies = [
  "http",
  "hyper",
  "hyper-rustls",
- "internal-dns-names",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -4414,8 +4413,6 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "clap 4.1.8",
- "clap 4.1.8",
- "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",

@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/// Guts of the DNS (protocol) server within our DNS server program
-///
-/// The facilities here handle binding a UDP socket, receiving DNS messages on
-/// that socket, and replying to them.
+//! Guts of the DNS (protocol) server within our DNS server program
+//!
+//! The facilities here handle binding a UDP socket, receiving DNS messages on
+//! that socket, and replying to them.
 
 use crate::dns_types::DnsRecord;
 use crate::storage;
@@ -80,14 +80,12 @@ impl Server {
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
         let server_socket = Arc::new(
-            UdpSocket::bind(config.bind_address).await.with_context(
-                || {
-                    format!(
-                        "DNS server start: UDP bind to {:?}",
-                        config.bind_address
-                    )
-                },
-            )?,
+            UdpSocket::bind(config.bind_address).await.with_context(|| {
+                format!(
+                    "DNS server start: UDP bind to {:?}",
+                    config.bind_address
+                )
+            })?,
         );
 
         let local_address = server_socket.local_addr().context(

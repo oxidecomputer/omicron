@@ -15,7 +15,7 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
-use chrono::{DateTime, Duration, Utc};
+use chrono::Duration;
 use internal_dns::{ServiceName, SRV};
 use nexus_db_queries::context::{OpContext, OpKind};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};

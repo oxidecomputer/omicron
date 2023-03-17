@@ -24,9 +24,7 @@ pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
 use crate::Error as DnsConfigError;
 
 /// Returns whether an error from this client should be retried
-pub fn is_retryable(
-    error: &DnsConfigError<crate::types::Error>,
-) -> bool {
+pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
     let response_value = match error {
         DnsConfigError::CommunicationError(_) => return true,
         DnsConfigError::InvalidRequest(_)
