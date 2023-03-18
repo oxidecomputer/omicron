@@ -11,7 +11,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
-use slog::{error, info};
+use slog::{debug, error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{
@@ -71,7 +71,7 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let state = State::new();
+        let state = State::new(&log);
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
@@ -142,6 +142,11 @@ impl Runner {
                 }
                 Event::UpdateArtifacts(artifacts) => {
                     self.state.update_state.update_artifacts(artifacts);
+                    self.screen.draw(&self.state, &mut self.terminal)?;
+                }
+                Event::UpdateLog(logs) => {
+                    debug!(self.log, "{:#?}", logs);
+                    self.state.update_state.update_logs(logs);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 _ => (),
