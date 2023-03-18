@@ -4,7 +4,7 @@
 
 use crate::DNS_ZONE;
 use omicron_common::address::{
-    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_SERVER_PORT,
+    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, info};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -88,7 +88,7 @@ impl Resolver {
             .into_iter()
             .map(|dns_subnet| {
                 let ip_addr = IpAddr::V6(dns_subnet.dns_address().ip());
-                SocketAddr::new(ip_addr, DNS_SERVER_PORT)
+                SocketAddr::new(ip_addr, DNS_PORT)
             })
             .collect();
         Resolver::new_from_addrs(log, dns_ips)
