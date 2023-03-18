@@ -722,7 +722,7 @@ impl ServiceManager {
                 ServiceType::InternalDns { server_address, dns_address } => {
                     info!(self.inner.log, "Setting up internal-dns service");
                     smfh.setprop(
-                        "config/server_address",
+                        "config/http_address",
                         format!(
                             "[{}]:{}",
                             server_address.ip(),
