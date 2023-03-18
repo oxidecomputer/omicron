@@ -140,8 +140,10 @@ impl Runner {
                 Event::Inventory(event) => {
                     self.handle_inventory_event(event)?;
                 }
-                Event::UpdateArtifacts(artifacts) => {
-                    self.state.update_state.update_artifacts(artifacts);
+                Event::UpdateArtifacts { system_version, artifacts } => {
+                    self.state
+                        .update_state
+                        .update_artifacts(system_version, artifacts);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::UpdateLog(logs) => {

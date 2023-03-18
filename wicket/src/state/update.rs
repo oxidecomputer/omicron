@@ -20,6 +20,7 @@ use wicketd_client::types::{
 pub struct RackUpdateState {
     log: Logger,
     pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
+    pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
     pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
     pub logs: BTreeMap<ComponentId, UpdateLog>,
@@ -59,6 +60,7 @@ impl RackUpdateState {
     pub fn new(log: &Logger) -> Self {
         RackUpdateState {
             log: log.new(o!("component" => "RackUpdateState")),
+            system_version: None,
             items: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| match id {
@@ -118,7 +120,12 @@ impl RackUpdateState {
         }
     }
 
-    pub fn update_artifacts(&mut self, artifacts: Vec<ArtifactId>) {
+    pub fn update_artifacts(
+        &mut self,
+        system_version: Option<SemverVersion>,
+        artifacts: Vec<ArtifactId>,
+    ) {
+        self.system_version = system_version;
         self.artifacts = artifacts;
         self.artifact_versions.clear();
         for id in &mut self.artifacts {
