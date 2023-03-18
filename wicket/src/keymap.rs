@@ -79,6 +79,9 @@ pub enum Cmd {
 
     /// Swap between the sidebar and primary pane
     SwapPane,
+
+    /// Write the current snapshot to a file
+    DumpSnapshot,
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -141,6 +144,9 @@ impl KeyHandler {
                 Cmd::KnightRiderMode
             }
             KeyCode::Char('s') => Cmd::SwapPane,
+            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::DumpSnapshot
+            }
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,
