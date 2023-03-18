@@ -7,6 +7,7 @@
 use anyhow::anyhow;
 use lazy_static::lazy_static;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
@@ -27,7 +28,7 @@ lazy_static! {
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Inventory {
     power: BTreeMap<ComponentId, PowerState>,
     inventory: BTreeMap<ComponentId, Component>,
@@ -97,7 +98,7 @@ impl Inventory {
 
 // We just print the debug info on the screen for now
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sp {
     ignition: SpIgnition,
     state: SpState,
@@ -105,7 +106,7 @@ pub struct Sp {
 }
 
 // XXX: Eventually a Sled will have a host component.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Sled(Sp),
     Switch(Sp),
@@ -149,7 +150,9 @@ impl Component {
 }
 
 // The component type and its slot.
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize,
+)]
 pub enum ComponentId {
     Sled(u8),
     Switch(u8),
@@ -212,7 +215,7 @@ impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum PowerState {
     /// Working
     A0,

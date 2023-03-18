@@ -189,9 +189,8 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
-        let wicketd_spans =
-            state.service_status.wicketd_liveness.compute().to_spans();
-        let mgs_spans = state.service_status.mgs_liveness.compute().to_spans();
+        let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
+        let mgs_spans = state.service_status.mgs_liveness().to_spans();
         let mut spans = vec![Span::styled("WICKETD: ", style::service())];
         spans.extend_from_slice(&wicketd_spans);
         spans.push(Span::styled(" | ", style::divider()));

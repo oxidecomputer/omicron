@@ -7,10 +7,11 @@
 //! This is mostly visual selection state right now.
 
 use super::inventory::ComponentId;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 
 // Easter egg alert: Support for Knight Rider mode
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct KnightRiderMode {
     pub count: usize,
 }
@@ -22,8 +23,9 @@ impl KnightRiderMode {
 }
 
 // The visual state of the rack
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackState {
+    #[serde(skip)]
     pub log: Option<Logger>,
     pub selected: ComponentId,
     pub knight_rider_mode: Option<KnightRiderMode>,
