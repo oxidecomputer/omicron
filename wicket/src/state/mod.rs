@@ -14,16 +14,17 @@ pub use inventory::{
     ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
-pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
+pub use status::{Liveness, ServiceStatus};
 pub use update::{artifact_title, RackUpdateState, UpdateState};
 
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 
 /// The global state of wicket
 ///
 /// [`State`] is not tied to any specific screen and is updated upon event
 /// receipt.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub screen_width: u16,
     pub screen_height: u16,

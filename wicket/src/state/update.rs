@@ -8,6 +8,7 @@ use crate::ui::defaults::style;
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
+use serde::{Deserialize, Serialize};
 use slog::{o, warn, Logger};
 use std::collections::BTreeMap;
 use std::fmt::Display;
@@ -16,9 +17,11 @@ use wicketd_client::types::{
     UpdateNormalEventKind, UpdateStateKind, UpdateTerminalEventKind,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
-    log: Logger,
+    #[serde(skip)]
+    // Only an Option so we can skip sererializaton
+    log: Option<Logger>,
     pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
@@ -26,7 +29,7 @@ pub struct RackUpdateState {
     pub logs: BTreeMap<ComponentId, UpdateLog>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpdateState {
     Waiting,
     Updated,
@@ -59,7 +62,7 @@ impl UpdateState {
 impl RackUpdateState {
     pub fn new(log: &Logger) -> Self {
         RackUpdateState {
-            log: log.new(o!("component" => "RackUpdateState")),
+            log: Some(log.new(o!("component" => "RackUpdateState"))),
             system_version: None,
             items: ALL_COMPONENT_IDS
                 .iter()
@@ -111,7 +114,7 @@ impl RackUpdateState {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(self.log, "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
+                    warn!(self.log.as_ref().unwrap(), "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
                     continue;
                 };
                 self.update_items(&id, &log);

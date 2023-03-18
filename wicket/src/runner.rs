@@ -23,11 +23,14 @@ use tui::Terminal;
 
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
-use crate::{Action, Cmd, Event, InventoryEvent, KeyHandler, State};
+use crate::{Action, Cmd, Event, KeyHandler, Recorder, State};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
+
+const TICK_INTERVAL: Duration = Duration::from_millis(30);
+const MAX_RECORDED_EVENTS: usize = 10000;
 
 /// The `Runner` owns the main UI thread, and starts a tokio runtime
 /// for interaction with downstream services.
@@ -65,6 +68,9 @@ pub struct Runner {
 
     // The tokio runtime for everything outside the main thread
     tokio_rt: tokio::runtime::Runtime,
+
+    // A recorder for debugging the history of events for use in a debugger.
+    recorder: Recorder,
 }
 
 #[allow(clippy::new_without_default)]
@@ -90,6 +96,7 @@ impl Runner {
             terminal,
             log,
             tokio_rt,
+            recorder: Recorder::new(MAX_RECORDED_EVENTS),
         }
     }
 
@@ -106,8 +113,6 @@ impl Runner {
     fn main_loop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
 
-        let mut key_handler = KeyHandler::default();
-
         // Size the initial screen
         let rect = self.terminal.get_frame().size();
         self.screen.resize(&mut self.state, rect.width, rect.height);
@@ -118,86 +123,51 @@ impl Runner {
         loop {
             // unwrap is safe because we always hold onto a UnboundedSender
             let event = self.events_rx.blocking_recv().unwrap();
+            self.recorder.push(&self.state, event.clone());
             match event {
                 Event::Tick => {
+                    // We want to periodically to update the status bar
+                    // By default this is every 1s.
+                    let redraw =
+                        self.state.service_status.advance_all(TICK_INTERVAL);
                     let action = self.screen.on(&mut self.state, Cmd::Tick);
+                    let already_drawn =
+                        action.as_ref().map_or(false, |a| a.should_redraw());
+                    self.handle_action(action)?;
+                    if redraw && !already_drawn {
+                        self.screen.draw(&self.state, &mut self.terminal)?;
+                    }
+                }
+                Event::Term(cmd) => {
+                    let action = self.screen.on(&mut self.state, cmd);
                     self.handle_action(action)?;
                 }
-                Event::Term(TermEvent::Key(key_event)) => {
-                    if is_control_c(&key_event) {
-                        info!(self.log, "CTRL-C Pressed. Exiting.");
-                        break;
-                    }
-                    if let Some(cmd) = key_handler.on(key_event) {
-                        let action = self.screen.on(&mut self.state, cmd);
-                        self.handle_action(action)?;
-                    }
-                }
-                Event::Term(TermEvent::Resize(width, height)) => {
+                Event::Resize { width, height } => {
                     self.screen.resize(&mut self.state, width, height);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
-                Event::Inventory(event) => {
-                    self.handle_inventory_event(event)?;
+                Event::Inventory { inventory, mgs_last_seen } => {
+                    self.state.service_status.reset_mgs(mgs_last_seen);
+                    self.state.service_status.reset_wicketd(Duration::ZERO);
+                    self.state.inventory.update_inventory(inventory)?;
+                    self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::UpdateArtifacts { system_version, artifacts } => {
+                    self.state.service_status.reset_wicketd(Duration::ZERO);
                     self.state
                         .update_state
                         .update_artifacts(system_version, artifacts);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::UpdateLog(logs) => {
+                    self.state.service_status.reset_wicketd(Duration::ZERO);
                     debug!(self.log, "{:#?}", logs);
                     self.state.update_state.update_logs(logs);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
-                _ => (),
+                Event::Shutdown => break,
             }
         }
-        Ok(())
-    }
-
-    fn handle_inventory_event(
-        &mut self,
-        event: InventoryEvent,
-    ) -> anyhow::Result<()> {
-        let mut redraw = false;
-
-        match event {
-            InventoryEvent::Inventory {
-                changed_inventory,
-                wicketd_received,
-                mgs_received,
-            } => {
-                if let Some(inventory) = changed_inventory {
-                    if let Err(e) =
-                        self.state.inventory.update_inventory(inventory)
-                    {
-                        error!(self.log, "Failed to update inventory: {e}",);
-                    } else {
-                        redraw = true;
-                    }
-                };
-
-                self.state
-                    .service_status
-                    .reset_wicketd(wicketd_received.elapsed());
-                self.state.service_status.reset_mgs(mgs_received.elapsed());
-            }
-            InventoryEvent::Unavailable { wicketd_received } => {
-                self.state
-                    .service_status
-                    .reset_wicketd(wicketd_received.elapsed());
-            }
-        }
-
-        redraw |= self.state.service_status.should_redraw();
-
-        if redraw {
-            // Inventory or status bar changed. Redraw the screen.
-            self.screen.draw(&self.state, &mut self.terminal)?;
-        }
-
         Ok(())
     }
 
@@ -245,7 +215,8 @@ async fn run_event_listener(
     info!(log, "Starting event listener");
     tokio::spawn(async move {
         let mut events = EventStream::new();
-        let mut ticker = interval(Duration::from_millis(30));
+        let mut ticker = interval(TICK_INTERVAL);
+        let mut key_handler = KeyHandler::default();
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -268,10 +239,32 @@ async fn run_event_listener(
                           return;
                         }
                     };
-                    if events_tx.send(Event::Term(event)).is_err() {
-                        info!(log, "Event listener completed");
-                        // The receiver was dropped. Program is ending.
-                        return;
+
+                    let event = match event {
+                        TermEvent::Key(key_event) => {
+                            if is_control_c(&key_event) {
+                                info!(log, "CTRL-C Pressed. Exiting.");
+                                Some(Event::Shutdown)
+                            } else {
+                                if let Some(cmd) = key_handler.on(key_event) {
+                                    Some(Event::Term(cmd))
+                                } else {
+                                    None
+                                }
+                            }
+                        }
+                        TermEvent::Resize(width, height) => {
+                            Some(Event::Resize{width, height})
+                        }
+                         _ => None
+                    };
+
+                    if let Some(event) = event {
+                        if events_tx.send(event).is_err() {
+                            info!(log, "Event listener completed");
+                            // The receiver was dropped. Program is ending.
+                            return;
+                        }
                     }
                 }
             }
