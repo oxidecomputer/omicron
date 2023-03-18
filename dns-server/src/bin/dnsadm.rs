@@ -210,7 +210,7 @@ async fn main() -> Result<()> {
 /// zone name.
 fn verify_zone_name(zone_name: &str) -> Result<()> {
     ensure!(
-        zone_name.trim_end_matches(".").ends_with(".oxide.test"),
+        zone_name.trim_end_matches('.').ends_with(".oxide.test"),
         "zone name must be under \".oxide.test\""
     );
     Ok(())

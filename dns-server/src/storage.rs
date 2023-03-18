@@ -641,7 +641,7 @@ impl Store {
                 "name" => &name_str
             );
 
-            return Err(QueryError::NoName(name_str.clone()));
+            return Err(QueryError::NoName(name_str));
         }
 
         Ok(records)
