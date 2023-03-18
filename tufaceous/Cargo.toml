@@ -10,7 +10,7 @@ camino.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 chrono.workspace = true
 console = { version = "0.15.5", default-features = false }
-humantime = "2.1.0"
+humantime.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 slog-async.workspace = true

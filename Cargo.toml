@@ -158,6 +158,7 @@ http = "0.2.9"
 httptest = "0.15.4"
 hyper-rustls = "0.23.2"
 hyper = "0.14"
+humantime = "2.1.0"
 illumos-utils = { path = "illumos-utils" }
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator-artifactd = { path = "installinator-artifactd" }

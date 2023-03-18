@@ -2,8 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::{keymap::Cmd, state::ComponentId, State};
+use camino::Utf8PathBuf;
+use humantime::format_rfc3339;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::fs::File;
+use std::time::{Duration, SystemTime};
 use wicketd_client::types::{
     ArtifactId, RackV1Inventory, SemverVersion, UpdateLogAll,
 };
@@ -93,6 +96,22 @@ impl Recorder {
         }
         self.snapshot.history.push(event);
         true
+    }
+
+    /// Dump the current snapshot to disk
+    pub fn dump(&mut self) -> anyhow::Result<()> {
+        let timestamp = format_rfc3339(SystemTime::now());
+        let mut path: Utf8PathBuf = match std::env::var("WICKET_DUMP_PATH") {
+            Ok(path) => path.into(),
+            Err(std::env::VarError::NotPresent) => "/tmp/".into(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("WICKET_DUMP_PATH is not valid utf8");
+            }
+        };
+        path.push(format!("{}.wicket.dump", timestamp));
+        let file = File::create(path)?;
+        bincode::serialize_into(file, &self.snapshot)?;
+        Ok(())
     }
 }
 

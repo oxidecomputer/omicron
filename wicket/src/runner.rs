@@ -139,8 +139,15 @@ impl Runner {
                     }
                 }
                 Event::Term(cmd) => {
-                    let action = self.screen.on(&mut self.state, cmd);
-                    self.handle_action(action)?;
+                    if cmd == Cmd::DumpSnapshot {
+                        // TODO: Show a graphical indicator?
+                        if let Err(e) = self.recorder.dump() {
+                            error!(self.log, "{}", e);
+                        }
+                    } else {
+                        let action = self.screen.on(&mut self.state, cmd);
+                        self.handle_action(action)?;
+                    }
                 }
                 Event::Resize { width, height } => {
                     self.screen.resize(&mut self.state, width, height);

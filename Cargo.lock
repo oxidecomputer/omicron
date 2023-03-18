@@ -7945,11 +7945,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "bincode",
  "camino",
  "clap 4.1.9",
  "crossterm 0.26.1",
  "futures",
  "hex",
+ "humantime",
  "lazy_static",
  "libsw",
  "omicron-common",

@@ -8,11 +8,13 @@ default-run = "wicket"
 
 [dependencies]
 anyhow.workspace = true
+bincode.workspace = true
 camino.workspace = true
 clap.workspace = true
 crossterm = { version = "0.26.1", features = ["event-stream"] }
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
+humantime.workspace = true
 lazy_static.workspace = true
 omicron-common.workspace = true
 reqwest.workspace = true
