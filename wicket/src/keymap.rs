@@ -82,6 +82,9 @@ pub enum Cmd {
 
     /// Switch to the previous pane.
     PrevPane,
+
+    /// Write the current snapshot to a file
+    DumpSnapshot,
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -145,6 +148,9 @@ impl KeyHandler {
             }
             KeyCode::Tab => Cmd::NextPane,
             KeyCode::BackTab => Cmd::PrevPane,
+            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::DumpSnapshot
+            }
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,
