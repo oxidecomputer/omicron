@@ -20,7 +20,7 @@
 //! makes up the control plane would also be a host.  Each host might have
 //! several things running there.  For example, our DNS servers have both an
 //! HTTP server that's used to configure the DNS server as well as an actual
-//! DNS [protocol] server.
+//! DNS \[protocol\] server.
 //!
 //! **Services**, **instances**, and **backends** are specific terms, too.
 //! From RFD 248:
@@ -186,9 +186,12 @@ impl DnsConfigBuilder {
 
     /// Add a new host of type "sled" to the configuration
     ///
+    /// Returns a [`Sled`] that can be used with [`Self::service_backend_sled()`] to
+    /// specify that this sled is a backend for some higher-level service.
+    ///
     /// # Errors
     ///
-    /// This function fails only if the given zone has already been added to the
+    /// This function fails only if the given sled has already been added to the
     /// configuration.
     pub fn host_sled(
         &mut self,
@@ -208,7 +211,7 @@ impl DnsConfigBuilder {
 
     /// Add a new host of type "zone" to the configuration
     ///
-    /// Returns a [`Zone`] that can be used with [`Self::service_backend()`] to
+    /// Returns a [`Zone`] that can be used with [`Self::service_backend_zone()`] to
     /// specify that this zone is a backend for some higher-level service.
     ///
     /// # Errors
