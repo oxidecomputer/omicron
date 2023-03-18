@@ -485,8 +485,11 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver = DnsResolver::new_from_subnet(config.az_subnet())
-            .expect("Failed to create DNS resolver");
+        let resolver = DnsResolver::new_from_subnet(
+            self.log.new(o!("component" => "DnsResolver")),
+            config.az_subnet(),
+        )
+        .expect("Failed to create DNS resolver");
         let ip = resolver
             .lookup_ip(SRV::Service(ServiceName::Nexus))
             .await

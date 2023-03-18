@@ -6,6 +6,7 @@ use crate::DNS_ZONE;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_SERVER_PORT,
 };
+use slog::{debug, info};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
@@ -31,13 +32,17 @@ pub enum ResolveError {
 /// look up IP addresses of services based on their SRV keys.
 #[derive(Clone)]
 pub struct Resolver {
+    log: slog::Logger,
     inner: Box<TokioAsyncResolver>,
 }
 
 impl Resolver {
     pub fn new_from_addrs(
+        log: slog::Logger,
         dns_addrs: Vec<SocketAddr>,
     ) -> Result<Self, ResolveError> {
+        info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
+
         let mut rc = ResolverConfig::new();
         for socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
@@ -51,15 +56,18 @@ impl Resolver {
         let inner =
             Box::new(TokioAsyncResolver::tokio(rc, ResolverOpts::default())?);
 
-        Ok(Self { inner })
+        Ok(Self { inner, log })
     }
 
     /// Convenience wrapper for [`Resolver::new_from_addrs`] that determines
     /// the subnet based on a provided IP address and then uses the DNS
     /// resolvers for that subnet.
-    pub fn new_from_ip(address: Ipv6Addr) -> Result<Self, ResolveError> {
+    pub fn new_from_ip(
+        log: slog::Logger,
+        address: Ipv6Addr,
+    ) -> Result<Self, ResolveError> {
         let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
-        Self::new_from_subnet(subnet)
+        Self::new_from_subnet(log, subnet)
     }
 
     // TODO-correctness This function and its callers make assumptions about how
@@ -72,6 +80,7 @@ impl Resolver {
     // re-resolve this.  That's how we'd learn about dynamic changes to the set
     // of DNS servers.
     pub fn new_from_subnet(
+        log: slog::Logger,
         subnet: Ipv6Subnet<AZ_PREFIX>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = ReservedRackSubnet::new(subnet)
@@ -82,7 +91,7 @@ impl Resolver {
                 SocketAddr::new(ip_addr, DNS_SERVER_PORT)
             })
             .collect();
-        Resolver::new_from_addrs(dns_ips)
+        Resolver::new_from_addrs(log, dns_ips)
     }
 
     /// Looks up a single [`Ipv6Addr`] based on the SRV name.
@@ -97,6 +106,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup_ipv6 srv"; "name" => &name);
         let response = self.inner.ipv6_lookup(&name).await?;
         let address = response
             .iter()
@@ -112,6 +122,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup_socket_v6 srv"; "name" => &name);
         let response = self.inner.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
@@ -145,6 +156,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<IpAddr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup srv"; "name" => &name);
         let response = self.inner.lookup_ip(&name).await?;
         let address = response
             .iter()
@@ -183,6 +195,7 @@ mod test {
         successful: bool,
         dns_server: dns_server::dns_server::ServerHandle,
         config_client: dns_service_client::Client,
+        log: slog::Logger,
     }
 
     impl DnsServer {
@@ -229,6 +242,7 @@ mod test {
                 dropshot_server,
                 successful: false,
                 config_client,
+                log: log.clone(),
             }
         }
 
@@ -242,7 +256,8 @@ mod test {
         }
 
         fn resolver(&self) -> anyhow::Result<Resolver> {
-            Resolver::new_from_addrs(vec![self.dns_server_address()])
+            let log = self.log.new(o!("component" => "DnsResolver"));
+            Resolver::new_from_addrs(log, vec![self.dns_server_address()])
                 .context("creating resolver for test DNS server")
         }
 

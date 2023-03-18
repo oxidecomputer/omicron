@@ -42,8 +42,11 @@ impl LazyNexusClient {
     pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
         Ok(Self {
             inner: Arc::new(Inner {
-                log,
-                resolver: Resolver::new_from_ip(addr)?,
+                log: log.clone(),
+                resolver: Resolver::new_from_ip(
+                    log.new(o!("component" => "DnsResolver")),
+                    addr,
+                )?,
             }),
         })
     }

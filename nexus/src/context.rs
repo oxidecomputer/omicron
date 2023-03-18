@@ -139,9 +139,11 @@ impl ServerContext {
         let az_subnet =
             Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
-        let resolver =
-            internal_dns::resolver::Resolver::new_from_subnet(az_subnet)
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
+            log.new(o!("component" => "DnsResolver")),
+            az_subnet,
+        )
+        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool
         let url = match &config.deployment.database {
