@@ -56,6 +56,9 @@ pub enum PlanError {
 
     #[error(transparent)]
     Sled(#[from] crate::rack_setup::sled_interface::Error),
+
+    #[error("Not enough sleds with U.2s to provision necessary services")]
+    NotEnoughDisks,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -117,6 +120,9 @@ impl Plan {
 
         let mut allocations = vec![];
 
+        let mut remaining_crdb_needed = CRDB_COUNT;
+        let mut remaining_clickhouse_needed = CLICKHOUSE_COUNT;
+
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];
             let subnet: Ipv6Subnet<SLED_PREFIX> =
@@ -154,9 +160,9 @@ impl Plan {
                 })
             }
 
-            // The first enumerated sleds host the CRDB datasets, using
-            // zpools described from the underlying config file.
-            if idx < CRDB_COUNT {
+            // The first enumerated sleds with disks host the CRDB datasets,
+            // using zpools described from the underlying config file.
+            if remaining_crdb_needed > 0 && u2_zpools.len() > 0 {
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
                     omicron_common::address::COCKROACH_PORT,
@@ -171,10 +177,11 @@ impl Plan {
                     },
                     address,
                 });
+                remaining_crdb_needed -= 1;
             }
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < CLICKHOUSE_COUNT {
+            if remaining_clickhouse_needed > 0 && u2_zpools.len() > 0 {
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
                     omicron_common::address::CLICKHOUSE_PORT,
@@ -187,6 +194,7 @@ impl Plan {
                     dataset_kind: crate::params::DatasetKind::Clickhouse,
                     address,
                 });
+                remaining_clickhouse_needed -= 1;
             }
 
             // Each zpool gets a crucible zone.
@@ -244,6 +252,10 @@ impl Plan {
             }
 
             allocations.push((sled_address, request));
+        }
+
+        if remaining_crdb_needed > 0 || remaining_clickhouse_needed > 0 {
+            return Err(PlanError::NotEnoughDisks);
         }
 
         let mut services = std::collections::HashMap::new();

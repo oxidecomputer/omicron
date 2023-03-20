@@ -74,6 +74,7 @@ use crate::rack_setup::plan::sled::{
 };
 use crate::rack_setup::sled_interface::{RealSledAccess, SledInterface};
 use dns_service_client::multiclient::DnsError;
+use dns_service_client::multiclient::ResolveError;
 use internal_dns_names::{ServiceName, SRV};
 use nexus_client::types as NexusTypes;
 use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
@@ -132,6 +133,9 @@ pub enum SetupServiceError {
 
     #[error("Failed to access DNS servers: {0}")]
     Dns(#[from] DnsError),
+
+    #[error("Failed to resolve IP address: {0}")]
+    DnsResolve(#[from] ResolveError),
 }
 
 // The workload / information allocated to a single sled.
@@ -462,10 +466,7 @@ impl ServiceInner {
         info!(self.log, "Handing off control to Nexus");
 
         let resolver = dns_access.new_resolver(config.az_subnet());
-        let ip = resolver
-            .lookup_ip(SRV::Service(ServiceName::Nexus))
-            .await
-            .expect("Failed to lookup IP");
+        let ip = resolver.lookup_ip(SRV::Service(ServiceName::Nexus)).await?;
         let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
@@ -1356,17 +1357,15 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO: This test should NOT panic, but I'm including it as validation of existing behavior.
     #[tokio::test]
-    #[should_panic]
-    async fn rack_initialize_no_u2_panics() {
-        let logctx = test_setup_log("rack_initialize_no_u2_panics");
+    async fn rack_initialize_no_u2() {
+        let logctx = test_setup_log("rack_initialize_no_u2");
         let log = &logctx.log;
 
         let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let request = RackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
-            rack_secret_threshold: 2,
+            rack_secret_threshold: 1,
             gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
             nexus_external_address,
         };
@@ -1391,25 +1390,26 @@ mod test {
             request,
             vec![],
         );
-        rss.join().await.unwrap();
-
-        // XXX The panic happens because we index into "u2_zpools" without validating the length
-        // during plan generation.
+        let error = rss.join().await.unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "Not enough sleds with U.2s to provision necessary services"
+            ),
+            "Unexpected error: '{error}'",
+        );
 
         logctx.cleanup_successful();
     }
 
-    // TODO: This test should NOT panic, but I'm including it as validation of existing behavior.
     #[tokio::test]
-    #[should_panic]
-    async fn rack_reinitialize_missing_dns_panics() {
-        let logctx = test_setup_log("rack_reinitialize_missing_dns_panics");
+    async fn rack_reinitialize_missing_dns() {
+        let logctx = test_setup_log("rack_reinitialize_missing_dns");
         let log = &logctx.log;
 
         let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let request = RackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
-            rack_secret_threshold: 2,
+            rack_secret_threshold: 1,
             gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
             nexus_external_address,
         };
@@ -1435,27 +1435,31 @@ mod test {
         );
         rss.join().await.unwrap();
 
-        // Re-initialize the rack with the same config, in the same temporary directory
-        {
-            let sleds = AllSleds::new();
-            let bootstrap = FakeBootstrapNetwork::new(
-                vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
-                sleds.clone(),
-                ZPOOLS_PER_SLED,
-            );
-            let interfaces = test_interfaces(sleds.clone(), bootstrap);
-            let rss = RackSetupService::new_internal(
-                log.new(o!("component" => "RSS")),
-                interfaces,
-                tempdir.path().into(),
-                request.clone(),
-                vec![],
-            );
-            rss.join().await.unwrap();
-        }
+        // Re-initialize the rack with the same config, in the same temporary directory.
+        //
+        // Note that by re-initializing the DNS interface, we're dropping all
+        // the records, which means that we'll be unable to find the Nexus
+        // address.
+        let sleds = AllSleds::new();
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            interfaces,
+            tempdir.path().into(),
+            request.clone(),
+            vec![],
+        );
+        let error = rss.join().await.unwrap_err();
 
-        // XXX The panic happens because "handoff_to_nexus" ".expects()" that the Nexus IP
-        // address can be looked up, but in reality, it should return an error.
+        assert!(
+            error.to_string().contains("Failed to resolve IP address"),
+            "Unexpected error: '{error}'",
+        );
 
         logctx.cleanup_successful();
     }
@@ -1468,7 +1472,7 @@ mod test {
         let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let request = RackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
-            rack_secret_threshold: 2,
+            rack_secret_threshold: 1,
             gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
             nexus_external_address,
         };
@@ -1496,28 +1500,25 @@ mod test {
         rss.join().await.unwrap();
 
         // Re-initialize the rack with the same config, in the same temporary directory
-        //
         // NOTE: We use the same "DNS Access" to look up Nexus - without it, handoff fails,
         // because the IP address cannot be identified.
-        {
-            let sleds = AllSleds::new();
-            let bootstrap = FakeBootstrapNetwork::new(
-                vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
-                sleds.clone(),
-                ZPOOLS_PER_SLED,
-            );
-            let mut interfaces = test_interfaces(sleds.clone(), bootstrap);
-            interfaces.dns = dns;
+        let sleds = AllSleds::new();
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+        let mut interfaces = test_interfaces(sleds.clone(), bootstrap);
+        interfaces.dns = dns;
 
-            let rss = RackSetupService::new_internal(
-                log.new(o!("component" => "RSS")),
-                interfaces,
-                tempdir.path().into(),
-                request.clone(),
-                vec![],
-            );
-            rss.join().await.unwrap();
-        }
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            interfaces,
+            tempdir.path().into(),
+            request.clone(),
+            vec![],
+        );
+        rss.join().await.unwrap();
 
         logctx.cleanup_successful();
     }
