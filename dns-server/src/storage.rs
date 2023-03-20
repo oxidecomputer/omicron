@@ -575,12 +575,21 @@ impl Store {
         self.prune_trees(trees_to_prune, "too old");
     }
 
-    pub(crate) async fn query(
+    pub(crate) fn query(
         &self,
         mr: &trust_dns_server::authority::MessageRequest,
     ) -> Result<Vec<DnsRecord>, QueryError> {
-        let config = self.read_config().map_err(QueryError::QueryFail)?;
         let name = mr.query().name();
+        let orig_name = mr.query().original().name();
+        self.query_name(name, orig_name)
+    }
+
+    fn query_name(
+        &self,
+        name: &LowerName,
+        orig_name: &Name,
+    ) -> Result<Vec<DnsRecord>, QueryError> {
+        let config = self.read_config().map_err(QueryError::QueryFail)?;
 
         let zone_name = config
             .zones
@@ -589,7 +598,7 @@ impl Store {
                 let zone_name = LowerName::from(Name::from_str(&z).unwrap());
                 zone_name.zone_of(name)
             })
-            .ok_or_else(|| QueryError::NoZone(name.to_string()))?;
+            .ok_or_else(|| QueryError::NoZone(orig_name.to_string()))?;
 
         let tree_name = Self::tree_name_for_zone(zone_name, config.generation);
         let tree = self
@@ -603,7 +612,6 @@ impl Store {
         // the request.  (This basically duplicates work in `zone_of` above.)
         let name_str = name.to_string();
         let key = {
-            let orig_name = mr.query().original().name();
             let zone_name = Name::from_str(zone_name).unwrap();
             // This is implied by passing the `zone_of()` check above.
             assert!(zone_name.num_labels() <= orig_name.num_labels());
@@ -671,6 +679,8 @@ struct UpdateInfo {
     req_id: String,
 }
 
+/// Used to help ensure that code paths that begin an exclusive update also
+/// release their exclusive lock.
 struct UpdateGuard<'store, 'req_id> {
     store: &'store Store,
     req_id: &'req_id str,
@@ -711,5 +721,166 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
         if !self.finished {
             panic!("attempted to return early without finishing update!");
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{Config, Store};
+    use crate::dns_types::DnsConfigParams;
+    use crate::dns_types::DnsConfigZone;
+    use crate::dns_types::DnsKV;
+    use crate::dns_types::DnsRecord;
+    use crate::dns_types::DnsRecordKey;
+    use crate::storage::QueryError;
+    use omicron_test_utils::dev::test_setup_log;
+    use std::net::Ipv6Addr;
+    use std::str::FromStr;
+    use trust_dns_client::rr::LowerName;
+    use trust_dns_client::rr::Name;
+
+    /// As usual, `TestContext` groups the various pieces we need in a bunch of
+    /// our tests and helps make sure they get cleaned up properly.
+    struct TestContext {
+        logctx: dropshot::test_util::LogContext,
+        tmpdir: tempdir::TempDir,
+        store: Store,
+    }
+
+    impl TestContext {
+        fn new(test_name: &str) -> TestContext {
+            let logctx = test_setup_log(test_name);
+            let tmpdir = tempdir::TempDir::new("dns-server-storage-test")
+                .expect("failed to create tmp directory for test");
+            let storage_path = camino::Utf8PathBuf::from_path_buf(
+                tmpdir.path().to_path_buf(),
+            )
+            .expect(
+                "failed to create Utf8PathBuf for test temporary directory",
+            );
+            let store = Store::new(
+                logctx.log.clone(),
+                &Config { storage_path, keep_old_generations: 3 },
+            )
+            .expect("failed to create test Store");
+            assert!(store.is_new());
+            TestContext { logctx, tmpdir, store }
+        }
+
+        /// Invoke upon successful completion of a test to clean up the
+        /// temporary files that were made.  These files are deliberately
+        /// preserved for debugging on failure.
+        fn cleanup_successful(self) {
+            self.logctx.cleanup_successful();
+
+            // These are redundant given the current implementation (that this
+            // function consumes `self`).  But they're here for clarity: first
+            // we drop the Store to close the database.  Then we drop the
+            // temporary directory so that it gets removed.
+            drop(self.store);
+            drop(self.tmpdir);
+        }
+    }
+
+    /// Describes what one of the tests expects to get back for a particular DNS
+    /// query
+    #[derive(Debug)]
+    enum Expect<'a> {
+        NoZone,
+        NoName,
+        Record(&'a DnsRecord),
+    }
+
+    /// Looks up the given name and verifies that the store layer returns the
+    /// correct error: that the name is not in a zone that we know about
+    fn expect(store: &Store, name: &str, expect: Expect<'_>) {
+        let dns_name_orig = Name::from_str(name).expect("bad DNS name");
+        let dns_name_lower = LowerName::from(dns_name_orig.clone());
+        let result = store.query_name(&dns_name_lower, &dns_name_orig);
+        println!(
+            "expecting {:?} for query of {:?}: {:?}",
+            expect, name, result
+        );
+
+        match (expect, result) {
+            (Expect::NoZone, Err(QueryError::NoZone(n))) if n == name => (),
+            (Expect::NoName, Err(QueryError::NoName(n))) if n == name => (),
+            (Expect::Record(r), Ok(records))
+                if records.len() == 1 && records[0] == *r =>
+            {
+                ()
+            }
+            _ => panic!("did not get what we expected from DNS query"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_success() {
+        let tc = TestContext::new("test_update_success");
+
+        // XXX-dap figure out how best to generalize this in terms of
+        // declarative generations.
+
+        // Verify the initial configuration.
+        let config = tc.store.dns_config().await.unwrap();
+        assert_eq!(config.generation, 0);
+        assert!(config.zones.is_empty());
+        expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "Gen1_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
+        expect(&tc.store, "gen3_name.zone3.internal", Expect::NoZone);
+
+        // Update to generation 1, which contains one zone with one name.
+        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let update1 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 1,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: vec![
+                    DnsKV {
+                        key: DnsRecordKey { name: "gen1_name".to_string() },
+                        records: vec![dummy_record.clone()],
+                    },
+                    DnsKV {
+                        key: DnsRecordKey { name: "shared_name".to_string() },
+                        records: vec![dummy_record.clone()],
+                    },
+                ],
+            }],
+        };
+
+        tc.store.dns_config_update(&update1, "my request id").await.unwrap();
+        expect(
+            &tc.store,
+            "gen1_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(
+            &tc.store,
+            "gen1_name.ZONE1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(
+            &tc.store,
+            "Gen1_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(
+            &tc.store,
+            "shared_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(&tc.store, "enoent.zone1.internal", Expect::NoName);
+        expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
+        expect(&tc.store, "gen3_name.zone3.internal", Expect::NoZone);
+
+        // XXX-dap when it comes time to test the update process, maybe the
+        // thing to is separate the existing do_update() into two phases that
+        // the test suite can call separately, with some checks in between.  Or
+        // maybe we can drop the store, keep the Db, make a new Store, and see
+        // what it does
+        tc.cleanup_successful();
     }
 }

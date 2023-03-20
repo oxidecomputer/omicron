@@ -223,7 +223,7 @@ async fn handle_dns_message(
     let header = Header::response_from_request(mr.header());
     let query = mr.query();
     let name = query.original().name().clone();
-    let records = store.query(mr).await?;
+    let records = store.query(mr)?;
     let rb = MessageResponseBuilder::from_message_request(mr);
     let response_records = records
         .into_iter()

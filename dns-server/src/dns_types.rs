@@ -7,14 +7,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv6Addr;
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfigParams {
     pub generation: u64,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
     pub generation: u64,
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -22,33 +22,33 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfigZone {
     pub zone_name: String,
     pub records: Vec<DnsKV>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename = "DnsKv")]
 pub struct DnsKV {
     pub key: DnsRecordKey,
     pub records: Vec<DnsRecord>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DnsRecordKey {
     pub name: String,
 }
 
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", content = "data")]
 pub enum DnsRecord {
     AAAA(Ipv6Addr),
     SRV(SRV),
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(rename = "Srv")]
 pub struct SRV {
     pub prio: u16,
