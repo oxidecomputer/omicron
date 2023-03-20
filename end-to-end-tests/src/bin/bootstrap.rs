@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let (first, last) = get_system_ip_pool()?;
     client
         .ip_pool_range_add()
-        .pool_name("default")
+        .pool("default")
         .body(IpRange::V4(Ipv4Range { first, last }))
         .send()
         .await?;
