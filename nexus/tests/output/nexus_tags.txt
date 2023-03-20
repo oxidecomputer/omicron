@@ -117,10 +117,8 @@ project_view_v1                          /v1/projects/{project}
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
-role_list                                /roles
-role_list_v1                             /v1/system/roles
-role_view                                /roles/{role_name}
-role_view_v1                             /v1/system/roles/{role_name}
+role_list                                /v1/system/roles
+role_view                                /v1/system/roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH
@@ -176,12 +174,9 @@ ip_pool_service_range_remove             /v1/system/ip-pools-service/ranges/remo
 ip_pool_service_view                     /v1/system/ip-pools-service
 ip_pool_update                           /v1/system/ip-pools/{pool}
 ip_pool_view                             /v1/system/ip-pools/{pool}
-local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
-local_idp_user_create_v1                 /v1/system/identity-providers/local/users
-local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}
-local_idp_user_delete_v1                 /v1/system/identity-providers/local/users/{user_id}
-local_idp_user_set_password              /system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password
-local_idp_user_set_password_v1           /v1/system/identity-providers/local/users/{user_id}/set-password
+local_idp_user_create                    /v1/system/identity-providers/local/users
+local_idp_user_delete                    /v1/system/identity-providers/local/users/{user_id}
+local_idp_user_set_password              /v1/system/identity-providers/local/users/{user_id}/set-password
 physical_disk_list                       /system/hardware/disks
 physical_disk_list_v1                    /v1/system/hardware/disks
 rack_list                                /system/hardware/racks
@@ -192,16 +187,13 @@ saga_list                                /system/sagas
 saga_list_v1                             /v1/system/sagas
 saga_view                                /system/sagas/{saga_id}
 saga_view_v1                             /v1/system/sagas/{saga_id}
-saml_identity_provider_create            /system/silos/{silo_name}/identity-providers/saml
-saml_identity_provider_create_v1         /v1/system/identity-providers/saml
-saml_identity_provider_view              /system/silos/{silo_name}/identity-providers/saml/{provider_name}
-saml_identity_provider_view_v1           /v1/system/identity-providers/saml/{provider}
+saml_identity_provider_create            /v1/system/identity-providers/saml
+saml_identity_provider_view              /v1/system/identity-providers/saml/{provider}
 silo_create                              /system/silos
 silo_create_v1                           /v1/system/silos
 silo_delete                              /system/silos/{silo_name}
 silo_delete_v1                           /v1/system/silos/{silo}
-silo_identity_provider_list              /system/silos/{silo_name}/identity-providers
-silo_identity_provider_list_v1           /v1/system/identity-providers
+silo_identity_provider_list              /v1/system/identity-providers
 silo_list                                /system/silos
 silo_list_v1                             /v1/system/silos
 silo_policy_update                       /system/silos/{silo_name}/policy
@@ -234,8 +226,6 @@ system_update_refresh                    /v1/system/update/refresh
 system_update_start                      /v1/system/update/start
 system_update_stop                       /v1/system/update/stop
 system_update_view                       /v1/system/update/updates/{version}
-system_user_list                         /system/user
-system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
 update_deployment_view                   /v1/system/update/deployments/{id}
 update_deployments_list                  /v1/system/update/deployments
