@@ -1,7 +1,7 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
-use oxide_client::types::{Name, NameOrId, OrganizationCreate, ProjectCreate};
+use oxide_client::types::{Name, OrganizationCreate, ProjectCreate};
 use oxide_client::{
     Client, ClientOrganizationsExt, ClientProjectsExt, ClientVpcsExt,
 };
@@ -37,7 +37,7 @@ impl Context {
 
         let project_name = client
             .project_create()
-            .organization(NameOrId::Name(org_name.clone()))
+            .organization(org_name.clone())
             .body(ProjectCreate {
                 name: generate_name("proj")?,
                 description: String::new(),
@@ -68,8 +68,8 @@ impl Context {
             .await?;
         self.client
             .project_delete()
-            .organization(NameOrId::Name(self.org_name.clone()))
-            .project(NameOrId::Name(self.project_name))
+            .organization(self.org_name.clone())
+            .project(self.project_name)
             .send()
             .await?;
         self.client

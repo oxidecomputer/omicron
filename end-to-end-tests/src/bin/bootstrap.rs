@@ -3,7 +3,7 @@ use end_to_end_tests::helpers::ctx::{build_client, Context};
 use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, IpRange, Ipv4Range, NameOrId,
+    ByteCount, DiskCreate, DiskSource, IpRange, Ipv4Range,
 };
 use oxide_client::{ClientDisksExt, ClientOrganizationsExt, ClientSystemExt};
 use std::time::Duration;
@@ -41,14 +41,12 @@ async fn main() -> Result<()> {
     eprintln!("ensuring datasets are ready...");
     let ctx = Context::from_client(client).await?;
     let disk_name = generate_name("disk")?;
-    let org_name = NameOrId::Name(ctx.org_name.clone());
-    let project_name = NameOrId::Name(ctx.project_name.clone());
     wait_for_condition(
         || async {
             ctx.client
                 .disk_create()
-                .organization(org_name.clone())
-                .project(project_name.clone())
+                .organization(ctx.org_name.clone())
+                .project(ctx.project_name.clone())
                 .body(DiskCreate {
                     name: disk_name.clone(),
                     description: String::new(),
@@ -67,9 +65,9 @@ async fn main() -> Result<()> {
     .await?;
     ctx.client
         .disk_delete()
-        .organization(org_name.clone())
-        .project(project_name.clone())
-        .disk(NameOrId::Name(disk_name))
+        .organization(ctx.org_name.clone())
+        .project(ctx.project_name.clone())
+        .disk(disk_name)
         .send()
         .await?;
     ctx.cleanup().await?;
