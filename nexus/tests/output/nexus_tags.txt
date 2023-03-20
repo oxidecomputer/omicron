@@ -1,16 +1,10 @@
 API operations found with tag "disks"
 OPERATION ID                             URL PATH
-disk_create                              /organizations/{organization_name}/projects/{project_name}/disks
-disk_create_v1                           /v1/disks
-disk_delete                              /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-disk_delete_v1                           /v1/disks/{disk}
-disk_list                                /organizations/{organization_name}/projects/{project_name}/disks
-disk_list_v1                             /v1/disks
-disk_metrics_list                        /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}
-disk_metrics_list_v1                     /v1/disks/{disk}/metrics/{metric}
-disk_view                                /organizations/{organization_name}/projects/{project_name}/disks/{disk_name}
-disk_view_by_id                          /by-id/disks/{id}
-disk_view_v1                             /v1/disks/{disk}
+disk_create                              /v1/disks
+disk_delete                              /v1/disks/{disk}
+disk_list                                /v1/disks
+disk_metrics_list                        /v1/disks/{disk}/metrics/{metric}
+disk_view                                /v1/disks/{disk}
 
 API operations found with tag "hidden"
 OPERATION ID                             URL PATH
@@ -83,10 +77,6 @@ login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
-API operations found with tag "metrics"
-OPERATION ID                             URL PATH
-timeseries_schema_get                    /timeseries/schema
-
 API operations found with tag "organizations"
 OPERATION ID                             URL PATH
 organization_create                      /organizations
@@ -156,15 +146,10 @@ user_list_v1                             /v1/users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
-snapshot_create                          /organizations/{organization_name}/projects/{project_name}/snapshots
-snapshot_create_v1                       /v1/snapshots
-snapshot_delete                          /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-snapshot_delete_v1                       /v1/snapshots/{snapshot}
-snapshot_list                            /organizations/{organization_name}/projects/{project_name}/snapshots
-snapshot_list_v1                         /v1/snapshots
-snapshot_view                            /organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}
-snapshot_view_by_id                      /by-id/snapshots/{id}
-snapshot_view_v1                         /v1/snapshots/{snapshot}
+snapshot_create                          /v1/snapshots
+snapshot_delete                          /v1/snapshots/{snapshot}
+snapshot_list                            /v1/snapshots
+snapshot_view                            /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
@@ -176,31 +161,18 @@ certificate_list                         /system/certificates
 certificate_list_v1                      /v1/system/certificates
 certificate_view                         /system/certificates/{certificate}
 certificate_view_v1                      /v1/system/certificates/{certificate}
-ip_pool_create                           /system/ip-pools
-ip_pool_create_v1                        /v1/system/ip-pools
-ip_pool_delete                           /system/ip-pools/{pool_name}
-ip_pool_delete_v1                        /v1/system/ip-pools/{pool}
-ip_pool_list                             /system/ip-pools
-ip_pool_list_v1                          /v1/system/ip-pools
-ip_pool_range_add                        /system/ip-pools/{pool_name}/ranges/add
-ip_pool_range_add_v1                     /v1/system/ip-pools/{pool}/ranges/add
-ip_pool_range_list                       /system/ip-pools/{pool_name}/ranges
-ip_pool_range_list_v1                    /v1/system/ip-pools/{pool}/ranges
-ip_pool_range_remove                     /system/ip-pools/{pool_name}/ranges/remove
-ip_pool_range_remove_v1                  /v1/system/ip-pools/{pool}/ranges/remove
-ip_pool_service_range_add                /system/ip-pools-service/ranges/add
-ip_pool_service_range_add_v1             /v1/system/ip-pools-service/ranges/add
-ip_pool_service_range_list               /system/ip-pools-service/ranges
-ip_pool_service_range_list_v1            /v1/system/ip-pools-service/ranges
-ip_pool_service_range_remove             /system/ip-pools-service/ranges/remove
-ip_pool_service_range_remove_v1          /v1/system/ip-pools-service/ranges/remove
-ip_pool_service_view                     /system/ip-pools-service
-ip_pool_service_view_v1                  /v1/system/ip-pools-service
-ip_pool_update                           /system/ip-pools/{pool_name}
-ip_pool_update_v1                        /v1/system/ip-pools/{pool}
-ip_pool_view                             /system/ip-pools/{pool_name}
-ip_pool_view_by_id                       /system/by-id/ip-pools/{id}
-ip_pool_view_v1                          /v1/system/ip-pools/{pool}
+ip_pool_create                           /v1/system/ip-pools
+ip_pool_delete                           /v1/system/ip-pools/{pool}
+ip_pool_list                             /v1/system/ip-pools
+ip_pool_range_add                        /v1/system/ip-pools/{pool}/ranges/add
+ip_pool_range_list                       /v1/system/ip-pools/{pool}/ranges
+ip_pool_range_remove                     /v1/system/ip-pools/{pool}/ranges/remove
+ip_pool_service_range_add                /v1/system/ip-pools-service/ranges/add
+ip_pool_service_range_list               /v1/system/ip-pools-service/ranges
+ip_pool_service_range_remove             /v1/system/ip-pools-service/ranges/remove
+ip_pool_service_view                     /v1/system/ip-pools-service
+ip_pool_update                           /v1/system/ip-pools/{pool}
+ip_pool_view                             /v1/system/ip-pools/{pool}
 local_idp_user_create                    /system/silos/{silo_name}/identity-providers/local/users
 local_idp_user_create_v1                 /v1/system/identity-providers/local/users
 local_idp_user_delete                    /system/silos/{silo_name}/identity-providers/local/users/{user_id}

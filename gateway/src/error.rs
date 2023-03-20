@@ -141,7 +141,7 @@ impl From<SpCommsError> for HttpError {
 // message. MGS is an "internal" service - even when we return a 500-level
 // status code, we want to give our caller some information about what is going
 // wrong (e.g., we timed out waiting for an SP).
-fn http_err_with_message(
+pub(crate) fn http_err_with_message(
     status_code: http::StatusCode,
     error_code: &str,
     message: String,
