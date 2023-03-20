@@ -22,7 +22,7 @@ use steno::ActionError;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
-    pub authz_org: authz::Organization,
+    pub authz_silo: authz::Silo,
 }
 
 // project create saga: actions
@@ -82,10 +82,10 @@ async fn spc_create_record(
     );
 
     let db_project =
-        db::model::Project::new(params.authz_org.id(), params.project_create);
+        db::model::Project::new(params.authz_silo.id(), params.project_create);
     osagactx
         .datastore()
-        .project_create(&opctx, &params.authz_org, db_project)
+        .project_create(&opctx, db_project)
         .await
         .map_err(ActionError::action_failed)
 }
@@ -184,10 +184,7 @@ mod test {
     }
 
     // Helper for creating project create parameters
-    fn new_test_params(
-        opctx: &OpContext,
-        authz_org: authz::Organization,
-    ) -> Params {
+    fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_create: params::ProjectCreate {
@@ -196,7 +193,7 @@ mod test {
                     description: "My Project".to_string(),
                 },
             },
-            authz_org,
+            authz_silo,
         }
     }
 

@@ -217,12 +217,12 @@ resource Project {
 	"modify" if "admin";
 
 	# Roles implied by roles on this resource's parent (Organization)
-	relations = { parent_organization: Organization };
-	"admin" if "collaborator" on "parent_organization";
-	"viewer" if "viewer" on "parent_organization";
+	relations = { parent_silo: Silo };
+	"admin" if "collaborator" on "parent_silo";
+	"viewer" if "viewer" on "parent_silo";
 }
-has_relation(organization: Organization, "parent_organization", project: Project)
-	if project.organization = organization;
+has_relation(silo: Silo, "parent_silo", project: Project)
+	if project.silo = silo;
 
 #
 # GENERAL RESOURCES OUTSIDE THE SILO/ORGANIZATION/PROJECT HIERARCHY

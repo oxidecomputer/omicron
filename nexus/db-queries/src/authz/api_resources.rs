@@ -678,7 +678,7 @@ impl db::model::DatabaseString for OrganizationRole {
 
 authz_resource! {
     name = "Project",
-    parent = "Organization",
+    parent = "Silo",
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,

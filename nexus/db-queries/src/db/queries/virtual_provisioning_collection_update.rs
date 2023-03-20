@@ -36,9 +36,7 @@ impl ParentOrg {
         Self {
             query: Box::new(
                 dsl::project.filter(dsl::id.eq(project_id)).select((
-                    ExpressionAlias::new::<parent_org::dsl::id>(
-                        dsl::organization_id,
-                    ),
+                    ExpressionAlias::new::<parent_org::dsl::id>(dsl::silo_id),
                 )),
             ),
         }

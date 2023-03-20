@@ -98,7 +98,7 @@ pub struct Project {
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub organization_id: Uuid,
+    // Important: Silo ID does not get presented to user
 }
 
 // CERTIFICATES

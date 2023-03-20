@@ -2,9 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, Name, Project};
-use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{organization, project};
+use super::{Generation, Name};
+use crate::schema::organization;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -41,13 +40,6 @@ impl From<Organization> for views::Organization {
     fn from(org: Organization) -> Self {
         Self { identity: org.identity() }
     }
-}
-
-impl DatastoreCollectionConfig<Project> for Organization {
-    type CollectionId = Uuid;
-    type GenerationNumberColumn = organization::dsl::rcgen;
-    type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
-    type CollectionIdColumn = project::dsl::organization_id;
 }
 
 /// Describes a set of updates for the [`Organization`] model.

@@ -1753,15 +1753,8 @@ mod tests {
                     },
                 },
             );
-            let (.., authz_org) = LookupPath::new(&opctx, &db_datastore)
-                .organization_id(organization.id())
-                .lookup_for(authz::Action::CreateChild)
-                .await
-                .unwrap();
-            let (.., project) = db_datastore
-                .project_create(&opctx, &authz_org, project)
-                .await
-                .unwrap();
+            let (.., project) =
+                db_datastore.project_create(&opctx, project).await.unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let p = db_datastore.pool_authorized(&opctx).await.unwrap();

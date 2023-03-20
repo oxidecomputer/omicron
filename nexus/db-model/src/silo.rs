@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, Organization};
+use super::{Generation, Organization, Project};
 use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
-use crate::schema::{organization, silo};
+use crate::schema::{organization, project, silo};
 use db_macros::Resource;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views;
@@ -153,4 +153,11 @@ impl DatastoreCollectionConfig<Organization> for Silo {
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = organization::dsl::silo_id;
+}
+
+impl DatastoreCollectionConfig<Project> for Silo {
+    type CollectionId = Uuid;
+    type GenerationNumberColumn = project::dsl::rcgen;
+    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type CollectionIdColumn = project::dsl::silo_id;
 }

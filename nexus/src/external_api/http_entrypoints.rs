@@ -1447,10 +1447,8 @@ async fn project_list(
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &scan_params.selector)?;
         let projects = nexus
-            .project_list(&opctx, &organization_lookup, &paginated_by)
+            .project_list(&opctx, &paginated_by)
             .await?
             .into_iter()
             .map(|p| p.into())
@@ -1472,25 +1470,15 @@ async fn project_list(
 }]
 async fn project_create(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<params::OrganizationSelector>,
+    _query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector =
-            params::OrganizationSelector { organization: query.organization };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let project = nexus
-            .project_create(
-                &opctx,
-                &organization_lookup,
-                &new_project.into_inner(),
-            )
-            .await?;
+        let project =
+            nexus.project_create(&opctx, &new_project.into_inner()).await?;
         Ok(HttpResponseCreated(project.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

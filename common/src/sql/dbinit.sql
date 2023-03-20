@@ -689,12 +689,12 @@ CREATE TABLE omicron.public.project (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    /* Which organization this project belongs to */
-    organization_id UUID NOT NULL /* foreign key into "Organization" table */
+    /* Which silo this project belongs to */
+    silo_id UUID NOT NULL /* foreign key into "silo" table */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.project (
-    organization_id,
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;

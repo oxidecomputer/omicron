@@ -333,7 +333,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        organization_id -> Uuid,
+        silo_id -> Uuid,
     }
 }
 

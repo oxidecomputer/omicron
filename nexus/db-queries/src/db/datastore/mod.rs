@@ -342,7 +342,7 @@ mod test {
             .lookup_for(authz::Action::CreateChild)
             .await
             .unwrap();
-        datastore.project_create(&opctx, &authz_org, project).await.unwrap();
+        datastore.project_create(&opctx, project).await.unwrap();
 
         let (.., organization_after_project_create) =
             LookupPath::new(&opctx, &datastore)

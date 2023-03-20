@@ -38,18 +38,13 @@ impl super::Nexus {
                 project: NameOrId::Id(id),
                 organization_selector: None,
             } => {
-                let project =
-                    LookupPath::new(opctx, &self.db_datastore).project_id(*id);
-                Ok(project)
+                Ok(LookupPath::new(opctx, &self.db_datastore).project_id(*id))
             }
             params::ProjectSelector {
                 project: NameOrId::Name(name),
-                organization_selector: Some(organization_selector),
+                organization_selector: Some(_organization_selector),
             } => {
-                let project = self
-                    .organization_lookup(opctx, organization_selector)?
-                    .project_name(Name::ref_cast(name));
-                Ok(project)
+               Ok(LookupPath::new(opctx, &self.db_datastore).project_name(Name::ref_cast(name)))
             }
             params::ProjectSelector {
                 project: NameOrId::Id(_),
@@ -68,16 +63,18 @@ impl super::Nexus {
     pub async fn project_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_lookup: &lookup::Organization<'_>,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let (.., authz_org) =
-            organization_lookup.lookup_for(authz::Action::CreateChild).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Project")?;
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
         let saga_params = sagas::project_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_create: new_project.clone(),
-            authz_org,
+            authz_silo,
         };
         let saga_outputs = self
             .execute_saga::<sagas::project_create::SagaProjectCreate>(
@@ -96,12 +93,9 @@ impl super::Nexus {
     pub async fn project_list(
         &self,
         opctx: &OpContext,
-        organization_lookup: &lookup::Organization<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Project> {
-        let (.., authz_org) =
-            organization_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.projects_list(opctx, &authz_org, pagparams).await
+        self.db_datastore.projects_list(opctx, pagparams).await
     }
 
     pub async fn project_update(

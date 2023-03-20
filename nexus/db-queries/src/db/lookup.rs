@@ -212,6 +212,30 @@ impl<'a> LookupPath<'a> {
         Organization::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Project, identified by its name
+    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Project::Name(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Project::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
@@ -493,7 +517,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider"],
+    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -563,7 +587,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Organization",
     ancestors = [ "Silo" ],
-    children = [ "Project" ],
+    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -571,7 +595,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Project",
-    ancestors = [ "Silo", "Organization" ],
+    ancestors = [ "Silo" ],
     children = [ "Disk", "Instance", "Vpc", "Snapshot", "Image" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -580,7 +604,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -589,7 +613,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Image",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -598,7 +622,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Snapshot",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -607,7 +631,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Instance",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [ "NetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -616,7 +640,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "NetworkInterface",
-    ancestors = [ "Silo", "Organization", "Project", "Instance" ],
+    ancestors = [ "Silo", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -625,7 +649,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Vpc",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -634,7 +658,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcRouter",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -643,7 +667,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "RouterRoute",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc", "VpcRouter" ],
+    ancestors = [ "Silo", "Project", "Vpc", "VpcRouter" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -652,7 +676,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcSubnet",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Project", "Vpc" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,

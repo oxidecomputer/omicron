@@ -71,11 +71,10 @@ impl super::Nexus {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (authz_silo, _authz_org, authz_project, authz_disk, db_disk) =
-            project_lookup
-                .disk_name(&db::model::Name(params.disk.clone()))
-                .fetch_for(authz::Action::Read)
-                .await?;
+        (authz_silo, authz_project, authz_disk, db_disk) = project_lookup
+            .disk_name(&db::model::Name(params.disk.clone()))
+            .fetch_for(authz::Action::Read)
+            .await?;
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot

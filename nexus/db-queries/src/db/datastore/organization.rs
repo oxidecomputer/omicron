@@ -59,7 +59,7 @@ impl DataStore {
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                let org = Silo::insert_resource(
+                let org: Organization = Silo::insert_resource(
                     silo_id,
                     diesel::insert_into(dsl::organization).values(organization),
                 )
@@ -115,7 +115,8 @@ impl DataStore {
         // Make sure there are no projects present within this organization.
         let project_found = diesel_pool_result_optional(
             project::dsl::project
-                .filter(project::dsl::organization_id.eq(authz_org.id()))
+                // HACK lmao. this is all going away
+                .filter(project::dsl::silo_id.eq(authz_org.id()))
                 .filter(project::dsl::time_deleted.is_null())
                 .select(project::dsl::id)
                 .limit(1)
