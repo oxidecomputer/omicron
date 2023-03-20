@@ -81,6 +81,10 @@ CREATE TABLE omicron.public.sled (
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
 
+    /* CPU & RAM summary for the sled */
+    usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
