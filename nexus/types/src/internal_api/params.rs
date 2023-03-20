@@ -49,6 +49,12 @@ pub struct SledAgentStartupInfo {
 
     /// Describes the sled's identity
     pub baseboard: Baseboard,
+
+    /// The number of hardware threads which can execute on this sled
+    pub usable_hardware_threads: u32,
+
+    /// Amount of RAM which may be used by the Sled's OS
+    pub usable_physical_ram: ByteCount,
 }
 
 /// Describes the type of physical disk.

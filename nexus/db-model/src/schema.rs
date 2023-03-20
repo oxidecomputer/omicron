@@ -395,6 +395,9 @@ table! {
         part_number -> Text,
         revision -> Int8,
 
+        usable_hardware_threads -> Int8,
+        usable_physical_ram -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
