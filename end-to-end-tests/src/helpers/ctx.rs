@@ -74,7 +74,7 @@ impl Context {
             .await?;
         self.client
             .organization_delete()
-            .organization_name(self.org_name)
+            .organization(self.org_name)
             .send()
             .await?;
         Ok(())
