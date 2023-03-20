@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let (first, last) = get_system_ip_pool()?;
     client
         .ip_pool_range_add()
-        .pool_name("default")
+        .pool("default")
         .body(IpRange::V4(Ipv4Range { first, last }))
         .send()
         .await?;
@@ -45,8 +45,8 @@ async fn main() -> Result<()> {
         || async {
             ctx.client
                 .disk_create()
-                .organization_name(ctx.org_name.clone())
-                .project_name(ctx.project_name.clone())
+                .organization(ctx.org_name.clone())
+                .project(ctx.project_name.clone())
                 .body(DiskCreate {
                     name: disk_name.clone(),
                     description: String::new(),
@@ -65,9 +65,9 @@ async fn main() -> Result<()> {
     .await?;
     ctx.client
         .disk_delete()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
-        .disk_name(disk_name)
+        .organization(ctx.org_name.clone())
+        .project(ctx.project_name.clone())
+        .disk(disk_name)
         .send()
         .await?;
     ctx.cleanup().await?;

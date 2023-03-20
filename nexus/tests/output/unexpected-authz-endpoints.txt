@@ -1,1 +1,7 @@
 API endpoints tested by unauthorized.rs but not found in the OpenAPI spec:
+GET    "/v1/me"
+GET    "/v1/me/groups"
+GET    "/v1/me/ssh-keys"
+POST   "/v1/me/ssh-keys"
+GET    "/v1/me/ssh-keys/aaaaa-ssh-key"
+DELETE "/v1/me/ssh-keys/aaaaa-ssh-key"

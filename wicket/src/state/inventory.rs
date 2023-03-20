@@ -6,6 +6,7 @@
 
 use anyhow::anyhow;
 use lazy_static::lazy_static;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
@@ -159,6 +160,22 @@ impl ComponentId {
     pub fn name(&self) -> String {
         self.to_string()
     }
+
+    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
+            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
+        }
+    }
+
+    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
+    }
 }
 
 impl Display for ComponentId {
@@ -174,6 +191,24 @@ impl Display for ComponentId {
 impl From<ComponentId> for Text<'_> {
     fn from(value: ComponentId) -> Self {
         value.to_string().into()
+    }
+}
+
+pub struct ParsableComponentId<'a> {
+    pub sp_type: &'a str,
+    pub i: &'a str,
+}
+
+impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
+    type Error = ();
+    fn try_from(value: ParsableComponentId<'a>) -> Result<Self, Self::Error> {
+        let i: u8 = value.i.parse().map_err(|_| ())?;
+        match (value.sp_type, i) {
+            ("sled", 0..=31) => Ok(ComponentId::Sled(i)),
+            ("switch", 0..=1) => Ok(ComponentId::Switch(i)),
+            ("power", 0..=1) => Ok(ComponentId::Psc(i)),
+            _ => Err(()),
+        }
     }
 }
 

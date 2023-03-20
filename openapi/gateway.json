@@ -288,7 +288,7 @@
     "/sp/{type}/{slot}/component/{component}": {
       "get": {
         "summary": "Get info for an SP component",
-        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.\nAs communication with SPs maybe unreliable, consumers may specify a timeout to override the default. This interface will return an error when the timeout is reached.",
+        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.",
         "operationId": "sp_component_get",
         "parameters": [
           {
@@ -442,6 +442,60 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/caboose": {
+      "get": {
+        "summary": "Get the caboose of an SP component",
+        "description": "Not all components have a caboose.",
+        "operationId": "sp_component_caboose_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentCaboose"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2083,6 +2137,29 @@
               "state"
             ]
           }
+        ]
+      },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
         ]
       },
       "SpComponentDetails": {

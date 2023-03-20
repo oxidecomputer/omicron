@@ -65,8 +65,8 @@ async fn instance_launch() -> Result<()> {
     let disk_name = ctx
         .client
         .disk_create()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
+        .organization(ctx.org_name.clone())
+        .project(ctx.project_name.clone())
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
@@ -258,9 +258,9 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .disk_delete()
-                .organization_name(ctx.org_name.clone())
-                .project_name(ctx.project_name.clone())
-                .disk_name(disk_name.clone())
+                .organization(ctx.org_name.clone())
+                .project(ctx.project_name.clone())
+                .disk(disk_name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
