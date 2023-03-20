@@ -7,8 +7,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
     GlobalImageCreate, ImageSource, InstanceCpuCount, InstanceCreate,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, NameOrId,
-    SshKeyCreate,
+    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{
     ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
@@ -66,8 +65,8 @@ async fn instance_launch() -> Result<()> {
     let disk_name = ctx
         .client
         .disk_create()
-        .organization(NameOrId::Name(ctx.org_name.clone()))
-        .project(NameOrId::Name(ctx.project_name.clone()))
+        .organization(ctx.org_name.clone())
+        .project(ctx.project_name.clone())
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
@@ -259,9 +258,9 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .disk_delete()
-                .organization(NameOrId::Name(ctx.org_name.clone()))
-                .project(NameOrId::Name(ctx.project_name.clone()))
-                .disk(NameOrId::Name(disk_name.clone()))
+                .organization(ctx.org_name.clone())
+                .project(ctx.project_name.clone())
+                .disk(disk_name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
