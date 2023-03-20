@@ -1431,6 +1431,11 @@ pub struct UserBuiltinCreate {
     pub identity: IdentityMetadataCreateParams,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct UserBuiltinSelector {
+    pub user: NameOrId,
+}
+
 // SSH PUBLIC KEYS
 //
 // The SSH key mangement endpoints are currently under `/v1/me`,

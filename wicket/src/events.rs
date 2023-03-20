@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::state::ComponentId;
 use tokio::time::Instant;
-use wicketd_client::types::{ArtifactId, RackV1Inventory, UpdateLogAll};
+use wicketd_client::types::{
+    ArtifactId, RackV1Inventory, SemverVersion, UpdateLogAll,
+};
 
 use crossterm::event::Event as TermEvent;
 
@@ -22,7 +24,10 @@ pub enum Event {
     UpdateLog(UpdateLogAll),
 
     /// TUF repo artifacts unpacked by wicketd
-    UpdateArtifacts(Vec<ArtifactId>),
+    UpdateArtifacts {
+        system_version: Option<SemverVersion>,
+        artifacts: Vec<ArtifactId>,
+    },
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal

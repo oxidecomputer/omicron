@@ -30,10 +30,6 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     // Create a project that we'll use for testing.
     let organization_name = "test-org";
     let project_name = "springfield-squidport";
-    let vpcs_url = format!(
-        "/organizations/{}/projects/{}/vpcs",
-        organization_name, project_name
-    );
     create_organization(&client, organization_name).await;
     let _ = create_project(&client, organization_name, project_name).await;
 
@@ -42,8 +38,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let vpc =
         create_vpc(&client, organization_name, project_name, vpc_name).await;
 
-    let vpc_url = format!("{}/{}", vpcs_url, vpc_name);
-    let routers_url = format!("{}/routers", vpc_url);
+    let routers_url = format!(
+        "/v1/vpc-routers?organization={}&project={}&vpc={}",
+        organization_name, project_name, vpc_name
+    );
 
     // get routers should have only the system router created w/ the VPC
     let routers =
@@ -52,7 +50,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(routers[0].kind, VpcRouterKind::System);
 
     let router_name = "router1";
-    let router_url = format!("{}/{}", routers_url, router_name);
+    let router_url = format!(
+        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
+        router_name, organization_name, project_name, vpc_name
+    );
 
     // fetching a particular router should 404
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -118,7 +119,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: vpc-router \"router1\"");
 
     let router2_name = "router2";
-    let router2_url = format!("{}/{}", routers_url, router2_name);
+    let router2_url = format!(
+        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
+        router2_name, organization_name, project_name, vpc_name
+    );
 
     // second router 404s before it's created
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
@@ -192,7 +196,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
 
-    let router_url = format!("{}/{}", routers_url, "new-name");
+    let router_url = format!(
+        "/v1/vpc-routers/new-name?organization={}&project={}&vpc={}",
+        organization_name, project_name, vpc_name
+    );
 
     // fetching by new name works
     let updated_router: VpcRouter =
