@@ -140,6 +140,23 @@ struct SledAllocation {
     initialization_request: SledAgentRequest,
 }
 
+// Describes the dependencies RSS has on "external services".
+//
+// Grouping these interfaces together means they can be faked
+// during testing.
+struct Interfaces<DNS, Nexus, Sleds, Bootstrap>
+where
+    DNS: DnsInterface,
+    Nexus: NexusInterface,
+    Sleds: SledInterface,
+    Bootstrap: BootstrapNetwork,
+{
+    dns: DNS,
+    nexus: Nexus,
+    sleds: Sleds,
+    bootstrap_network: Bootstrap,
+}
+
 /// The interface to the Rack Setup Service.
 pub struct RackSetupService {
     handle: tokio::task::JoinHandle<Result<(), SetupServiceError>>,
@@ -164,47 +181,47 @@ impl RackSetupService {
         // accept it as a parameter instead.
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
-        let dns_access = RealDnsAccess {};
-        let nexus_access = RealNexusAccess {};
-        let sled_access = RealSledAccess {};
+        let interfaces = Interfaces {
+            dns: RealDnsAccess {},
+            nexus: RealNexusAccess {},
+            sleds: RealSledAccess {},
+            bootstrap_network: local_bootstrap_agent,
+        };
 
         let marker_directory = omicron_common::OMICRON_CONFIG_PATH.into();
         Self::new_internal(
             log,
-            dns_access,
-            nexus_access,
-            sled_access,
+            interfaces,
             marker_directory,
             request,
-            local_bootstrap_agent,
             member_device_id_certs,
         )
     }
 
-    fn new_internal(
+    fn new_internal<DNS, Nexus, Sleds, Bootstrap>(
         log: Logger,
-        dns_access: impl DnsInterface,
-        nexus_access: impl NexusInterface,
-        sled_access: impl SledInterface,
+        interfaces: Interfaces<DNS, Nexus, Sleds, Bootstrap>,
         marker_directory: PathBuf,
         request: RackInitializeRequest,
-        local_bootstrap_agent: impl BootstrapNetwork,
         // TODO-cleanup: We should be collecting the device ID certs of all
         // trust quorum members over the management network. Currently we don't
         // have a management network, so we hard-code the list of members and
         // accept it as a parameter instead.
         member_device_id_certs: Vec<Ed25519Certificate>,
-    ) -> Self {
+    ) -> Self
+    where
+        DNS: DnsInterface,
+        Nexus: NexusInterface,
+        Sleds: SledInterface,
+        Bootstrap: BootstrapNetwork,
+    {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
                 .run(
                     &request,
-                    dns_access,
-                    nexus_access,
-                    sled_access,
+                    interfaces,
                     marker_directory,
-                    local_bootstrap_agent,
                     &member_device_id_certs,
                 )
                 .await
@@ -591,18 +608,21 @@ impl ServiceInner {
     // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
     //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and no work remains.
-    async fn run(
+    async fn run<DNS, Nexus, Sleds, Bootstrap>(
         &self,
         config: &Config,
-        dns_access: impl DnsInterface,
-        nexus_access: impl NexusInterface,
-        sled_access: impl SledInterface,
+        interfaces: Interfaces<DNS, Nexus, Sleds, Bootstrap>,
         // Directory where "plans" and "markers of completion" files are stored
         marker_directory: PathBuf,
         // Access to our local bootstrap agent and the bootstrap network
-        local_bootstrap_agent: impl BootstrapNetwork,
         member_device_id_certs: &[Ed25519Certificate],
-    ) -> Result<(), SetupServiceError> {
+    ) -> Result<(), SetupServiceError>
+    where
+        DNS: DnsInterface,
+        Nexus: NexusInterface,
+        Sleds: SledInterface,
+        Bootstrap: BootstrapNetwork,
+    {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
         // Check if a previous RSS plan has completed successfully.
@@ -632,8 +652,8 @@ impl ServiceInner {
                 .expect("Service plan should exist if completed marker exists");
             self.handoff_to_nexus(
                 &config,
-                &dns_access,
-                &nexus_access,
+                &interfaces.dns,
+                &interfaces.nexus,
                 &sled_plan,
                 &service_plan,
             )
@@ -655,7 +675,8 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
-        let addrs = local_bootstrap_agent
+        let addrs = interfaces
+            .bootstrap_network
             .wait_for_peers(&self.log, expectation)
             .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
@@ -702,7 +723,8 @@ impl ServiceInner {
         }
 
         // Forward the sled initialization requests to our sled-agent.
-        local_bootstrap_agent
+        interfaces
+            .bootstrap_network
             .initialize_all_sleds(
                 plan.sleds
                     .iter()
@@ -737,7 +759,7 @@ impl ServiceInner {
             ServicePlan::create(
                 &self.log,
                 &marker_directory,
-                &sled_access,
+                &interfaces.sleds,
                 &config,
                 &sled_addresses,
             )
@@ -760,7 +782,7 @@ impl ServiceInner {
                     .collect();
                 if !dns_services.is_empty() {
                     self.initialize_services(
-                        &sled_access,
+                        &interfaces.sleds,
                         *sled_address,
                         &dns_services,
                     )
@@ -773,7 +795,7 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
-        let dns_servers = dns_access.new_updater(
+        let dns_servers = interfaces.dns.new_updater(
             config.az_subnet(),
             self.log.new(o!("client" => "DNS")),
         );
@@ -786,7 +808,7 @@ impl ServiceInner {
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async {
                 self.initialize_datasets(
-                    &sled_access,
+                    &interfaces.sleds,
                     *sled_address,
                     &services_request.datasets,
                 )
@@ -818,7 +840,7 @@ impl ServiceInner {
                 // already running - this is fine, however, as the receiving
                 // sled agent doesn't modify the already-running service.
                 self.initialize_services(
-                    &sled_access,
+                    &interfaces.sleds,
                     *sled_address,
                     &services_request.services,
                 )
@@ -844,8 +866,8 @@ impl ServiceInner {
         // services, or DNS records.
         self.handoff_to_nexus(
             &config,
-            &dns_access,
-            &nexus_access,
+            &interfaces.dns,
+            &interfaces.nexus,
             &plan,
             &service_plan,
         )
@@ -892,7 +914,7 @@ mod test {
             let records = self.records.lock().unwrap();
             let aaaa =
                 records.get(&srv).ok_or_else(|| ResolveError::NotFound(srv))?;
-            Ok(IpAddr::V6(aaaa[0].1.ip().clone()))
+            Ok(IpAddr::V6(*aaaa[0].1.ip()))
         }
     }
 
@@ -1169,6 +1191,23 @@ mod test {
         }
     }
 
+    fn test_interfaces(
+        sleds: AllSleds,
+        fake_bootstrap_network: FakeBootstrapNetwork,
+    ) -> Interfaces<
+        FakeDnsAccess,
+        FakeNexusAccess,
+        FakeSledAccess,
+        FakeBootstrapNetwork,
+    > {
+        Interfaces {
+            dns: FakeDnsAccess::new(),
+            nexus: FakeNexusAccess::new(),
+            sleds: FakeSledAccess::new(sleds),
+            bootstrap_network: fake_bootstrap_network,
+        }
+    }
+
     #[tokio::test]
     async fn rack_initialize_one_sled() {
         let logctx = test_setup_log("rack_initialize_one_sled");
@@ -1183,29 +1222,27 @@ mod test {
         };
 
         let sleds = AllSleds::new();
-        let dns_access = FakeDnsAccess::new();
-        let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 3;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![Ipv6Addr::LOCALHOST],
             sleds.clone(),
             ZPOOLS_PER_SLED,
         );
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
 
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
         assert_eq!(0, sleds.inner.lock().unwrap().len());
-        assert_eq!(0, dns_access.records.lock().unwrap().len());
+        assert_eq!(0, interfaces.dns.records.lock().unwrap().len());
+
+        let dns = interfaces.dns.clone();
+        let nexus = interfaces.nexus.clone();
 
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access.clone(),
-            nexus_access.clone(),
-            sled_access,
+            interfaces,
             tempdir.path().into(),
             request,
-            bootstrap,
             vec![],
         );
         rss.join().await.unwrap();
@@ -1231,11 +1268,11 @@ mod test {
         // Validate DNS records
         assert_eq!(
             EXPECTED_SERVICES + EXPECTED_DATASETS,
-            dns_access.records.lock().unwrap().len()
+            dns.records.lock().unwrap().len()
         );
 
         // Validate that Nexus heard about the request
-        let nexus_request = nexus_access.request.get().unwrap();
+        let nexus_request = nexus.request.get().unwrap();
         assert_eq!(EXPECTED_SERVICES, nexus_request.services.len());
         assert_eq!(EXPECTED_DATASETS, nexus_request.datasets.len());
         assert_eq!(1, nexus_request.internal_services_ip_pool_ranges.len(),);
@@ -1258,9 +1295,6 @@ mod test {
         };
 
         let sleds = AllSleds::new();
-        let dns_access = FakeDnsAccess::new();
-        let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 3;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![
@@ -1270,20 +1304,20 @@ mod test {
             sleds.clone(),
             ZPOOLS_PER_SLED,
         );
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
 
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
         assert_eq!(0, sleds.inner.lock().unwrap().len());
-        assert_eq!(0, dns_access.records.lock().unwrap().len());
+        assert_eq!(0, interfaces.dns.records.lock().unwrap().len());
 
+        let dns = interfaces.dns.clone();
+        let nexus = interfaces.nexus.clone();
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access.clone(),
-            nexus_access.clone(),
-            sled_access,
+            interfaces,
             tempdir.path().into(),
             request,
-            bootstrap,
             vec![],
         );
         rss.join().await.unwrap();
@@ -1309,11 +1343,11 @@ mod test {
         // Validate DNS records
         assert_eq!(
             EXPECTED_SERVICES + EXPECTED_DATASETS,
-            dns_access.records.lock().unwrap().len()
+            dns.records.lock().unwrap().len()
         );
 
         // Validate that Nexus heard about the request
-        let nexus_request = nexus_access.request.get().unwrap();
+        let nexus_request = nexus.request.get().unwrap();
         assert_eq!(EXPECTED_SERVICES, nexus_request.services.len());
         assert_eq!(EXPECTED_DATASETS, nexus_request.datasets.len());
         assert_eq!(1, nexus_request.internal_services_ip_pool_ranges.len(),);
@@ -1338,29 +1372,23 @@ mod test {
         };
 
         let sleds = AllSleds::new();
-        let dns_access = FakeDnsAccess::new();
-        let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 0;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
             sleds.clone(),
             ZPOOLS_PER_SLED,
         );
-
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
         assert_eq!(0, sleds.inner.lock().unwrap().len());
-        assert_eq!(0, dns_access.records.lock().unwrap().len());
+        assert_eq!(0, interfaces.dns.records.lock().unwrap().len());
 
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access.clone(),
-            nexus_access.clone(),
-            sled_access,
+            interfaces,
             tempdir.path().into(),
             request,
-            bootstrap,
             vec![],
         );
         rss.join().await.unwrap();
@@ -1387,27 +1415,22 @@ mod test {
         };
 
         let sleds = AllSleds::new();
-        let dns_access = FakeDnsAccess::new();
-        let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 3;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
             sleds.clone(),
             ZPOOLS_PER_SLED,
         );
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
 
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
         // Initializing the rack should succeed
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access.clone(),
-            nexus_access.clone(),
-            sled_access,
+            interfaces,
             tempdir.path().into(),
             request.clone(),
-            bootstrap,
             vec![],
         );
         rss.join().await.unwrap();
@@ -1415,22 +1438,17 @@ mod test {
         // Re-initialize the rack with the same config, in the same temporary directory
         {
             let sleds = AllSleds::new();
-            let dns_access = FakeDnsAccess::new();
-            let nexus_access = FakeNexusAccess::new();
-            let sled_access = FakeSledAccess::new(sleds.clone());
             let bootstrap = FakeBootstrapNetwork::new(
                 vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
                 sleds.clone(),
                 ZPOOLS_PER_SLED,
             );
+            let interfaces = test_interfaces(sleds.clone(), bootstrap);
             let rss = RackSetupService::new_internal(
                 log.new(o!("component" => "RSS")),
-                dns_access.clone(),
-                nexus_access.clone(),
-                sled_access,
+                interfaces,
                 tempdir.path().into(),
                 request.clone(),
-                bootstrap,
                 vec![],
             );
             rss.join().await.unwrap();
@@ -1456,27 +1474,23 @@ mod test {
         };
 
         let sleds = AllSleds::new();
-        let dns_access = FakeDnsAccess::new();
-        let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 3;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
             sleds.clone(),
             ZPOOLS_PER_SLED,
         );
+        let interfaces = test_interfaces(sleds.clone(), bootstrap);
+        let dns = interfaces.dns.clone();
 
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
         // Initializing the rack should succeed
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access.clone(),
-            nexus_access.clone(),
-            sled_access,
+            interfaces,
             tempdir.path().into(),
             request.clone(),
-            bootstrap,
             vec![],
         );
         rss.join().await.unwrap();
@@ -1487,21 +1501,19 @@ mod test {
         // because the IP address cannot be identified.
         {
             let sleds = AllSleds::new();
-            let nexus_access = FakeNexusAccess::new();
-            let sled_access = FakeSledAccess::new(sleds.clone());
             let bootstrap = FakeBootstrapNetwork::new(
                 vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
                 sleds.clone(),
                 ZPOOLS_PER_SLED,
             );
+            let mut interfaces = test_interfaces(sleds.clone(), bootstrap);
+            interfaces.dns = dns;
+
             let rss = RackSetupService::new_internal(
                 log.new(o!("component" => "RSS")),
-                dns_access.clone(),
-                nexus_access.clone(),
-                sled_access,
+                interfaces,
                 tempdir.path().into(),
                 request.clone(),
-                bootstrap,
                 vec![],
             );
             rss.join().await.unwrap();
