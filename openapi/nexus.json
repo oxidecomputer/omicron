@@ -12193,7 +12193,7 @@
     },
     "schemas": {
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "description": "Properties that should uniquely identify a Sled.",
         "type": "object",
         "properties": {
           "part": {
@@ -16189,7 +16189,7 @@
         ]
       },
       "Sled": {
-        "description": "Client view of a [`Sled`]",
+        "description": "An operator's view of a Sled.",
         "type": "object",
         "properties": {
           "baseboard": {
@@ -16201,11 +16201,9 @@
             "format": "uuid"
           },
           "rack_id": {
+            "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
-          },
-          "service_address": {
-            "type": "string"
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -16216,15 +16214,30 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "usable_hardware_threads": {
+            "description": "The number of hardware threads which can execute on this sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "description": "Amount of RAM which may be used by the Sled's OS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
           "baseboard",
           "id",
           "rack_id",
-          "service_address",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "usable_hardware_threads",
+          "usable_physical_ram"
         ]
       },
       "SledResultsPage": {

@@ -10,6 +10,7 @@ anyhow.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
+libc.workspace = true
 nexus-client.workspace = true
 slog.workspace = true
 thiserror.workspace = true

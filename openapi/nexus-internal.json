@@ -2248,12 +2248,28 @@
           "sa_address": {
             "description": "The address of the sled agent's API endpoint",
             "type": "string"
+          },
+          "usable_hardware_threads": {
+            "description": "The number of hardware threads which can execute on this sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "description": "Amount of RAM which may be used by the Sled's OS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
           "baseboard",
           "role",
-          "sa_address"
+          "sa_address",
+          "usable_hardware_threads",
+          "usable_physical_ram"
         ]
       },
       "SledRole": {

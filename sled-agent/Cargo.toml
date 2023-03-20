@@ -26,7 +26,6 @@ futures.workspace = true
 illumos-utils.workspace = true
 internal-dns-names.workspace = true
 ipnetwork.workspace = true
-libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
