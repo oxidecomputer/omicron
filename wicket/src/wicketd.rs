@@ -130,8 +130,13 @@ impl WicketdManager {
                 match client.get_artifacts().await {
                     Ok(val) => {
                         // TODO: Only send on changes
-                        let artifacts = val.into_inner().artifacts;
-                        let _ = tx.send(Event::UpdateArtifacts(artifacts));
+                        let rsp = val.into_inner();
+                        let artifacts = rsp.artifacts;
+                        let system_version = rsp.system_version;
+                        let _ = tx.send(Event::UpdateArtifacts {
+                            system_version,
+                            artifacts,
+                        });
                     }
                     Err(e) => {
                         warn!(log, "{e}");

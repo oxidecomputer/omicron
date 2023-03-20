@@ -9,6 +9,7 @@
 use std::net::SocketAddrV6;
 
 use anyhow::{anyhow, Result};
+use dropshot::HttpServer;
 
 use crate::{
     context::ServerContext,
@@ -37,8 +38,8 @@ impl ArtifactServer {
 
     /// Starts the artifact server.
     ///
-    /// The future returned by this method runs forever.
-    pub async fn start(self) -> Result<()> {
+    /// This returns an `HttpServer`, which can be awaited to completion.
+    pub fn start(self) -> Result<HttpServer<ServerContext>> {
         let context = ServerContext { artifact_store: self.store };
 
         let dropshot_config = dropshot::ConfigDropshot {
@@ -58,9 +59,6 @@ impl ArtifactServer {
                 .context("failed to create installinator artifact server")
         })?;
 
-        server
-            .start()
-            .await
-            .map_err(|error| anyhow!(error).context("failed to run server"))
+        Ok(server.start())
     }
 }

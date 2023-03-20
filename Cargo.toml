@@ -106,9 +106,9 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.8"
+assert_cmd = "2.0.10"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.66"
+async-trait = "0.1.67"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -229,7 +229,7 @@ rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
-regress = "0.4.1"
+regress = "0.5.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
