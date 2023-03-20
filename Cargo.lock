@@ -2890,7 +2890,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "progenitor",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
@@ -3472,7 +3472,7 @@ dependencies = [
  "chrono",
  "omicron-common",
  "progenitor",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "serde",
  "serde_json",
@@ -3873,7 +3873,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "ring",
  "schemars",
@@ -4380,7 +4380,7 @@ dependencies = [
  "futures",
  "progenitor",
  "rand 0.8.5",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "serde",
  "serde_json",
@@ -5480,15 +5480,6 @@ checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
 
 [[package]]
 name = "regress"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a92ff21fe8026ce3f2627faaf43606f0b67b014dbc9ccf027181a804f75d92e"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "regress"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d995d590bd8ec096d1893f414bf3f5e8b0ee4c9eed9a5642b9766ef2c8e2e8e9"
@@ -6345,7 +6336,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common",
  "progenitor",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "serde",
  "slog",
@@ -7549,7 +7540,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress 0.5.0",
+ "regress",
  "schemars",
  "serde_json",
  "syn",
@@ -8054,7 +8045,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "progenitor",
- "regress 0.4.1",
+ "regress",
  "reqwest",
  "schemars",
  "serde",
