@@ -146,14 +146,10 @@ snapshot_view                            /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             URL PATH
-certificate_create                       /system/certificates
-certificate_create_v1                    /v1/system/certificates
-certificate_delete                       /system/certificates/{certificate}
-certificate_delete_v1                    /v1/system/certificates/{certificate}
-certificate_list                         /system/certificates
-certificate_list_v1                      /v1/system/certificates
-certificate_view                         /system/certificates/{certificate}
-certificate_view_v1                      /v1/system/certificates/{certificate}
+certificate_create                       /v1/system/certificates
+certificate_delete                       /v1/system/certificates/{certificate}
+certificate_list                         /v1/system/certificates
+certificate_view                         /v1/system/certificates/{certificate}
 ip_pool_create                           /v1/system/ip-pools
 ip_pool_delete                           /v1/system/ip-pools/{pool}
 ip_pool_list                             /v1/system/ip-pools
