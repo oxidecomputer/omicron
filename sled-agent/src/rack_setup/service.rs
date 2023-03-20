@@ -864,6 +864,7 @@ mod test {
     use super::*;
 
     use crate::bootstrap::params::{Gateway, RackInitializeRequest};
+    use crate::params::DatasetKind;
     use crate::rack_setup::dns_interface::DnsResolverInterface;
     use crate::rack_setup::nexus_interface::Error as NexusError;
     use crate::rack_setup::sled_interface::Error as SledError;
@@ -913,6 +914,7 @@ mod test {
         }
     }
 
+    #[derive(Clone)]
     struct FakeDnsAccess {
         records: Arc<Mutex<HashMap<internal_dns_names::SRV, Vec<AAAARecord>>>>,
     }
@@ -939,13 +941,14 @@ mod test {
         }
     }
 
+    #[derive(Clone)]
     struct FakeNexusAccess {
-        request: OnceCell<NexusTypes::RackInitializationRequest>,
+        request: Arc<OnceCell<NexusTypes::RackInitializationRequest>>,
     }
 
     impl FakeNexusAccess {
         fn new() -> Self {
-            Self { request: OnceCell::new() }
+            Self { request: Arc::new(OnceCell::new()) }
         }
     }
 
@@ -964,12 +967,18 @@ mod test {
     }
 
     struct FakeSled {
-        zpools: Vec<Uuid>,
+        zpools: HashSet<Uuid>,
+        datasets: HashMap<Uuid, DatasetEnsureBody>,
+        services: HashMap<Uuid, ServiceZoneRequest>,
     }
 
     impl FakeSled {
-        fn new() -> Self {
-            Self { zpools: vec![Uuid::new_v4(); 3] }
+        fn new(zpools_per_sled: usize) -> Self {
+            Self {
+                zpools: (0..zpools_per_sled).map(|_| Uuid::new_v4()).collect(),
+                datasets: HashMap::new(),
+                services: HashMap::new(),
+            }
         }
     }
 
@@ -982,10 +991,90 @@ mod test {
         fn new() -> Self {
             Self { inner: Arc::new(Mutex::new(HashMap::new())) }
         }
+
+        // Gather all datasets, across all sleds
+        fn datasets(&self) -> Vec<DatasetEnsureBody> {
+            let inner = self.inner.lock().unwrap();
+            let mut datasets = vec![];
+            for sled in inner.values() {
+                datasets.extend(sled.datasets.values().cloned());
+            }
+            datasets
+        }
+
+        fn clickhouse(&self) -> Vec<DatasetEnsureBody> {
+            self.datasets()
+                .into_iter()
+                .filter(|d| matches!(d.dataset_kind, DatasetKind::Clickhouse))
+                .collect()
+        }
+
+        fn cockroach(&self) -> Vec<DatasetEnsureBody> {
+            self.datasets()
+                .into_iter()
+                .filter(|d| {
+                    matches!(d.dataset_kind, DatasetKind::CockroachDb { .. })
+                })
+                .collect()
+        }
+
+        fn crucible(&self) -> Vec<DatasetEnsureBody> {
+            self.datasets()
+                .into_iter()
+                .filter(|d| matches!(d.dataset_kind, DatasetKind::Crucible))
+                .collect()
+        }
+
+        // Gather all services, across all sleds
+        fn services(&self) -> Vec<ServiceZoneRequest> {
+            let inner = self.inner.lock().unwrap();
+            let mut services = vec![];
+            for sled in inner.values() {
+                services.extend(sled.services.values().cloned());
+            }
+            services
+        }
+
+        fn nexus(&self) -> Vec<ServiceZoneRequest> {
+            self.services()
+                .into_iter()
+                .filter(|s| matches!(s.zone_type, ZoneType::Nexus))
+                .collect()
+        }
+        fn oximeter(&self) -> Vec<ServiceZoneRequest> {
+            self.services()
+                .into_iter()
+                .filter(|s| matches!(s.zone_type, ZoneType::Oximeter))
+                .collect()
+        }
+        fn internal_dns(&self) -> Vec<ServiceZoneRequest> {
+            self.services()
+                .into_iter()
+                .filter(|s| matches!(s.zone_type, ZoneType::InternalDNS))
+                .collect()
+        }
+        fn crucible_pantry(&self) -> Vec<ServiceZoneRequest> {
+            self.services()
+                .into_iter()
+                .filter(|s| matches!(s.zone_type, ZoneType::CruciblePantry))
+                .collect()
+        }
     }
 
     struct FakeBootstrapNetwork {
+        bootstrap_addresses: Vec<Ipv6Addr>,
         sleds: AllSleds,
+        zpools_per_sled: usize,
+    }
+
+    impl FakeBootstrapNetwork {
+        fn new(
+            bootstrap_addresses: Vec<Ipv6Addr>,
+            sleds: AllSleds,
+            zpools_per_sled: usize,
+        ) -> Self {
+            Self { bootstrap_addresses, sleds, zpools_per_sled }
+        }
     }
 
     #[async_trait::async_trait]
@@ -1000,7 +1089,10 @@ mod test {
         ) -> Result<(), String> {
             let mut sleds = self.sleds.inner.lock().unwrap();
             for (_, request, _) in &requests {
-                sleds.insert(get_sled_address(request.subnet), FakeSled::new());
+                sleds.insert(
+                    get_sled_address(request.subnet),
+                    FakeSled::new(self.zpools_per_sled),
+                );
             }
 
             Ok(())
@@ -1011,12 +1103,18 @@ mod test {
             _log: &Logger,
             _expectation: PeerExpectation,
         ) -> Result<Vec<Ipv6Addr>, DdmError> {
-            Ok(vec![Ipv6Addr::LOCALHOST])
+            Ok(self.bootstrap_addresses.clone())
         }
     }
 
     struct FakeSledAccess {
         sleds: AllSleds,
+    }
+
+    impl FakeSledAccess {
+        fn new(sleds: AllSleds) -> Self {
+            Self { sleds }
+        }
     }
 
     #[async_trait::async_trait]
@@ -1031,7 +1129,7 @@ mod test {
                 .lock()
                 .unwrap()
                 .get(&address)
-                .map(|sled| sled.zpools.clone())
+                .map(|sled| sled.zpools.iter().cloned().collect())
                 .ok_or_else(|| {
                     SledError::SledInitialization("Sled not found".to_string())
                 })
@@ -1040,18 +1138,33 @@ mod test {
         async fn initialize_datasets(
             &self,
             _log: &Logger,
-            _sled_address: SocketAddrV6,
-            _datasets: &Vec<DatasetEnsureBody>,
+            sled_address: SocketAddrV6,
+            datasets: &Vec<DatasetEnsureBody>,
         ) -> Result<(), SledError> {
+            let mut sleds = self.sleds.inner.lock().unwrap();
+            let sled = sleds.get_mut(&sled_address).ok_or_else(|| {
+                SledError::SledInitialization("Sled not found".to_string())
+            })?;
+            for dataset in datasets {
+                sled.datasets.insert(dataset.id, dataset.clone());
+            }
+
             Ok(())
         }
 
         async fn initialize_services(
             &self,
             _log: &Logger,
-            _sled_address: SocketAddrV6,
-            _services: &Vec<ServiceZoneRequest>,
+            sled_address: SocketAddrV6,
+            services: &Vec<ServiceZoneRequest>,
         ) -> Result<(), SledError> {
+            let mut sleds = self.sleds.inner.lock().unwrap();
+            let sled = sleds.get_mut(&sled_address).ok_or_else(|| {
+                SledError::SledInitialization("Sled not found".to_string())
+            })?;
+            for service in services {
+                sled.services.insert(service.id, service.clone());
+            }
             Ok(())
         }
     }
@@ -1061,26 +1174,34 @@ mod test {
         let logctx = test_setup_log("rack_initialize_one_sled");
         let log = &logctx.log;
 
+        let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let request = RackInitializeRequest {
             rack_subnet: Ipv6Addr::LOCALHOST,
             rack_secret_threshold: 1,
             gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
-            nexus_external_address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            nexus_external_address,
         };
 
         let sleds = AllSleds::new();
         let dns_access = FakeDnsAccess::new();
         let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess { sleds: sleds.clone() };
-        let bootstrap = FakeBootstrapNetwork { sleds: sleds.clone() };
+        let sled_access = FakeSledAccess::new(sleds.clone());
+        const ZPOOLS_PER_SLED: usize = 3;
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::LOCALHOST],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
 
         let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
 
-        // TODO: Config-related params are coupled, right?
+        assert_eq!(0, sleds.inner.lock().unwrap().len());
+        assert_eq!(0, dns_access.records.lock().unwrap().len());
+
         let rss = RackSetupService::new_internal(
             log.new(o!("component" => "RSS")),
-            dns_access,
-            nexus_access,
+            dns_access.clone(),
+            nexus_access.clone(),
             sled_access,
             tempdir.path().into(),
             request,
@@ -1088,6 +1209,115 @@ mod test {
             vec![],
         );
         rss.join().await.unwrap();
+
+        const EXPECTED_SLEDS: usize = 1;
+        assert_eq!(EXPECTED_SLEDS, sleds.inner.lock().unwrap().len());
+
+        // Validate provisioned datasets
+        const EXPECTED_DATASETS: usize = EXPECTED_SLEDS * ZPOOLS_PER_SLED + 2;
+        assert_eq!(ZPOOLS_PER_SLED, sleds.crucible().len());
+        assert_eq!(1, sleds.cockroach().len());
+        assert_eq!(1, sleds.clickhouse().len());
+        assert_eq!(EXPECTED_DATASETS, sleds.datasets().len());
+
+        // Validate provisioned services
+        const EXPECTED_SERVICES: usize = 4;
+        assert_eq!(1, sleds.nexus().len());
+        assert_eq!(1, sleds.oximeter().len());
+        assert_eq!(1, sleds.internal_dns().len());
+        assert_eq!(1, sleds.crucible_pantry().len());
+        assert_eq!(EXPECTED_SERVICES, sleds.services().len());
+
+        // Validate DNS records
+        assert_eq!(
+            EXPECTED_SERVICES + EXPECTED_DATASETS,
+            dns_access.records.lock().unwrap().len()
+        );
+
+        // Validate that Nexus heard about the request
+        let nexus_request = nexus_access.request.get().unwrap();
+        assert_eq!(EXPECTED_SERVICES, nexus_request.services.len());
+        assert_eq!(EXPECTED_DATASETS, nexus_request.datasets.len());
+        assert_eq!(1, nexus_request.internal_services_ip_pool_ranges.len(),);
+        assert_eq!(0, nexus_request.certs.len(),);
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_initialize_two_sleds() {
+        let logctx = test_setup_log("rack_initialize_two_sleds");
+        let log = &logctx.log;
+
+        let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let request = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            rack_secret_threshold: 2,
+            gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
+            nexus_external_address,
+        };
+
+        let sleds = AllSleds::new();
+        let dns_access = FakeDnsAccess::new();
+        let nexus_access = FakeNexusAccess::new();
+        let sled_access = FakeSledAccess { sleds: sleds.clone() };
+        const ZPOOLS_PER_SLED: usize = 3;
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![
+                Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 2),
+            ],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        assert_eq!(0, sleds.inner.lock().unwrap().len());
+        assert_eq!(0, dns_access.records.lock().unwrap().len());
+
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            dns_access.clone(),
+            nexus_access.clone(),
+            sled_access,
+            tempdir.path().into(),
+            request,
+            bootstrap,
+            vec![],
+        );
+        rss.join().await.unwrap();
+
+        const EXPECTED_SLEDS: usize = 2;
+        assert_eq!(EXPECTED_SLEDS, sleds.inner.lock().unwrap().len());
+
+        // Validate provisioned datasets
+        const EXPECTED_DATASETS: usize = EXPECTED_SLEDS * ZPOOLS_PER_SLED + 2;
+        assert_eq!(ZPOOLS_PER_SLED * EXPECTED_SLEDS, sleds.crucible().len(),);
+        assert_eq!(1, sleds.cockroach().len(),);
+        assert_eq!(1, sleds.clickhouse().len(),);
+        assert_eq!(EXPECTED_DATASETS, sleds.datasets().len());
+
+        // Validate provisioned services
+        const EXPECTED_SERVICES: usize = 4;
+        assert_eq!(1, sleds.nexus().len());
+        assert_eq!(1, sleds.oximeter().len());
+        assert_eq!(1, sleds.internal_dns().len());
+        assert_eq!(1, sleds.crucible_pantry().len());
+        assert_eq!(EXPECTED_SERVICES, sleds.services().len());
+
+        // Validate DNS records
+        assert_eq!(
+            EXPECTED_SERVICES + EXPECTED_DATASETS,
+            dns_access.records.lock().unwrap().len()
+        );
+
+        // Validate that Nexus heard about the request
+        let nexus_request = nexus_access.request.get().unwrap();
+        assert_eq!(EXPECTED_SERVICES, nexus_request.services.len());
+        assert_eq!(EXPECTED_DATASETS, nexus_request.datasets.len());
+        assert_eq!(1, nexus_request.internal_services_ip_pool_ranges.len(),);
+        assert_eq!(0, nexus_request.certs.len(),);
 
         logctx.cleanup_successful();
     }
