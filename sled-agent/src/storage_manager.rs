@@ -4,18 +4,17 @@
 
 //! Management of sled-local storage.
 
-use crate::hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::zone::AddressRequest;
-use crate::illumos::zpool::ZpoolName;
-use crate::illumos::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use crate::nexus::LazyNexusClient;
-use crate::params::DatasetKind;
+use crate::params::{DatasetKind, DiskType};
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zpool::ZpoolName;
+use illumos_utils::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
@@ -24,6 +23,7 @@ use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -39,9 +39,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
+use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
-use crate::illumos::{zfs::Zfs, zpool::Zpool};
+use illumos_utils::{zfs::Zfs, zpool::Zpool};
 
 const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
 const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
@@ -55,38 +55,38 @@ const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    DiskError(#[from] crate::hardware::DiskError),
+    DiskError(#[from] sled_hardware::DiskError),
 
     // TODO: We could add the context of "why are we doint this op", maybe?
     #[error(transparent)]
-    ZfsListDataset(#[from] crate::illumos::zfs::ListDatasetsError),
+    ZfsListDataset(#[from] illumos_utils::zfs::ListDatasetsError),
 
     #[error(transparent)]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
     #[error(transparent)]
-    ZfsSetValue(#[from] crate::illumos::zfs::SetValueError),
+    ZfsSetValue(#[from] illumos_utils::zfs::SetValueError),
 
     #[error(transparent)]
-    ZfsGetValue(#[from] crate::illumos::zfs::GetValueError),
+    ZfsGetValue(#[from] illumos_utils::zfs::GetValueError),
 
     #[error(transparent)]
-    GetZpoolInfo(#[from] crate::illumos::zpool::GetInfoError),
+    GetZpoolInfo(#[from] illumos_utils::zpool::GetInfoError),
 
     #[error(transparent)]
-    Fstyp(#[from] crate::illumos::fstyp::Error),
+    Fstyp(#[from] illumos_utils::fstyp::Error),
 
     #[error(transparent)]
-    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+    ZoneCommand(#[from] illumos_utils::running_zone::RunCommandError),
 
     #[error(transparent)]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -133,18 +133,24 @@ struct Pool {
     info: ZpoolInfo,
     // ZFS filesytem UUID -> Zone.
     zones: HashMap<Uuid, RunningZone>,
+
+    // The devfs path to the disk where this zpool exists.
+    disk_path: Option<PathBuf>,
 }
 
 impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(name: &ZpoolName) -> Result<Pool, Error> {
+    fn new(
+        name: &ZpoolName,
+        disk_path: Option<PathBuf>,
+    ) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        Ok(Pool { id: name.id(), info, zones: HashMap::new() })
+        Ok(Pool { id: name.id(), info, zones: HashMap::new(), disk_path })
     }
 
     /// Associate an already running zone with this pool object.
@@ -257,7 +263,7 @@ impl DatasetInfo {
                 info!(log, "start_zone: Loading CRDB manifest");
                 // Load the CRDB manifest.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/cockroachdb/manifest.xml",
                 ])?;
@@ -269,7 +275,7 @@ impl DatasetInfo {
                     address
                 );
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -278,7 +284,7 @@ impl DatasetInfo {
 
                 info!(log, "start_zone: setting CRDB's config/store");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -290,7 +296,7 @@ impl DatasetInfo {
                 // "start-single-node".
                 info!(log, "start_zone: setting CRDB's config/join_addrs");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_SVC,
                     "setprop",
@@ -301,7 +307,7 @@ impl DatasetInfo {
                 // so they become "effective" properties when the service is enabled.
                 info!(log, "start_zone: refreshing manifest");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     COCKROACH_DEFAULT_SVC,
                     "refresh",
@@ -309,7 +315,7 @@ impl DatasetInfo {
 
                 info!(log, "start_zone: enabling CRDB service");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     COCKROACH_DEFAULT_SVC,
@@ -365,20 +371,20 @@ impl DatasetInfo {
             DatasetKind::Clickhouse { .. } => {
                 info!(log, "Initialiting Clickhouse");
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/clickhouse/manifest.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_SVC,
                     "setprop",
                     &format!("config/listen_host={}", address.ip()),
                 ])?;
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_SVC,
                     "setprop",
@@ -388,14 +394,14 @@ impl DatasetInfo {
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CLICKHOUSE_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     CLICKHOUSE_DEFAULT_SVC,
@@ -407,19 +413,19 @@ impl DatasetInfo {
                 info!(log, "Initializing Crucible");
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/crucible/agent.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "import",
                     "/var/svc/manifest/site/crucible/downstairs.xml",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -427,7 +433,7 @@ impl DatasetInfo {
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -435,7 +441,7 @@ impl DatasetInfo {
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_SVC,
                     "setprop",
@@ -445,14 +451,14 @@ impl DatasetInfo {
                 // Refresh the manifest with the new properties we set,
                 // so they become "effective" properties when the service is enabled.
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCCFG,
+                    illumos_utils::zone::SVCCFG,
                     "-s",
                     CRUCIBLE_AGENT_DEFAULT_SVC,
                     "refresh",
                 ])?;
 
                 zone.run_cmd(&[
-                    crate::illumos::zone::SVCADM,
+                    illumos_utils::zone::SVCADM,
                     "enable",
                     "-t",
                     CRUCIBLE_AGENT_DEFAULT_SVC,
@@ -486,9 +492,7 @@ async fn ensure_running_zone(
             info!(log, "Zone for {} is already running", dataset_name.full());
             return Ok(zone);
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotFound {
-            ..
-        }) => {
+        Err(illumos_utils::running_zone::GetZoneError::NotFound { .. }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
 
             let installed_zone = InstalledZone::install(
@@ -520,7 +524,7 @@ async fn ensure_running_zone(
 
             Ok(zone)
         }
-        Err(crate::illumos::running_zone::GetZoneError::NotRunning {
+        Err(illumos_utils::running_zone::GetZoneError::NotRunning {
             name,
             state,
         }) => {
@@ -709,7 +713,7 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
-            match crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+            match sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             }) {
@@ -794,7 +798,7 @@ impl StorageWorker {
 
         // Ensure the disk conforms to an expected partition layout.
         let disk =
-            crate::hardware::Disk::new(&self.log, disk).map_err(|err| {
+            sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             })?;
@@ -810,8 +814,9 @@ impl StorageWorker {
         disk: Disk,
     ) -> Result<(), Error> {
         let zpool_name = disk.zpool_name().clone();
-        disks.insert(disk.devfs_path().to_path_buf(), disk.clone());
-        self.upsert_zpool(&resources, &zpool_name).await?;
+        let disk_path = disk.devfs_path().to_path_buf();
+        disks.insert(disk_path.clone(), disk.clone());
+        self.upsert_zpool(&resources, Some(disk_path), &zpool_name).await?;
         self.physical_disk_notify(NotifyDiskRequest::Add(disk));
 
         Ok(())
@@ -907,10 +912,11 @@ impl StorageWorker {
     async fn upsert_zpool(
         &mut self,
         resources: &StorageResources,
+        disk_path: Option<PathBuf>,
         pool_name: &ZpoolName,
     ) -> Result<(), Error> {
         let mut pools = resources.pools.lock().await;
-        let zpool = Pool::new(pool_name)?;
+        let zpool = Pool::new(pool_name, disk_path)?;
 
         let pool = match pools.entry(pool_name.clone()) {
             hash_map::Entry::Occupied(mut entry) => {
@@ -1030,8 +1036,8 @@ impl StorageWorker {
         );
         let pool_name = pool.info.name();
         let dataset_info: DatasetInfo =
-            toml::from_slice(
-                &tokio::fs::read(&config_path).await.map_err(|err| Error::Io {
+            toml::from_str(
+                &tokio::fs::read_to_string(&config_path).await.map_err(|err| Error::Io {
                     message: format!("read config for pool {pool_name}, dataset {dataset_name:?} from {config_path:?}"),
                     err,
                 })?
@@ -1091,8 +1097,8 @@ impl StorageWorker {
                         RemoveDisk(disk) => {
                             self.delete_disk(&resources, disk).await?;
                         },
-                        NewPool(pool_name) => {
-                            self.upsert_zpool(&resources, &pool_name).await?;
+                        NewPool { pool_name, disk_path }  => {
+                            self.upsert_zpool(&resources, disk_path, &pool_name).await?;
                         },
                         NewFilesystem(request) => {
                             let result = self.add_dataset(&resources, &request).await;
@@ -1113,7 +1119,7 @@ enum StorageWorkerRequest {
     AddDisk(UnparsedDisk),
     RemoveDisk(UnparsedDisk),
     DisksChanged(Vec<UnparsedDisk>),
-    NewPool(ZpoolName),
+    NewPool { pool_name: ZpoolName, disk_path: Option<PathBuf> },
     NewFilesystem(NewFilesystemRequest),
 }
 
@@ -1203,17 +1209,48 @@ impl StorageManager {
 
     /// Adds a zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_zpool].
-    pub async fn upsert_zpool(&self, name: ZpoolName) {
+    pub async fn upsert_zpool(
+        &self,
+        name: ZpoolName,
+        disk_path: Option<PathBuf>,
+    ) {
         info!(self.log, "Inserting zpool: {name:?}");
-        self.tx.send(StorageWorkerRequest::NewPool(name)).await.unwrap();
+        self.tx
+            .send(StorageWorkerRequest::NewPool { pool_name: name, disk_path })
+            .await
+            .unwrap();
     }
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
+        let disks = self.resources.disks.lock().await;
         let pools = self.resources.pools.lock().await;
-        Ok(pools
-            .keys()
-            .map(|zpool| crate::params::Zpool { id: zpool.id() })
-            .collect())
+
+        let mut zpools = Vec::with_capacity(pools.len());
+
+        for (name, pool) in pools.iter() {
+            let disk_type = if let Some(disk_path) = &pool.disk_path {
+                if let Some(disk) = disks.get(disk_path) {
+                    disk.variant().into()
+                } else {
+                    // If the zpool claims to be attached to a disk that we
+                    // don't know about, that's an error.
+                    return Err(Error::ZpoolNotFound(
+                        format!("zpool: {name} claims to be from unknown disk: {disk_path}",
+                            disk_path = disk_path.display()
+                        )
+                    ));
+                }
+            } else {
+                // If the pool does not have an associated disk, treat it like a
+                // U.2 device. This should only be the case for "disks attached
+                // via the sled agent config".
+                DiskType::U2
+            };
+
+            zpools.push(crate::params::Zpool { id: name.id(), disk_type });
+        }
+
+        Ok(zpools)
     }
 
     pub async fn upsert_filesystem(

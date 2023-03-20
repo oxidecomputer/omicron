@@ -38,12 +38,26 @@ type ControlPlaneTestContext =
 const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
-fn get_project_url() -> String {
-    format!("/organizations/{}/projects/{}", ORG_NAME, PROJECT_NAME)
+fn get_disks_url() -> String {
+    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
 }
 
-fn get_disks_url() -> String {
-    format!("{}/disks", get_project_url())
+fn get_disk_url(disk: &str) -> String {
+    format!(
+        "/v1/disks/{}?organization={}&project={}",
+        disk, ORG_NAME, PROJECT_NAME
+    )
+}
+
+fn get_snapshots_url() -> String {
+    format!("/v1/snapshots?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+}
+
+fn get_snapshot_url(snapshot: &str) -> String {
+    format!(
+        "/v1/snapshots/{}?organization={}&project={}",
+        snapshot, ORG_NAME, PROJECT_NAME
+    )
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -52,7 +66,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     project.identity.id
 }
 
-async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
+async fn create_image(client: &ClientTestContext) -> views::Image {
     populate_ip_pool(&client, "default", None).await;
     create_org_and_project(client).await;
 
@@ -69,7 +83,7 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -79,14 +93,16 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    NexusRequest::objects_post(client, "/system/images", &image_create_params)
+    let images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -97,7 +113,7 @@ async fn create_global_image(client: &ClientTestContext) -> views::GlobalImage {
 
 async fn create_base_disk(
     client: &ClientTestContext,
-    global_image: &views::GlobalImage,
+    image: &views::Image,
     disks_url: &String,
     base_disk_name: &Name,
 ) -> Disk {
@@ -107,9 +123,7 @@ async fn create_base_disk(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -141,21 +155,15 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
@@ -173,8 +181,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("base-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -184,9 +191,7 @@ async fn test_snapshot_then_delete_disk(cptestctx: &ControlPlaneTestContext) {
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the snapshot
-    let snapshot_url =
-        format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("a-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -211,21 +216,15 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
     // Define a global image
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
@@ -243,9 +242,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the snapshot
-    let snapshot_url =
-        format!("{}/snapshots/{}", get_project_url(), "a-snapshot");
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("a-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -255,8 +252,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("base-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -280,22 +276,16 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot requests
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     for i in 0..4 {
         let snapshot: views::Snapshot = object_create(
             client,
-            &snapshots_url,
+            &get_snapshots_url(),
             &params::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: format!("a-snapshot-{}", i).parse().unwrap(),
@@ -314,8 +304,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("base-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -326,8 +315,7 @@ async fn test_multiple_snapshots(cptestctx: &ControlPlaneTestContext) {
         // The Crucible snapshots still remain
         assert!(!disk_test.crucible_resources_deleted().await);
 
-        let snapshot_url =
-            format!("{}/snapshots/a-snapshot-{}", get_project_url(), i);
+        let snapshot_url = get_snapshot_url(&format!("a-snapshot-{}", i));
         NexusRequest::object_delete(client, &snapshot_url)
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
@@ -351,21 +339,15 @@ async fn test_snapshot_prevents_other_disk(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_global_image(&client).await;
+    let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "a-snapshot".parse().unwrap(),
@@ -383,8 +365,7 @@ async fn test_snapshot_prevents_other_disk(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the disk
-    let disk_url = format!("{}/{}", disks_url, base_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("base-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -402,9 +383,7 @@ async fn test_snapshot_prevents_other_disk(
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -419,8 +398,7 @@ async fn test_snapshot_prevents_other_disk(
     .unwrap();
 
     // Delete the snapshot
-    let snapshot_url = format!("{}/snapshots/a-snapshot", get_project_url());
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("a-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -443,8 +421,7 @@ async fn test_snapshot_prevents_other_disk(
     .unwrap();
 
     // Delete it
-    let disk_url = format!("{}/{}", disks_url, next_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("next-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -492,14 +469,9 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     .unwrap();
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let first_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-snapshot".parse().unwrap(),
@@ -541,7 +513,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Issue snapshot request for the second disk
     let second_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-snapshot".parse().unwrap(),
@@ -558,8 +530,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first disk
-    let disk_url = format!("{}/{}", disks_url, first_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("first-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -568,9 +539,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second snapshot
-    let snapshot_url =
-        format!("{}/snapshots/second-snapshot", get_project_url());
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("second-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -579,8 +548,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second disk
-    let disk_url = format!("{}/{}", disks_url, second_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("second-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -589,9 +557,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first snapshot
-    let snapshot_url =
-        format!("{}/snapshots/first-snapshot", get_project_url());
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("first-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -639,14 +605,9 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     .unwrap();
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let first_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-snapshot".parse().unwrap(),
@@ -688,7 +649,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Issue snapshot request for the second disk
     let second_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-snapshot".parse().unwrap(),
@@ -705,8 +666,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first disk
-    let disk_url = format!("{}/{}", disks_url, first_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("first-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -715,8 +675,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second disk
-    let disk_url = format!("{}/{}", disks_url, second_disk_name);
-    NexusRequest::object_delete(client, &disk_url)
+    NexusRequest::object_delete(client, &get_disk_url("second-disk"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -725,9 +684,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the second snapshot
-    let snapshot_url =
-        format!("{}/snapshots/second-snapshot", get_project_url());
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("second-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -736,9 +693,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     assert!(!disk_test.crucible_resources_deleted().await);
 
     // Delete the first snapshot
-    let snapshot_url =
-        format!("{}/snapshots/first-snapshot", get_project_url());
-    NexusRequest::object_delete(client, &snapshot_url)
+    NexusRequest::object_delete(client, &get_snapshot_url("first-snapshot"))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -780,14 +735,9 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     .unwrap();
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/organizations/{}/projects/{}/snapshots",
-        ORG_NAME, PROJECT_NAME
-    );
-
     let layer_1_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-1-snapshot".parse().unwrap(),
@@ -829,7 +779,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     // Issue snapshot request for the second disk
     let layer_2_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-2-snapshot".parse().unwrap(),
@@ -871,7 +821,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     // Issue snapshot request for the third disk
     let layer_3_snapshot: views::Snapshot = object_create(
         client,
-        &snapshots_url,
+        &get_snapshots_url(),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "layer-3-snapshot".parse().unwrap(),
@@ -903,8 +853,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     for name in ["layer-1-disk", "layer-2-disk", "layer-3-disk"] {
         assert!(!disk_test.crucible_resources_deleted().await);
 
-        let disk_url = format!("{}/{}", get_disks_url(), name);
-        NexusRequest::object_delete(client, &disk_url)
+        NexusRequest::object_delete(client, &get_disk_url(name))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -915,8 +864,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_disks_first(
     for name in ["layer-1-snapshot", "layer-2-snapshot", "layer-3-snapshot"] {
         assert!(!disk_test.crucible_resources_deleted().await);
 
-        let snapshot_url = format!("{}/snapshots/{}", get_project_url(), name);
-        NexusRequest::object_delete(client, &snapshot_url)
+        NexusRequest::object_delete(client, &get_snapshot_url(name))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -944,8 +892,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     for name in ["layer-1-snapshot", "layer-2-snapshot", "layer-3-snapshot"] {
         assert!(!disk_test.crucible_resources_deleted().await);
 
-        let snapshot_url = format!("{}/snapshots/{}", get_project_url(), name);
-        NexusRequest::object_delete(client, &snapshot_url)
+        NexusRequest::object_delete(client, &get_snapshot_url(name))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -956,8 +903,7 @@ async fn test_multiple_layers_of_snapshots_delete_all_snapshots_first(
     for name in ["layer-1-disk", "layer-2-disk", "layer-3-disk"] {
         assert!(!disk_test.crucible_resources_deleted().await);
 
-        let disk_url = format!("{}/{}", get_disks_url(), name);
-        NexusRequest::object_delete(client, &disk_url)
+        NexusRequest::object_delete(client, &get_disk_url(name))
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -1012,8 +958,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
 
         match object {
             DeleteObject::Disk(name) => {
-                let disk_url = format!("{}/{}", get_disks_url(), name);
-                NexusRequest::object_delete(client, &disk_url)
+                NexusRequest::object_delete(client, &get_disk_url(name))
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await
@@ -1021,9 +966,7 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
             }
 
             DeleteObject::Snapshot(name) => {
-                let snapshot_url =
-                    format!("{}/snapshots/{}", get_project_url(), name);
-                NexusRequest::object_delete(client, &snapshot_url)
+                NexusRequest::object_delete(client, &get_snapshot_url(name))
                     .authn_as(AuthnMode::PrivilegedUser)
                     .execute()
                     .await

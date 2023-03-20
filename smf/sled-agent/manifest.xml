@@ -5,7 +5,6 @@
 
 <service name='system/illumos/sled-agent' type='service' version='1'>
   <create_default_instance enabled='true' />
-  <single_instance />
 
   <!-- File systems should all be mounted before we begin: -->
   <dependency name='fs-root' grouping='require_all' restart_on='none'
@@ -17,20 +16,25 @@
     <service_fmri value='svc:/system/filesystem/minimal' />
   </dependency>
 
-  <!-- The bootstrapping portion of the agent uses the network to communicate with
-    other servers on the rack. -->
-  <dependency name='loopback' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/milestone/network' />
-  </dependency>
   <!-- Run after initial device configuration has completed. -->
   <dependency name='devices' grouping='require_all' restart_on='none'
     type='service'>
     <service_fmri value='svc:/milestone/devices' />
   </dependency>
+
+  <!-- The bootstrapping portion of the agent uses the network to communicate
+    with other servers on the rack. -->
   <dependency name='network' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/milestone/network:default' />
+  <service_fmri value='svc:/milestone/network' />
+  </dependency>
+
+  <!-- ... and make sure we run after the T6 has been configured. This is
+  grouped as `optional_all` to allow sled-agent to run on devices that do
+  not have a t6init service (e.g., testing in CI). -->
+  <dependency name='t6init' grouping='optional_all' restart_on='none'
+    type='service'>
+        <service_fmri value='svc:/system/t6init' />
   </dependency>
 
   <method_context>

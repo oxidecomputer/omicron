@@ -9,6 +9,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -27,7 +28,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authz;
-use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::lookup::LookupPath;
@@ -74,7 +74,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -84,24 +84,20 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -111,9 +107,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -209,7 +203,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -219,24 +213,20 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = format!(
+        "/v1/images?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME
+    );
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -246,9 +236,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 

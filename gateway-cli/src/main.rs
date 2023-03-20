@@ -18,8 +18,8 @@ use gateway_client::types::SpComponentFirmwareSlot;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
-use gateway_client::types::UpdateBody;
 use gateway_client::Client;
+use omicron_common::update::ArtifactHash;
 use serde::Serialize;
 use slog::o;
 use slog::Drain;
@@ -139,22 +139,27 @@ enum Command {
         /// Clear any previously-set ID.
         #[clap(long)]
         clear: bool,
+        /// ID to assign to this update for progress/completion messages.
+        #[clap(
+            long,
+            conflicts_with = "clear",
+            required_unless_present = "clear"
+        )]
+        update_id: Option<Uuid>,
         /// Hash of the host OS image.
         #[clap(
             long,
-            value_parser = sha256_from_str,
             conflicts_with = "clear",
-            required_unless_present = "clear",
+            required_unless_present = "clear"
         )]
-        host_phase_2: Option<[u8; 32]>,
+        host_phase_2: Option<ArtifactHash>,
         /// Hash of the control plane image.
         #[clap(
             long,
-            value_parser = sha256_from_str,
             conflicts_with = "clear",
-            required_unless_present = "clear",
+            required_unless_present = "clear"
         )]
-        control_plane: Option<[u8; 32]>,
+        control_plane: Option<ArtifactHash>,
     },
 
     /// Ask SP for its inventory.
@@ -291,12 +296,6 @@ fn level_from_str(s: &str) -> Result<Level> {
     } else {
         bail!(format!("Invalid log level: {}", s))
     }
-}
-
-fn sha256_from_str(s: &str) -> Result<[u8; 32]> {
-    hex::FromHex::from_hex(s).map_err(|err| {
-        anyhow!("failed to parse {s:?} as a sha256 digest: {err}")
-    })
 }
 
 fn sp_identifier_from_str(s: &str) -> Result<SpIdentifier> {
@@ -460,6 +459,7 @@ async fn main() -> Result<()> {
         Command::SetInstallinatorImageId {
             sp,
             clear,
+            update_id,
             host_phase_2,
             control_plane,
         } => {
@@ -468,14 +468,19 @@ async fn main() -> Result<()> {
                     .sp_installinator_image_id_delete(sp.type_, sp.slot)
                     .await?;
             } else {
-                // clap guarantees these are not `None`.
-                let host_phase_2 = host_phase_2.unwrap().to_vec();
-                let control_plane = control_plane.unwrap().to_vec();
+                // clap guarantees these are not `None` when `clear` is false.
+                let update_id = update_id.unwrap();
+                let host_phase_2 = host_phase_2.unwrap().to_string();
+                let control_plane = control_plane.unwrap().to_string();
                 client
                     .sp_installinator_image_id_set(
                         sp.type_,
                         sp.slot,
-                        &InstallinatorImageId { host_phase_2, control_plane },
+                        &InstallinatorImageId {
+                            update_id,
+                            host_phase_2,
+                            control_plane,
+                        },
                     )
                     .await?;
             }
@@ -601,9 +606,10 @@ async fn update(
     let update_id = Uuid::new_v4();
     println!("generated update ID {update_id}");
 
-    let body = UpdateBody { id: update_id, image, slot };
     client
-        .sp_component_update(sp.type_, sp.slot, component, &body)
+        .sp_component_update(
+            sp.type_, sp.slot, component, slot, &update_id, image,
+        )
         .await
         .context("failed to start update")?;
 

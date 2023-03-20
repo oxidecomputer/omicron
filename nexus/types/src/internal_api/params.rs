@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
+
+use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -221,15 +223,14 @@ impl std::fmt::Debug for Certificate {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
+    /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
+    /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
-    // While it's true that Nexus will only run with a single address,
-    // we want to convey information about the available pool of addresses
-    // when handing off from RSS -> Nexus.
-
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1528):
-    // Support passing x509 cert info.
+    /// Ranges of the service IP pool which may be used for internal services,
+    /// such as Nexus.
+    pub internal_services_ip_pool_ranges: Vec<IpRange>,
+    /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
 }
 

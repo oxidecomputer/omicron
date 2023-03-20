@@ -46,10 +46,10 @@
 
 use crate::authn::{Actor, Reason};
 use crate::authz;
-use crate::context::OpContext;
 use crate::db::lookup::LookupPath;
 use crate::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
+use nexus_db_queries::context::OpContext;
 
 use omicron_common::api::external::{CreateResult, Error};
 
@@ -118,7 +118,6 @@ impl super::Nexus {
                 message: "device authorization request expired".to_string(),
             })
         } else {
-            // TODO-security: set an expiration time for the valid token.
             self.db_datastore
                 .device_access_token_create(
                     opctx,

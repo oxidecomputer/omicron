@@ -62,7 +62,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     // Create a key
     let _new_key: views::SshKey = NexusRequest::objects_post(
         client,
-        "/session/me/sshkeys",
+        "/v1/me/ssh-keys",
         &params::SshKeyCreate {
             identity: IdentityMetadataCreateParams {
                 name: name.parse().unwrap(),
@@ -79,23 +79,21 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // user1 can read that key
-    let _fetched_key: views::SshKey = NexusRequest::object_get(
-        client,
-        &format!("/session/me/sshkeys/{}", name),
-    )
-    .authn_as(AuthnMode::SiloUser(user1))
-    .execute()
-    .await
-    .expect("failed to make GET request")
-    .parsed_body()
-    .unwrap();
+    let _fetched_key: views::SshKey =
+        NexusRequest::object_get(client, &format!("/v1/me/ssh-keys/{}", name))
+            .authn_as(AuthnMode::SiloUser(user1))
+            .execute()
+            .await
+            .expect("failed to make GET request")
+            .parsed_body()
+            .unwrap();
 
     // user2 cannot - they should see 404, not 403
     NexusRequest::new(
         RequestBuilder::new(
             client,
             http::Method::GET,
-            &format!("/session/me/sshkeys/{}", name),
+            &format!("/v1/me/ssh-keys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -108,7 +106,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             http::Method::DELETE,
-            &format!("/session/me/sshkeys/{}", name),
+            &format!("/v1/me/ssh-keys/{}", name),
         )
         .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
@@ -119,7 +117,7 @@ async fn test_cannot_read_others_ssh_keys(cptestctx: &ControlPlaneTestContext) {
 
     // it also shouldn't show up in their list
     let user2_keys: ResultsPage<views::SshKey> =
-        NexusRequest::object_get(client, &"/session/me/sshkeys")
+        NexusRequest::object_get(client, &"/v1/me/ssh-keys")
             .authn_as(AuthnMode::SiloUser(user2))
             .execute()
             .await
@@ -256,7 +254,7 @@ async fn test_list_silo_users_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // Listing users should work
     let users: ResultsPage<views::User> =
-        NexusRequest::object_get(client, &"/users")
+        NexusRequest::object_get(client, &"/v1/users")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -296,7 +294,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let _users: ResultsPage<views::IdentityProvider> =
         NexusRequest::object_get(
             client,
-            &"/system/silos/authz/identity-providers",
+            &"/v1/system/identity-providers?silo=authz",
         )
         .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
@@ -306,7 +304,7 @@ async fn test_list_silo_idps_for_unpriv(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 }
 
-// Test that an authenticated, unprivileged user can access /session/me
+// Test that an authenticated, unprivileged user can access /v1/me
 #[nexus_test]
 async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -330,7 +328,7 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .id;
 
     let _session_user: views::User =
-        NexusRequest::object_get(client, &"/session/me")
+        NexusRequest::object_get(client, &"/v1/me")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -373,7 +371,7 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // That user can access their own silo
     let _silo: views::Silo =
-        NexusRequest::object_get(client, &"/system/silos/authz")
+        NexusRequest::object_get(client, &"/v1/system/silos/authz")
             .authn_as(AuthnMode::SiloUser(new_silo_user_id))
             .execute()
             .await
@@ -383,8 +381,12 @@ async fn test_silo_read_for_unpriv(cptestctx: &ControlPlaneTestContext) {
 
     // But not others
     NexusRequest::new(
-        RequestBuilder::new(client, http::Method::GET, &"/system/silos/other")
-            .expect_status(Some(http::StatusCode::NOT_FOUND)),
+        RequestBuilder::new(
+            client,
+            http::Method::GET,
+            &"/v1/system/silos/other",
+        )
+        .expect_status(Some(http::StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()

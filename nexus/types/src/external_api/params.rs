@@ -9,7 +9,8 @@ use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, SemverVersion,
+    InstanceCpuCount, Ipv4Net, Ipv6Net, Name, NameOrId, RouteDestination,
+    RouteTarget, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{
@@ -35,6 +36,31 @@ pub struct InstancePath {
     pub instance: NameOrId,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct NetworkInterfacePath {
+    pub interface: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct VpcPath {
+    pub vpc: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetPath {
+    pub subnet: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouterPath {
+    pub router: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RoutePath {
+    pub route: NameOrId,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct DiskPath {
     pub disk: NameOrId,
@@ -43,6 +69,80 @@ pub struct DiskPath {
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SnapshotPath {
     pub snapshot: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ImagePath {
+    pub image: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SiloPath {
+    pub silo: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct ProviderPath {
+    pub provider: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct IpPoolPath {
+    pub pool: NameOrId,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SshKeyPath {
+    pub ssh_key: NameOrId,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SiloSelector {
+    pub silo: NameOrId,
+}
+
+impl From<Name> for SiloSelector {
+    fn from(name: Name) -> Self {
+        SiloSelector { silo: name.into() }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SamlIdentityProviderSelector {
+    #[serde(flatten)]
+    pub silo_selector: Option<SiloSelector>,
+    pub saml_identity_provider: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SamlIdentityProviderSelector {
+    pub fn new(
+        silo: Option<NameOrId>,
+        saml_identity_provider: NameOrId,
+    ) -> Self {
+        SamlIdentityProviderSelector {
+            silo_selector: silo.map(|s| SiloSelector { silo: s }),
+            saml_identity_provider,
+        }
+    }
+}
+
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
+#[derive(Deserialize, JsonSchema)]
+pub struct GroupPath {
+    pub group: Uuid,
+}
+
+// The shape of this selector is slightly different than the others given that
+// silos users can only be specified via ID and are automatically provided by
+// the environment the user is authetnicated in
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SshKeySelector {
+    pub silo_user_id: Uuid,
+    pub ssh_key: NameOrId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -93,6 +193,7 @@ pub struct DiskSelector {
     pub disk: NameOrId,
 }
 
+// TODO-v1: delete this post migration
 impl DiskSelector {
     pub fn new(
         organization: Option<NameOrId>,
@@ -114,6 +215,7 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
+// TODO-v1: delete this post migration
 impl SnapshotSelector {
     pub fn new(
         organization: Option<NameOrId>,
@@ -129,6 +231,28 @@ impl SnapshotSelector {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct ImageSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub image: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl ImageSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        image: NameOrId,
+    ) -> Self {
+        ImageSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            image,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
@@ -146,6 +270,141 @@ impl InstanceSelector {
             project_selector: project
                 .map(|p| ProjectSelector::new(organization, p)),
             instance,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInstanceSelector {
+    #[serde(flatten)]
+    pub instance_selector: Option<InstanceSelector>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct NetworkInterfaceSelector {
+    #[serde(flatten)]
+    pub instance_selector: Option<InstanceSelector>,
+    pub network_interface: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl NetworkInterfaceSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        instance: Option<NameOrId>,
+        network_interface: NameOrId,
+    ) -> Self {
+        NetworkInterfaceSelector {
+            instance_selector: instance.map(|instance| {
+                InstanceSelector::new(organization, project, instance)
+            }),
+            network_interface,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct VpcSelector {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+    pub vpc: NameOrId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalVpcSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+}
+
+// TODO-v1: delete this post migration
+impl VpcSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: NameOrId,
+    ) -> Self {
+        VpcSelector {
+            project_selector: project
+                .map(|p| ProjectSelector::new(organization, p)),
+            vpc,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SubnetSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub subnet: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl SubnetSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        subnet: NameOrId,
+    ) -> Self {
+        SubnetSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            subnet,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RouterSelector {
+    #[serde(flatten)]
+    pub vpc_selector: Option<VpcSelector>,
+    pub router: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouterSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: NameOrId,
+    ) -> Self {
+        RouterSelector {
+            vpc_selector: vpc
+                .map(|vpc| VpcSelector::new(organization, project, vpc)),
+            router,
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalRouterSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct RouteSelector {
+    #[serde(flatten)]
+    pub router_selector: Option<RouterSelector>,
+    pub route: NameOrId,
+}
+
+// TODO-v1: delete this post migration
+impl RouteSelector {
+    pub fn new(
+        organization: Option<NameOrId>,
+        project: Option<NameOrId>,
+        vpc: Option<NameOrId>,
+        router: Option<NameOrId>,
+        route: NameOrId,
+    ) -> Self {
+        RouteSelector {
+            router_selector: router.map(|router| {
+                RouterSelector::new(organization, project, vpc, router)
+            }),
+            route,
         }
     }
 }
@@ -248,7 +507,7 @@ impl TryFrom<String> for Password {
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
-        // OpenAPI schema below.
+        // OpenAPI schema below.  See omicron#2307.
         Ok(Password(value, inner))
     }
 }
@@ -276,7 +535,7 @@ impl JsonSchema for Password {
                     "A password used to authenticate a user".to_string(),
                 ),
                 // TODO-doc If we apply password strength rules, they should
-                // presumably be documented here.
+                // presumably be documented here.  See omicron#2307.
                 description: Some(
                     "Passwords may be subject to additional constraints."
                         .to_string(),
@@ -609,7 +868,7 @@ pub struct NetworkInterfaceUpdate {
     /// Note that this can only be used to select a new primary interface for an
     /// instance. Requests to change the primary interface into a secondary will
     /// return an error.
-    // TODO-completeness TODO-docs: When we get there, this should note that a
+    // TODO-completeness TODO-doc When we get there, this should note that a
     // change in the primary interface will result in changes to the DNS records
     // for the instance, though not the name.
     #[serde(default)]
@@ -951,6 +1210,26 @@ pub struct VpcRouterUpdate {
     pub identity: IdentityMetadataUpdateParams,
 }
 
+// VPC ROUTER ROUTES
+
+/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
+/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouterRouteUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
+    pub target: RouteTarget,
+    pub destination: RouteDestination,
+}
+
 // DISKS
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
@@ -1106,6 +1385,12 @@ pub struct ImageCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
+    /// The family of the operating system (e.g. Debian, Ubuntu, etc.)
+    pub os: String,
+
+    /// The version of the operating system (e.g. 18.04, 20.04, etc.)
+    pub version: String,
+
     /// block size in bytes
     pub block_size: BlockSize,
 
@@ -1126,6 +1411,13 @@ pub struct SnapshotCreate {
     pub disk: Name,
 }
 
+// USERS AND GROUPS
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalGroupSelector {
+    pub group: Option<Uuid>,
+}
+
 // BUILT-IN USERS
 //
 // These cannot be created via the external API, but we use the same interfaces
@@ -1139,9 +1431,14 @@ pub struct UserBuiltinCreate {
     pub identity: IdentityMetadataCreateParams,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct UserBuiltinSelector {
+    pub user: NameOrId,
+}
+
 // SSH PUBLIC KEYS
 //
-// The SSH key mangement endpoints are currently under `/session/me`,
+// The SSH key mangement endpoints are currently under `/v1/me`,
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 

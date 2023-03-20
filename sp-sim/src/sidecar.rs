@@ -836,6 +836,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
         slot: u16,
+        persist: bool,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to set component active slot (not supported for sim components)";
@@ -843,6 +844,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
             "slot" => slot,
+            "persist" => persist,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
@@ -925,6 +927,18 @@ impl SpHandler for Handler {
             "port" => ?port,
             "key" => key,
             "value" => ?value,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_caboose_value(
+        &mut self,
+        key: [u8; 4],
+    ) -> std::result::Result<&'static [u8], SpError> {
+        warn!(
+            &self.log,
+            "received request for caboose key; not supported by simulated sidecar";
+            "key" => ?key,
         );
         Err(SpError::RequestUnsupportedForSp)
     }

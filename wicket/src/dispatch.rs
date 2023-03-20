@@ -2,73 +2,56 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Code that manages command dispatch for wicket.
+//! Code that manages command dispatch from a shell for wicket.
 
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 use anyhow::{bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
+use omicron_common::address::WICKETD_PORT;
 use slog::Drain;
 
-use crate::{upload::UploadArgs, wizard::Wizard};
+use crate::{upload::UploadArgs, Runner};
 
-#[derive(Debug, Parser)]
-#[command(version, author = "Oxide Computer Company")]
-pub struct WicketApp {
-    /// Login shell arguments.
-    ///
-    /// Wicket is designed to be a login shell for use over ssh. If no arguments are specified,
-    /// wicket behaves like a TUI. However, if arguments are specified with "-c" (as in other login
-    /// shells e.g. bash -c), wicketd accepts an upload command.
-    ///
-    /// Login shell arguments are provided in a quoted form, so we expect a single String here.
-    /// This string is split using shell quoting logic to get the actual arguments.
-    #[arg(short = 'c', allow_hyphen_values = true)]
-    shell_args: Option<String>,
+pub fn exec() -> Result<()> {
+    let wicketd_addr =
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, WICKETD_PORT, 0, 0);
+
+    // SSH_ORIGINAL_COMMAND contains additional arguments, if any.
+    if let Ok(ssh_args) = std::env::var("SSH_ORIGINAL_COMMAND") {
+        // The argument is in a quoted form, so split it using Unix shell semantics.
+        let args = shell_words::split(&ssh_args).with_context(|| {
+            format!("could not parse shell arguments from input {ssh_args}")
+        })?;
+
+        let log = setup_log(&log_path()?, WithStderr::Yes)?;
+        // parse_from uses the the first argument as the command name. Insert "wicket" as
+        // the command name.
+        let args = ShellCommand::parse_from(
+            std::iter::once("wicket".to_owned()).chain(args),
+        );
+        match args {
+            ShellCommand::Upload(args) => args.exec(log, wicketd_addr),
+        }
+    } else {
+        // Do not expose log messages via standard error since they'll show up
+        // on top of the TUI.
+        let log = setup_log(&log_path()?, WithStderr::No)?;
+        Runner::new(log, wicketd_addr).run()
+    }
 }
 
+/// Arguments passed to wicket.
+///
+/// Wicket is designed to be used as a captive shell, set up via sshd
+/// ForceCommand. If no arguments are specified, wicket behaves like a TUI.
+/// However, if arguments are specified via SSH_ORIGINAL_COMMAND, wicketd
+/// accepts an upload command.
 #[derive(Debug, Parser)]
 enum ShellCommand {
     /// Upload an artifact to wicketd.
     Upload(UploadArgs),
-}
-
-impl WicketApp {
-    /// Executes the command.
-    pub fn exec(self) -> Result<()> {
-        // TODO: make this configurable?
-        // To launch within the switch zone, and as part of a login shell,
-        // we likely have to store this in a config file, which may have to be written
-        // by sled-agent.
-        //
-        // We can't just use a command line-arg because we want to act as a login shells
-        let wicketd_addr: SocketAddrV6 = "[::1]:12226".parse().unwrap();
-
-        match self.shell_args {
-            Some(shell_args) => {
-                let args =
-                    shell_words::split(&shell_args).with_context(|| {
-                        format!("could not parse shell arguments from input {shell_args}")
-                    })?;
-                let log = setup_log(&log_path()?, WithStderr::Yes)?;
-                // parse_from uses the the first argument as the command name. Insert "wicket" as
-                // the command name.
-                let args = ShellCommand::parse_from(
-                    std::iter::once("wicket".to_owned()).chain(args),
-                );
-                match args {
-                    ShellCommand::Upload(args) => args.exec(log, wicketd_addr),
-                }
-            }
-            None => {
-                // Do not expose standard error since it'll be on top of the TUI.
-                let log = setup_log(&log_path()?, WithStderr::No)?;
-                // Not invoked with "-c" -- run the TUI wizard.
-                Wizard::new(log, wicketd_addr).run()
-            }
-        }
-    }
 }
 
 fn setup_log(

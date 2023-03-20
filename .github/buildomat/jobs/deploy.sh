@@ -2,10 +2,11 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-netdev"
+#: target = "lab-opte-0.21"
 #: output_rules = [
 #:	"%/var/svc/log/system-illumos-sled-agent:default.log",
-#:	"%/zone/oxz_nexus/root/var/svc/log/system-illumos-nexus:default.log",
+#:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
+#:	"!/zone/oxz_propolis-server_*/root/var/svc/log/*.log",
 #: ]
 #: skip_clone = true
 #:
@@ -138,7 +139,7 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 # on a canned subnet.  We need to create an address in the global zone such
 # that we can, in the test below, reach Nexus.
 #
-# This must be kept in sync with the IP in "smf/sled-agent/config-rss.toml" and
+# This must be kept in sync with the IP in "smf/sled-agent/non-gimlet/config-rss.toml" and
 # the prefix length which apparently defaults (in the Rust code) to /24.
 #
 pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
@@ -163,7 +164,7 @@ rm -rf pkg
 # uninstallation.
 #
 OMICRON_NO_UNINSTALL=1 \
-    ptime -m pfexec ./target/release/omicron-package install
+    ptime -m pfexec ./target/release/omicron-package -t test install
 
 ./tests/bootstrap
 rm ./tests/bootstrap

@@ -5,7 +5,9 @@
 //! Bootstrap-related APIs.
 
 use super::client::Client as BootstrapAgentClient;
-use super::config::{Config, BOOTSTRAP_AGENT_PORT};
+use super::config::{
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::SledAgentRequest;
@@ -17,23 +19,23 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
-use crate::hardware::HardwareManager;
-use crate::illumos::dladm::{self, Dladm, GetMacError, PhysicalLink};
-use crate::illumos::link::LinkKind;
-use crate::illumos::zfs::{
-    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
-};
-use crate::illumos::zone::Zones;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use crate::updates::UpdateManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
+use illumos_utils::zfs::{
+    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+};
+use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
+use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -59,6 +61,9 @@ pub enum BootstrapError {
         err: std::io::Error,
     },
 
+    #[error("Error cleaning up old state: {0}")]
+    Cleanup(anyhow::Error),
+
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
 
@@ -78,25 +83,28 @@ pub enum BootstrapError {
     PeerAddresses(String),
 
     #[error("Failed to initialize bootstrap address: {err}")]
-    BootstrapAddress { err: crate::illumos::zone::EnsureGzAddressError },
+    BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
 
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
 
     #[error("Failed to lookup VNICs on boot: {0}")]
-    GetVnics(#[from] crate::illumos::dladm::GetVnicError),
+    GetVnics(#[from] illumos_utils::dladm::GetVnicError),
 
     #[error("Failed to delete VNIC on boot: {0}")]
-    DeleteVnic(#[from] crate::illumos::dladm::DeleteVnicError),
+    DeleteVnic(#[from] illumos_utils::dladm::DeleteVnicError),
 
     #[error("Failed to ensure ZFS filesystem: {0}")]
-    ZfsEnsureFilesystem(#[from] crate::illumos::zfs::EnsureFilesystemError),
+    ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
     #[error("Failed to perform Zone operation: {0}")]
-    ZoneOperation(#[from] crate::illumos::zone::AdmError),
+    ZoneOperation(#[from] illumos_utils::zone::AdmError),
 
     #[error("Error managing guest networking: {0}")]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Error accessing version information: {0}")]
+    Version(#[from] crate::updates::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -124,7 +132,9 @@ pub(crate) struct Agent {
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: SocketAddrV6,
+
+    /// Bootstrap network address.
+    ip: Ipv6Addr,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
@@ -157,48 +167,14 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     )
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
 fn bootstrap_ip(
     link: PhysicalLink,
     interface_id: u64,
 ) -> Result<Ipv6Addr, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_bootstrap_ip(mac, interface_id))
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-fn bootstrap_address(
-    link: PhysicalLink,
-    interface_id: u64,
-    port: u16,
-) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let ip = bootstrap_ip(link, interface_id)?;
-    Ok(SocketAddrV6::new(ip, port, 0, 0))
-}
-
-// Delete all VNICs that can be managed by the control plane.
-//
-// These are currently those that match the prefix `ox` or `vopte`.
-pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), BootstrapError> {
-    let vnics = Dladm::get_vnics()?;
-    stream::iter(vnics)
-        .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::illumos::dladm::DeleteVnicError>)
-        .try_for_each_concurrent(None, |(vnic, log)| async {
-            tokio::task::spawn_blocking(move || {
-                warn!(
-                  log,
-                  "Deleting existing VNIC";
-                    "vnic_name" => &vnic,
-                    "vnic_kind" => ?LinkKind::from_name(&vnic).unwrap(),
-                );
-                Dladm::delete_vnic(&vnic)
-            })
-            .await
-            .unwrap()
-        })
-        .await?;
-    Ok(())
 }
 
 // Deletes all state which may be left-over from a previous execution of the
@@ -220,7 +196,7 @@ async fn cleanup_all_old_global_state(
     let zones = Zones::get().await?;
     stream::iter(zones)
         .zip(stream::iter(std::iter::repeat(log.clone())))
-        .map(Ok::<_, crate::zone::AdmError>)
+        .map(Ok::<_, illumos_utils::zone::AdmError>)
         .try_for_each_concurrent(None, |(zone, log)| async move {
             warn!(log, "Deleting existing zone"; "zone_name" => zone.name());
             Zones::halt_and_remove_logged(&log, zone.name()).await
@@ -240,7 +216,9 @@ async fn cleanup_all_old_global_state(
     // Note that we don't currently delete the VNICs in any particular
     // order. That should be OK, since we're definitely deleting the guest
     // VNICs before the xde devices, which is the main constraint.
-    delete_omicron_vnics(&log).await?;
+    sled_hardware::cleanup::delete_omicron_vnics(&log)
+        .await
+        .map_err(|err| BootstrapError::Cleanup(err))?;
 
     // Also delete any extant xde devices. These should also eventually be
     // recovered / tracked, to avoid interruption of any guests that are
@@ -249,7 +227,7 @@ async fn cleanup_all_old_global_state(
     //
     // This is also tracked by
     // https://github.com/oxidecomputer/omicron/issues/725.
-    crate::opte::delete_all_xde_devices(&log)?;
+    illumos_utils::opte::delete_all_xde_devices(&log)?;
 
     Ok(())
 }
@@ -265,7 +243,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
 
-        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
+        let ip = bootstrap_ip(link.clone(), 1)?;
 
         // The only zone with a bootstrap ip address besides the global zone,
         // is the switch zone. We allocate this address here since we have
@@ -294,7 +272,7 @@ impl Agent {
             })?;
 
         let bootstrap_etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::BOOTSTRAP_ETHERSTUB_NAME,
+            illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
         )
         .map_err(|e| {
             BootstrapError::SledError(format!(
@@ -315,7 +293,7 @@ impl Agent {
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
-            *address.ip(),
+            ip,
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
@@ -323,7 +301,7 @@ impl Agent {
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -342,7 +320,7 @@ impl Agent {
 
         // HardwareMonitor must be on the underlay network like all services
         let underlay_etherstub = Dladm::ensure_etherstub(
-            crate::illumos::dladm::UNDERLAY_ETHERSTUB_NAME,
+            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
         )
         .map_err(|e| {
             BootstrapError::SledError(format!(
@@ -381,7 +359,7 @@ impl Agent {
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            address,
+            ip,
             share: Mutex::new(None),
             rss: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(Some(
@@ -654,7 +632,7 @@ impl Agent {
                     .map(|addr| {
                         let addr = SocketAddrV6::new(
                             addr,
-                            BOOTSTRAP_AGENT_PORT,
+                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
                             0,
                             0,
                         );
@@ -735,7 +713,7 @@ impl Agent {
             let rss = RssHandle::start_rss(
                 &self.parent_log,
                 rss_config.clone(),
-                *self.address.ip(),
+                self.ip,
                 self.sp.clone(),
                 // TODO-cleanup: Remove this arg once RSS can discover the trust
                 // quorum members over the management network.
@@ -750,9 +728,22 @@ impl Agent {
         Ok(())
     }
 
-    /// Return the global zone address that the bootstrap agent binds to.
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
+    pub async fn components_get(
+        &self,
+    ) -> Result<Vec<crate::updates::Component>, BootstrapError> {
+        let updates = UpdateManager::new(self.sled_config.updates.clone());
+        let components = updates.components_get().await?;
+        Ok(components)
+    }
+
+    /// The GZ address used by the bootstrap agent for Sprockets.
+    pub fn sprockets_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    }
+
+    /// The address used by the bootstrap agent to serve a dropshot interface.
+    pub fn http_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
     }
 }
 
@@ -777,8 +768,8 @@ impl PersistentSledAgentRequest<'_> {
         }
 
         let mut out = String::with_capacity(128);
-        let mut serializer = toml::Serializer::new(&mut out);
-        PersistentSledAgentRequestDef::serialize(self, &mut serializer)?;
+        let serializer = toml::Serializer::new(&mut out);
+        PersistentSledAgentRequestDef::serialize(self, serializer)?;
         Ok(out)
     }
 }
@@ -827,7 +818,7 @@ mod tests {
 
         let serialized = request.danger_serialize_as_toml().unwrap();
         let deserialized: PersistentSledAgentRequest =
-            toml::from_slice(serialized.as_bytes()).unwrap();
+            toml::from_str(&serialized).unwrap();
 
         assert!(request == deserialized, "serialization round trip failed");
     }

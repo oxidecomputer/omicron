@@ -39,7 +39,8 @@ table! {
         project_id -> Uuid,
         volume_id -> Uuid,
         url -> Nullable<Text>,
-        version -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
         digest -> Nullable<Text>,
         block_size -> crate::BlockSizeEnum,
         size_bytes -> Int8,
@@ -242,7 +243,11 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(silo_user, silo_user_password_hash);
-allow_tables_to_appear_in_same_query!(silo_group, silo_group_membership);
+allow_tables_to_appear_in_same_query!(
+    silo_group,
+    silo_group_membership,
+    silo_user,
+);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
@@ -408,6 +413,13 @@ table! {
         sled_id -> Uuid,
         ip -> Inet,
         kind -> crate::ServiceKindEnum,
+    }
+}
+
+table! {
+    nexus_service (id) {
+        id -> Uuid,
+        external_ip_id -> Uuid,
     }
 }
 
@@ -693,7 +705,7 @@ table! {
     update_available_artifact (name, version, kind) {
         name -> Text,
         version -> Text,
-        kind -> crate::UpdateArtifactKindEnum,
+        kind -> crate::KnownArtifactKindEnum,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
         target_name -> Text,

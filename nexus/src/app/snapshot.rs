@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::authn;
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use db::model::Name;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;

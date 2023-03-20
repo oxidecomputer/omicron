@@ -9,6 +9,7 @@ use super::metrics::query_for_latest_metric;
 use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -33,7 +34,6 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
-use omicron_nexus::context::OpContext;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -61,18 +61,24 @@ type ControlPlaneTestContext =
 static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
+fn get_project_selector() -> String {
+    format!("organization={}&project={}", ORGANIZATION_NAME, PROJECT_NAME)
+}
+
 fn get_instances_url() -> String {
-    format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    )
+    format!("/v1/instances?{}", get_project_selector())
 }
 
 fn get_instance_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{}?organization={}&project={}",
-        instance_name, ORGANIZATION_NAME, PROJECT_NAME
-    )
+    format!("/v1/instances/{}?{}", instance_name, get_project_selector())
+}
+
+fn get_disks_url() -> String {
+    format!("/v1/disks?{}", get_project_selector())
+}
+
+fn default_vpc_subnets_url() -> String {
+    format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -90,11 +96,10 @@ async fn test_instances_access_before_create_returns_not_found(
 
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = get_instances_url();
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
-    let instances = instances_list(&client, &url_instances).await;
+    let instances = instances_list(&client, &get_instances_url()).await;
     assert_eq!(instances.len(), 0);
 
     // Make sure we get a 404 if we fetch one.
@@ -204,7 +209,6 @@ async fn test_instances_create_reboot_halt(
     let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = get_instances_url();
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
@@ -225,7 +229,7 @@ async fn test_instances_create_reboot_halt(
 
     // Attempt to create a second instance with a conflicting name.
     let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url_instances)
+        RequestBuilder::new(client, Method::POST, &get_instances_url())
             .body(Some(&params::InstanceCreate {
                 identity: IdentityMetadataCreateParams {
                     name: instance.identity.name.clone(),
@@ -258,7 +262,7 @@ async fn test_instances_create_reboot_halt(
     );
 
     // List instances again and expect to find the one we just created.
-    let instances = instances_list(&client, &url_instances).await;
+    let instances = instances_list(&client, &get_instances_url()).await;
     assert_eq!(instances.len(), 1);
     instances_eq(&instances[0], &instance);
 
@@ -268,12 +272,12 @@ async fn test_instances_create_reboot_halt(
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     // Check that the instance got a network interface
-    let ips_url = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
+    let nics_url = format!(
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
         ORGANIZATION_NAME, PROJECT_NAME
     );
     let network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &ips_url)
+        objects_list_page_authz::<NetworkInterface>(client, &nics_url)
             .await
             .items;
     assert_eq!(network_interfaces.len(), 1);
@@ -465,7 +469,7 @@ async fn test_instances_create_reboot_halt(
     // Check that the network interfaces for that instance are gone, peeking
     // at the subnet-scoped URL so we don't 404 at the instance-scoped route.
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets/default/network-interfaces",
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
         ORGANIZATION_NAME, PROJECT_NAME,
     );
     let interfaces =
@@ -533,10 +537,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     populate_ip_pool(&client, "default", None).await;
     let organization_id =
         create_organization(&client, ORGANIZATION_NAME).await.identity.id;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
         .await
         .identity
@@ -555,7 +555,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Query the view of these metrics stored within Clickhouse
     let metric_url = |metric_type: &str, id: Uuid| {
         format!(
-            "/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
+            "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
             Utc::now() - chrono::Duration::seconds(30),
             Utc::now() + chrono::Duration::seconds(30),
         )
@@ -590,7 +590,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance.
     let instance_name = "just-rainsticks";
-    let instance_url = format!("{url_instances}/{instance_name}");
     create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
         .await;
     let virtual_provisioning_collection = datastore
@@ -607,7 +606,8 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
     instance_simulate(nexus, &instance.identity.id).await;
-    let instance = instance_get(&client, &instance_url).await;
+    let instance =
+        instance_get(&client, &get_instance_url(&instance_name)).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
     // NOTE: I think it's arguably "more correct" to identify that the
     // number of CPUs being used by guests at this point is actually "0",
@@ -657,7 +657,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Stop the instance
-    NexusRequest::object_delete(client, &instance_url)
+    NexusRequest::object_delete(client, &get_instance_url(&instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -708,15 +708,11 @@ async fn test_instances_create_stopped_start(
     let instance_name = "just-rainsticks";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
         client,
-        &url_instances,
+        &get_instances_url(),
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
@@ -818,15 +814,11 @@ async fn test_instances_invalid_creation_returns_bad_request(
     // passed through properly.
 
     let client = &cptestctx.external_client;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     let error = client
         .make_request_with_body(
             Method::POST,
-            &url_instances,
+            &get_instances_url(),
             "{".into(),
             StatusCode::BAD_REQUEST,
         )
@@ -848,15 +840,15 @@ async fn test_instances_invalid_creation_returns_bad_request(
     let error = client
         .make_request_with_body(
             Method::POST,
-            &url_instances,
+            &get_instances_url(),
             request_body.into(),
             StatusCode::BAD_REQUEST,
         )
         .await
         .unwrap_err();
-    assert!(error
-        .message
-        .starts_with("unable to parse JSON body: invalid value: integer `-3`"));
+    assert!(error.message.starts_with(
+        "unable to parse JSON body: ncpus: invalid value: integer `-3`"
+    ));
 }
 
 #[nexus_test]
@@ -877,10 +869,6 @@ async fn test_instance_create_saga_removes_instance_database_record(
 
     // Create test IP pool, organization and project
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -914,12 +902,15 @@ async fn test_instance_create_saga_removes_instance_database_record(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create first instance");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create first instance");
     let _ = response.parsed_body::<Instance>().unwrap();
 
     // Try to create a _new_ instance, with the same IP address. Note that the
@@ -938,15 +929,18 @@ async fn test_instance_create_saga_removes_instance_database_record(
         disks: vec![],
         start: true,
     };
-    let _ =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect_err(
-                "Should have failed to create second instance with \
+    let _ = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect_err(
+        "Should have failed to create second instance with \
                 the same IP address as the first",
-            );
+    );
 
     // Update the IP address to one that will succeed, but leave the other data
     // as-is. This would fail with a conflict on the instance name, if we don't
@@ -969,12 +963,15 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         ..instance_params.clone()
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Creating a new instance should succeed");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Creating a new instance should succeed");
     let instance = response.parsed_body::<Instance>().unwrap();
     assert_eq!(instance.identity.name, instance_params.identity.name);
 }
@@ -987,10 +984,6 @@ async fn test_instance_with_single_explicit_ip_address(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1024,18 +1017,23 @@ async fn test_instance_with_single_explicit_ip_address(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Get the interface, and verify it has the requested address
     let url_interface = format!(
-        "{}/{}/network-interfaces/{}",
-        url_instances, instance_params.identity.name, if0_params.identity.name,
+        "/v1/network-interfaces/{}?{}&instance={}",
+        if0_params.identity.name,
+        get_project_selector(),
+        instance_params.identity.name,
     );
     let interface = NexusRequest::object_get(client, &url_interface)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -1060,19 +1058,11 @@ async fn test_instance_with_new_custom_network_interfaces(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create a VPC Subnet other than the default.
     //
     // We'll create one interface in the default VPC Subnet and one in this new
     // VPC Subnet.
-    let url_vpc_subnets = format!(
-        "/organizations/{}/projects/{}/vpcs/{}/subnets",
-        ORGANIZATION_NAME, PROJECT_NAME, "default",
-    );
     let default_name = Name::try_from(String::from("default")).unwrap();
     let non_default_subnet_name =
         Name::try_from(String::from("non-default-subnet")).unwrap();
@@ -1086,7 +1076,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     };
     let _response = NexusRequest::objects_post(
         client,
-        &url_vpc_subnets,
+        &default_vpc_subnets_url(),
         &vpc_subnet_params,
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1094,7 +1084,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     .await
     .expect("Failed to create custom VPC Subnet");
 
-    // TODO-testing: We'd like to assert things about this VPC Subnet we just
+    // TODO-coverage: We'd like to assert things about this VPC Subnet we just
     // created, but the `vpc_subnets_post` endpoint in Nexus currently returns
     // the "private" `omicron_nexus::db::model::VpcSubnet` type. That should be
     // converted to return the public `omicron_common::external` type, which is
@@ -1141,26 +1131,29 @@ async fn test_instance_with_new_custom_network_interfaces(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Check that both interfaces actually appear correct.
-    let ip_url = |subnet_name: &Name| {
+    let nics_url = |subnet_name: &Name| {
         format!(
-            "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces",
-            ORGANIZATION_NAME, PROJECT_NAME, "default", subnet_name
+            "/v1/vpc-subnets/{}/network-interfaces?organization={}&project={}&vpc=default",
+            subnet_name, ORGANIZATION_NAME, PROJECT_NAME
         )
     };
 
     // The first interface is in the default VPC Subnet
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client,
-        ip_url(&default_name).as_str(),
+        nics_url(&default_name).as_str(),
         "",
         Some(100),
     )
@@ -1179,7 +1172,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client,
-        ip_url(&non_default_subnet_name).as_str(),
+        nics_url(&non_default_subnet_name).as_str(),
         "",
         Some(100),
     )
@@ -1192,7 +1185,7 @@ async fn test_instance_with_new_custom_network_interfaces(
     );
     let if1 = &interfaces1.all_items[0];
 
-    // TODO-testing: Add this test once the `VpcSubnet` type can be
+    // TODO-coverage: Add this test once the `VpcSubnet` type can be
     // deserialized.
     // assert_eq!(if1.subnet_id, non_default_vpc_subnet.id);
 
@@ -1216,10 +1209,6 @@ async fn test_instance_create_delete_network_interface(
     let instance_name = "nic-attach-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1230,16 +1219,15 @@ async fn test_instance_create_delete_network_interface(
         ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
         ipv6_block: None,
     };
-    let url_vpc_subnets = format!(
-        "/organizations/{}/projects/{}/vpcs/{}/subnets",
-        ORGANIZATION_NAME, PROJECT_NAME, "default",
-    );
-    let _response =
-        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create secondary VPC Subnet");
+    let _response = NexusRequest::objects_post(
+        client,
+        &default_vpc_subnets_url(),
+        &secondary_subnet,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create secondary VPC Subnet");
 
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
@@ -1256,17 +1244,20 @@ async fn test_instance_create_delete_network_interface(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Verify there are no interfaces
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        "/v1/network-interfaces?organization={}&project={}&instance={}",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
@@ -1375,13 +1366,11 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify we cannot delete either interface while the instance is running
     for iface in interfaces.iter() {
-        let url_interface =
-            format!("{}/{}", url_interfaces, iface.identity.name.as_str());
         let err = NexusRequest::expect_failure(
             client,
             http::StatusCode::BAD_REQUEST,
             http::Method::DELETE,
-            url_interface.as_str(),
+            &format!("/v1/network-interfaces/{}", iface.identity.id),
         )
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1405,7 +1394,7 @@ async fn test_instance_create_delete_network_interface(
     // We should not be able to delete the primary interface, while the
     // secondary still exists
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[0].identity.id);
     let err = NexusRequest::expect_failure(
         client,
         http::StatusCode::BAD_REQUEST,
@@ -1433,7 +1422,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify that we can delete the secondary.
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[1].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[1].identity.id);
     NexusRequest::object_delete(client, url_interface.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1442,7 +1431,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Now verify that we can delete the primary
     let url_interface =
-        format!("{}/{}", url_interfaces, interfaces[0].identity.name.as_str());
+        format!("/v1/network-interfaces/{}", interfaces[0].identity.id);
     NexusRequest::object_delete(client, url_interface.as_str())
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1461,7 +1450,6 @@ async fn test_instance_update_network_interfaces(
     let instance_name = "nic-update-test-inst";
 
     create_org_and_project(&client).await;
-    let url_instances = get_instances_url();
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1472,16 +1460,15 @@ async fn test_instance_update_network_interfaces(
         ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
         ipv6_block: None,
     };
-    let url_vpc_subnets = format!(
-        "/organizations/{}/projects/{}/vpcs/{}/subnets",
-        ORGANIZATION_NAME, PROJECT_NAME, "default",
-    );
-    let _response =
-        NexusRequest::objects_post(client, &url_vpc_subnets, &secondary_subnet)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create secondary VPC Subnet");
+    let _response = NexusRequest::objects_post(
+        client,
+        &default_vpc_subnets_url(),
+        &secondary_subnet,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create secondary VPC Subnet");
 
     // Create an instance with no network interfaces
     let instance_params = params::InstanceCreate {
@@ -1498,15 +1485,18 @@ async fn test_instance_update_network_interfaces(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create instance with two network interfaces");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
     let url_interfaces = format!(
-        "/organizations/{}/projects/{}/instances/{}/network-interfaces",
+        "/v1/network-interfaces?organization={}&project={}&instance={}",
         ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
     );
 
@@ -1574,7 +1564,7 @@ async fn test_instance_update_network_interfaces(
     // NOTE: Need to use RequestBuilder manually because `expect_failure` does
     // not allow setting the body.
     let url_interface =
-        format!("{}/{}", url_interfaces, primary_iface.identity.name.as_str());
+        format!("/v1/network-interfaces/{}", primary_iface.identity.id);
     let builder =
         RequestBuilder::new(client, http::Method::PUT, url_interface.as_str())
             .body(Some(&updates))
@@ -1597,8 +1587,7 @@ async fn test_instance_update_network_interfaces(
     instance_simulate(nexus, &instance.identity.id).await;
     let updated_primary_iface = NexusRequest::object_put(
         client,
-        format!("{}/{}", url_interfaces.as_str(), primary_iface.identity.name)
-            .as_str(),
+        &format!("/v1/network-interfaces/{}", primary_iface.identity.id),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1646,12 +1635,10 @@ async fn test_instance_update_network_interfaces(
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            updated_primary_iface.identity.name
-        )
-        .as_str(),
+        &format!(
+            "/v1/network-interfaces/{}",
+            updated_primary_iface.identity.id
+        ),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1702,10 +1689,10 @@ async fn test_instance_update_network_interfaces(
         instance_post(client, instance_name, InstanceOp::Start).await;
     instance_simulate(nexus, &instance.identity.id).await;
 
-    for if_name in
-        [&updated_primary_iface.identity.name, &secondary_iface.identity.name]
+    for if_id in
+        [&updated_primary_iface.identity.id, &secondary_iface.identity.id]
     {
-        let url_interface = format!("{}/{}", url_interfaces, if_name.as_str());
+        let url_interface = format!("/v1/network-interfaces/{}", if_id);
         let builder = RequestBuilder::new(
             client,
             http::Method::PUT,
@@ -1742,12 +1729,7 @@ async fn test_instance_update_network_interfaces(
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            secondary_iface.identity.name
-        )
-        .as_str(),
+        &format!("/v1/network-interfaces/{}", secondary_iface.identity.id),
         Some(&updates),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1771,12 +1753,10 @@ async fn test_instance_update_network_interfaces(
     // Get the newly-made secondary interface to test
     let new_secondary_iface = NexusRequest::object_get(
         client,
-        format!(
-            "{}/{}",
-            url_interfaces.as_str(),
-            updated_primary_iface.identity.name
-        )
-        .as_str(),
+        &format!(
+            "/v1/network-interfaces/{}",
+            updated_primary_iface.identity.id
+        ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -1805,7 +1785,7 @@ async fn test_instance_update_network_interfaces(
     // Let's delete the original primary, and verify that we've still got the
     // secondary.
     let url_interface =
-        format!("{}/{}", url_interfaces, new_secondary_iface.identity.name);
+        format!("/v1/network-interfaces/{}", new_secondary_iface.identity.id);
     NexusRequest::object_delete(&client, &url_interface)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1850,10 +1830,6 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 
     // Create a project that we'll use for testing.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two interfaces, in the same VPC Subnet. This will trigger an
@@ -1900,7 +1876,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         start: true,
     };
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
     let response = NexusRequest::new(builder)
@@ -1912,8 +1888,8 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 
     // Verify that there are no NICs at all in the subnet.
     let url_nics = format!(
-        "/organizations/{}/projects/{}/vpcs/{}/subnets/{}/network-interfaces",
-        ORGANIZATION_NAME, PROJECT_NAME, "default", "default"
+        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
+        ORGANIZATION_NAME, PROJECT_NAME,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client, &url_nics, "", None,
@@ -1941,19 +1917,11 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
 
     // Verify disk is there and currently detached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Detached);
 
@@ -1977,9 +1945,8 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         start: true,
     };
 
-    let url_instances = get_instances_url();
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::CREATED));
     let response = NexusRequest::new(builder)
@@ -1991,12 +1958,8 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Verify disk is attached to the instance
-    let url_instance_disks = format!(
-        "/organizations/{}/projects/{}/instances/{}/disks",
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        instance.identity.name.as_str(),
-    );
+    let url_instance_disks =
+        format!("/v1/instances/{}/disks", instance.identity.id,);
     let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
         client,
         &url_instance_disks,
@@ -2026,19 +1989,11 @@ async fn test_instance_fails_to_boot_with_disk(
     create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
 
     // Verify disk is there and currently detached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Detached);
 
@@ -2067,13 +2022,8 @@ async fn test_instance_fails_to_boot_with_disk(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::INTERNAL_SERVER_ERROR));
 
@@ -2084,19 +2034,11 @@ async fn test_instance_fails_to_boot_with_disk(
         .expect("Expected instance creation to fail!");
 
     // Verify disk is not attached to the instance
-    let url_instance_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_instance_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
 
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Detached);
@@ -2152,13 +2094,8 @@ async fn test_instance_create_attach_disks(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::CREATED));
 
@@ -2171,19 +2108,11 @@ async fn test_instance_create_attach_disks(
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Assert disks are created and attached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 2);
 
     for disk in disks {
@@ -2210,11 +2139,6 @@ async fn test_instance_create_attach_disks_undo(
         create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "faulted-disk")
             .await;
 
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-
     // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
@@ -2224,15 +2148,11 @@ async fn test_instance_create_attach_disks_undo(
         .unwrap());
 
     // Assert regular and faulted disks were created
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 2);
 
     assert_eq!(disks[0].identity.id, regular_disk.identity.id);
@@ -2273,13 +2193,8 @@ async fn test_instance_create_attach_disks_undo(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
 
@@ -2290,15 +2205,11 @@ async fn test_instance_create_attach_disks_undo(
         .expect("Expected instance creation to fail!");
 
     // Assert disks are in the same state as before the instance creation began
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 2);
 
     assert_eq!(disks[0].identity.id, regular_disk.identity.id);
@@ -2331,19 +2242,11 @@ async fn test_attach_eight_disks_to_instance(
     }
 
     // Assert we created 8 disks
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 8);
 
     // Try to boot an instance that has 8 disks attached
@@ -2371,13 +2274,8 @@ async fn test_attach_eight_disks_to_instance(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::CREATED));
 
@@ -2390,19 +2288,11 @@ async fn test_attach_eight_disks_to_instance(
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Assert disks are attached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 8);
 
     for disk in disks {
@@ -2417,39 +2307,36 @@ async fn test_cannot_attach_nine_disks_to_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    const ORGANIZATION_NAME: &str = "bobs-barrel-of-bytes";
-    const PROJECT_NAME: &str = "bit-barrel";
+    let org_name = "bobs-barrel-of-bytes";
+    let project_name = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
-    create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    create_organization(&client, org_name).await;
+    create_project(client, org_name, project_name).await;
 
     // Make 9 disks
     for i in 0..9 {
         create_disk(
             &client,
-            ORGANIZATION_NAME,
-            PROJECT_NAME,
+            org_name,
+            project_name,
             &format!("probablydata{}", i,),
         )
         .await;
     }
 
-    // Assert we created 9 disks
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
+    let disks_url = format!(
+        "/v1/disks?organization={}&project={}",
+        org_name, project_name,
     );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+
+    // Assert we created 9 disks
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &disks_url, "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 9);
 
     // Try to boot an instance that has 9 disks attached
@@ -2477,13 +2364,13 @@ async fn test_cannot_attach_nine_disks_to_instance(
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
+    let instances_url = format!(
+        "/v1/instances?organization={}&project={}",
+        org_name, project_name,
     );
 
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &instances_url)
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
 
@@ -2494,19 +2381,11 @@ async fn test_cannot_attach_nine_disks_to_instance(
         .expect("Expected instance creation to fail with bad request!");
 
     // Check that disks are still detached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &disks_url, "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 9);
 
     for disk in disks {
@@ -2534,19 +2413,11 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Assert we created 8 disks
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
@@ -2555,15 +2426,11 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
     // Assert FAULTED
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 8);
 
     for (i, disk) in disks.iter().enumerate() {
@@ -2599,13 +2466,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         start: true,
     };
 
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
 
@@ -2616,19 +2478,11 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected instance creation to fail!");
 
     // Assert disks are detached (except for the 7th)
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
     assert_eq!(disks.len(), 8);
 
     for (i, disk) in disks.iter().enumerate() {
@@ -2664,19 +2518,11 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 
     // Assert we created 8 disks
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
 
     assert_eq!(disks.len(), 8);
     for disk in &disks {
@@ -2708,10 +2554,8 @@ async fn test_disks_detached_when_instance_destroyed(
         start: true,
     };
 
-    let url_instances = get_instances_url();
-
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &url_instances)
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::CREATED));
 
@@ -2722,19 +2566,11 @@ async fn test_disks_detached_when_instance_destroyed(
         .expect("expected instance creation!");
 
     // Assert disks are attached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
 
     assert_eq!(disks.len(), 8);
     for disk in &disks {
@@ -2742,10 +2578,7 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 
     // Stop and delete instance
-    let instance_url = format!(
-        "/organizations/{}/projects/{}/instances/nfs",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let instance_url = format!("/v1/instances/nfs?{}", get_project_selector());
 
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -2762,19 +2595,11 @@ async fn test_disks_detached_when_instance_destroyed(
         .unwrap();
 
     // Assert disks are detached
-    let url_project_disks = format!(
-        "/organizations/{}/projects/{}/disks",
-        ORGANIZATION_NAME, PROJECT_NAME,
-    );
-    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
-        client,
-        &url_project_disks,
-        "",
-        None,
-    )
-    .await
-    .expect("failed to list disks")
-    .all_items;
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
 
     assert_eq!(disks.len(), 8);
     for disk in &disks {
@@ -2792,7 +2617,6 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
     create_org_and_project(client).await;
 
     // Attempt to create the instance, observe a server error.
-    let instances_url = get_instances_url();
     let instance_name = "just-rainsticks";
     let instance = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2812,7 +2636,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &instances_url)
+        RequestBuilder::new(client, Method::POST, &get_instances_url())
             .body(Some(&instance))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -2842,7 +2666,6 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     create_org_and_project(client).await;
 
     // Attempt to create the instance, observe a server error.
-    let instances_url = get_instances_url();
     let instance_name = "just-rainsticks";
     let instance = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2862,7 +2685,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     };
 
     let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &instances_url)
+        RequestBuilder::new(client, Method::POST, &get_instances_url())
             .body(Some(&instance))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -2980,10 +2803,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // Create test organization and projects.
     create_organization(&client, ORGANIZATION_NAME).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two IP pools.
@@ -3026,18 +2845,21 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         disks: vec![],
         start: true,
     };
-    let response =
-        NexusRequest::objects_post(client, &url_instances, &instance_params)
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("Failed to create first instance");
+    let response = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create first instance");
     let _ = response.parsed_body::<Instance>().unwrap();
 
     // Fetch the external IPs for the instance.
     let ips_url = format!(
-        "{}/{}/external-ips",
-        url_instances, instance_params.identity.name
+        "/v1/instances/{}/external-ips?organization={}&project={}",
+        instance_params.identity.name, ORGANIZATION_NAME, PROJECT_NAME
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3074,7 +2896,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .id;
     grant_iam(
         client,
-        "/system/silos/authz",
+        "/v1/system/silos/authz",
         SiloRole::Collaborator,
         user_id,
         AuthnMode::PrivilegedUser,
@@ -3087,7 +2909,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     // Create test organization and projects.
     NexusRequest::objects_post(
         client,
-        "/organizations",
+        "/v1/organizations",
         &params::OrganizationCreate {
             identity: IdentityMetadataCreateParams {
                 name: ORGANIZATION_NAME.parse().unwrap(),
@@ -3103,7 +2925,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to parse new Organization");
     NexusRequest::objects_post(
         client,
-        &format!("/organizations/{ORGANIZATION_NAME}/projects"),
+        &format!("/v1/projects?organization={ORGANIZATION_NAME}"),
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: PROJECT_NAME.parse().unwrap(),
@@ -3136,11 +2958,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         disks: vec![],
         start: true,
     };
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
-    NexusRequest::objects_post(client, &url_instances, &instance_params)
+    NexusRequest::objects_post(client, &get_instances_url(), &instance_params)
         .authn_as(AuthnMode::SiloUser(user_id))
         .execute()
         .await

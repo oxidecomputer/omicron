@@ -10,7 +10,6 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -115,48 +114,51 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-    let block_size: db::model::BlockSize = match &params
-        .create_params
-        .disk_source
-    {
-        params::DiskSource::Blank { block_size } => {
-            db::model::BlockSize::try_from(*block_size).map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
-            })?
-        }
-        params::DiskSource::Snapshot { snapshot_id } => {
-            let (.., db_snapshot) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .snapshot_id(*snapshot_id)
-                    .fetch()
-                    .await
-                    .map_err(ActionError::action_failed)?;
+    let block_size: db::model::BlockSize =
+        match &params.create_params.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                    ActionError::action_failed(Error::internal_error(
+                        &e.to_string(),
+                    ))
+                })?
+            }
+            params::DiskSource::Snapshot { snapshot_id } => {
+                let (.., db_snapshot) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .snapshot_id(*snapshot_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
 
-            db_snapshot.block_size
-        }
-        params::DiskSource::Image { image_id: _ } => {
-            // Until we implement project images, do not allow disks to be
-            // created from a project image.
-            return Err(ActionError::action_failed(Error::InvalidValue {
-                label: String::from("image"),
-                message: String::from("project image are not yet supported"),
-            }));
-        }
-        params::DiskSource::GlobalImage { image_id } => {
-            let (.., global_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .global_image_id(*image_id)
-                    .fetch()
-                    .await
-                    .map_err(ActionError::action_failed)?;
+                db_snapshot.block_size
+            }
+            params::DiskSource::Image { image_id } => {
+                let (.., image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
 
-            global_image.block_size
-        }
-    };
+                image.block_size
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., global_image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .global_image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
+
+                global_image.block_size
+            }
+        };
 
     let disk = db::model::Disk::new(
         disk_id,
@@ -213,7 +215,10 @@ async fn sdc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -251,7 +256,10 @@ async fn sdc_account_space(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -272,7 +280,10 @@ async fn sdc_account_space_undo(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -308,7 +319,10 @@ async fn sdc_regions_ensure(
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match &params.create_params.disk_source {
@@ -354,15 +368,48 @@ async fn sdc_regions_ensure(
                     },
                 )?))
             }
-            params::DiskSource::Image { image_id: _ } => {
-                // Until we implement project images, do not allow disks to be
-                // created from a project image.
-                return Err(ActionError::action_failed(Error::InvalidValue {
-                    label: String::from("image"),
-                    message: String::from(
-                        "project image are not yet supported",
-                    ),
-                }));
+            params::DiskSource::Image { image_id } => {
+                debug!(log, "grabbing image {}", image_id);
+
+                let (.., image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
+
+                debug!(log, "retrieved project image {}", image.id());
+
+                debug!(
+                    log,
+                    "grabbing global image {} volume {}",
+                    image.id(),
+                    image.volume_id
+                );
+
+                let volume = osagactx
+                    .datastore()
+                    .volume_checkout(image.volume_id)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+                debug!(
+                    log,
+                    "grabbed volume {}, with data {}",
+                    volume.id(),
+                    volume.data()
+                );
+
+                Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                    |e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &format!(
+                                "failed to deserialize volume data: {}",
+                                e,
+                            ),
+                        ))
+                    },
+                )?))
             }
             params::DiskSource::GlobalImage { image_id } => {
                 debug!(log, "grabbing image {}", image_id);
@@ -521,7 +568,10 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
@@ -533,7 +583,10 @@ async fn sdc_finalize_disk_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
@@ -637,7 +690,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
-        context::OpContext, db::datastore::DataStore, external_api::params,
+        db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -645,6 +698,7 @@ pub(crate) mod test {
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
@@ -781,9 +835,11 @@ pub(crate) mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::virtual_disk_bytes_provisioned.ne(0))

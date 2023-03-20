@@ -10,11 +10,6 @@
 /*
  * Important CockroachDB notes:
  *
- *    The syntax STRING(63) means a Unicode string with at most 63 code points,
- *    not 63 bytes.  In many cases, Nexus itself will validate a string's
- *    byte count or code points, so it's still reasonable to limit ourselves to
- *    powers of two (or powers-of-two-minus-one) to improve storage utilization.
- *
  *    For timestamps, CockroachDB's docs recommend TIMESTAMPTZ rather than
  *    TIMESTAMP.  This does not change what is stored with each datum, but
  *    rather how it's interpreted when clients use it.  It should make no
@@ -138,6 +133,15 @@ CREATE TABLE omicron.public.service (
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
     sled_id
+);
+
+-- Extended information for services where "service.kind = nexus"
+-- The "id" columng of this table should match "id" column of the
+-- "omicron.public.service" table exactly.
+CREATE TABLE omicron.public.nexus_service (
+    id UUID PRIMARY KEY,
+    -- The external IP address used for Nexus' external interface.
+    external_ip_id UUID NOT NULL
 );
 
 CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
@@ -873,7 +877,8 @@ CREATE TABLE omicron.public.image (
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    os STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
@@ -885,6 +890,7 @@ CREATE UNIQUE INDEX on omicron.public.image (
 ) WHERE
     time_deleted is NULL;
 
+/* TODO-v1: Delete this after migration */
 CREATE TABLE omicron.public.global_image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1537,7 +1543,20 @@ CREATE INDEX ON omicron.public.console_session (
 /*******************************************************************/
 
 CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
-    'zone'
+    -- Sled artifacts
+    'gimlet_sp',
+    'gimlet_rot',
+    'host',
+    'trampoline',
+    'control_plane',
+
+    -- PSC artifacts
+    'psc_sp',
+    'psc_rot',
+
+    -- Switch artifacts
+    'switch_sp',
+    'switch_rot'
 );
 
 CREATE TABLE omicron.public.update_available_artifact (
@@ -1770,7 +1789,6 @@ CREATE TABLE omicron.public.device_auth_request (
 );
 
 -- Access tokens granted in response to successful device authorization flows.
--- TODO-security: expire tokens.
 CREATE TABLE omicron.public.device_access_token (
     token STRING(40) PRIMARY KEY,
     client_id UUID NOT NULL,

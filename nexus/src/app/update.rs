@@ -5,13 +5,13 @@
 //! Software Updates
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::UpdateArtifactKind;
+use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
@@ -121,7 +121,7 @@ impl super::Nexus {
                     .update_artifact(
                         &sled_agent_client::types::UpdateArtifactId {
                             name: artifact.name.clone(),
-                            version: artifact.version.clone(),
+                            version: artifact.version.0.clone().into(),
                             kind: artifact.kind.0.into(),
                         },
                     )
@@ -153,8 +153,8 @@ impl super::Nexus {
         let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
             .update_available_artifact_tuple(
                 &artifact.name,
-                &artifact.version,
-                UpdateArtifactKind(artifact.kind),
+                db::model::SemverVersion(artifact.version.clone()),
+                KnownArtifactKind(artifact.kind),
             )
             .fetch()
             .await?;
@@ -579,11 +579,12 @@ impl super::Nexus {
 
 #[cfg(test)]
 mod tests {
-    use std::{assert_matches::assert_matches, num::NonZeroU32};
+    use assert_matches::assert_matches;
+    use std::num::NonZeroU32;
 
-    use crate::context::OpContext;
     use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
         params::{

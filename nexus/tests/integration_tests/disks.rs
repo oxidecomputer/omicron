@@ -14,6 +14,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -36,7 +37,7 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
-use omicron_nexus::{context::OpContext, external_api::params, Nexus};
+use omicron_nexus::{external_api::params, Nexus};
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 use sled_agent_client::TestInterfaces as _;
@@ -979,8 +980,7 @@ async fn test_disk_virtual_provisioning_collection(
     // This disk should appear in the accounting information for the project
     // in which it was allocated
     let disk_size = ByteCount::from_gibibytes_u32(1);
-    let disks_url =
-        format!("/organizations/{}/projects/{}/disks", ORG_NAME, PROJECT_NAME);
+    let disks_url = get_disks_url();
     let disk_one = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
@@ -1048,7 +1048,7 @@ async fn test_disk_virtual_provisioning_collection(
     // Each project should be using "one disk" of real storage, but the org
     // should be using both.
     let disks_url = format!(
-        "/organizations/{}/projects/{}/disks",
+        "/v1/disks?organization={}&project={}",
         ORG_NAME, PROJECT_NAME_2
     );
     let disk_one = params::DiskCreate {
@@ -1099,7 +1099,10 @@ async fn test_disk_virtual_provisioning_collection(
 
     // Delete the disk we just created, observe the utilization drop
     // accordingly.
-    let disk_url = format!("{}/{}", disks_url, "disk-two");
+    let disk_url = format!(
+        "/v1/disks/{}?organization={}&project={}",
+        "disk-two", ORG_NAME, PROJECT_NAME_2
+    );
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1397,18 +1400,21 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
-    let metric_url = |metric_type: &str| {
-        let disk_url = format!("/organizations/{ORG_NAME}/projects/{PROJECT_NAME}/disks/{DISK_NAME}");
+    let metric_url = |metric: &str| {
         format!(
-            "{disk_url}/metrics/{metric_type}?start_time={:?}&end_time={:?}",
+            "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&organization={}&project={}",
+            DISK_NAME,
+            metric,
             Utc::now() - chrono::Duration::seconds(10),
             Utc::now() + chrono::Duration::seconds(10),
+            ORG_NAME,
+            PROJECT_NAME,
         )
     };
     // Check the utilization info for the whole project too.
     let utilization_url = |id: Uuid| {
         format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
             Utc::now() - chrono::Duration::seconds(10),
             Utc::now() + chrono::Duration::seconds(10),
             id,
@@ -1466,14 +1472,14 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     create_org_and_project(client).await;
     create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
-    let disk_url = format!(
-        "/organizations/{ORG_NAME}/projects/{PROJECT_NAME}/disks/{DISK_NAME}"
-    );
 
     let oximeter = &cptestctx.oximeter;
     oximeter.force_collect().await;
     for metric in &ALL_METRICS {
-        let collection_url = format!("{}/metrics/{metric}", disk_url);
+        let collection_url = format!(
+            "/v1/disks/{}/metrics/{}?organization={}&project={}",
+            DISK_NAME, metric, ORG_NAME, PROJECT_NAME
+        );
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",
             Utc::now() - chrono::Duration::seconds(2),
@@ -1482,7 +1488,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
 
         objects_list_page_authz::<Measurement>(
             client,
-            &format!("{collection_url}?{initial_params}"),
+            &format!("{collection_url}&{initial_params}"),
         )
         .await;
 

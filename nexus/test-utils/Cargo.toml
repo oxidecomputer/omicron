@@ -8,14 +8,16 @@ license = "MPL-2.0"
 anyhow.workspace = true
 bytes.workspace = true
 chrono.workspace = true
+crucible-agent-client.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 headers.workspace = true
 http.workspace = true
 hyper.workspace = true
-internal-dns-client.workspace = true
+nexus-db-queries.workspace = true
 nexus-test-interface.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
-omicron-nexus.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oximeter.workspace = true
@@ -27,6 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_urlencoded.workspace = true
 slog.workspace = true
+tempfile.workspace = true
 uuid.workspace = true
 
 [build-dependencies]

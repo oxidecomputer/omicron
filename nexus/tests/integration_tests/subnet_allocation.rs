@@ -89,7 +89,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
+        "/v1/instances?organization={}&project={}",
         organization_name, project_name
     );
 
@@ -97,10 +97,11 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // to test address exhaustion.
     let subnet_size =
         cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
-    let url_subnets = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets",
+    let vpc_selector = format!(
+        "organization={}&project={}&vpc=default",
         organization_name, project_name
     );
+    let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
     let subnet = Ipv4Network::new(network_address, subnet_size)
@@ -114,7 +115,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         ipv4_block: Ipv4Net(subnet),
         ipv6_block: None,
     };
-    NexusRequest::objects_post(client, &url_subnets, &Some(&subnet_create))
+    NexusRequest::objects_post(client, &subnets_url, &Some(&subnet_create))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -164,18 +165,21 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "No available IP addresses for interface");
 
     // Verify the subnet lists the two addresses as in use
-    let url_ips = format!("{}/{}/network-interfaces", url_subnets, subnet_name);
+    let url_ips = format!(
+        "/v1/vpc-subnets/{}/network-interfaces?{}",
+        subnet_name, vpc_selector
+    );
     let mut network_interfaces =
         objects_list_page_authz::<NetworkInterface>(client, &url_ips)
             .await
             .items;
-    assert_eq!(network_interfaces.len(), subnet_size as usize);
+    assert_eq!(network_interfaces.len(), subnet_size);
 
     // Sort by IP address to simplify the checks
     network_interfaces.sort_by(|a, b| a.ip.cmp(&b.ip));
     for (iface, addr) in network_interfaces
         .iter()
-        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES as usize))
+        .zip(subnet.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES))
     {
         assert_eq!(
             iface.ip,

@@ -5,28 +5,39 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
+camino.workspace = true
 clap.workspace = true
 debug-ignore.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-messages.workspace = true
+hex.workspace = true
 http.workspace = true
 hyper.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
+sha2.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+tough.workspace = true
 snafu.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
+installinator-common.workspace = true
 omicron-common.workspace = true
+tufaceous-lib.workspace = true
 
 [[bin]]
 name = "wicketd"
@@ -34,9 +45,15 @@ doc = false
 
 [dev-dependencies]
 expectorate.workspace = true
+fs-err.workspace = true
+gateway-test-utils.workspace = true
 http.workspace = true
+installinator-artifact-client.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 serde_json.workspace = true
 subprocess.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+tufaceous.workspace = true
+wicketd-client.workspace = true

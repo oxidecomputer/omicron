@@ -5,13 +5,22 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use buf_list::BufList;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
+use installinator_common::CompletionEventKind;
+use omicron_common::{
+    api::internal::nexus::KnownArtifactKind,
+    update::{ArtifactHashId, ArtifactKind},
+};
 use slog::Drain;
-use tokio::io::AsyncWriteExt;
+use tokio::sync::mpsc;
 
-use crate::peers::{ArtifactId, DiscoveryMechanism, FetchedArtifact, Peers};
+use crate::{
+    artifact::ArtifactIdOpts,
+    peers::{DiscoveryMechanism, FetchedArtifact, Peers},
+    reporter::{ProgressReporter, ReportEvent},
+    write::{ArtifactWriter, WriteDestination},
+};
 
 /// Installinator app.
 #[derive(Debug, Parser)]
@@ -28,6 +37,9 @@ impl InstallinatorApp {
 
         match self.subcommand {
             InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
+            InstallinatorCommand::DebugHardwareScan(opts) => {
+                opts.exec(log).await
+            }
             InstallinatorCommand::Install(opts) => opts.exec(log).await,
         }
     }
@@ -55,6 +67,8 @@ impl InstallinatorApp {
 enum InstallinatorCommand {
     /// Discover peers on the bootstrap network.
     DebugDiscover(DebugDiscoverOpts),
+    /// Scan hardware to find the target M.2 device.
+    DebugHardwareScan(DebugHardwareScan),
     /// Perform the installation.
     Install(InstallOpts),
 }
@@ -87,84 +101,184 @@ struct DiscoverOpts {
     mechanism: DiscoveryMechanism,
 }
 
+/// Perform a scan of the device hardware looking for the target M.2.
+#[derive(Debug, Args)]
+#[command(version)]
+struct DebugHardwareScan {}
+
+impl DebugHardwareScan {
+    async fn exec(self, log: slog::Logger) -> Result<()> {
+        // Finding the write destination from the gimlet hardware logs details
+        // about what it's doing sufficiently for this subcommand; just create a
+        // write destination and then discard it.
+        _ = WriteDestination::from_hardware(&log)?;
+        Ok(())
+    }
+}
+
 #[derive(Debug, Args)]
 #[command(version)]
 struct InstallOpts {
     #[command(flatten)]
     discover_opts: DiscoverOpts,
 
-    artifact_id: ArtifactId,
+    /// Artifact ID options
+    #[command(flatten)]
+    artifact_ids: ArtifactIdOpts,
+
+    /// If true, perform sled-agent-like bootstrapping operations on startup
+    /// (e.g., configure and enable maghemite).
+    #[clap(long)]
+    bootstrap_sled: bool,
+
+    /// If true, do not exit after successful completion (e.g., to continue
+    /// running as an smf service).
+    #[clap(long)]
+    stay_alive: bool,
+
+    /// Install on a gimlet's M.2 drives, found via scanning for hardware.
+    ///
+    /// WARNING: This will overwrite the boot image slice of both M.2 drives, if
+    /// present!
+    #[clap(long)]
+    install_on_gimlet: bool,
 
     // TODO: checksum?
 
     // The destination to write to.
-    destination: Utf8PathBuf,
+    #[clap(
+        required_unless_present = "install_on_gimlet",
+        conflicts_with = "install_on_gimlet"
+    )]
+    destination: Option<Utf8PathBuf>,
 }
 
 impl InstallOpts {
     async fn exec(self, log: slog::Logger) -> Result<()> {
-        // Assume that buffering up the entire artifact in memory is OK, because we expect to have
-        // much more RAM available than the size of the host image. (If this changes in the future,
-        // we'll need to have some sort of streaming here.)
-        let artifact = FetchedArtifact::loop_fetch_from_peers(
-            &log,
-            || {
-                // TODO: discover nodes via the bootstrap network
-                async {
+        if self.bootstrap_sled {
+            crate::bootstrap::bootstrap_sled(log.clone()).await?;
+        }
+
+        let image_id = self.artifact_ids.resolve()?;
+
+        let host_phase_2_id = ArtifactHashId {
+            // TODO: currently we're assuming that wicket will unpack the host
+            // phase 2 image. We may instead have the installinator do it.
+            // kind: KnownArtifactKind::Host.into(),
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: image_id.host_phase_2,
+        };
+
+        let discovery = self.discover_opts.mechanism.clone();
+        let discovery_log = log.clone();
+        let (progress_reporter, event_sender) =
+            ProgressReporter::new(&log, image_id.update_id, move || {
+                let log = discovery_log.clone();
+                let discovery = discovery.clone();
+                async move {
                     Ok(Peers::new(
                         &log,
-                        self.discover_opts
-                            .mechanism
-                            .discover_peers(&log)
-                            .await?,
+                        discovery.discover_peers(&log).await?,
                         Duration::from_secs(10),
                     ))
                 }
-            },
-            &self.artifact_id,
+            });
+        let progress_handle = progress_reporter.start();
+
+        let host_phase_2_artifact = fetch_artifact(
+            &host_phase_2_id,
+            &self.discover_opts.mechanism,
+            &log,
+            &event_sender,
         )
         .await?;
 
-        slog::info!(
-            log,
-            "for artifact {}, fetched {} bytes from {}, writing to {}",
-            self.artifact_id,
-            artifact.artifact.num_bytes(),
-            artifact.addr,
-            self.destination,
+        let control_plane_id = ArtifactHashId {
+            kind: KnownArtifactKind::ControlPlane.into(),
+            hash: image_id.control_plane,
+        };
+
+        let control_plane_artifact = fetch_artifact(
+            &control_plane_id,
+            &self.discover_opts.mechanism,
+            &log,
+            &event_sender,
+        )
+        .await?;
+
+        let destination = if self.install_on_gimlet {
+            WriteDestination::from_hardware(&log)?
+        } else {
+            // clap ensures `self.destinatino` is not `None` if
+            // `install_on_gimlet` is false.
+            let destination = self.destination.as_ref().unwrap();
+            WriteDestination::in_directory(destination)?
+        };
+
+        let mut writer = ArtifactWriter::new(
+            &host_phase_2_id,
+            &host_phase_2_artifact.artifact,
+            &control_plane_id,
+            &control_plane_artifact.artifact,
+            destination,
         );
 
-        // TODO: add retries to this?
-        write_artifact(&self.artifact_id, artifact.artifact, &self.destination)
-            .await?;
+        writer.write(&log, &event_sender).await;
+
+        // TODO: verify artifact was correctly written out to disk.
+
+        // Drop the event sender: this signals completion.
+        _ = event_sender
+            .send(ReportEvent::Completion(CompletionEventKind::Completed))
+            .await;
+        std::mem::drop(event_sender);
+
+        // Wait for all progress reports to be sent.
+        progress_handle.await.context("progress reporter to complete")?;
+
+        if self.stay_alive {
+            loop {
+                slog::info!(log, "installation complete; sleeping");
+                tokio::time::sleep(Duration::from_secs(60)).await;
+            }
+        }
 
         Ok(())
     }
 }
 
-async fn write_artifact(
-    artifact_id: &ArtifactId,
-    mut artifact: BufList,
-    destination: &Utf8Path,
-) -> Result<()> {
-    let mut file = tokio::fs::OpenOptions::new()
-        // TODO: do we want create = true? Maybe only if writing to a file and not an M.2.
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(destination)
-        .await
-        .with_context(|| {
-            format!("failed to open destination `{destination}` for writing")
-        })?;
+async fn fetch_artifact(
+    id: &ArtifactHashId,
+    discovery: &DiscoveryMechanism,
+    log: &slog::Logger,
+    event_sender: &mpsc::Sender<ReportEvent>,
+) -> Result<FetchedArtifact> {
+    // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
+    // out at some point.
+    let log = log.new(slog::o!("artifact" => format!("{id:?}")));
+    let artifact = FetchedArtifact::loop_fetch_from_peers(
+        &log,
+        || async {
+            Ok(Peers::new(
+                &log,
+                discovery.discover_peers(&log).await?,
+                Duration::from_secs(10),
+            ))
+        },
+        id,
+        event_sender,
+    )
+    .await
+    .with_context(|| format!("error fetching image with id {id:?}"))?;
 
-    let num_bytes = artifact.num_bytes();
+    slog::info!(
+        log,
+        "fetched {} bytes from {}",
+        artifact.artifact.num_bytes(),
+        artifact.addr,
+    );
 
-    file.write_all_buf(&mut artifact).await.with_context(|| {
-        format!("failed to write artifact {artifact_id} ({num_bytes} bytes) to destination `{destination}`")
-    })?;
-
-    Ok(())
+    Ok(artifact)
 }
 
 pub(crate) fn stderr_env_drain(

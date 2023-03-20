@@ -21,6 +21,7 @@ omicron-common.workspace = true
 once_cell.workspace = true
 schemars.workspace = true
 serde.workspace = true
+serde_human_bytes.workspace = true
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true
@@ -35,6 +36,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+gateway-test-utils.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

@@ -288,7 +288,7 @@
     "/sp/{type}/{slot}/component/{component}": {
       "get": {
         "summary": "Get info for an SP component",
-        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.\nAs communication with SPs maybe unreliable, consumers may specify a timeout to override the default. This interface will return an error when the timeout is reached.",
+        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.",
         "operationId": "sp_component_get",
         "parameters": [
           {
@@ -442,6 +442,60 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/caboose": {
+      "get": {
+        "summary": "Get the caboose of an SP component",
+        "description": "Not all components have a caboose.",
+        "operationId": "sp_component_caboose_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentCaboose"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -625,13 +679,35 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "firmware_slot",
+            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/octet-stream": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateBody"
+                "type": "string",
+                "format": "binary"
               }
             }
           },
@@ -751,6 +827,86 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/host-phase2-progress": {
+      "get": {
+        "summary": "Get the most recent host phase2 request we've seen from the target SP.",
+        "description": "This method can be used as an indirect progress report for how far along a host is when it is booting via the MGS -> SP -> UART recovery path. This path is used to install the trampoline image containing installinator to recover a sled.",
+        "operationId": "sp_host_phase2_progress_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostPhase2Progress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Clear the most recent host phase2 request we've seen from the target SP.",
+        "operationId": "sp_host_phase2_progress_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1078,6 +1234,25 @@
       }
     },
     "schemas": {
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -1097,12 +1272,65 @@
           "request_id"
         ]
       },
+      "HostPhase2Progress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "age": {
+                "$ref": "#/components/schemas/Duration"
+              },
+              "image_id": {
+                "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
+              },
+              "offset": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              },
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "available"
+                ]
+              },
+              "total_size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "age",
+              "image_id",
+              "offset",
+              "progress",
+              "total_size"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "progress": {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              }
+            },
+            "required": [
+              "progress"
+            ]
+          }
+        ]
+      },
       "HostPhase2RecoveryImageId": {
         "description": "Identity of a host phase2 recovery image.",
         "type": "object",
         "properties": {
           "sha256_hash": {
-            "type": "string"
+            "type": "string",
+            "format": "hex string (32 bytes)"
           }
         },
         "required": [
@@ -1175,29 +1403,22 @@
         "type": "object",
         "properties": {
           "control_plane": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
           },
           "host_phase_2": {
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            },
-            "minItems": 32,
-            "maxItems": 32
+            "type": "string",
+            "format": "hex string (32 bytes)"
+          },
+          "update_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
           "control_plane",
-          "host_phase_2"
+          "host_phase_2",
+          "update_id"
         ]
       },
       "LinkStatus": {
@@ -1916,6 +2137,29 @@
               "state"
             ]
           }
+        ]
+      },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
         ]
       },
       "SpComponentDetails": {
@@ -2643,36 +2887,6 @@
         },
         "required": [
           "id"
-        ]
-      },
-      "UpdateBody": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "description": "An identifier for this update.\n\nThis ID applies to this single instance of the API call; it is not an ID of `image` itself. Multiple API calls with the same `image` should use different IDs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "image": {
-            "description": "The binary blob containing the update image (component-specific).",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "slot": {
-            "description": "The update slot to apply this image to. Supply 0 if the component only has one update slot.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "id",
-          "image",
-          "slot"
         ]
       },
       "UpdatePreparationProgress": {

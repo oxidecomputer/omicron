@@ -8,7 +8,6 @@ use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
 use crate::config;
-use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -17,6 +16,7 @@ use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
@@ -34,10 +34,10 @@ mod image;
 mod instance;
 mod ip_pool;
 mod metrics;
+mod network_interface;
 mod organization;
 mod oximeter;
 mod project;
-pub mod provisioning;
 mod rack;
 pub mod saga;
 mod session;
@@ -62,7 +62,7 @@ pub(crate) const MAX_DISKS_PER_INSTANCE: u32 = 8;
 
 pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
-// TODO-completness: Support multiple external IPs
+// TODO-completeness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
 
 pub(crate) struct ExternalServers {
@@ -162,7 +162,7 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
+    resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -178,7 +178,7 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<internal_dns_client::multiclient::Resolver>>,
+        resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
@@ -418,9 +418,9 @@ impl Nexus {
     /// _existence_ of this endpoint is not a secret.  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
@@ -440,9 +440,9 @@ impl Nexus {
     /// of a specific resource of type "my-new-kind-of-resource").  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
@@ -482,10 +482,10 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
@@ -512,10 +512,10 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
@@ -605,12 +605,12 @@ impl Nexus {
 
     pub async fn set_resolver(
         &self,
-        resolver: internal_dns_client::multiclient::Resolver,
+        resolver: dns_service_client::multiclient::Resolver,
     ) {
         *self.resolver.lock().await = resolver;
     }
 
-    pub async fn resolver(&self) -> internal_dns_client::multiclient::Resolver {
+    pub async fn resolver(&self) -> dns_service_client::multiclient::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()
     }

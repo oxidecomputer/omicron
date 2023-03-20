@@ -4,9 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceSerialConsoleData,
-    InstanceSerialConsoleRequest, VpcFirewallRulesEnsureBody,
+    InstanceSerialConsoleRequest,
 };
 use crate::serial::ByteOffset;
 use dropshot::endpoint;
@@ -140,12 +141,14 @@ async fn update_artifact(
     rqctx: RequestContext<Arc<SledAgent>>,
     artifact: TypedBody<UpdateArtifactId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    crate::updates::download_artifact(
-        artifact.into_inner(),
-        rqctx.context().nexus_client.as_ref(),
-    )
-    .await
-    .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+    let sa = rqctx.context();
+    sa.updates()
+        .download_artifact(
+            artifact.into_inner(),
+            rqctx.context().nexus_client.as_ref(),
+        )
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
     Ok(HttpResponseUpdatedNoContent())
 }
 

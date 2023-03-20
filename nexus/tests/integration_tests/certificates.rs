@@ -33,6 +33,11 @@ pub struct CertificateChain {
 
 impl CertificateChain {
     pub fn new() -> Self {
+        let params = rcgen::CertificateParams::new(vec!["localhost".into()]);
+        Self::with_params(params)
+    }
+
+    pub fn with_params(params: rcgen::CertificateParams) -> Self {
         let mut root_params = rcgen::CertificateParams::new(vec![]);
         root_params.is_ca =
             rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
@@ -46,7 +51,6 @@ impl CertificateChain {
             rcgen::Certificate::from_params(intermediate_params)
                 .expect("failed to generate intermediate keys");
 
-        let params = rcgen::CertificateParams::new(vec!["localhost".into()]);
         let end_keypair = rcgen::Certificate::from_params(params)
             .expect("failed to generate end-entity keys");
 
@@ -69,12 +73,12 @@ impl CertificateChain {
         Self { root_cert, intermediate_cert, end_cert, end_keypair }
     }
 
-    fn end_cert_private_key(&self) -> rustls::PrivateKey {
-        rustls::PrivateKey(self.end_keypair.serialize_private_key_der())
+    pub fn end_cert_private_key_as_der(&self) -> Vec<u8> {
+        self.end_keypair.serialize_private_key_der()
     }
 
     pub fn end_cert_private_key_as_pem(&self) -> Vec<u8> {
-        tls_key_to_pem(&self.end_cert_private_key())
+        self.end_keypair.serialize_private_key_pem().into_bytes()
     }
 
     fn cert_chain(&self) -> Vec<rustls::Certificate> {
@@ -154,21 +158,7 @@ fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
     serialized_certs
 }
 
-fn tls_key_to_pem(key: &rustls::PrivateKey) -> Vec<u8> {
-    let mut serialized_key = vec![];
-    let mut key_writer = std::io::BufWriter::new(&mut serialized_key);
-    let encoded_key = pem::encode(&pem::Pem {
-        tag: "PRIVATE KEY".to_string(),
-        contents: key.0.clone(),
-    });
-    key_writer
-        .write_all(encoded_key.as_bytes())
-        .expect("failed to serialize key");
-    drop(key_writer);
-    serialized_key
-}
-
-const CERTS_URL: &str = "/system/certificates";
+const CERTS_URL: &str = "/v1/system/certificates";
 const CERT_NAME: &str = "my-certificate";
 const CERT_NAME2: &str = "my-other-certificate";
 
@@ -384,13 +374,27 @@ async fn test_cannot_create_certificate_with_bad_key(
     let client = &cptestctx.external_client;
 
     let chain = CertificateChain::new();
-    let (cert, mut key) =
-        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+    let (cert, der_key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_der());
 
-    for i in 0..key.len() {
-        key[i] = !key[i];
-    }
-    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+    // Cannot create a certificate with a bad key (e.g. not PEM encoded)
+    cert_create_expect_error(&client, CERT_NAME, cert, der_key).await;
+}
+
+#[nexus_test]
+async fn test_cannot_create_certificate_with_mismatched_key(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let chain1 = CertificateChain::new();
+    let cert1 = chain1.cert_chain_as_pem();
+
+    let chain2 = CertificateChain::new();
+    let key2 = chain2.end_cert_private_key_as_pem();
+
+    // Cannot create a certificate with a key that doesn't match the cert
+    cert_create_expect_error(&client, CERT_NAME, cert1, key2).await;
 }
 
 #[nexus_test]
@@ -406,5 +410,21 @@ async fn test_cannot_create_certificate_with_bad_cert(
     for i in 0..cert.len() {
         cert[i] = !cert[i];
     }
+    cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+}
+
+#[nexus_test]
+async fn test_cannot_create_certificate_with_expired_cert(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let mut params = rcgen::CertificateParams::new(vec!["localhost".into()]);
+    params.not_after = std::time::SystemTime::UNIX_EPOCH.into();
+
+    let chain = CertificateChain::with_params(params);
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+
     cert_create_expect_error(&client, CERT_NAME, cert, key).await;
 }

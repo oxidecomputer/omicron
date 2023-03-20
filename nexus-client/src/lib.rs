@@ -173,16 +173,38 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::UpdateArtifactKind>
-    for types::UpdateArtifactKind
+impl From<omicron_common::api::external::SemverVersion>
+    for types::SemverVersion
+{
+    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
+        s.to_string().parse().expect(
+            "semver should generate output that matches validation regex",
+        )
+    }
+}
+
+impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
+    for types::KnownArtifactKind
 {
     fn from(
-        s: omicron_common::api::internal::nexus::UpdateArtifactKind,
+        s: omicron_common::api::internal::nexus::KnownArtifactKind,
     ) -> Self {
-        use omicron_common::api::internal::nexus::UpdateArtifactKind;
+        use omicron_common::api::internal::nexus::KnownArtifactKind;
 
         match s {
-            UpdateArtifactKind::Zone => types::UpdateArtifactKind::Zone,
+            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
+            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
+            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
+            KnownArtifactKind::Trampoline => {
+                types::KnownArtifactKind::Trampoline
+            }
+            KnownArtifactKind::ControlPlane => {
+                types::KnownArtifactKind::ControlPlane
+            }
+            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
+            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
+            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
+            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
         }
     }
 }

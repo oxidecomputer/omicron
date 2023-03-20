@@ -285,13 +285,13 @@ impl JsonSchema for Name {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(63),
-                min_length: None,
+                min_length: Some(1),
                 pattern: Some(
                     concat!(
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]"#,
+                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
                         r#"$"#,
                     )
                     .to_string(),
@@ -376,7 +376,19 @@ impl JsonSchema for NameOrId {
 
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Display,
+    FromStr,
+)]
 #[display("{0}")]
 pub struct SemverVersion(pub semver::Version);
 
@@ -384,6 +396,11 @@ impl SemverVersion {
     pub fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self(semver::Version::new(major, minor, patch))
     }
+
+    /// This is the official ECMAScript-compatible validation regex for
+    /// semver:
+    /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -397,7 +414,7 @@ impl JsonSchema for SemverVersion {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
+                pattern: Some(Self::VALIDATION_REGEX.to_owned()),
                 ..Default::default()
             })),
             ..Default::default()
@@ -480,9 +497,6 @@ impl JsonSchema for RoleName {
 /// can fail (if the value is larger than i64::MAX).  We provide all of these for
 /// consumers' convenience.
 // TODO-cleanup This could benefit from a more complete implementation.
-// TODO-correctness RFD 4 requires that this be a multiple of 256 MiB.  We'll
-// need to write a validator for that.
-// /
 //
 // The maximum byte count of i64::MAX comes from the fact that this is stored in
 // the database as an i64.  Constraining it here ensures that we can't fail to
@@ -1341,6 +1355,15 @@ impl From<Ipv6Addr> for IpNet {
     }
 }
 
+impl From<IpAddr> for IpNet {
+    fn from(n: IpAddr) -> IpNet {
+        match n {
+            IpAddr::V4(v4) => IpNet::from(v4),
+            IpAddr::V6(v6) => IpNet::from(v6),
+        }
+    }
+}
+
 impl std::fmt::Display for IpNet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1553,24 +1576,6 @@ pub struct RouterRoute {
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
 
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Create-time parameters for a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteCreateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    pub target: RouteTarget,
-    pub destination: RouteDestination,
-}
-
-/// Updateable properties of a [`RouterRoute`]
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RouterRouteUpdateParams {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
     pub target: RouteTarget,
     pub destination: RouteDestination,
 }
@@ -2096,6 +2101,7 @@ mod test {
     use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
+    use super::SemverVersion;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -2109,6 +2115,50 @@ mod test {
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::str::FromStr;
+
+    #[test]
+    fn test_semver_validation() {
+        // Examples copied from
+        // https://github.com/dtolnay/semver/blob/cc2cfed67c17dfe6abae18726830bdb6d7cf740d/tests/test_version.rs#L13.
+        let valid = [
+            "1.2.3",
+            "1.2.3-alpha1",
+            "1.2.3+build5",
+            "1.2.3+5build",
+            "1.2.3-alpha1+build5",
+            "1.2.3-1.alpha1.9+build5.7.3aedf",
+            "1.2.3-0a.alpha1.9+05build.7.3aed",
+            "0.4.0-beta.1+0851523",
+            "1.1.0-beta-10",
+        ];
+        let invalid = [
+            // These examples are rejected by the validation regex.
+            "",
+            "1",
+            "1.2",
+            "1.2.3-",
+            "a.b.c",
+            "1.2.3 abc",
+            "1.2.3-01",
+        ];
+
+        let r = regress::Regex::new(SemverVersion::VALIDATION_REGEX)
+            .expect("validation regex is valid");
+        for input in valid {
+            let m = r
+                .find(input)
+                .unwrap_or_else(|| panic!("input {input} did not match regex"));
+            assert_eq!(m.start(), 0, "input {input} did not match start");
+            assert_eq!(m.end(), input.len(), "input {input} did not match end");
+        }
+
+        for input in invalid {
+            assert!(
+                r.find(input).is_none(),
+                "invalid input {input} should not match validation regex"
+            );
+        }
+    }
 
     #[test]
     fn test_name_parse() {
@@ -2150,6 +2200,7 @@ mod test {
 
         // Success cases
         let valid_names: Vec<&str> = vec![
+            "a",
             "abc",
             "abc-123",
             "a123",
@@ -2308,7 +2359,7 @@ mod test {
         assert_eq!(2793, tb3.to_whole_gibibytes());
         assert_eq!(2, tb3.to_whole_tebibytes());
 
-        let three_tebibytes = (3u64 * 1024 * 1024 * 1024 * 1024) as u64;
+        let three_tebibytes = 3u64 * 1024 * 1024 * 1024 * 1024;
         let tib3 = ByteCount::try_from(three_tebibytes).unwrap();
         assert_eq!(three_tebibytes, tib3.to_bytes());
         assert_eq!(3 * 1024 * 1024 * 1024, tib3.to_whole_kibibytes());

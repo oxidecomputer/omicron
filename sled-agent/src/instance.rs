@@ -5,17 +5,8 @@
 //! API for controlling a single instance.
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
-use crate::illumos::dladm::Etherstub;
-use crate::illumos::link::VnicAllocator;
-use crate::illumos::running_zone::{
-    InstalledZone, RunCommandError, RunningZone,
-};
-use crate::illumos::svc::wait_for_service;
-use crate::illumos::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::opte::PortManager;
-use crate::opte::PortTicket;
 use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
@@ -26,6 +17,15 @@ use crate::params::{
 use crate::serial::{ByteOffset, SerialConsoleBuffer};
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
+use illumos_utils::dladm::Etherstub;
+use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::PortManager;
+use illumos_utils::opte::PortTicket;
+use illumos_utils::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
+};
+use illumos_utils::svc::wait_for_service;
+use illumos_utils::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::InstanceState;
@@ -41,9 +41,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 #[cfg(test)]
-use crate::illumos::zone::MockZones as Zones;
+use illumos_utils::zone::MockZones as Zones;
 #[cfg(not(test))]
-use crate::illumos::zone::Zones;
+use illumos_utils::zone::Zones;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -51,7 +51,7 @@ pub enum Error {
     Timeout(String),
 
     #[error("Failed to create VNIC: {0}")]
-    VnicCreation(#[from] crate::illumos::dladm::CreateVnicError),
+    VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
     Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
@@ -69,28 +69,28 @@ pub enum Error {
     Migration(anyhow::Error),
 
     #[error(transparent)]
-    ZoneCommand(#[from] crate::illumos::running_zone::RunCommandError),
+    ZoneCommand(#[from] illumos_utils::running_zone::RunCommandError),
 
     #[error(transparent)]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("serde_json failure: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error(transparent)]
-    Opte(#[from] crate::opte::Error),
+    Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Serial console buffer: {0}")]
     Serial(#[from] crate::serial::Error),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns_client::multiclient::ResolveError),
+    ResolveError(#[from] dns_service_client::multiclient::ResolveError),
 
     #[error("Instance {0} not running!")]
     InstanceNotRunning(Uuid),
@@ -615,7 +615,7 @@ impl Instance {
             || async {
                 running_zone
                     .run_cmd(&[
-                        crate::illumos::zone::SVCCFG,
+                        illumos_utils::zone::SVCCFG,
                         "-s",
                         smf_service_name,
                         "add",
@@ -637,7 +637,7 @@ impl Instance {
 
         info!(inner.log, "Adding service property group 'config'");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "addpg",
@@ -647,7 +647,7 @@ impl Instance {
 
         info!(inner.log, "Setting server address property"; "address" => &server_addr);
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "setprop",
@@ -662,7 +662,7 @@ impl Instance {
             NEXUS_INTERNAL_PORT,
         );
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "setprop",
@@ -674,7 +674,7 @@ impl Instance {
 
         info!(inner.log, "Refreshing instance");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCCFG,
+            illumos_utils::zone::SVCCFG,
             "-s",
             &smf_instance_name,
             "refresh",
@@ -682,7 +682,7 @@ impl Instance {
 
         info!(inner.log, "Enabling instance");
         running_zone.run_cmd(&[
-            crate::illumos::zone::SVCADM,
+            illumos_utils::zone::SVCADM,
             "enable",
             "-t",
             &smf_instance_name,
@@ -869,12 +869,13 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::dladm::Etherstub;
     use crate::nexus::LazyNexusClient;
-    use crate::opte::PortManager;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
     use chrono::Utc;
+    use illumos_utils::dladm::Etherstub;
+    use illumos_utils::dladm::PhysicalLink;
+    use illumos_utils::opte::PortManager;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
@@ -949,8 +950,9 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let mac = MacAddr6::from([0u8; 6]);
+        let data_link = PhysicalLink("myphylink".to_string());
         let port_manager =
-            PortManager::new(log.new(slog::o!()), underlay_ip, mac);
+            PortManager::new(log.new(slog::o!()), data_link, underlay_ip, mac);
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();

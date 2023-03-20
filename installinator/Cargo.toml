@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
@@ -13,21 +14,35 @@ clap.workspace = true
 ddm-admin-client.workspace = true
 display-error-chain.workspace = true
 futures.workspace = true
+hex.workspace = true
+http.workspace = true
+illumos-utils.workspace = true
 installinator-artifact-client.workspace = true
+installinator-common.workspace = true
+ipcc-key-value.workspace = true
 itertools.workspace = true
 once_cell.workspace = true
+omicron-common.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sled-hardware.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+omicron-test-utils.workspace = true
+hex-literal.workspace = true
+partial-io.workspace = true
 proptest.workspace = true
+tempfile.workspace = true
 test-strategy.workspace = true
 tokio = { workspace = true, features = [ "test-util" ] }
+tokio-stream.workspace = true

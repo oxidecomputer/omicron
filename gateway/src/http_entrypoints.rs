@@ -12,6 +12,7 @@ mod conversions;
 use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
+use crate::http_err_with_message;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -19,6 +20,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
 use dropshot::UntypedBody;
@@ -27,11 +29,17 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use gateway_messages::SpError;
+use gateway_sp_comms::error::CommunicationError;
+use gateway_sp_comms::HostPhase2Provider;
+use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::str;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_stream::StreamExt;
 use tokio_util::either::Either;
 use uuid::Uuid;
@@ -409,8 +417,21 @@ pub struct ImageVersion {
 )]
 #[serde(rename_all = "snake_case")]
 pub struct InstallinatorImageId {
-    pub host_phase_2: [u8; 32],
-    pub control_plane: [u8; 32],
+    pub update_id: Uuid,
+    pub host_phase_2: ArtifactHash,
+    pub control_plane: ArtifactHash,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "progress", rename_all = "snake_case")]
+pub enum HostPhase2Progress {
+    Available {
+        image_id: HostPhase2RecoveryImageId,
+        offset: u64,
+        total_size: u64,
+        age: Duration,
+    },
+    None,
 }
 
 /// Identifier for an SP's component's firmware slot; e.g., slots 0 and 1 for
@@ -422,10 +443,19 @@ pub struct SpComponentFirmwareSlot {
     pub slot: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SpComponentCaboose {
+    pub git_commit: String,
+    pub board: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
 /// Identity of a host phase2 recovery image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2RecoveryImageId {
-    pub sha256_hash: String,
+    pub sha256_hash: ArtifactHash,
 }
 
 // We can't use the default `Deserialize` derivation for `SpIdentifier::slot`
@@ -696,10 +726,6 @@ async fn sp_component_list(
 /// This can be useful, for example, to poll the state of a component if
 /// another interface has changed the power state of a component or updated a
 /// component.
-///
-/// As communication with SPs maybe unreliable, consumers may specify a timeout
-/// to override the default. This interface will return an error when the
-/// timeout is reached.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}",
@@ -717,6 +743,80 @@ async fn sp_component_get(
         sp.component_details(component).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+// Implementation notes:
+//
+// 1. As of the time of this comment, the cannonical keys written to the hubris
+//    caboose are defined in https://github.com/oxidecomputer/hubtools; see
+//    `write_default_caboose()`.
+// 2. We currently assume that the caboose always includes the same set of
+//    fields regardless of the component (e.g., the SP and RoT caboose have the
+//    same fields). If that becomes untrue, we may need to split this endpoint
+//    up to allow differently-typed responses.
+/// Get the caboose of an SP component
+///
+/// Not all components have a caboose.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/caboose",
+}]
+async fn sp_component_caboose_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError> {
+    const CABOOSE_KEY_GIT_COMMIT: [u8; 4] = *b"GITC";
+    const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
+    const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
+    const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+
+    // TODO currently unused, but will be used once we can get RoT caboose
+    // values. At the moment this endpoint only works if the requested component
+    // is the SP itself.
+    let _component = component_from_str(&component)?;
+
+    let from_utf8 = |key: &[u8], bytes| {
+        // This helper closure is only called with the ascii-printable [u8; 4]
+        // key constants we define above, so we can unwrap this conversion.
+        let key = str::from_utf8(key).unwrap();
+        String::from_utf8(bytes).map_err(|_| {
+            http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "InvalidCaboose",
+                format!("non-utf8 data returned for caboose key {key}"),
+            )
+        })
+    };
+
+    let git_commit = sp
+        .get_caboose_value(CABOOSE_KEY_GIT_COMMIT)
+        .await
+        .map_err(SpCommsError::from)?;
+    let board = sp
+        .get_caboose_value(CABOOSE_KEY_BOARD)
+        .await
+        .map_err(SpCommsError::from)?;
+    let name = sp
+        .get_caboose_value(CABOOSE_KEY_NAME)
+        .await
+        .map_err(SpCommsError::from)?;
+    let version = match sp.get_caboose_value(CABOOSE_KEY_VERSION).await {
+        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
+        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
+        Err(err) => return Err(SpCommsError::from(err).into()),
+    };
+
+    let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
+    let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
+    let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+
+    let caboose = SpComponentCaboose { git_commit, board, name, version };
+
+    Ok(HttpResponseOk(caboose))
 }
 
 /// Clear status of a component
@@ -787,7 +887,7 @@ async fn sp_component_active_slot_set(
     let component = component_from_str(&component)?;
     let slot = body.into_inner().slot;
 
-    sp.set_component_active_slot(component, slot)
+    sp.set_component_active_slot(component, slot, false)
         .await
         .map_err(SpCommsError::from)?;
 
@@ -855,20 +955,17 @@ async fn sp_component_serial_console_detach(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
-// TODO: how can we make this generic enough to support any update mechanism?
 #[derive(Deserialize, JsonSchema)]
-pub struct UpdateBody {
+pub struct ComponentUpdateIdSlot {
     /// An identifier for this update.
     ///
     /// This ID applies to this single instance of the API call; it is not an
     /// ID of `image` itself. Multiple API calls with the same `image` should
     /// use different IDs.
     pub id: Uuid,
-    /// The binary blob containing the update image (component-specific).
-    pub image: Vec<u8>,
     /// The update slot to apply this image to. Supply 0 if the component only
     /// has one update slot.
-    pub slot: u16,
+    pub firmware_slot: u16,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -926,16 +1023,20 @@ async fn sp_reset(
 async fn sp_component_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
-    body: TypedBody<UpdateBody>,
+    query_params: Query<ComponentUpdateIdSlot>,
+    body: UntypedBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
 
     let PathSpComponent { sp, component } = path.into_inner();
     let sp = apictx.mgmt_switch.sp(sp.into())?;
     let component = component_from_str(&component)?;
+    let ComponentUpdateIdSlot { id, firmware_slot } = query_params.into_inner();
 
-    let UpdateBody { id, image, slot } = body.into_inner();
-    sp.start_update(component, id, slot, image)
+    // TODO-performance: this makes a full copy of the uploaded data
+    let image = body.as_bytes().to_vec();
+
+    sp.start_update(component, id, firmware_slot, image)
         .await
         .map_err(SpCommsError::from)?;
 
@@ -1173,6 +1274,68 @@ async fn sp_installinator_image_id_delete(
     Ok(HttpResponseUpdatedNoContent {})
 }
 
+/// Get the most recent host phase2 request we've seen from the target SP.
+///
+/// This method can be used as an indirect progress report for how far along a
+/// host is when it is booting via the MGS -> SP -> UART recovery path. This
+/// path is used to install the trampoline image containing installinator to
+/// recover a sled.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/host-phase2-progress",
+}]
+async fn sp_host_phase2_progress_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseOk<HostPhase2Progress>, HttpError> {
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    let Some(progress) = sp.most_recent_host_phase2_request().await else {
+        return Ok(HttpResponseOk(HostPhase2Progress::None));
+    };
+
+    // Our `host_phase2_provider` is using an in-memory cache, so the only way
+    // we can fail to get the total size is if we no longer have the image that
+    // this SP most recently requested. We'll treat that as "no progress
+    // information", since it almost certainly means our progress info on this
+    // SP is very stale.
+    let Ok(total_size) = apictx
+        .host_phase2_provider
+        .total_size(progress.hash)
+        .await
+    else {
+        return Ok(HttpResponseOk(HostPhase2Progress::None));
+    };
+
+    let image_id =
+        HostPhase2RecoveryImageId { sha256_hash: ArtifactHash(progress.hash) };
+
+    Ok(HttpResponseOk(HostPhase2Progress::Available {
+        image_id,
+        offset: progress.offset,
+        total_size,
+        age: progress.received.elapsed(),
+    }))
+}
+
+/// Clear the most recent host phase2 request we've seen from the target SP.
+#[endpoint {
+    method = DELETE,
+    path = "/sp/{type}/{slot}/host-phase2-progress",
+}]
+async fn sp_host_phase2_progress_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSp>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+
+    sp.clear_most_recent_host_phase2_request().await;
+
+    Ok(HttpResponseUpdatedNoContent {})
+}
+
 /// Upload a host phase2 image that can be served to recovering hosts via the
 /// host/SP control uart.
 ///
@@ -1193,7 +1356,7 @@ async fn recovery_host_phase2_upload(
     // if it's malformed.
     let image = body.as_bytes().to_vec();
 
-    let sha2 =
+    let sha256_hash =
         apictx.host_phase2_provider.insert(image).await.map_err(|err| {
             // Any cache-insertion failure indicates a malformed image; map them
             // to bad requests.
@@ -1202,10 +1365,9 @@ async fn recovery_host_phase2_upload(
                 err.to_string(),
             )
         })?;
+    let sha256_hash = ArtifactHash(sha256_hash);
 
-    Ok(HttpResponseOk(HostPhase2RecoveryImageId {
-        sha256_hash: hex::encode(&sha2),
-    }))
+    Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
 }
 
 // TODO
@@ -1237,6 +1399,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_caboose_get)?;
         api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
@@ -1245,6 +1408,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
+        api.register(sp_host_phase2_progress_get)?;
+        api.register(sp_host_phase2_progress_delete)?;
         api.register(ignition_list)?;
         api.register(ignition_get)?;
         api.register(ignition_command)?;

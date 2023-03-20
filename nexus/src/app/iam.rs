@@ -5,18 +5,21 @@
 //! Built-ins and roles
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
-use crate::db::lookup::LookupPath;
+use crate::db::lookup::{self, LookupPath};
 use crate::db::model::Name;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_queries::context::OpContext;
+use nexus_types::external_api::params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -69,8 +72,38 @@ impl super::Nexus {
             .silo_required()
             .internal_context("listing current silo's users")?;
         let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+
         self.db_datastore
-            .silo_users_list_by_id(opctx, &authz_silo_user_list, pagparams)
+            .silo_users_list(opctx, &authz_silo_user_list, pagparams)
+            .await
+    }
+
+    /// List users in the current Silo, filtered by group ID
+    pub async fn current_silo_group_users_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+        group_id: &Uuid,
+    ) -> ListResultVec<db::model::SiloUser> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("listing current silo's users")?;
+        let authz_silo_user_list = authz::SiloUserList::new(authz_silo.clone());
+
+        let (.., authz_group, _db_group) =
+            LookupPath::new(opctx, &self.db_datastore)
+                .silo_group_id(*group_id)
+                .fetch()
+                .await?;
+
+        self.db_datastore
+            .silo_group_users_list(
+                opctx,
+                &authz_silo_user_list,
+                pagparams,
+                &authz_group,
+            )
             .await
     }
 
@@ -124,16 +157,21 @@ impl super::Nexus {
         self.db_datastore.users_builtin_list_by_name(opctx, pagparams).await
     }
 
-    pub async fn user_builtin_fetch(
-        &self,
-        opctx: &OpContext,
-        name: &Name,
-    ) -> LookupResult<db::model::UserBuiltin> {
-        let (.., db_user_builtin) = LookupPath::new(opctx, &self.db_datastore)
-            .user_builtin_name(name)
-            .fetch()
-            .await?;
-        Ok(db_user_builtin)
+    pub fn user_builtin_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        user_selector: &'a params::UserBuiltinSelector,
+    ) -> LookupResult<lookup::UserBuiltin<'a>> {
+        let lookup_path = LookupPath::new(opctx, &self.db_datastore);
+        let user = match user_selector {
+            params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
+                lookup_path.user_builtin_id(*id)
+            }
+            params::UserBuiltinSelector { user: NameOrId::Name(name) } => {
+                lookup_path.user_builtin_name(Name::ref_cast(name))
+            }
+        };
+        Ok(user)
     }
 
     // Built-in roles

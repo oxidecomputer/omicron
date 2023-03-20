@@ -131,6 +131,17 @@ struct Args {
     )]
     config: PathBuf,
 
+    #[clap(
+        short,
+        long,
+        help = "The name of the build target to use for this command"
+    )]
+    target: String,
+
+    /// The output directory, where artifacts should be built and staged
+    #[clap(long = "artifacts", default_value = "out/")]
+    artifact_dir: PathBuf,
+
     #[clap(subcommand)]
     subcommand: SubCommand,
 }
@@ -484,6 +495,10 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
     ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
 
+fn do_dot(_config: &Config) -> Result<()> {
+    anyhow::bail!("\"dot\" command is not supported for thing-flinger");
+}
+
 fn do_check(config: &Config) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
 
@@ -670,7 +685,7 @@ fn overlay_rss_config(
     let src = if let Some(src) = &config.rss_config_path {
         src.clone()
     } else {
-        config.omicron_path.join("smf/sled-agent/config-rss.toml")
+        config.omicron_path.join("smf/sled-agent/non-gimlet/config-rss.toml")
     };
     let dst = format!(
         "{}@{}:{}/config-rss.toml",
@@ -981,27 +996,30 @@ fn main() -> Result<()> {
         }
         SubCommand::Sync => do_sync(&config)?,
         SubCommand::InstallPrereqs => do_install_prereqs(&config)?,
-        SubCommand::Builder(BuildCommand::Package { artifact_dir }) => {
-            do_package(&config, artifact_dir)?;
+        SubCommand::Builder(BuildCommand::Target { .. }) => {
+            todo!("Setting target not supported through thing-flinger")
+        }
+        SubCommand::Builder(BuildCommand::Package) => {
+            do_package(&config, args.artifact_dir)?;
+        }
+        SubCommand::Builder(BuildCommand::Stamp { .. }) => {
+            anyhow::bail!("Distributed package stamping not supported")
         }
         SubCommand::Builder(BuildCommand::Check) => do_check(&config)?,
-        SubCommand::Deploy(DeployCommand::Install {
-            artifact_dir,
-            install_dir,
-        }) => {
+        SubCommand::Builder(BuildCommand::Dot) => {
+            do_dot(&config)?;
+        }
+        SubCommand::Deploy(DeployCommand::Install { install_dir }) => {
             do_build_minimal(&config)?;
-            do_install(&config, &artifact_dir, &install_dir);
+            do_install(&config, &args.artifact_dir, &install_dir);
         }
         SubCommand::Deploy(DeployCommand::Uninstall) => {
             do_build_minimal(&config)?;
             do_uninstall(&config)?;
         }
-        SubCommand::Deploy(DeployCommand::Clean {
-            artifact_dir,
-            install_dir,
-        }) => {
+        SubCommand::Deploy(DeployCommand::Clean { install_dir }) => {
             do_build_minimal(&config)?;
-            do_clean(&config, artifact_dir, install_dir)?;
+            do_clean(&config, args.artifact_dir, install_dir)?;
         }
         // TODO: It doesn't really make sense to allow the user direct access
         // to these low level operations in thing-flinger. Should we not use

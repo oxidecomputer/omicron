@@ -52,7 +52,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -70,7 +70,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // without other privileges.  However, they _do_ need the privilege to
     // create Organizations because we'll be testing that as a smoke test.
     // We'll remove that privilege afterwards.
-    let silo_url = format!("/system/silos/{}", DEFAULT_SILO.identity().name);
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let policy_url = format!("{}/policy", silo_url);
     let initial_policy: shared::Policy<SiloRole> =
         NexusRequest::object_get(testctx, &policy_url)
@@ -90,7 +90,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .header(header::COOKIE, &session_token)
         .body(Some(&org_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
@@ -127,7 +127,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
         .header(header::COOKIE, &session_token)
         .body(Some(&org_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
@@ -327,15 +327,15 @@ async fn test_absolute_static_dir() {
 async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me")
+    // hitting /v1/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/me")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user = NexusRequest::object_get(testctx, "/session/me")
+    let priv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -352,7 +352,7 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         }
     );
 
-    let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
         .execute()
         .await
@@ -374,33 +374,31 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me/groups")
+    // hitting /v1/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/me/groups")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let priv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(priv_user_groups.items, vec![]);
 
-    let unpriv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let unpriv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(unpriv_user_groups.items, vec![]);
 }

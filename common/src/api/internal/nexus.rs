@@ -5,14 +5,16 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState,
+    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
+    SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
-use parse_display::Display;
+use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
+use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
@@ -95,11 +97,45 @@ pub struct UpdateArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: String,
+    pub version: SemverVersion,
 
     /// The kind of update artifact this is.
-    pub kind: UpdateArtifactKind,
+    pub kind: KnownArtifactKind,
 }
+
+// Adding a new KnownArtifactKind
+// ===============================
+//
+// Adding a new update artifact kind is a tricky process. To do so:
+//
+// 1. Add it here.
+//
+// 2. Add the new kind to <repo root>/{nexus-client,sled-agent-client}/lib.rs.
+//    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
+//    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
+//    be updated with the new variant until step 5 below.
+//
+// 3. Add it to <repo root>/common/src/sql/dbinit.sql under (CREATE TYPE
+//    omicron.public.update_artifact_kind).
+//
+//    TODO: After omicron ships this would likely involve a DB migration.
+//
+// 4. Add the new kind and the mapping to its `update_artifact_kind` to
+//    <repo root>/nexus/db-model/src/update_artifact.rs
+//
+// 5. Regenerate the OpenAPI specs for nexus and sled-agent:
+//
+//    ```
+//    EXPECTORATE=overwrite cargo test -p omicron-nexus -p omicron-sled-agent openapi
+//    ```
+//
+// 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2
+//    and replace the `todo!()`s with the new `types::UpdateArtifactKind::*`
+//    variant.
+//
+// See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
+//
+// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint requirements.
 
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
@@ -113,12 +149,63 @@ pub struct UpdateArtifactId {
     Ord,
     PartialOrd,
     Display,
+    FromStr,
     Deserialize,
     Serialize,
     JsonSchema,
+    EnumIter,
 )]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "kebab-case")]
-pub enum UpdateArtifactKind {
-    Zone,
+#[display(style = "snake_case")]
+#[serde(rename_all = "snake_case")]
+pub enum KnownArtifactKind {
+    // Sled Artifacts
+    GimletSp,
+    GimletRot,
+    Host,
+    Trampoline,
+    ControlPlane,
+
+    // PSC Artifacts
+    PscSp,
+    PscRot,
+
+    // Switch Artifacts
+    SwitchSp,
+    SwitchRot,
+}
+
+impl KnownArtifactKind {
+    /// Returns an iterator over all the variants in this struct.
+    ///
+    /// This is provided as a helper so dependent packages don't have to pull in
+    /// strum explicitly.
+    pub fn iter() -> KnownArtifactKindIter {
+        <Self as IntoEnumIterator>::iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_artifact_kind_roundtrip() {
+        for kind in KnownArtifactKind::iter() {
+            let as_string = kind.to_string();
+            let kind2 = as_string.parse::<KnownArtifactKind>().unwrap_or_else(
+                |error| panic!("error parsing kind {as_string}: {error}"),
+            );
+            assert_eq!(kind, kind2);
+        }
+    }
+}
+
+/// A `HostIdentifier` represents either an IP host or network (v4 or v6),
+/// or an entire VPC (identified by its VNI). It is used in firewall rule
+/// host filters.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum HostIdentifier {
+    Ip(IpNet),
+    Vpc(Vni),
 }

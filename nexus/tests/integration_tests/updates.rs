@@ -17,7 +17,7 @@ use http::{Method, Response, StatusCode};
 use hyper::Body;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
-use omicron_common::api::internal::nexus::UpdateArtifactKind;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_nexus::config::UpdatesConfig;
 use ring::pkcs8::Document;
@@ -39,18 +39,11 @@ use tough::key_source::KeySource;
 use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
-const UPDATE_IMAGE_PATH: &'static str = "/var/tmp/zones/omicron-test-component";
+const UPDATE_COMPONENT: &'static str = "omicron-test-component";
 
 #[tokio::test]
 async fn test_update_end_to_end() {
     let mut config = load_test_config();
-
-    // remove any existing output file from a previous run
-    match tokio::fs::remove_file(UPDATE_IMAGE_PATH).await {
-        Ok(_) => (),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound) => (),
-        Err(e) => panic!("failed to remove {:?}: {:#}", UPDATE_IMAGE_PATH, e),
-    };
 
     // build the TUF repo
     let rng = SystemRandom::new();
@@ -93,11 +86,10 @@ async fn test_update_end_to_end() {
     .await
     .unwrap();
 
+    let artifact_path = cptestctx.sled_agent_storage.path();
+    let component_path = artifact_path.join(UPDATE_COMPONENT);
     // check sled agent did the thing
-    assert_eq!(
-        tokio::fs::read(UPDATE_IMAGE_PATH).await.unwrap(),
-        TARGET_CONTENTS
-    );
+    assert_eq!(tokio::fs::read(component_path).await.unwrap(), TARGET_CONTENTS);
 
     server.close().await.expect("failed to shut down dropshot server");
     cptestctx.teardown().await;
@@ -229,18 +221,19 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
 
     // The update artifact. This will someday be a tarball of some variety.
     std::fs::write(
-        dir.path().join("omicron-test-component-1"),
+        dir.path().join(format!("{UPDATE_COMPONENT}-1")),
         TARGET_CONTENTS,
     )
     .unwrap();
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
+        system_version: "1.0.0".parse().unwrap(),
         artifacts: vec![Artifact {
-            name: "omicron-test-component".into(),
-            version: "0.0.0".into(),
-            kind: ArtifactKind::Known(UpdateArtifactKind::Zone),
-            target: "omicron-test-component-1".into(),
+            name: UPDATE_COMPONENT.into(),
+            version: "0.0.0".parse().unwrap(),
+            kind: ArtifactKind::from_known(KnownArtifactKind::ControlPlane),
+            target: format!("{UPDATE_COMPONENT}-1"),
         }],
     };
     let f = File::create(dir.path().join("artifacts.json")).unwrap();

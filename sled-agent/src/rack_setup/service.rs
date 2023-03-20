@@ -67,10 +67,10 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
-use internal_dns_client::multiclient::{
+use dns_service_client::multiclient::{
     DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
 };
-use internal_dns_client::names::{ServiceName, SRV};
+use internal_dns_names::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -86,7 +86,7 @@ use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::OnceCell;
@@ -471,6 +471,8 @@ impl ServiceInner {
         // a format which can be processed by Nexus.
         let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
+        let mut internal_services_ip_pool_ranges: Vec<NexusTypes::IpRange> =
+            vec![];
         for (addr, service_request) in service_plan.services.iter() {
             let sled_id = *id_map
                 .get(addr)
@@ -480,6 +482,25 @@ impl ServiceInner {
                 for svc in &zone.services {
                     let kind = match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                            // NOTE: Eventually, this IP pool will be entirely
+                            // user-supplied. For now, however, it's inferred
+                            // based on the input IP addresses.
+                            let range = match external_ip {
+                                IpAddr::V4(addr) => NexusTypes::IpRange::V4(
+                                    NexusTypes::Ipv4Range {
+                                        first: *addr,
+                                        last: *addr,
+                                    },
+                                ),
+                                IpAddr::V6(addr) => NexusTypes::IpRange::V6(
+                                    NexusTypes::Ipv6Range {
+                                        first: *addr,
+                                        last: *addr,
+                                    },
+                                ),
+                            };
+                            internal_services_ip_pool_ranges.push(range);
+
                             NexusTypes::ServiceKind::Nexus {
                                 external_address: *external_ip,
                             }
@@ -526,6 +547,13 @@ impl ServiceInner {
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
+            // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Plumb
+            // these pools through RSS's API.
+            //
+            // Currently, we're passing the addresses to accomodate Nexus
+            // services, but the operator may want to supply additional
+            // addresses.
+            internal_services_ip_pool_ranges,
             // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
             // these paths through RSS's API.
             //

@@ -144,14 +144,17 @@ pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The project the disk belongs to
+    /// The project the image belongs to
     pub project_id: Uuid,
 
     /// URL source of this image, if any
     pub url: Option<String>,
 
-    /// Version of this, if any
-    pub version: Option<String>,
+    /// The family of the operating system like Debian, Ubuntu, etc.
+    pub os: String,
+
+    /// Version of the operating system
+    pub version: String,
 
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
@@ -419,7 +422,6 @@ pub struct DeviceAuthResponse {
 }
 
 /// Successful access token grant. See RFC 6749 §5.1.
-/// TODO-security: `expires_in`, `refresh_token`, etc.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAccessTokenGrant {
     /// The access token issued to the client.

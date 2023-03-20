@@ -6,7 +6,6 @@ use super::instance_create::allocate_sled_ipv6;
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::sagas::declare_saga_actions;
 use crate::authn;
-use crate::context::OpContext;
 use crate::db::identity::Resource;
 use crate::db::model::IpKind;
 use crate::external_api::params;
@@ -98,7 +97,10 @@ async fn sim_migrate_prep(
 ) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
@@ -127,7 +129,10 @@ async fn sim_allocate_propolis_ip(
     sagactx: NexusActionContext,
 ) -> Result<Ipv6Addr, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     allocate_sled_ipv6(&opctx, sagactx, "dst_sled_uuid").await
 }
 
@@ -136,7 +141,10 @@ async fn sim_instance_migrate(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_id = params.migrate_params.dst_sled_id;
@@ -194,7 +202,7 @@ async fn sim_instance_migrate(
     }
     let source_nat = SourceNatConfig::from(snat_ip.into_iter().next().unwrap());
 
-    // The TODOs below are tracked in
+    // The TODO items below are tracked in
     //   https://github.com/oxidecomputer/omicron/issues/1783
     let instance_hardware = InstanceHardware {
         runtime: runtime.into(),

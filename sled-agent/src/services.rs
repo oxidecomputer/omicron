@@ -26,17 +26,16 @@
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
-use crate::common::underlay;
-use crate::illumos::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
-use crate::illumos::link::{Link, VnicAllocator};
-use crate::illumos::running_zone::{InstalledZone, RunningZone};
-use crate::illumos::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
-use crate::illumos::zone::AddressRequest;
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::smf_helper::SmfHelper;
-use crate::zone::Zones;
+use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
+use illumos_utils::link::{Link, VnicAllocator};
+use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use illumos_utils::zone::AddressRequest;
+use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -51,6 +50,7 @@ use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -99,17 +99,17 @@ pub enum Error {
     ZoneCommand {
         intent: String,
         #[source]
-        err: crate::illumos::running_zone::RunCommandError,
+        err: illumos_utils::running_zone::RunCommandError,
     },
 
     #[error("Failed to boot zone: {0}")]
-    ZoneBoot(#[from] crate::illumos::running_zone::BootError),
+    ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
     #[error(transparent)]
-    ZoneEnsureAddress(#[from] crate::illumos::running_zone::EnsureAddressError),
+    ZoneEnsureAddress(#[from] illumos_utils::running_zone::EnsureAddressError),
 
     #[error(transparent)]
-    ZoneInstall(#[from] crate::illumos::running_zone::InstallZoneError),
+    ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -118,15 +118,15 @@ pub enum Error {
     Underlay(#[from] underlay::Error),
 
     #[error("Failed to create Vnic for Nexus: {0}")]
-    NexusVnicCreation(crate::illumos::dladm::CreateVnicError),
+    NexusVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to create Vnic in switch zone: {0}")]
-    SwitchVnicCreation(crate::illumos::dladm::CreateVnicError),
+    SwitchVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
         message: String,
-        err: crate::illumos::zone::EnsureGzAddressError,
+        err: illumos_utils::zone::EnsureGzAddressError,
     },
 
     #[error("Could not initialize service {service} as requested: {message}")]
@@ -250,36 +250,6 @@ struct SledAgentInfo {
     physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
-}
-
-fn is_char_device(name: impl Into<PathBuf>) -> bool {
-    use std::os::unix::fs::FileTypeExt;
-
-    match std::fs::metadata(name.into()) {
-        Ok(metadata) => metadata.file_type().is_char_device(),
-        Err(_) => false,
-    }
-}
-
-// Depending on the kernel version, a tofino device can be found at either
-// /dev/tofino or /dev/tofino/<instance#>.  This method examines each in
-// turn, returning the first character device it finds in either of those
-// locations.
-fn find_tofino(root: &str) -> Result<String, Error> {
-    if is_char_device(root) {
-        return Ok(root.to_string());
-    }
-
-    for entry in std::fs::read_dir(root)
-        .map_err(|e| Error::Io { path: root.into(), err: e })?
-    {
-        let entry =
-            entry.map_err(|e| Error::Io { path: root.into(), err: e })?;
-        if is_char_device(&entry.path()) {
-            return Ok(entry.path().into_os_string().into_string().unwrap());
-        }
-    }
-    Err(Error::MissingDevice { device: "tofino".to_string() })
 }
 
 #[derive(Clone)]
@@ -418,9 +388,15 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
-                    // When running on a real sidecar, we need the /dev/tofino
-                    // device to talk to the tofino ASIC.
-                    devices.push(find_tofino("/dev/tofino")?);
+                    if let Ok(Some(n)) = tofino::get_tofino() {
+                        if let Ok(device_path) = n.device_path() {
+                            devices.push(device_path);
+                            continue;
+                        }
+                    }
+                    return Err(Error::MissingDevice {
+                        device: "tofino".to_string(),
+                    });
                 }
                 _ => (),
             }
@@ -564,6 +540,9 @@ impl ServiceManager {
         }
 
         for addr in &request.addresses {
+            if *addr == Ipv6Addr::LOCALHOST {
+                continue;
+            }
             info!(
                 self.inner.log,
                 "Ensuring address {} exists",
@@ -817,14 +796,31 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
+                    smfh.delpropvalue("config/address", "*")?;
+                    for address in &request.addresses {
+                        smfh.addpropvalue(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
                     }
                     match *asic {
                         DendriteAsic::TofinoAsic => {
+                            // There should be exactly one device_name
+                            // associated with this zone: the /dev path for
+                            // the tofino ASIC.
+                            let dev_cnt = device_names.len();
+                            if dev_cnt == 1 {
+                                smfh.setprop(
+                                    "config/dev_path",
+                                    device_names[0].clone(),
+                                )?;
+                            } else {
+                                return Err(Error::SwitchZone(
+                                    anyhow::anyhow!(
+                                    "{dev_cnt} devices needed for tofino asic"
+                                ),
+                                ));
+                            }
                             smfh.setprop(
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
@@ -846,9 +842,10 @@ impl ServiceManager {
                     info!(self.inner.log, "Setting up tfport service");
 
                     smfh.setprop("config/pkt_source", pkt_source)?;
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop("config/host", &format!("[{}]", address))?;
-                    }
+                    smfh.setprop(
+                        "config/host",
+                        &format!("[{}]", Ipv6Addr::LOCALHOST),
+                    )?;
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
                     smfh.refresh()?;
                 }
@@ -1001,12 +998,14 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Wicketd,
                 ]
             }
         };
 
-        let addresses =
+        let mut addresses =
             if let Some(ip) = switch_zone_ip { vec![ip] } else { vec![] };
+        addresses.push(Ipv6Addr::LOCALHOST);
 
         let request = ServiceZoneRequest {
             id: Uuid::new_v4(),
@@ -1100,24 +1099,18 @@ impl ServiceManager {
                             smfh.refresh()?;
                         }
                         ServiceType::Dendrite { .. } => {
-                            smfh.setprop(
-                                "config/address",
-                                &format!("[{}]:{}", address, DENDRITE_PORT),
-                            )?;
+                            smfh.delpropvalue("config/address", "*")?;
+                            for address in &request.addresses {
+                                smfh.addpropvalue(
+                                    "config/address",
+                                    &format!("[{}]:{}", address, DENDRITE_PORT),
+                                )?;
+                            }
                             smfh.refresh()?;
-                            // TODO: For this restart to be optional, Dendrite must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
                         }
                         ServiceType::Tfport { .. } => {
-                            smfh.setprop(
-                                "config/host",
-                                &format!("[{}]", address),
-                            )?;
-                            smfh.refresh()?;
-                            // TODO: For this restart to be optional, Tfport must
-                            // implement a non-default "refresh" method.
-                            smfh.restart()?;
+                            // Since tfport and dpd communicate using localhost,
+                            // the tfport service shouldn't need to be restarted.
                         }
                         _ => (),
                     }
@@ -1186,7 +1179,8 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::illumos::{
+    use crate::params::ZoneType;
+    use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
             UNDERLAY_ETHERSTUB_NAME, UNDERLAY_ETHERSTUB_VNIC_NAME,
@@ -1194,7 +1188,6 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use crate::params::ZoneType;
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -1238,7 +1231,7 @@ mod test {
         let wait_ctx = svc::wait_for_service_context();
         wait_ctx.expect().return_once(|_, _| Ok(()));
         // Import the manifest, enable the service
-        let execute_ctx = crate::illumos::execute_context();
+        let execute_ctx = illumos_utils::execute_context();
         execute_ctx.expect().times(..).returning(|_| {
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),

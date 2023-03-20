@@ -4,7 +4,6 @@
 
 //! x.509 Certificates
 
-use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
@@ -12,7 +11,9 @@ use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
+use nexus_db_queries::context::OpContext;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -68,7 +69,7 @@ impl super::Nexus {
     pub async fn certificates_list(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Name>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Certificate> {
         self.db_datastore.certificate_list_for(opctx, None, pagparams).await
     }
@@ -108,11 +109,11 @@ impl super::Nexus {
             .certificate_list_for(
                 &opctx,
                 Some(db::model::ServiceKind::Nexus),
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(2).unwrap(),
-                },
+                }),
             )
             .await
             .map_err(|e| {

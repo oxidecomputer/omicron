@@ -9,8 +9,9 @@ mod http_entrypoints;
 mod server;
 mod store;
 
+pub use context::ServerContext;
 pub use server::ArtifactServer;
-pub use store::{ArtifactGetter, ArtifactId};
+pub use store::{ArtifactGetter, ProgressReportStatus};
 
 use anyhow::Result;
 

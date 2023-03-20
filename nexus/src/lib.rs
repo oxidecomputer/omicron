@@ -11,16 +11,11 @@
 #![allow(clippy::unnecessary_wraps)]
 // Clippy's style lints are useful, but not worth running automatically.
 #![allow(clippy::style)]
-// assert_matches! is pretty useful for tests so just enable it conditionally.
-#![cfg_attr(test, feature(assert_matches))]
 
 pub mod app; // Public for documentation examples
-pub mod authn; // Public only for testing
-pub mod authz; // Public for documentation examples
 mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
-pub mod db; // Public for documentation examples
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 mod populate;
@@ -39,13 +34,12 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+// These modules used to be within nexus, but have been moved to
+// nexus-db-queries. Keeping these around temporarily for migration reasons.
+pub use nexus_db_queries::{authn, authz, db};
+
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate newtype_derive;
-#[cfg(test)]
-#[macro_use]
-extern crate diesel;
 
 /// Run the OpenAPI generator for the external API, which emits the OpenAPI spec
 /// to stdout.
@@ -214,6 +208,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services: vec![],
                     datasets: vec![],
+                    internal_services_ip_pool_ranges: vec![],
                     certs: vec![],
                 },
             )
@@ -238,7 +233,7 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn set_resolver(
         &self,
-        resolver: internal_dns_client::multiclient::Resolver,
+        resolver: dns_service_client::multiclient::Resolver,
     ) {
         self.apictx.nexus.set_resolver(resolver).await
     }

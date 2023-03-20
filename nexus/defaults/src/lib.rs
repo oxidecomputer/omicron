@@ -58,16 +58,6 @@ lazy_static! {
                     "action": "allow",
                     "priority": 65534,
                     "description": "allow inbound ICMP traffic from anywhere"
-                },
-                {
-                    "name": "allow-rdp",
-                    "status": "enabled",
-                    "direction": "inbound",
-                    "targets": [ { "type": "vpc", "value": "default" } ],
-                    "filters": { "ports": [ "3389" ], "protocols": [ "TCP" ] },
-                    "action": "allow",
-                    "priority": 65534,
-                    "description": "allow inbound TCP connections on port 3389 from anywhere"
                 }
             ]
         }"#).unwrap();

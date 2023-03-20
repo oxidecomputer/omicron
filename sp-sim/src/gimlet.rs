@@ -24,6 +24,7 @@ use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
 use gateway_messages::SpState;
+use gateway_messages::UpdateId;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
 use gateway_messages::{
@@ -36,6 +37,7 @@ use sprockets_rot::common::Ed25519PublicKey;
 use sprockets_rot::{RotSprocket, RotSprocketError};
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::iter;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::{Arc, Mutex};
@@ -297,7 +299,7 @@ impl SerialConsoleTcpTask {
         while !remaining.is_empty() {
             let message = Message {
                 header: Header {
-                    version: version::V2,
+                    version: version::CURRENT,
                     message_id: self.next_request_message_id(),
                 },
                 kind: MessageKind::SpRequest(SpRequest::SerialConsole {
@@ -502,6 +504,7 @@ struct Handler {
     incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
     power_state: PowerState,
     startup_options: StartupOptions,
+    update_state: UpdateState,
 }
 
 impl Handler {
@@ -534,6 +537,7 @@ impl Handler {
             incoming_serial_console,
             power_state: PowerState::A2,
             startup_options: StartupOptions::empty(),
+            update_state: UpdateState::NotPrepared,
         }
     }
 
@@ -846,14 +850,22 @@ impl SpHandler for Handler {
         port: SpPort,
         update: gateway_messages::ComponentUpdatePrepare,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update prepare request; not supported by simulated gimlet";
+            "received component update prepare request";
             "sender" => %sender,
             "port" => ?port,
             "update" => ?update,
         );
-        Err(SpError::RequestUnsupportedForSp)
+
+        self.update_state = UpdateState::Prepared {
+            component: update.component,
+            id: update.id,
+            data: Cursor::new(
+                vec![0u8; update.total_size as usize].into_boxed_slice(),
+            ),
+        };
+        Ok(())
     }
 
     fn update_status(
@@ -862,14 +874,15 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
     ) -> Result<gateway_messages::UpdateStatus, SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update status request; not supported by simulated gimlet";
+            "received update status request";
             "sender" => %sender,
             "port" => ?port,
             "component" => ?component,
         );
-        Err(SpError::RequestUnsupportedForSp)
+        // TODO: check that component matches
+        Ok(self.update_state.to_message())
     }
 
     fn update_chunk(
@@ -877,34 +890,79 @@ impl SpHandler for Handler {
         sender: SocketAddrV6,
         port: SpPort,
         chunk: gateway_messages::UpdateChunk,
-        data: &[u8],
+        chunk_data: &[u8],
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update chunk; not supported by simulated gimlet";
+            "received update chunk";
             "sender" => %sender,
             "port" => ?port,
             "offset" => chunk.offset,
-            "length" => data.len(),
+            "length" => chunk_data.len(),
         );
-        Err(SpError::RequestUnsupportedForSp)
+        match &mut self.update_state {
+            UpdateState::Prepared { id, data, .. } => {
+                // Ensure that the update ID is correct.
+                // TODO: component?
+                if chunk.id != *id {
+                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
+                };
+                if data.position() != chunk.offset as u64 {
+                    return Err(SpError::UpdateInProgress(
+                        self.update_state.to_message(),
+                    ));
+                }
+
+                std::io::Write::write_all(data, chunk_data).map_err(|error| {
+                    // Writing to an in-memory buffer can only fail if the update is too large.
+                    warn!(
+                        &self.log,
+                        "update is too large";
+                        "sender" => %sender,
+                        "port" => ?port,
+                        "offset" => chunk.offset,
+                        "length" => chunk_data.len(),
+                        "total_size" => data.get_ref().len(),
+                        "error" => %error,
+                    );
+                    SpError::UpdateIsTooLarge
+                })
+            }
+            UpdateState::NotPrepared | UpdateState::Aborted(_) => {
+                Err(SpError::UpdateNotPrepared)
+            }
+        }
     }
 
     fn update_abort(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-        component: SpComponent,
-        id: gateway_messages::UpdateId,
+        update_component: SpComponent,
+        update_id: gateway_messages::UpdateId,
     ) -> Result<(), SpError> {
-        warn!(
+        debug!(
             &self.log,
-            "received update abort; not supported by simulated gimlet";
+            "received update abort";
             "sender" => %sender,
             "port" => ?port,
-            "component" => ?component,
-            "id" => ?id,
+            "component" => ?update_component,
+            "id" => ?update_id,
         );
+        match &self.update_state {
+            UpdateState::NotPrepared => {
+                // Ignore this. TODO error here?
+            }
+            UpdateState::Prepared { id, .. } => {
+                if update_id != *id {
+                    return Err(SpError::InvalidUpdateId { sp_update_id: *id });
+                }
+                // TODO: check for component equality?
+                self.update_state = UpdateState::Aborted(update_id);
+            }
+            UpdateState::Aborted(_) => {}
+        }
+
         Err(SpError::RequestUnsupportedForSp)
     }
 
@@ -1044,6 +1102,7 @@ impl SpHandler for Handler {
         port: SpPort,
         component: SpComponent,
         slot: u16,
+        persist: bool,
     ) -> Result<(), SpError> {
         warn!(
             &self.log, "asked to set component active slot (not supported for sim components)";
@@ -1051,6 +1110,7 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
             "slot" => slot,
+            "persist" => persist,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
@@ -1137,5 +1197,57 @@ impl SpHandler for Handler {
             "value" => ?value,
         );
         Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn get_caboose_value(
+        &mut self,
+        key: [u8; 4],
+    ) -> std::result::Result<&'static [u8], SpError> {
+        warn!(
+            &self.log,
+            "received request for caboose key; not supported by simulated gimlet";
+            "key" => ?key,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+}
+
+enum UpdateState {
+    NotPrepared,
+    Prepared {
+        #[allow(unused)]
+        component: SpComponent,
+        id: UpdateId,
+        // data would ordinarily be a Cursor<Vec<u8>>, but that can grow and
+        // reallocate. We want to ensure that we don't receive any more data
+        // than originally promised, so use a Cursor<Box<[u8]>> to ensure that
+        // it never grows.
+        data: Cursor<Box<[u8]>>,
+    },
+    Aborted(UpdateId),
+}
+
+impl UpdateState {
+    fn to_message(&self) -> gateway_messages::UpdateStatus {
+        match self {
+            Self::NotPrepared => gateway_messages::UpdateStatus::None,
+            Self::Prepared { id, data, .. } => {
+                // If all the data has written, mark it as completed.
+                let bytes_received = data.position() as u32;
+                let total_size = data.get_ref().len() as u32;
+                if bytes_received == total_size {
+                    gateway_messages::UpdateStatus::Complete(*id)
+                } else {
+                    gateway_messages::UpdateStatus::InProgress(
+                        gateway_messages::UpdateInProgressStatus {
+                            id: *id,
+                            bytes_received,
+                            total_size,
+                        },
+                    )
+                }
+            }
+            Self::Aborted(id) => gateway_messages::UpdateStatus::Aborted(*id),
+        }
     }
 }
