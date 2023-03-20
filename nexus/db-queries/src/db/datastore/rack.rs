@@ -373,6 +373,9 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test::{
+        sled_baseboard_for_test, sled_system_hardware_for_test,
+    };
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -435,18 +438,12 @@ mod test {
 
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
-        let is_scrimlet = false;
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let identifier = String::from("identifier");
-        let model = String::from("model");
-        let revision = 0;
         let sled = Sled::new(
             sled_id,
             addr,
-            is_scrimlet,
-            identifier,
-            model,
-            revision,
+            sled_baseboard_for_test(),
+            sled_system_hardware_for_test(),
             rack_id(),
         );
         db.sled_upsert(sled)
