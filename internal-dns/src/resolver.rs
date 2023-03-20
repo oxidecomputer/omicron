@@ -106,7 +106,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<Ipv6Addr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup_ipv6 srv"; "name" => &name);
+        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
         let response = self.inner.ipv6_lookup(&name).await?;
         let address = response
             .iter()
@@ -122,7 +122,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup_socket_v6 srv"; "name" => &name);
+        debug!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
         let response = self.inner.lookup(&name, RecordType::SRV).await?;
 
         let rdata = response
@@ -156,7 +156,7 @@ impl Resolver {
         srv: crate::SRV,
     ) -> Result<IpAddr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup srv"; "name" => &name);
+        debug!(self.log, "lookup srv"; "dns_name" => &name);
         let response = self.inner.lookup_ip(&name).await?;
         let address = response
             .iter()

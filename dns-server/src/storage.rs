@@ -638,7 +638,7 @@ impl Store {
             warn!(
                 &self.log,
                 "found name with no records";
-                "name" => &name_str
+                "dns_name" => &name_str
             );
 
             return Err(QueryError::NoName(name_str));
