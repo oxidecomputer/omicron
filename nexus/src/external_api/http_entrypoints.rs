@@ -315,7 +315,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_view)?;
         api.register(silo_view_by_id)?;
         api.register(silo_delete)?;
-        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
@@ -323,23 +322,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_create_v1)?;
         api.register(silo_view_v1)?;
         api.register(silo_delete_v1)?;
-        api.register(silo_identity_provider_list_v1)?;
+        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view_v1)?;
         api.register(silo_policy_update_v1)?;
 
         api.register(saml_identity_provider_create)?;
         api.register(saml_identity_provider_view)?;
 
-        api.register(saml_identity_provider_create_v1)?;
-        api.register(saml_identity_provider_view_v1)?;
-
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
-
-        api.register(local_idp_user_create_v1)?;
-        api.register(local_idp_user_delete_v1)?;
-        api.register(local_idp_user_set_password_v1)?;
 
         api.register(certificate_list)?;
         api.register(certificate_create)?;
@@ -1177,7 +1169,7 @@ async fn silo_user_view(
     path = "/v1/system/identity-providers",
     tags = ["system"],
 }]
-async fn silo_identity_provider_list_v1(
+async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::SiloSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
@@ -1206,46 +1198,6 @@ async fn silo_identity_provider_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List a silo's IDPs
-/// Use `/v1/system/silos/{silo}/identity-providers` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_identity_provider_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let identity_providers = nexus
-            .identity_provider_list(
-                &opctx,
-                &silo_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|x| x.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            identity_providers,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // Silo SAML identity providers
 
 /// Create a SAML IDP
@@ -1254,7 +1206,7 @@ async fn silo_identity_provider_list(
     path = "/v1/system/identity-providers/saml",
     tags = ["system"],
 }]
-async fn saml_identity_provider_create_v1(
+async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -1277,45 +1229,13 @@ async fn saml_identity_provider_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a SAML IDP
-/// Use `POST /v1/system/identity-providers/saml` instead.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/saml",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn saml_identity_provider_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
-) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let provider = nexus
-            .saml_identity_provider_create(
-                &opctx,
-                &silo_lookup,
-                new_provider.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
     tags = ["system"],
 }]
-async fn saml_identity_provider_view_v1(
+async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProviderPath>,
     query_params: Query<params::SiloSelector>,
@@ -1343,45 +1263,6 @@ async fn saml_identity_provider_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Silo SAML identity provider requests
-#[derive(Deserialize, JsonSchema)]
-struct SiloSamlPathParam {
-    /// The silo's unique name.
-    silo_name: Name,
-    /// The SAML identity provider's name
-    provider_name: Name,
-}
-
-/// Fetch a SAML IDP
-/// Use `GET /v1/system/identity-providers/saml/{provider_name}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers/saml/{provider_name}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn saml_identity_provider_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloSamlPathParam>,
-) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
-        let provider_selector = params::SamlIdentityProviderSelector::new(
-            Some(path_params.silo_name.into()),
-            path_params.provider_name.into(),
-        );
-        let (.., provider) = nexus
-            .saml_identity_provider_lookup(&opctx, &provider_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // TODO: no DELETE for identity providers?
 
 // "Local" Identity Provider
@@ -1398,7 +1279,7 @@ async fn saml_identity_provider_view(
     tags = ["system"],
     deprecated = true
 }]
-async fn local_idp_user_create_v1(
+async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_user_params: TypedBody<params::UserCreate>,
@@ -1409,39 +1290,6 @@ async fn local_idp_user_create_v1(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        let user = nexus
-            .local_idp_create_user(
-                &opctx,
-                &silo_lookup,
-                new_user_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a user
-///
-/// Users can only be created in Silos with `provision_type` == `Fixed`.
-/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
-/// logs in using an external Identity Provider.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users",
-    tags = ["system"],
-}]
-async fn local_idp_user_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_user_params: TypedBody<params::UserCreate>,
-) -> Result<HttpResponseCreated<User>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let silo = path_params.into_inner().silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let user = nexus
             .local_idp_create_user(
                 &opctx,
@@ -1460,7 +1308,7 @@ async fn local_idp_user_create(
     path = "/v1/system/identity-providers/local/users/{user_id}",
     tags = ["system"],
 }]
-async fn local_idp_user_delete_v1(
+async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloSelector>,
@@ -1478,31 +1326,6 @@ async fn local_idp_user_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a user
-/// Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Set or invalidate a user's password
 ///
 /// Passwords can only be updated for users in Silos with identity mode
@@ -1512,7 +1335,7 @@ async fn local_idp_user_delete(
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
     tags = ["system"],
 }]
-async fn local_idp_user_set_password_v1(
+async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloPath>,
@@ -1525,42 +1348,6 @@ async fn local_idp_user_set_password_v1(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        nexus
-            .local_idp_user_set_password(
-                &opctx,
-                &silo_lookup,
-                path.user_id,
-                update.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Set or invalidate a user's password
-///
-/// Passwords can only be updated for users in Silos with identity mode
-/// `LocalOnly`.
-/// Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_set_password(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-    update: TypedBody<params::UserPassword>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
