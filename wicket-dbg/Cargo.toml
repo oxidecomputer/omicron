@@ -10,6 +10,9 @@ bincode.workspace = true
 serde.workspace = true
 wicket.workspace = true
 
+# used only by wicket-dbg
+rustyline = "11.0.0"
+
 [[bin]]
 name = "wicket-dbg"
 

@@ -16,7 +16,7 @@ mod wicketd;
 
 pub use crate::dispatch::*;
 pub use crate::runner::*;
-pub use events::{Action, Event, Recorder};
+pub use events::{Action, Event, Recorder, Snapshot};
 pub use keymap::{Cmd, KeyHandler};
 pub use state::State;
 pub use ui::Control;
