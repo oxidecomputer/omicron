@@ -421,7 +421,7 @@ lazy_static! {
         };
 
     // SSH keys
-    pub static ref DEMO_SSHKEYS_URL: &'static str = "/session/me/sshkeys";
+    pub static ref DEMO_SSHKEYS_URL: &'static str = "/v1/me/ssh-keys";
     pub static ref DEMO_SSHKEY_NAME: Name = "aaaaa-ssh-key".parse().unwrap();
     pub static ref DEMO_SSHKEY_CREATE: params::SshKeyCreate = params::SshKeyCreate {
         identity: IdentityMetadataCreateParams {
@@ -472,7 +472,7 @@ lazy_static! {
 
     pub static ref DEMO_SYSTEM_METRICS_URL: String =
         format!(
-            "/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
+            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={}",
             Utc::now(),
             Utc::now(),
             "3aaf22ae-5691-4f6d-b62c-aa532512fa78",
@@ -503,7 +503,7 @@ pub struct VerifyEndpoint {
     /// Specifies whether an HTTP resource handled by this endpoint is visible
     /// to unauthenticated or unauthorized users
     ///
-    /// If it's [`Visibility::Public`] (like "/organizations"), unauthorized
+    /// If it's [`Visibility::Public`] (like "/v1/organizations"), unauthorized
     /// users can expect to get back a 401 or 403 when they attempt to access
     /// it.  If it's [`Visibility::Protected`] (like a specific Organization),
     /// unauthorized users will get a 404.
@@ -543,7 +543,7 @@ pub enum Visibility {
     /// All users can see the resource (including unauthenticated or
     /// unauthorized users)
     ///
-    /// "/organizations" is Public, for example.
+    /// "/v1/organizations" is Public, for example.
     Public,
 
     /// Only users with certain privileges can see this endpoint
@@ -623,7 +623,7 @@ impl AllowedMethod {
 
 lazy_static! {
     pub static ref URL_USERS_DB_INIT: String =
-        format!("/system/user/{}", authn::USER_DB_INIT.name);
+        format!("/v1/system/users-builtin/{}", authn::USER_DB_INIT.name);
 
     /// List of endpoints to be verified
     pub static ref VERIFY_ENDPOINTS: Vec<VerifyEndpoint> = vec![
@@ -1456,20 +1456,20 @@ lazy_static! {
         /* IAM */
 
         VerifyEndpoint {
-            url: "/roles",
+            url: "/v1/system/roles",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
         VerifyEndpoint {
-            url: "/roles/fleet.admin",
+            url: "/v1/system/roles/fleet.admin",
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
 
         VerifyEndpoint {
-            url: "/system/user",
+            url: "/v1/system/users-builtin",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
@@ -1539,15 +1539,6 @@ lazy_static! {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::GetNonexistent],
-        },
-
-        /* Timeseries schema */
-
-        VerifyEndpoint {
-            url: "/timeseries/schema",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
         },
 
         /* Updates */
@@ -1677,7 +1668,7 @@ lazy_static! {
         /* Misc */
 
         VerifyEndpoint {
-            url: "/session/me",
+            url: "/v1/me",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
@@ -1685,7 +1676,7 @@ lazy_static! {
             ],
         },
         VerifyEndpoint {
-            url: "/session/me/groups",
+            url: "/v1/me/groups",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![

@@ -116,7 +116,7 @@ fn test_nexus_openapi() {
 
     // Spot check a couple of items.
     assert!(!spec.paths.paths.is_empty());
-    assert!(spec.paths.paths.get("/organizations").is_some());
+    assert!(spec.paths.paths.get("/v1/organizations").is_some());
 
     // Check for lint errors.
     let errors = openapi_lint::validate(&spec);

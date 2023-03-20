@@ -4,13 +4,13 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use super::current_simulator_state;
-use super::setup;
-use super::SpStateExt;
 use dropshot::test_util;
 use gateway_messages::DeviceCapabilities;
 use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
+use gateway_test_utils::current_simulator_state;
+use gateway_test_utils::setup;
+use gateway_test_utils::SpStateExt;
 use omicron_gateway::http_entrypoints::SpComponentInfo;
 use omicron_gateway::http_entrypoints::SpComponentList;
 use omicron_gateway::http_entrypoints::SpComponentPresence;

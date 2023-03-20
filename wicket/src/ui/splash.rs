@@ -10,8 +10,7 @@ use super::defaults::colors::*;
 use super::defaults::dimensions::RectExt;
 use super::defaults::style;
 use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-use crate::{Event, Frame, Term};
-use crossterm::event::Event as TermEvent;
+use crate::{Cmd, Frame, Term};
 use tui::style::Style;
 use tui::widgets::Block;
 
@@ -68,17 +67,14 @@ impl SplashScreen {
 
     /// Return true if the splash screen should transition to the main screen, false
     /// if it should keep animating.
-    pub fn on(&mut self, event: Event) -> bool {
-        match event {
-            Event::Tick => {
+    pub fn on(&mut self, cmd: Cmd) -> bool {
+        match cmd {
+            Cmd::Tick => {
                 self.state.frame += 1;
                 self.state.frame >= TOTAL_FRAMES
             }
-            Event::Term(TermEvent::Key(_)) => {
-                // Allow the user to skip the splash screen with any key press
-                true
-            }
-            _ => false,
+            // Allow the user to skip the splash screen with any key press
+            _ => true,
         }
     }
 }

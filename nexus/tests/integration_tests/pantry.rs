@@ -123,8 +123,10 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
 }
 
 async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
-    let url =
-        format!("/organizations/{}/projects/{}/disks", ORG_NAME, PROJECT_NAME,);
+    let url = format!(
+        "/v1/disks?organization={}&project={}",
+        ORG_NAME, PROJECT_NAME,
+    );
 
     let _disk: Disk = object_create(
         client,

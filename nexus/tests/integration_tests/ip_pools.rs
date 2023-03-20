@@ -619,10 +619,13 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
 
     // Stop the instance, wait until it is in fact stopped.
     let instance_url = format!(
-        "/organizations/{}/projects/{}/instances/{}",
-        ORG_NAME, PROJECT_NAME, INSTANCE_NAME,
+        "/v1/instances/{}?organization={}&project={}",
+        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
     );
-    let instance_stop_url = format!("{}/stop", instance_url);
+    let instance_stop_url = format!(
+        "/v1/instances/{}/stop?organization={}&project={}",
+        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
+    );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instance_stop_url)
             .body(None as Option<&serde_json::Value>)

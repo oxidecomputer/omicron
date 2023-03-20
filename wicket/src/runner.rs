@@ -11,7 +11,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
-use slog::{error, info};
+use slog::{debug, error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{
@@ -22,9 +22,8 @@ use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
 use crate::ui::Screen;
-use crate::wicketd;
-use crate::wicketd::{WicketdHandle, WicketdManager};
-use crate::{Action, Event, InventoryEvent, State};
+use crate::wicketd::{self, WicketdHandle, WicketdManager};
+use crate::{Action, Cmd, Event, InventoryEvent, KeyHandler, State};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -72,7 +71,7 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let state = State::new();
+        let state = State::new(&log);
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
@@ -107,6 +106,8 @@ impl Runner {
     fn main_loop(&mut self) -> anyhow::Result<()> {
         info!(self.log, "Starting main loop");
 
+        let mut key_handler = KeyHandler::default();
+
         // Size the initial screen
         let rect = self.terminal.get_frame().size();
         self.screen.resize(&mut self.state, rect.width, rect.height);
@@ -119,7 +120,7 @@ impl Runner {
             let event = self.events_rx.blocking_recv().unwrap();
             match event {
                 Event::Tick => {
-                    let action = self.screen.on(&mut self.state, Event::Tick);
+                    let action = self.screen.on(&mut self.state, Cmd::Tick);
                     self.handle_action(action)?;
                 }
                 Event::Term(TermEvent::Key(key_event)) => {
@@ -127,11 +128,10 @@ impl Runner {
                         info!(self.log, "CTRL-C Pressed. Exiting.");
                         break;
                     }
-                    let action = self.screen.on(
-                        &mut self.state,
-                        Event::Term(TermEvent::Key(key_event)),
-                    );
-                    self.handle_action(action)?;
+                    if let Some(cmd) = key_handler.on(key_event) {
+                        let action = self.screen.on(&mut self.state, cmd);
+                        self.handle_action(action)?;
+                    }
                 }
                 Event::Term(TermEvent::Resize(width, height)) => {
                     self.screen.resize(&mut self.state, width, height);
@@ -140,14 +140,18 @@ impl Runner {
                 Event::Inventory(event) => {
                     self.handle_inventory_event(event)?;
                 }
-                Event::UpdateArtifacts(artifacts) => {
-                    self.state.update_state.update_artifacts(artifacts);
+                Event::UpdateArtifacts { system_version, artifacts } => {
+                    self.state
+                        .update_state
+                        .update_artifacts(system_version, artifacts);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
-                _ => {
-                    let action = self.screen.on(&mut self.state, event);
-                    self.handle_action(action)?;
+                Event::UpdateLog(logs) => {
+                    debug!(self.log, "{:#?}", logs);
+                    self.state.update_state.update_logs(logs);
+                    self.screen.draw(&self.state, &mut self.terminal)?;
                 }
+                _ => (),
             }
         }
         Ok(())

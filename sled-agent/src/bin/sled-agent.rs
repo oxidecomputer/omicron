@@ -99,6 +99,7 @@ async fn do_run() -> Result<(), CmdError> {
                 id: Uuid::new_v4(),
                 link,
                 log: config.log.clone(),
+                updates: config.updates.clone(),
                 rss_config,
                 sp_config,
             };

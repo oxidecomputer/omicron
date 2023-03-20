@@ -38,8 +38,10 @@ jobs:
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
+    - name: Set default target
+      run: cargo run --bin omicron-package -- -t default target create
     - name: Check build of deployed Omicron packages
-      run: cargo run --bin omicron-package -- check
+      run: cargo run --bin omicron-package -- -t default check
 
   clippy-lint:
     runs-on: ubuntu-20.04

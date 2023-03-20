@@ -468,8 +468,11 @@ pub(crate) struct ArtifactIdData {
 pub(crate) struct UpdatePlan {
     pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: ArtifactIdData,
+    pub(crate) gimlet_rot: ArtifactIdData,
     pub(crate) psc_sp: ArtifactIdData,
+    pub(crate) psc_rot: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
+    pub(crate) sidecar_rot: ArtifactIdData,
 
     // Note: The Trampoline image is broken into phase1/phase2 as part of our
     // update plan (because they go to different destinations), but the two
@@ -504,8 +507,11 @@ impl UpdatePlan {
         // snapshot. Scan the snapshot and record the first of each we find,
         // failing if we find a second.
         let mut gimlet_sp = None;
+        let mut gimlet_rot = None;
         let mut psc_sp = None;
+        let mut psc_rot = None;
         let mut sidecar_sp = None;
+        let mut sidecar_rot = None;
         let mut host_phase_1 = None;
         let mut host_phase_2 = None;
         let mut trampoline_phase_1 = None;
@@ -535,11 +541,20 @@ impl UpdatePlan {
                 KnownArtifactKind::GimletSp => {
                     artifact_found(&mut gimlet_sp, artifact_id, data)?
                 }
+                KnownArtifactKind::GimletRot => {
+                    artifact_found(&mut gimlet_rot, artifact_id, data)?
+                }
                 KnownArtifactKind::PscSp => {
                     artifact_found(&mut psc_sp, artifact_id, data)?
                 }
+                KnownArtifactKind::PscRot => {
+                    artifact_found(&mut psc_rot, artifact_id, data)?
+                }
                 KnownArtifactKind::SwitchSp => {
                     artifact_found(&mut sidecar_sp, artifact_id, data)?
+                }
+                KnownArtifactKind::SwitchRot => {
+                    artifact_found(&mut sidecar_rot, artifact_id, data)?
                 }
                 KnownArtifactKind::Host => {
                     slog::debug!(log, "extracting host tarball");
@@ -569,7 +584,9 @@ impl UpdatePlan {
                         &images.phase_1,
                     )?;
                 }
-                _ => continue,
+                KnownArtifactKind::ControlPlane => {
+                    // Only the installinator needs this artifact.
+                }
             }
         }
 
@@ -626,12 +643,25 @@ impl UpdatePlan {
                     KnownArtifactKind::GimletSp,
                 ),
             )?,
+            gimlet_rot: gimlet_rot.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::GimletRot,
+                ),
+            )?,
             psc_sp: psc_sp.ok_or(RepositoryError::MissingArtifactKind(
                 KnownArtifactKind::PscSp,
+            ))?,
+            psc_rot: psc_rot.ok_or(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::PscRot,
             ))?,
             sidecar_sp: sidecar_sp.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::SwitchSp,
+                ),
+            )?,
+            sidecar_rot: sidecar_rot.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::SwitchRot,
                 ),
             )?,
             host_phase_1: host_phase_1.ok_or(

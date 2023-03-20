@@ -7,31 +7,31 @@ use crate::ControlPlaneTestContext;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
+use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params;
+use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IdentityType;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::IpPool;
+use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::{
+    Organization, Project, Silo, Vpc, VpcRouter,
+};
+use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_nexus::crucible_agent_client::types::State as RegionState;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::params::UserId;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::shared::IdentityType;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Certificate;
-use omicron_nexus::external_api::views::IpPool;
-use omicron_nexus::external_api::views::IpPoolRange;
-use omicron_nexus::external_api::views::User;
-use omicron_nexus::external_api::views::{
-    Organization, Project, Silo, Vpc, VpcRouter,
-};
-use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -153,7 +153,7 @@ pub async fn create_certificate(
     cert: Vec<u8>,
     key: Vec<u8>,
 ) -> Certificate {
-    let url = "/system/certificates".to_string();
+    let url = "/v1/system/certificates".to_string();
     object_create(
         client,
         &url,
@@ -171,7 +171,7 @@ pub async fn create_certificate(
 }
 
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
-    let url = format!("/system/certificates/{}", cert_name);
+    let url = format!("/v1/system/certificates/{}", cert_name);
     object_delete(client, &url).await
 }
 
@@ -254,7 +254,7 @@ pub async fn create_local_user(
 ) -> User {
     let silo_name = &silo.identity.name;
     let url =
-        format!("/system/silos/{}/identity-providers/local/users", silo_name);
+        format!("/v1/system/identity-providers/local/users?silo={}", silo_name);
     object_create(
         client,
         &url,
@@ -306,7 +306,7 @@ pub async fn create_disk(
     disk_name: &str,
 ) -> Disk {
     let url = format!(
-        "/organizations/{}/projects/{}/disks",
+        "/v1/disks?organization={}&project={}",
         organization_name, project_name
     );
     object_create(
@@ -333,8 +333,8 @@ pub async fn delete_disk(
     disk_name: &str,
 ) {
     let url = format!(
-        "/organizations/{}/projects/{}/disks/{}",
-        organization_name, project_name, disk_name
+        "/v1/disks/{}?organization={}&project={}",
+        disk_name, organization_name, project_name,
     );
     object_delete(client, &url).await
 }
@@ -405,7 +405,7 @@ pub async fn create_vpc(
     object_create(
         &client,
         format!(
-            "/organizations/{}/projects/{}/vpcs",
+            "/v1/vpcs?organization={}&project={}",
             &organization_name, &project_name
         )
         .as_str(),
@@ -435,7 +435,7 @@ pub async fn create_vpc_with_error(
             client,
             Method::POST,
             format!(
-                "/organizations/{}/projects/{}/vpcs",
+                "/v1/vpcs?organization={}&project={}",
                 &organization_name, &project_name
             )
             .as_str(),
@@ -468,7 +468,7 @@ pub async fn create_router(
     NexusRequest::objects_post(
         &client,
         format!(
-            "/organizations/{}/projects/{}/vpcs/{}/routers",
+            "/v1/vpc-routers?organization={}&project={}&vpc={}",
             &organization_name, &project_name, &vpc_name
         )
         .as_str(),

@@ -25,7 +25,7 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     create_organization(&client, &o1_name).await;
     create_organization(&client, &o2_name).await;
 
-    // Verify GET /organizations/{org} works
+    // Verify GET /v1/organizations/{org} works
     let o1_url = format!("/v1/organizations/{}", o1_name);
     let organization: Organization = NexusRequest::object_get(&client, &o1_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -111,8 +111,6 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
 
     // Attempt to delete a non-empty organization
     let project_name = "p1";
-    let project_url =
-        format!("/organizations/{}/projects/{}", o2_name, project_name);
     create_project(&client, &o2_name, &project_name).await;
     NexusRequest::expect_failure(
         &client,
@@ -130,27 +128,32 @@ async fn test_organizations(cptestctx: &ControlPlaneTestContext) {
     // - The default VPC for the project
     // - The project
     // - The organization
-    NexusRequest::object_delete(
-        &client,
-        &format!("{project_url}/vpcs/default/subnets/default"),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::object_delete(
-        &client,
-        &format!("{project_url}/vpcs/default"),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to make request");
-    NexusRequest::object_delete(&client, &project_url)
+    let subnet_url = format!(
+        "/v1/vpc-subnets/default?organization={}&project={}&vpc=default",
+        o2_name, project_name
+    );
+    NexusRequest::object_delete(&client, &subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .expect("failed to make request");
+    let vpc_url = format!(
+        "/v1/vpcs/default?organization={}&project={}",
+        o2_name, project_name
+    );
+    NexusRequest::object_delete(&client, &vpc_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make request");
+    NexusRequest::object_delete(
+        &client,
+        &format!("/v1/projects/{}?organization={}", project_name, o2_name),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
     NexusRequest::object_delete(&client, &o2_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

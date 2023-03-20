@@ -1,0 +1,40 @@
+# Sled Agent Configuration
+
+# Identifies if the sled should be unconditionally treated as a scrimlet.
+#
+# If this is set to "true", the sled agent treats itself as a scrimlet.
+# If this is set to "false", the sled agent treats itself as a gimlet.
+# If this is unset:
+# - On illumos, the sled automatically detects whether or not it is a scrimlet.
+# - On all other platforms, the sled assumes it is a gimlet.
+# stub_scrimlet = true
+
+# Identifies the revision of the sidecar that is attached, if one is attached.
+# TODO: This field should be removed once Gimlets have the ability to auto-detect
+# this information.
+sidecar_revision = "rev_b"
+
+# A file-backed zpool can be manually created with the following:
+# # truncate -s 10GB testpool.vdev
+# # zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b "$PWD/testpool.vdev"
+#
+# Note that you'll need to create one such zpool for each below, with a
+# different vdev for each.
+zpools = [
+  "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
+  "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
+  "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
+]
+
+# An optional data link from which we extract a MAC address.
+# This is used as a unique identifier for the bootstrap address.
+#
+# If empty, this will be equivalent to the first result from:
+# $ dladm show-phys -p -o LINK
+# data_link = "igb0"
+
+[log]
+level = "info"
+mode = "file"
+path = "/dev/stdout"
+if_exists = "append"

@@ -368,6 +368,11 @@ impl<'a> LookupPath<'a> {
         SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SshKey, identified by its id
+    pub fn ssh_key_id(self, id: Uuid) -> SshKey<'a> {
+        SshKey::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type Rack, identified by its id
     pub fn rack_id(self, id: Uuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)
@@ -402,6 +407,14 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type UpdateDeployment, identified by its id
     pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
         UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type UserBuiltin, identified by its `name`
+    pub fn user_builtin_id<'b>(self, id: Uuid) -> UserBuiltin<'b>
+    where
+        'a: 'b,
+    {
+        UserBuiltin::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`

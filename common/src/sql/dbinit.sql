@@ -10,11 +10,6 @@
 /*
  * Important CockroachDB notes:
  *
- *    The syntax STRING(63) means a Unicode string with at most 63 code points,
- *    not 63 bytes.  In many cases, Nexus itself will validate a string's
- *    byte count or code points, so it's still reasonable to limit ourselves to
- *    powers of two (or powers-of-two-minus-one) to improve storage utilization.
- *
  *    For timestamps, CockroachDB's docs recommend TIMESTAMPTZ rather than
  *    TIMESTAMP.  This does not change what is stored with each datum, but
  *    rather how it's interpreted when clients use it.  It should make no

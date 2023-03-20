@@ -571,12 +571,12 @@ impl super::Nexus {
             .ssh_keys_list(
                 opctx,
                 &authz_user,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?
             .into_iter()

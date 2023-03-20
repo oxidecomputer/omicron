@@ -4,6 +4,7 @@
 
 // Copyright 2022 Oxide Computer Company
 
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use gateway_messages::SpPort;
@@ -20,7 +21,6 @@ use std::convert::Infallible;
 use std::future;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
-use std::path::Path;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -43,13 +43,17 @@ impl GatewayTestContext {
 }
 
 pub fn load_test_config() -> (omicron_gateway::Config, sp_sim::Config) {
-    let server_config_file_path = Path::new("tests/config.test.toml");
+    // The test configs are located relative to the directory this file is in.
+    // TODO: embed these with include_str! instead?
+    let manifest_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"));
+    let server_config_file_path = manifest_dir.join("configs/config.test.toml");
     let server_config =
-        omicron_gateway::Config::from_file(server_config_file_path)
+        omicron_gateway::Config::from_file(&server_config_file_path)
             .expect("failed to load config.test.toml");
 
-    let sp_sim_config_file_path = Path::new("tests/sp_sim_config.test.toml");
-    let sp_sim_config = sp_sim::Config::from_file(sp_sim_config_file_path)
+    let sp_sim_config_file_path =
+        manifest_dir.join("configs/sp_sim_config.test.toml");
+    let sp_sim_config = sp_sim::Config::from_file(&sp_sim_config_file_path)
         .expect("failed to load sp_sim_config.test.toml");
     (server_config, sp_sim_config)
 }

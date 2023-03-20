@@ -42,7 +42,7 @@ function ensure_zpools {
     # Find the list of zpools the sled agent expects, from its configuration
     # file.
     readarray -t ZPOOLS < <( \
-            grep '"oxp_' "$OMICRON_TOP/smf/sled-agent/config.toml" | \
+            grep '"oxp_' "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
             sed 's/[ ",]//g' \
         )
     for ZPOOL in "${ZPOOLS[@]}"; do

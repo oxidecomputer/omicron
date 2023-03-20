@@ -8,9 +8,7 @@ use super::{Control, OverviewPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
-use crate::{Action, Event, Frame, State, Term};
-use crossterm::event::Event as TermEvent;
-use crossterm::event::KeyCode;
+use crate::{Action, Cmd, Frame, State, Term};
 use slog::{o, Logger};
 use tui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use tui::style::{Modifier, Style};
@@ -120,49 +118,39 @@ impl MainScreen {
         self.current_pane().resize(state, pane_rect);
     }
 
-    /// Handle an [`Event`] to update state and output any necessary actions for the
+    /// Handle a [`Cmd`] to update state and output any necessary actions for the
     /// system to take.
-    pub fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Esc => {
-                    if self.sidebar.active {
-                        None
+    pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::SwapPane => {
+                if self.sidebar.active {
+                    self.sidebar.active = false;
+                    Some(Action::Redraw)
+                } else {
+                    if self.current_pane().is_modal_active() {
+                        self.current_pane().on(state, cmd)
                     } else {
-                        if self.current_pane().is_modal_active() {
-                            self.current_pane().on(state, event)
-                        } else {
-                            self.sidebar.active = true;
-                            Some(Action::Redraw)
-                        }
-                    }
-                }
-                KeyCode::Tab | KeyCode::Enter => {
-                    if self.sidebar.active {
-                        self.sidebar.active = false;
+                        self.sidebar.active = true;
                         Some(Action::Redraw)
-                    } else {
-                        self.current_pane()
-                            .on(state, Event::Term(TermEvent::Key(e)))
                     }
                 }
-                _ => {
-                    let event = Event::Term(TermEvent::Key(e));
-                    self.dispatch_event(state, event)
+            }
+            Cmd::Enter => {
+                if self.sidebar.active {
+                    self.sidebar.active = false;
+                    Some(Action::Redraw)
+                } else {
+                    self.current_pane().on(state, cmd)
                 }
-            },
-            e => self.dispatch_event(state, e),
+            }
+            _ => self.dispatch_cmd(state, cmd),
         }
     }
 
-    fn dispatch_event(
-        &mut self,
-        state: &mut State,
-        event: Event,
-    ) -> Option<Action> {
+    fn dispatch_cmd(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         let current_pane = self.sidebar.selected_pane();
         if self.sidebar.active {
-            let _ = self.sidebar.on(state, event);
+            let _ = self.sidebar.on(state, cmd);
             if self.sidebar.selected_pane() != current_pane {
                 // We need to inform the new pane, which may not have
                 // ever been drawn what its Rect is.
@@ -172,7 +160,7 @@ impl MainScreen {
                 None
             }
         } else {
-            self.current_pane().on(state, event)
+            self.current_pane().on(state, cmd)
         }
     }
 
@@ -212,12 +200,18 @@ impl MainScreen {
         let main = Paragraph::new(Spans::from(spans));
         frame.render_widget(main, rect);
 
+        let system_version = state
+            .update_state
+            .system_version
+            .as_ref()
+            .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string());
+
         let test = Paragraph::new(Spans::from(vec![
             Span::styled(
                 "UPDATE VERSION: ",
                 Style::default().fg(TUI_GREEN_DARK),
             ),
-            Span::styled("UNKNOWN", style::plain_text()),
+            Span::styled(system_version, style::plain_text()),
         ]))
         .alignment(Alignment::Right);
         frame.render_widget(test, rect);
@@ -250,19 +244,16 @@ impl Sidebar {
 }
 
 impl Control for Sidebar {
-    fn on(&mut self, _: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Up => {
-                    self.panes.previous();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Down => {
-                    self.panes.next();
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
+    fn on(&mut self, _: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Up => {
+                self.panes.previous();
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                self.panes.next();
+                Some(Action::Redraw)
+            }
             _ => None,
         }
     }
