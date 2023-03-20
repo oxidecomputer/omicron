@@ -12,6 +12,7 @@ mod conversions;
 use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
+use crate::http_err_with_message;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -28,12 +29,15 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use gateway_messages::SpError;
+use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::str;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_stream::StreamExt;
@@ -439,6 +443,15 @@ pub struct SpComponentFirmwareSlot {
     pub slot: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SpComponentCaboose {
+    pub git_commit: String,
+    pub board: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
 /// Identity of a host phase2 recovery image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2RecoveryImageId {
@@ -713,10 +726,6 @@ async fn sp_component_list(
 /// This can be useful, for example, to poll the state of a component if
 /// another interface has changed the power state of a component or updated a
 /// component.
-///
-/// As communication with SPs maybe unreliable, consumers may specify a timeout
-/// to override the default. This interface will return an error when the
-/// timeout is reached.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}",
@@ -734,6 +743,80 @@ async fn sp_component_get(
         sp.component_details(component).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+// Implementation notes:
+//
+// 1. As of the time of this comment, the cannonical keys written to the hubris
+//    caboose are defined in https://github.com/oxidecomputer/hubtools; see
+//    `write_default_caboose()`.
+// 2. We currently assume that the caboose always includes the same set of
+//    fields regardless of the component (e.g., the SP and RoT caboose have the
+//    same fields). If that becomes untrue, we may need to split this endpoint
+//    up to allow differently-typed responses.
+/// Get the caboose of an SP component
+///
+/// Not all components have a caboose.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/caboose",
+}]
+async fn sp_component_caboose_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError> {
+    const CABOOSE_KEY_GIT_COMMIT: [u8; 4] = *b"GITC";
+    const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
+    const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
+    const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+
+    // TODO currently unused, but will be used once we can get RoT caboose
+    // values. At the moment this endpoint only works if the requested component
+    // is the SP itself.
+    let _component = component_from_str(&component)?;
+
+    let from_utf8 = |key: &[u8], bytes| {
+        // This helper closure is only called with the ascii-printable [u8; 4]
+        // key constants we define above, so we can unwrap this conversion.
+        let key = str::from_utf8(key).unwrap();
+        String::from_utf8(bytes).map_err(|_| {
+            http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "InvalidCaboose",
+                format!("non-utf8 data returned for caboose key {key}"),
+            )
+        })
+    };
+
+    let git_commit = sp
+        .get_caboose_value(CABOOSE_KEY_GIT_COMMIT)
+        .await
+        .map_err(SpCommsError::from)?;
+    let board = sp
+        .get_caboose_value(CABOOSE_KEY_BOARD)
+        .await
+        .map_err(SpCommsError::from)?;
+    let name = sp
+        .get_caboose_value(CABOOSE_KEY_NAME)
+        .await
+        .map_err(SpCommsError::from)?;
+    let version = match sp.get_caboose_value(CABOOSE_KEY_VERSION).await {
+        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
+        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
+        Err(err) => return Err(SpCommsError::from(err).into()),
+    };
+
+    let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
+    let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
+    let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+
+    let caboose = SpComponentCaboose { git_commit, board, name, version };
+
+    Ok(HttpResponseOk(caboose))
 }
 
 /// Clear status of a component
@@ -1316,6 +1399,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_caboose_get)?;
         api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
