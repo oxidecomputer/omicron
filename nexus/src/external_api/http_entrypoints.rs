@@ -107,19 +107,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_list)?;
         api.register(project_create)?;
         api.register(project_view)?;
-        api.register(project_view_by_id)?;
         api.register(project_delete)?;
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
-
-        api.register(project_list_v1)?;
-        api.register(project_create_v1)?;
-        api.register(project_view_v1)?;
-        api.register(project_delete_v1)?;
-        api.register(project_update_v1)?;
-        api.register(project_policy_view_v1)?;
-        api.register(project_policy_update_v1)?;
 
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
@@ -288,17 +279,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(saga_list_v1)?;
         api.register(saga_view_v1)?;
 
-        api.register(system_user_list)?;
-        api.register(system_user_view)?;
-
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
 
         api.register(role_list)?;
         api.register(role_view)?;
-
-        api.register(role_list_v1)?;
-        api.register(role_view_v1)?;
 
         api.register(session_sshkey_list)?;
         api.register(session_sshkey_view)?;
@@ -318,7 +303,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_view)?;
         api.register(silo_view_by_id)?;
         api.register(silo_delete)?;
-        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
@@ -326,23 +310,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_create_v1)?;
         api.register(silo_view_v1)?;
         api.register(silo_delete_v1)?;
-        api.register(silo_identity_provider_list_v1)?;
+        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view_v1)?;
         api.register(silo_policy_update_v1)?;
 
         api.register(saml_identity_provider_create)?;
         api.register(saml_identity_provider_view)?;
 
-        api.register(saml_identity_provider_create_v1)?;
-        api.register(saml_identity_provider_view_v1)?;
-
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
-
-        api.register(local_idp_user_create_v1)?;
-        api.register(local_idp_user_delete_v1)?;
-        api.register(local_idp_user_set_password_v1)?;
 
         api.register(certificate_list)?;
         api.register(certificate_create)?;
@@ -1116,7 +1093,7 @@ async fn silo_user_view(
     path = "/v1/system/identity-providers",
     tags = ["system"],
 }]
-async fn silo_identity_provider_list_v1(
+async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::SiloSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
@@ -1145,46 +1122,6 @@ async fn silo_identity_provider_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List a silo's IDPs
-/// Use `/v1/system/silos/{silo}/identity-providers` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_identity_provider_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let identity_providers = nexus
-            .identity_provider_list(
-                &opctx,
-                &silo_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|x| x.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            identity_providers,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // Silo SAML identity providers
 
 /// Create a SAML IDP
@@ -1193,7 +1130,7 @@ async fn silo_identity_provider_list(
     path = "/v1/system/identity-providers/saml",
     tags = ["system"],
 }]
-async fn saml_identity_provider_create_v1(
+async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -1216,45 +1153,13 @@ async fn saml_identity_provider_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a SAML IDP
-/// Use `POST /v1/system/identity-providers/saml` instead.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/saml",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn saml_identity_provider_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
-) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let provider = nexus
-            .saml_identity_provider_create(
-                &opctx,
-                &silo_lookup,
-                new_provider.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
     tags = ["system"],
 }]
-async fn saml_identity_provider_view_v1(
+async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProviderPath>,
     query_params: Query<params::SiloSelector>,
@@ -1282,45 +1187,6 @@ async fn saml_identity_provider_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Silo SAML identity provider requests
-#[derive(Deserialize, JsonSchema)]
-struct SiloSamlPathParam {
-    /// The silo's unique name.
-    silo_name: Name,
-    /// The SAML identity provider's name
-    provider_name: Name,
-}
-
-/// Fetch a SAML IDP
-/// Use `GET /v1/system/identity-providers/saml/{provider_name}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers/saml/{provider_name}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn saml_identity_provider_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloSamlPathParam>,
-) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
-        let provider_selector = params::SamlIdentityProviderSelector::new(
-            Some(path_params.silo_name.into()),
-            path_params.provider_name.into(),
-        );
-        let (.., provider) = nexus
-            .saml_identity_provider_lookup(&opctx, &provider_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // TODO: no DELETE for identity providers?
 
 // "Local" Identity Provider
@@ -1337,7 +1203,7 @@ async fn saml_identity_provider_view(
     tags = ["system"],
     deprecated = true
 }]
-async fn local_idp_user_create_v1(
+async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_user_params: TypedBody<params::UserCreate>,
@@ -1348,39 +1214,6 @@ async fn local_idp_user_create_v1(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        let user = nexus
-            .local_idp_create_user(
-                &opctx,
-                &silo_lookup,
-                new_user_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a user
-///
-/// Users can only be created in Silos with `provision_type` == `Fixed`.
-/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
-/// logs in using an external Identity Provider.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users",
-    tags = ["system"],
-}]
-async fn local_idp_user_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_user_params: TypedBody<params::UserCreate>,
-) -> Result<HttpResponseCreated<User>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let silo = path_params.into_inner().silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let user = nexus
             .local_idp_create_user(
                 &opctx,
@@ -1399,7 +1232,7 @@ async fn local_idp_user_create(
     path = "/v1/system/identity-providers/local/users/{user_id}",
     tags = ["system"],
 }]
-async fn local_idp_user_delete_v1(
+async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloSelector>,
@@ -1417,31 +1250,6 @@ async fn local_idp_user_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a user
-/// Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Set or invalidate a user's password
 ///
 /// Passwords can only be updated for users in Silos with identity mode
@@ -1451,7 +1259,7 @@ async fn local_idp_user_delete(
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
     tags = ["system"],
 }]
-async fn local_idp_user_set_password_v1(
+async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloPath>,
@@ -1464,42 +1272,6 @@ async fn local_idp_user_set_password_v1(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        nexus
-            .local_idp_user_set_password(
-                &opctx,
-                &silo_lookup,
-                path.user_id,
-                update.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Set or invalidate a user's password
-///
-/// Passwords can only be updated for users in Silos with identity mode
-/// `LocalOnly`.
-/// Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_set_password(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-    update: TypedBody<params::UserPassword>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
@@ -1991,7 +1763,7 @@ async fn organization_policy_update(
     path = "/v1/projects",
     tags = ["projects"],
 }]
-async fn project_list_v1(
+async fn project_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
@@ -2020,55 +1792,13 @@ async fn project_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List projects
-/// Use `GET /v1/projects` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects",
-    tags = ["projects"],
-    deprecated = true,
-}]
-async fn project_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-    path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let projects = nexus
-            .project_list(&opctx, &organization_lookup, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|p| p.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            projects,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a project
 #[endpoint {
     method = POST,
     path = "/v1/projects",
     tags = ["projects"],
 }]
-async fn project_create_v1(
+async fn project_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
@@ -2094,48 +1824,13 @@ async fn project_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a project
-/// Use `POST /v1/projects` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
-    new_project: TypedBody<params::ProjectCreate>,
-) -> Result<HttpResponseCreated<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let project = nexus
-            .project_create(
-                &opctx,
-                &organization_lookup,
-                &new_project.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a project
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_view_v1(
+async fn project_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2166,67 +1861,13 @@ struct ProjectPathParam {
     project_name: Name,
 }
 
-/// Fetch a project
-/// Use `GET /v1/projects/{project}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let (.., project) =
-            nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
-        Ok(HttpResponseOk(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a project by id
-/// Use `GET /v1/projects/{project}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/projects/{id}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(None, path.id.into());
-        let (.., project) =
-            nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
-        Ok(HttpResponseOk(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a project
 #[endpoint {
     method = DELETE,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_delete_v1(
+async fn project_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2248,41 +1889,18 @@ async fn project_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a project
-/// Use `DELETE /v1/projects/{project}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        nexus.project_delete(&opctx, &project_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
+// TODO-correctness: Is it valid for PUT to accept application/json that's a
+// subset of what the resource actually represents?  If not, is that a problem?
+// (HTTP may require that this be idempotent.)  If so, can we get around that
+// having this be a slightly different content-type (e.g.,
+// "application/json-patch")?  We should see what other APIs do.
 /// Update a project
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_update_v1(
+async fn project_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2308,53 +1926,13 @@ async fn project_update_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project
-// TODO-correctness: Is it valid for PUT to accept application/json that's a
-// subset of what the resource actually represents?  If not, is that a problem?
-// (HTTP may require that this be idempotent.)  If so, can we get around that
-// having this be a slightly different content-type (e.g.,
-// "application/json-patch")?  We should see what other APIs do.
-/// Use `PUT /v1/projects/{project}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    updated_project: TypedBody<params::ProjectUpdate>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let new_project = nexus
-            .project_update(
-                &opctx,
-                &project_lookup,
-                &updated_project.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseOk(new_project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a project's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}/policy",
     tags = ["projects"],
 }]
-async fn project_policy_view_v1(
+async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2377,42 +1955,13 @@ async fn project_policy_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project's IAM policy
-/// Use `GET /v1/projects/{project}/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/policy",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_policy_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let policy =
-            nexus.project_fetch_policy(&opctx, &project_lookup).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Update a project's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}/policy",
     tags = ["projects"],
 }]
-async fn project_policy_update_v1(
+async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2434,39 +1983,6 @@ async fn project_policy_update_v1(
             .project_update_policy(&opctx, &project_lookup, &new_policy)
             .await?;
         Ok(HttpResponseOk(new_policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update a project's IAM policy
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/policy",
-    tags = ["projects"],
-}]
-async fn project_policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_policy = new_policy.into_inner();
-    let handler = async {
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let policy = nexus
-            .project_update_policy(&opctx, &project_lookup, &new_policy)
-            .await?;
-        Ok(HttpResponseOk(policy))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -7864,70 +7380,6 @@ async fn group_view(
 /// List built-in users
 #[endpoint {
     method = GET,
-    path = "/system/user",
-    tags = ["system"],
-}]
-async fn system_user_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams =
-        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let users = nexus
-            .users_builtin_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            users,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for global (system) user requests
-#[derive(Deserialize, JsonSchema)]
-struct BuiltinUserPathParam {
-    /// The built-in user's unique name.
-    user_name: Name,
-}
-
-/// Fetch a built-in user
-#[endpoint {
-    method = GET,
-    path = "/system/user/{user_name}",
-    tags = ["system"],
-}]
-async fn system_user_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<BuiltinUserPathParam>,
-) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let user_selector = params::UserBuiltinSelector {
-            user: NameOrId::Name(path.user_name.into()),
-        };
-        let (.., user) =
-            nexus.user_builtin_lookup(&opctx, &user_selector)?.fetch().await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List built-in users
-#[endpoint {
-    method = GET,
     path = "/v1/system/users-builtin",
     tags = ["system"],
 }]
@@ -7988,80 +7440,11 @@ struct RolePage {
     last_seen: String,
 }
 
-/// List built-in roles
-#[endpoint {
-    method = GET,
-    path = "/roles",
-    tags = ["roles"],
-}]
-async fn role_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
-) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let marker = match &query.page {
-            WhichPage::First(..) => None,
-            WhichPage::Next(RolePage { last_seen }) => {
-                Some(last_seen.split_once('.').ok_or_else(|| {
-                    Error::InvalidValue {
-                        label: last_seen.clone(),
-                        message: String::from("bad page token"),
-                    }
-                })?)
-                .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
-            }
-        };
-        let pagparams = DataPageParams {
-            limit: rqctx.page_limit(&query)?,
-            direction: PaginationOrder::Ascending,
-            marker: marker.as_ref(),
-        };
-        let roles = nexus
-            .roles_builtin_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(dropshot::ResultsPage::new(
-            roles,
-            &EmptyScanParams {},
-            |role: &Role, _| RolePage { last_seen: role.name.to_string() },
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Path parameters for global (system) role requests
 #[derive(Deserialize, JsonSchema)]
 struct RolePathParam {
     /// The built-in role's unique name.
     role_name: String,
-}
-
-/// Fetch a built-in role
-#[endpoint {
-    method = GET,
-    path = "/roles/{role_name}",
-    tags = ["roles"],
-}]
-async fn role_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<RolePathParam>,
-) -> Result<HttpResponseOk<Role>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let role_name = &path.role_name;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-        Ok(HttpResponseOk(role.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// List built-in roles
@@ -8070,7 +7453,7 @@ async fn role_view(
     path = "/v1/system/roles",
     tags = ["roles"],
 }]
-async fn role_list_v1(
+async fn role_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
 ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
@@ -8117,7 +7500,7 @@ async fn role_list_v1(
     path = "/v1/system/roles/{role_name}",
     tags = ["roles"],
 }]
-async fn role_view_v1(
+async fn role_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RolePathParam>,
 ) -> Result<HttpResponseOk<Role>, HttpError> {

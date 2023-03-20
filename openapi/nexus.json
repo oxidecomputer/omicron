@@ -169,46 +169,6 @@
         "deprecated": true
       }
     },
-    "/by-id/projects/{id}": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project by id",
-        "description": "Use `GET /v1/projects/{project}` instead",
-        "operationId": "project_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/by-id/vpc-router-routes/{id}": {
       "get": {
         "tags": [
@@ -1015,268 +975,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "List projects",
-        "description": "Use `GET /v1/projects` instead",
-        "operationId": "project_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Create a project",
-        "description": "Use `POST /v1/projects` instead",
-        "operationId": "project_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project",
-        "description": "Use `GET /v1/projects/{project}` instead",
-        "operationId": "project_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Update a project",
-        "description": "Use `PUT /v1/projects/{project}` instead",
-        "operationId": "project_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Delete a project",
-        "description": "Use `DELETE /v1/projects/{project}` instead",
-        "operationId": "project_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2723,110 +2421,6 @@
           }
         },
         "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/policy": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project's IAM policy",
-        "description": "Use `GET /v1/projects/{project}/policy` instead",
-        "operationId": "project_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Update a project's IAM policy",
-        "operationId": "project_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/organizations/{organization_name}/projects/{project_name}/vpcs": {
@@ -4377,94 +3971,6 @@
         "x-dropshot-pagination": true
       }
     },
-    "/roles": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "List built-in roles",
-        "operationId": "role_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RoleResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/roles/{role_name}": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "Fetch a built-in role",
-        "operationId": "role_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "role_name",
-            "description": "The built-in role's unique name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Role"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/session/me": {
       "get": {
         "tags": [
@@ -5783,318 +5289,6 @@
         "deprecated": true
       }
     },
-    "/system/silos/{silo_name}/identity-providers": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List a silo's IDPs",
-        "description": "Use `/v1/system/silos/{silo}/identity-providers` instead.",
-        "operationId": "silo_identity_provider_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IdentityProviderResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a user",
-        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
-        "operationId": "local_idp_user_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}": {
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a user",
-        "description": "Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead",
-        "operationId": "local_idp_user_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "description": "The user's internal id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Set or invalidate a user's password",
-        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`. Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead",
-        "operationId": "local_idp_user_set_password",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "description": "The user's internal id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserPassword"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/saml": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a SAML IDP",
-        "description": "Use `POST /v1/system/identity-providers/saml` instead.",
-        "operationId": "saml_identity_provider_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/saml/{provider_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a SAML IDP",
-        "description": "Use `GET /v1/system/identity-providers/saml/{provider_name}` instead",
-        "operationId": "saml_identity_provider_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "description": "The SAML identity provider's name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/system/silos/{silo_name}/policy": {
       "get": {
         "tags": [
@@ -6299,101 +5493,6 @@
           }
         },
         "deprecated": true
-      }
-    },
-    "/system/user": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List built-in users",
-        "operationId": "system_user_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/user/{user_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a built-in user",
-        "operationId": "system_user_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "user_name",
-            "description": "The built-in user's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltin"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/users": {
@@ -8802,7 +7901,7 @@
           "projects"
         ],
         "summary": "List projects",
-        "operationId": "project_list_v1",
+        "operationId": "project_list",
         "parameters": [
           {
             "in": "query",
@@ -8864,7 +7963,7 @@
           "projects"
         ],
         "summary": "Create a project",
-        "operationId": "project_create_v1",
+        "operationId": "project_create",
         "parameters": [
           {
             "in": "query",
@@ -8911,7 +8010,7 @@
           "projects"
         ],
         "summary": "Fetch a project",
-        "operationId": "project_view_v1",
+        "operationId": "project_view",
         "parameters": [
           {
             "in": "path",
@@ -8953,7 +8052,7 @@
           "projects"
         ],
         "summary": "Update a project",
-        "operationId": "project_update_v1",
+        "operationId": "project_update",
         "parameters": [
           {
             "in": "path",
@@ -9005,7 +8104,7 @@
           "projects"
         ],
         "summary": "Delete a project",
-        "operationId": "project_delete_v1",
+        "operationId": "project_delete",
         "parameters": [
           {
             "in": "path",
@@ -9042,7 +8141,7 @@
           "projects"
         ],
         "summary": "Fetch a project's IAM policy",
-        "operationId": "project_policy_view_v1",
+        "operationId": "project_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -9084,7 +8183,7 @@
           "projects"
         ],
         "summary": "Update a project's IAM policy",
-        "operationId": "project_policy_update_v1",
+        "operationId": "project_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -9832,7 +8931,7 @@
           "system"
         ],
         "summary": "List a silo's IDPs_name",
-        "operationId": "silo_identity_provider_list_v1",
+        "operationId": "silo_identity_provider_list",
         "parameters": [
           {
             "in": "query",
@@ -9897,7 +8996,7 @@
         ],
         "summary": "Create a user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider. Use `POST /v1/system/identity-providers/local/users` instead",
-        "operationId": "local_idp_user_create_v1",
+        "operationId": "local_idp_user_create",
         "parameters": [
           {
             "in": "query",
@@ -9945,7 +9044,7 @@
           "system"
         ],
         "summary": "Delete a user",
-        "operationId": "local_idp_user_delete_v1",
+        "operationId": "local_idp_user_delete",
         "parameters": [
           {
             "in": "path",
@@ -9986,7 +9085,7 @@
         ],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
-        "operationId": "local_idp_user_set_password_v1",
+        "operationId": "local_idp_user_set_password",
         "parameters": [
           {
             "in": "path",
@@ -10036,7 +9135,7 @@
           "system"
         ],
         "summary": "Create a SAML IDP",
-        "operationId": "saml_identity_provider_create_v1",
+        "operationId": "saml_identity_provider_create",
         "parameters": [
           {
             "in": "query",
@@ -10083,7 +9182,7 @@
           "system"
         ],
         "summary": "Fetch a SAML IDP",
-        "operationId": "saml_identity_provider_view_v1",
+        "operationId": "saml_identity_provider_view",
         "parameters": [
           {
             "in": "path",
@@ -10769,7 +9868,7 @@
           "roles"
         ],
         "summary": "List built-in roles",
-        "operationId": "role_list_v1",
+        "operationId": "role_list",
         "parameters": [
           {
             "in": "query",
@@ -10819,7 +9918,7 @@
           "roles"
         ],
         "summary": "Fetch a built-in role",
-        "operationId": "role_view_v1",
+        "operationId": "role_view",
         "parameters": [
           {
             "in": "path",
