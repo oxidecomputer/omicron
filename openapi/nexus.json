@@ -10,46 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/by-id/instances/{id}": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Fetch an instance by id",
-        "description": "Use `GET /v1/instances/{instance}` instead",
-        "operationId": "instance_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/by-id/network-interfaces/{id}": {
       "get": {
         "tags": [
@@ -947,453 +907,6 @@
         "deprecated": true
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/instances": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "List instances",
-        "description": "Use `GET /v1/instances` instead",
-        "operationId": "instance_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Create an instance",
-        "description": "Use `POST /v1/instances` instead",
-        "operationId": "instance_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Fetch an instance",
-        "description": "Use `GET /v1/instances/{instance}` instead",
-        "operationId": "instance_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Delete an instance",
-        "operationId": "instance_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "List an instance's disks",
-        "description": "Use `GET /v1/instances/{instance}/disks` instead",
-        "operationId": "instance_disk_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiskResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/attach": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Attach a disk to an instance",
-        "description": "Use `POST /v1/instances/{instance}/disks/attach` instead",
-        "operationId": "instance_disk_attach",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiskIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/disks/detach": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Detach a disk from an instance",
-        "description": "Use `POST /v1/disks/{disk}/detach` instead",
-        "operationId": "instance_disk_detach",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiskIdentifier"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/external-ips": {
       "get": {
         "tags": [
@@ -1435,71 +948,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExternalIpResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/migrate": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Migrate an instance",
-        "description": "Use `POST /v1/instances/{instance}/migrate` instead",
-        "operationId": "instance_migrate",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMigrate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
                 }
               }
             }
@@ -1837,307 +1285,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/reboot": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Reboot an instance",
-        "description": "Use `POST /v1/instances/{instance}/reboot` instead",
-        "operationId": "instance_reboot",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Fetch an instance's serial console",
-        "description": "Use `GET /v1/instances/{instance}/serial-console` instead",
-        "operationId": "instance_serial_console",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from_start",
-            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "most_recent",
-            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/serial-console/stream": {
-      "get": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Connect to an instance's serial console",
-        "description": "Use `GET /v1/instances/{instance}/serial-console/stream` instead",
-        "operationId": "instance_serial_console_stream",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "default": {
-            "description": "",
-            "content": {
-              "*/*": {
-                "schema": {}
-              }
-            }
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-websocket": {}
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/start": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Boot an instance",
-        "description": "Use `POST /v1/instances/{instance}/start` instead",
-        "operationId": "instance_start",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/instances/{instance_name}/stop": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Halt an instance",
-        "description": "Use `POST /v1/instances/{instance}/stop` instead",
-        "operationId": "instance_stop",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -5981,7 +5128,7 @@
           "instances"
         ],
         "summary": "List instances",
-        "operationId": "instance_list_v1",
+        "operationId": "instance_list",
         "parameters": [
           {
             "in": "query",
@@ -6050,7 +5197,7 @@
           "instances"
         ],
         "summary": "Create an instance",
-        "operationId": "instance_create_v1",
+        "operationId": "instance_create",
         "parameters": [
           {
             "in": "query",
@@ -6104,7 +5251,7 @@
           "instances"
         ],
         "summary": "Fetch an instance",
-        "operationId": "instance_view_v1",
+        "operationId": "instance_view",
         "parameters": [
           {
             "in": "query",
@@ -6153,7 +5300,7 @@
           "instances"
         ],
         "summary": "Delete an instance",
-        "operationId": "instance_delete_v1",
+        "operationId": "instance_delete",
         "parameters": [
           {
             "in": "query",
@@ -6197,7 +5344,7 @@
           "instances"
         ],
         "summary": "List an instance's disks",
-        "operationId": "instance_disk_list_v1",
+        "operationId": "instance_disk_list",
         "parameters": [
           {
             "in": "query",
@@ -6276,7 +5423,7 @@
           "instances"
         ],
         "summary": "Attach a disk to an instance",
-        "operationId": "instance_disk_attach_v1",
+        "operationId": "instance_disk_attach",
         "parameters": [
           {
             "in": "path",
@@ -6337,7 +5484,7 @@
           "instances"
         ],
         "summary": "Detach a disk from an instance",
-        "operationId": "instance_disk_detach_v1",
+        "operationId": "instance_disk_detach",
         "parameters": [
           {
             "in": "path",
@@ -6449,7 +5596,7 @@
           "instances"
         ],
         "summary": "Migrate an instance",
-        "operationId": "instance_migrate_v1",
+        "operationId": "instance_migrate",
         "parameters": [
           {
             "in": "query",
@@ -6510,7 +5657,7 @@
           "instances"
         ],
         "summary": "Reboot an instance",
-        "operationId": "instance_reboot_v1",
+        "operationId": "instance_reboot",
         "parameters": [
           {
             "in": "query",
@@ -6561,7 +5708,7 @@
           "instances"
         ],
         "summary": "Fetch an instance's serial console",
-        "operationId": "instance_serial_console_v1",
+        "operationId": "instance_serial_console",
         "parameters": [
           {
             "in": "path",
@@ -6645,7 +5792,7 @@
           "instances"
         ],
         "summary": "Stream an instance's serial console",
-        "operationId": "instance_serial_console_stream_v1",
+        "operationId": "instance_serial_console_stream",
         "parameters": [
           {
             "in": "path",
@@ -6689,7 +5836,7 @@
           "instances"
         ],
         "summary": "Boot an instance",
-        "operationId": "instance_start_v1",
+        "operationId": "instance_start",
         "parameters": [
           {
             "in": "query",
@@ -6740,7 +5887,7 @@
           "instances"
         ],
         "summary": "Stop an instance",
-        "operationId": "instance_stop_v1",
+        "operationId": "instance_stop",
         "parameters": [
           {
             "in": "query",
@@ -12976,18 +12123,6 @@
           "disk_source",
           "name",
           "size"
-        ]
-      },
-      "DiskIdentifier": {
-        "description": "TODO-v1: Delete this Parameters for the [`Disk`](omicron_common::api::external::Disk) to be attached or detached to an instance",
-        "type": "object",
-        "properties": {
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        },
-        "required": [
-          "name"
         ]
       },
       "DiskPath": {
