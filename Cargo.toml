@@ -49,6 +49,7 @@ members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -97,6 +98,7 @@ default-members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -301,6 +303,7 @@ usdt = "0.3"
 vsss-rs = { version = "2.7", default-features = false, features = ["std"] }
 walkdir = "2.3"
 wicketd-client = { path = "wicketd-client" }
+wicket = { path = "wicket" }
 zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }

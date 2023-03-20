@@ -7977,6 +7977,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wicket-dbg"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "serde",
+ "wicket",
+]
+
+[[package]]
 name = "wicketd"
 version = "0.1.0"
 dependencies = [

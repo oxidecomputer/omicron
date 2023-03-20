@@ -1,0 +1,17 @@
+[package]
+name = "wicket-dbg"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+bincode.workspace = true
+serde.workspace = true
+wicket.workspace = true
+
+[[bin]]
+name = "wicket-dbg"
+
+[[bin]]
+name = "wicket-dbg-server"

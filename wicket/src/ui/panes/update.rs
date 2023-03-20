@@ -30,10 +30,14 @@ enum PopupKind {
 pub struct UpdatePane {
     #[allow(unused)]
     log: Logger,
+    help: Vec<(&'static str, &'static str)>,
+
+    /// TODO: Move following  state into global `State` so that recorder snapshots
+    /// capture all state.
     tree_state: TreeState,
     items: Vec<TreeItem<'static>>,
-    help: Vec<(&'static str, &'static str)>,
     rect: Rect,
+
     // TODO: These will likely move into a status view, because there will be
     // other update views/tabs
     title_rect: Rect,

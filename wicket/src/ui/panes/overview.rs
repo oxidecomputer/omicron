@@ -20,6 +20,8 @@ use tui::widgets::{Block, BorderType, Borders, Paragraph};
 /// The OverviewPane shows a rendering of the rack.
 ///
 /// This is useful for getting a quick view of the state of the rack.
+///
+// TODO: Move this state into global `State` so `Recorder` snapshots work
 pub struct OverviewPane {
     rack_view: RackView,
     inventory_view: InventoryView,
