@@ -165,8 +165,15 @@ mod tests {
     fn parse_rack_initialization() {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
-        let path = PathBuf::from(manifest)
-            .join("../smf/sled-agent/nongimlet/config-rss.toml");
+        let manifest = PathBuf::from(manifest);
+
+        let path =
+            manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let contents = std::fs::read_to_string(path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+
+        let path = manifest
+            .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
         let contents = std::fs::read_to_string(path).unwrap();
         let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
     }
