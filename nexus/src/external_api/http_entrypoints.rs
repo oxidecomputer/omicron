@@ -81,9 +81,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(system_policy_view)?;
         api.register(system_policy_update)?;
 
-        api.register(system_policy_view_v1)?;
-        api.register(system_policy_update_v1)?;
-
         api.register(policy_view)?;
         api.register(policy_update)?;
 
@@ -93,19 +90,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(organization_list)?;
         api.register(organization_create)?;
         api.register(organization_view)?;
-        api.register(organization_view_by_id)?;
         api.register(organization_delete)?;
         api.register(organization_update)?;
         api.register(organization_policy_view)?;
         api.register(organization_policy_update)?;
-
-        api.register(organization_list_v1)?;
-        api.register(organization_create_v1)?;
-        api.register(organization_view_v1)?;
-        api.register(organization_delete_v1)?;
-        api.register(organization_update_v1)?;
-        api.register(organization_policy_view_v1)?;
-        api.register(organization_policy_update_v1)?;
 
         api.register(project_list)?;
         api.register(project_create)?;
@@ -321,11 +309,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(certificate_view)?;
         api.register(certificate_delete)?;
 
-        api.register(certificate_list_v1)?;
-        api.register(certificate_create_v1)?;
-        api.register(certificate_view_v1)?;
-        api.register(certificate_delete_v1)?;
-
         api.register(system_image_list)?;
         api.register(system_image_create)?;
         api.register(system_image_view)?;
@@ -429,34 +412,12 @@ pub fn external_api() -> NexusApiDescription {
     path = "/v1/system/policy",
     tags = ["policy"],
 }]
-async fn system_policy_view_v1(
+async fn system_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let policy = nexus.fleet_fetch_policy(&opctx).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the top-level IAM policy
-/// Use `GET /v1/system/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/system/policy",
-    tags = ["policy"],
-    deprecated = true
-}]
-async fn system_policy_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let policy = nexus.fleet_fetch_policy(&opctx).await?;
         Ok(HttpResponseOk(policy))
@@ -476,7 +437,7 @@ struct ByIdPathParams {
     path = "/v1/system/policy",
     tags = ["policy"],
 }]
-async fn system_policy_update_v1(
+async fn system_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
@@ -484,33 +445,6 @@ async fn system_policy_update_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let new_policy = new_policy.into_inner();
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let policy = nexus.fleet_update_policy(&opctx, &new_policy).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update the top-level IAM policy
-/// Use 'PUT /v1/system/policy' instead
-#[endpoint {
-    method = PUT,
-    path = "/system/policy",
-    tags = ["policy"],
-    deprecated = true
-}]
-async fn system_policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::FleetRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::FleetRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_policy = new_policy.into_inner();
-
-    let handler = async {
         let nasgns = new_policy.role_assignments.len();
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
@@ -1274,53 +1208,18 @@ async fn local_idp_user_set_password(
     path = "/v1/organizations",
     tags = ["organizations"]
 }]
-async fn organization_list_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organizations = nexus
-            .organizations_list(&opctx, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|p| p.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            organizations,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List organizations
-/// Use `GET /v1/organizations` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations",
-    tags = ["organizations"],
-    deprecated = true
-}]
 async fn organization_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Organization>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let organizations = nexus
             .organizations_list(&opctx, &paginated_by)
             .await?
@@ -1341,30 +1240,6 @@ async fn organization_list(
     method = POST,
     path = "/v1/organizations",
     tags = ["organizations"],
-}]
-async fn organization_create_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_organization: TypedBody<params::OrganizationCreate>,
-) -> Result<HttpResponseCreated<Organization>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization = nexus
-            .organization_create(&opctx, &new_organization.into_inner())
-            .await?;
-        Ok(HttpResponseCreated(organization.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create an organization
-/// Use `POST /v1/organizations` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations",
-    tags = ["organizations"],
-    deprecated = true
 }]
 async fn organization_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -1388,7 +1263,7 @@ async fn organization_create(
     path = "/v1/organizations/{organization}",
     tags = ["organizations"],
 }]
-async fn organization_view_v1(
+async fn organization_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<Organization>, HttpError> {
@@ -1411,118 +1286,23 @@ async fn organization_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Organization requests
-#[derive(Deserialize, JsonSchema)]
-struct OrganizationPathParam {
-    /// The organization's unique name.
-    organization_name: Name,
-}
-
-/// Fetch an organization
-/// Use `GET /v1/organizations/{organization}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}",
-    tags = ["organizations"],
-    deprecated = true
-}]
-async fn organization_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<Organization>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., organization) = nexus
-            .organization_lookup(
-                &opctx,
-                &params::OrganizationSelector {
-                    organization: path.organization_name.into(),
-                },
-            )?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(organization.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an organization by id
-/// Use `GET /v1/organizations/{organization}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/organizations/{id}",
-    tags = ["organizations"],
-    deprecated = true
-}]
-async fn organization_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Organization>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., organization) = nexus
-            .organization_lookup(
-                &opctx,
-                &params::OrganizationSelector { organization: path.id.into() },
-            )?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(organization.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete an organization
 #[endpoint {
     method = DELETE,
     path = "/v1/organizations/{organization}",
     tags = ["organizations"],
-}]
-async fn organization_delete_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::OrganizationPath>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let params = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector { organization: params.organization };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        nexus.organization_delete(&opctx, &organization_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an organization
-/// Use `DELETE /v1/organizations/{organization}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}",
-    tags = ["organizations"],
-    deprecated = true
 }]
 async fn organization_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
+    path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let params = path_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: params.organization_name.into(),
-        };
+        let organization_selector =
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         nexus.organization_delete(&opctx, &organization_lookup).await?;
@@ -1537,7 +1317,7 @@ async fn organization_delete(
     path = "/v1/organizations/{organization}",
     tags = ["organizations"],
 }]
-async fn organization_update_v1(
+async fn organization_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     updated_organization: TypedBody<params::OrganizationUpdate>,
@@ -1549,46 +1329,6 @@ async fn organization_update_v1(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let organization_selector =
             &params::OrganizationSelector { organization: params.organization };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let new_organization = nexus
-            .organization_update(
-                &opctx,
-                &organization_lookup,
-                &updated_organization.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseOk(new_organization.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update an organization
-// TODO-correctness: Is it valid for PUT to accept application/json that's a
-// subset of what the resource actually represents?  If not, is that a problem?
-// (HTTP may require that this be idempotent.)  If so, can we get around that
-// having this be a slightly different content-type (e.g.,
-// "application/json-patch")?  We should see what other APIs do.
-/// Use `PUT /v1/organizations/{organization}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}",
-    tags = ["organizations"],
-    deprecated = true
-}]
-async fn organization_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
-    updated_organization: TypedBody<params::OrganizationUpdate>,
-) -> Result<HttpResponseOk<Organization>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let new_organization = nexus
@@ -1608,51 +1348,19 @@ async fn organization_update(
     method = GET,
     path = "/v1/organizations/{organization}/policy",
     tags = ["organizations"],
-}]
-async fn organization_policy_view_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::OrganizationPath>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
-{
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let params = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector =
-            &params::OrganizationSelector { organization: params.organization };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let policy = nexus
-            .organization_fetch_policy(&opctx, &organization_lookup)
-            .await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an organization's IAM policy
-/// Use `GET /v1/organizations/{organization}/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/policy",
-    tags = ["organizations"],
-    deprecated = true
 }]
 async fn organization_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
+    path_params: Path<params::OrganizationPath>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
 {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-
+    let params = path_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
+        let organization_selector =
+            &params::OrganizationSelector { organization: params.organization };
         let organization_lookup =
             nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
@@ -1669,7 +1377,7 @@ async fn organization_policy_view(
     path = "/v1/organizations/{organization}/policy",
     tags = ["organizations"],
 }]
-async fn organization_policy_update_v1(
+async fn organization_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::OrganizationPath>,
     new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
@@ -1688,46 +1396,6 @@ async fn organization_policy_update_v1(
         let nasgns = new_policy.role_assignments.len();
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let policy = nexus
-            .organization_update_policy(
-                &opctx,
-                &organization_lookup,
-                &new_policy,
-            )
-            .await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update an organization's IAM policy
-/// Use `PUT /v1/organizations/{organization}/policy` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/policy",
-    tags = ["organizations"],
-    deprecated = true
-}]
-async fn organization_policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::OrganizationRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::OrganizationRole>>, HttpError>
-{
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_policy = new_policy.into_inner();
-    let handler = async {
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
         let policy = nexus
             .organization_update_policy(
                 &opctx,
@@ -3393,7 +3061,7 @@ async fn instance_disk_detach(
     path = "/v1/system/certificates",
     tags = ["system"],
 }]
-async fn certificate_list_v1(
+async fn certificate_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
@@ -3420,45 +3088,6 @@ async fn certificate_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List system-wide certificates
-///
-/// Returns a list of all the system-wide certificates. System-wide certificates
-/// are returned sorted by creation date, with the most recent certificates
-/// appearing first.
-/// Use `GET /v1/system/certificates` instead
-#[endpoint {
-    method = GET,
-    path = "/system/certificates",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<Certificate>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pag_params = data_page_params_for(&rqctx, &query)?;
-    let scan_params = ScanByNameOrId::from_query(&query)?;
-    let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let certs = nexus
-            .certificates_list(&opctx, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|d| d.try_into())
-            .collect::<Result<Vec<_>, Error>>()?;
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            certs,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a new system-wide x.509 certificate.
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
@@ -3468,7 +3097,7 @@ async fn certificate_list(
     path = "/v1/system/certificates",
     tags = ["system"]
 }]
-async fn certificate_create_v1(
+async fn certificate_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_cert: TypedBody<params::CertificateCreate>,
 ) -> Result<HttpResponseCreated<Certificate>, HttpError> {
@@ -3476,32 +3105,6 @@ async fn certificate_create_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let new_cert_params = new_cert.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
-        Ok(HttpResponseCreated(cert.try_into()?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a new system-wide x.509 certificate.
-///
-/// This certificate is automatically used by the Oxide Control plane to serve
-/// external connections.
-/// Use `POST /v1/system/certificates` instead
-#[endpoint {
-    method = POST,
-    path = "/system/certificates",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_cert: TypedBody<params::CertificateCreate>,
-) -> Result<HttpResponseCreated<Certificate>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_cert_params = new_cert.into_inner();
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let cert = nexus.certificate_create(&opctx, new_cert_params).await?;
         Ok(HttpResponseCreated(cert.try_into()?))
@@ -3523,7 +3126,7 @@ struct CertificatePathParam {
     path = "/v1/system/certificates/{certificate}",
     tags = ["system"],
 }]
-async fn certificate_view_v1(
+async fn certificate_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<CertificatePathParam>,
 ) -> Result<HttpResponseOk<Certificate>, HttpError> {
@@ -3531,32 +3134,6 @@ async fn certificate_view_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., cert) =
-            nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
-        Ok(HttpResponseOk(cert.try_into()?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a certificate
-///
-/// Returns the details of a specific certificate
-/// Use `GET /v1/system/certificates/{certificate}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/certificates/{certificate}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<CertificatePathParam>,
-) -> Result<HttpResponseOk<Certificate>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let (.., cert) =
             nexus.certificate_lookup(&opctx, &path.certificate).fetch().await?;
@@ -3573,7 +3150,7 @@ async fn certificate_view(
     path = "/v1/system/certificates/{certificate}",
     tags = ["system"],
 }]
-async fn certificate_delete_v1(
+async fn certificate_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<CertificatePathParam>,
 ) -> Result<HttpResponseDeleted, HttpError> {
@@ -3581,36 +3158,6 @@ async fn certificate_delete_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus
-            .certificate_delete(
-                &opctx,
-                nexus.certificate_lookup(&opctx, &path.certificate),
-            )
-            .await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a certificate
-///
-/// Permanently delete a certificate. This operation cannot be undone.
-/// Use `DELETE /v1/system/certificates/{certificate}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/certificates/{certificate}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn certificate_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<CertificatePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus
             .certificate_delete(
