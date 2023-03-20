@@ -1260,7 +1260,7 @@ mod test {
         let sleds = AllSleds::new();
         let dns_access = FakeDnsAccess::new();
         let nexus_access = FakeNexusAccess::new();
-        let sled_access = FakeSledAccess { sleds: sleds.clone() };
+        let sled_access = FakeSledAccess::new(sleds.clone());
         const ZPOOLS_PER_SLED: usize = 3;
         let bootstrap = FakeBootstrapNetwork::new(
             vec![
@@ -1322,11 +1322,191 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // TODO: Test with no u.2s! I think we have a bug where we zero index
-    // regardless of length...
+    // TODO: This test should NOT panic, but I'm including it as validation of existing behavior.
+    #[tokio::test]
+    #[should_panic]
+    async fn rack_initialize_no_u2_panics() {
+        let logctx = test_setup_log("rack_initialize_no_u2_panics");
+        let log = &logctx.log;
 
-    // TODO: Build out fakes a little more - test too few disks, running
-    // out of addresses, etc.
-    // TODO: Changing configuration
-    // TODO: Multiple peers
+        let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let request = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            rack_secret_threshold: 2,
+            gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
+            nexus_external_address,
+        };
+
+        let sleds = AllSleds::new();
+        let dns_access = FakeDnsAccess::new();
+        let nexus_access = FakeNexusAccess::new();
+        let sled_access = FakeSledAccess::new(sleds.clone());
+        const ZPOOLS_PER_SLED: usize = 0;
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        assert_eq!(0, sleds.inner.lock().unwrap().len());
+        assert_eq!(0, dns_access.records.lock().unwrap().len());
+
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            dns_access.clone(),
+            nexus_access.clone(),
+            sled_access,
+            tempdir.path().into(),
+            request,
+            bootstrap,
+            vec![],
+        );
+        rss.join().await.unwrap();
+
+        // XXX The panic happens because we index into "u2_zpools" without validating the length
+        // during plan generation.
+
+        logctx.cleanup_successful();
+    }
+
+    // TODO: This test should NOT panic, but I'm including it as validation of existing behavior.
+    #[tokio::test]
+    #[should_panic]
+    async fn rack_reinitialize_missing_dns_panics() {
+        let logctx = test_setup_log("rack_reinitialize_missing_dns_panics");
+        let log = &logctx.log;
+
+        let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let request = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            rack_secret_threshold: 2,
+            gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
+            nexus_external_address,
+        };
+
+        let sleds = AllSleds::new();
+        let dns_access = FakeDnsAccess::new();
+        let nexus_access = FakeNexusAccess::new();
+        let sled_access = FakeSledAccess::new(sleds.clone());
+        const ZPOOLS_PER_SLED: usize = 3;
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        // Initializing the rack should succeed
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            dns_access.clone(),
+            nexus_access.clone(),
+            sled_access,
+            tempdir.path().into(),
+            request.clone(),
+            bootstrap,
+            vec![],
+        );
+        rss.join().await.unwrap();
+
+        // Re-initialize the rack with the same config, in the same temporary directory
+        {
+            let sleds = AllSleds::new();
+            let dns_access = FakeDnsAccess::new();
+            let nexus_access = FakeNexusAccess::new();
+            let sled_access = FakeSledAccess::new(sleds.clone());
+            let bootstrap = FakeBootstrapNetwork::new(
+                vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+                sleds.clone(),
+                ZPOOLS_PER_SLED,
+            );
+            let rss = RackSetupService::new_internal(
+                log.new(o!("component" => "RSS")),
+                dns_access.clone(),
+                nexus_access.clone(),
+                sled_access,
+                tempdir.path().into(),
+                request.clone(),
+                bootstrap,
+                vec![],
+            );
+            rss.join().await.unwrap();
+        }
+
+        // XXX The panic happens because "handoff_to_nexus" ".expects()" that the Nexus IP
+        // address can be looked up, but in reality, it should return an error.
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_reinitialize_reads_configs() {
+        let logctx = test_setup_log("rack_reinitialize_reads_configs");
+        let log = &logctx.log;
+
+        let nexus_external_address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let request = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            rack_secret_threshold: 2,
+            gateway: Gateway { address: None, mac: MacAddr6::nil().into() },
+            nexus_external_address,
+        };
+
+        let sleds = AllSleds::new();
+        let dns_access = FakeDnsAccess::new();
+        let nexus_access = FakeNexusAccess::new();
+        let sled_access = FakeSledAccess::new(sleds.clone());
+        const ZPOOLS_PER_SLED: usize = 3;
+        let bootstrap = FakeBootstrapNetwork::new(
+            vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+            sleds.clone(),
+            ZPOOLS_PER_SLED,
+        );
+
+        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+
+        // Initializing the rack should succeed
+        let rss = RackSetupService::new_internal(
+            log.new(o!("component" => "RSS")),
+            dns_access.clone(),
+            nexus_access.clone(),
+            sled_access,
+            tempdir.path().into(),
+            request.clone(),
+            bootstrap,
+            vec![],
+        );
+        rss.join().await.unwrap();
+
+        // Re-initialize the rack with the same config, in the same temporary directory
+        //
+        // NOTE: We use the same "DNS Access" to look up Nexus - without it, handoff fails,
+        // because the IP address cannot be identified.
+        {
+            let sleds = AllSleds::new();
+            let nexus_access = FakeNexusAccess::new();
+            let sled_access = FakeSledAccess::new(sleds.clone());
+            let bootstrap = FakeBootstrapNetwork::new(
+                vec![Ipv6Addr::new(0xfe81, 0, 0, 0, 0, 0, 0, 1)],
+                sleds.clone(),
+                ZPOOLS_PER_SLED,
+            );
+            let rss = RackSetupService::new_internal(
+                log.new(o!("component" => "RSS")),
+                dns_access.clone(),
+                nexus_access.clone(),
+                sled_access,
+                tempdir.path().into(),
+                request.clone(),
+                bootstrap,
+                vec![],
+            );
+            rss.join().await.unwrap();
+        }
+
+        logctx.cleanup_successful();
+    }
 }
