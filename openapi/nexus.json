@@ -10,46 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/by-id/organizations/{id}": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization by id",
-        "description": "Use `GET /v1/organizations/{organization}` instead",
-        "operationId": "organization_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/device/auth": {
       "post": {
         "tags": [
@@ -402,309 +362,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      }
-    },
-    "/organizations": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "List organizations",
-        "description": "Use `GET /v1/organizations` instead",
-        "operationId": "organization_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Create an organization",
-        "description": "Use `POST /v1/organizations` instead",
-        "operationId": "organization_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization",
-        "description": "Use `GET /v1/organizations/{organization}` instead",
-        "operationId": "organization_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization",
-        "description": "Use `PUT /v1/organizations/{organization}` instead",
-        "operationId": "organization_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Delete an organization",
-        "description": "Use `DELETE /v1/organizations/{organization}` instead",
-        "operationId": "organization_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/policy": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization's IAM policy",
-        "description": "Use `GET /v1/organizations/{organization}/policy` instead",
-        "operationId": "organization_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization's IAM policy",
-        "description": "Use `PUT /v1/organizations/{organization}/policy` instead",
-        "operationId": "organization_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
       }
     },
     "/policy": {
@@ -1091,171 +748,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/certificates": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List system-wide certificates",
-        "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first. Use `GET /v1/system/certificates` instead",
-        "operationId": "certificate_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a new system-wide x.509 certificate.",
-        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections. Use `POST /v1/system/certificates` instead",
-        "operationId": "certificate_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CertificateCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Certificate"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/certificates/{certificate}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a certificate",
-        "description": "Returns the details of a specific certificate Use `GET /v1/system/certificates/{certificate}` instead",
-        "operationId": "certificate_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "certificate",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Certificate"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone. Use `DELETE /v1/system/certificates/{certificate}` instead",
-        "operationId": "certificate_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "certificate",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1748,72 +1240,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/policy": {
-      "get": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Fetch the top-level IAM policy",
-        "description": "Use `GET /v1/system/policy` instead",
-        "operationId": "system_policy_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "Update the top-level IAM policy",
-        "description": "Use 'PUT /v1/system/policy' instead",
-        "operationId": "system_policy_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FleetRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetRolePolicy"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -4357,7 +3783,7 @@
           "organizations"
         ],
         "summary": "List organizations",
-        "operationId": "organization_list_v1",
+        "operationId": "organization_list",
         "parameters": [
           {
             "in": "query",
@@ -4412,7 +3838,7 @@
           "organizations"
         ],
         "summary": "Create an organization",
-        "operationId": "organization_create_v1",
+        "operationId": "organization_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4449,7 +3875,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization",
-        "operationId": "organization_view_v1",
+        "operationId": "organization_view",
         "parameters": [
           {
             "in": "path",
@@ -4484,7 +3910,7 @@
           "organizations"
         ],
         "summary": "Update an organization",
-        "operationId": "organization_update_v1",
+        "operationId": "organization_update",
         "parameters": [
           {
             "in": "path",
@@ -4529,7 +3955,7 @@
           "organizations"
         ],
         "summary": "Delete an organization",
-        "operationId": "organization_delete_v1",
+        "operationId": "organization_delete",
         "parameters": [
           {
             "in": "path",
@@ -4559,7 +3985,7 @@
           "organizations"
         ],
         "summary": "Fetch an organization's IAM policy",
-        "operationId": "organization_policy_view_v1",
+        "operationId": "organization_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -4594,7 +4020,7 @@
           "organizations"
         ],
         "summary": "Update an organization's IAM policy",
-        "operationId": "organization_policy_update_v1",
+        "operationId": "organization_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -5257,7 +4683,7 @@
         ],
         "summary": "List system-wide certificates",
         "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first.",
-        "operationId": "certificate_list_v1",
+        "operationId": "certificate_list",
         "parameters": [
           {
             "in": "query",
@@ -5313,7 +4739,7 @@
         ],
         "summary": "Create a new system-wide x.509 certificate.",
         "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
-        "operationId": "certificate_create_v1",
+        "operationId": "certificate_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5351,7 +4777,7 @@
         ],
         "summary": "Fetch a certificate",
         "description": "Returns the details of a specific certificate",
-        "operationId": "certificate_view_v1",
+        "operationId": "certificate_view",
         "parameters": [
           {
             "in": "path",
@@ -5387,7 +4813,7 @@
         ],
         "summary": "Delete a certificate",
         "description": "Permanently delete a certificate. This operation cannot be undone.",
-        "operationId": "certificate_delete_v1",
+        "operationId": "certificate_delete",
         "parameters": [
           {
             "in": "path",
@@ -6608,7 +6034,7 @@
           "policy"
         ],
         "summary": "Fetch the top-level IAM policy",
-        "operationId": "system_policy_view_v1",
+        "operationId": "system_policy_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -6633,7 +6059,7 @@
           "policy"
         ],
         "summary": "Update the top-level IAM policy",
-        "operationId": "system_policy_update_v1",
+        "operationId": "system_policy_update",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9203,7 +8629,7 @@
     },
     "schemas": {
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "description": "Properties that should uniquely identify a Sled.",
         "type": "object",
         "properties": {
           "part": {
@@ -13187,7 +12613,7 @@
         ]
       },
       "Sled": {
-        "description": "Client view of a [`Sled`]",
+        "description": "An operator's view of a Sled.",
         "type": "object",
         "properties": {
           "baseboard": {
@@ -13199,11 +12625,9 @@
             "format": "uuid"
           },
           "rack_id": {
+            "description": "The rack to which this Sled is currently attached",
             "type": "string",
             "format": "uuid"
-          },
-          "service_address": {
-            "type": "string"
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -13214,15 +12638,30 @@
             "description": "timestamp when this resource was last modified",
             "type": "string",
             "format": "date-time"
+          },
+          "usable_hardware_threads": {
+            "description": "The number of hardware threads which can execute on this sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "description": "Amount of RAM which may be used by the Sled's OS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           }
         },
         "required": [
           "baseboard",
           "id",
           "rack_id",
-          "service_address",
           "time_created",
-          "time_modified"
+          "time_modified",
+          "usable_hardware_threads",
+          "usable_physical_ram"
         ]
       },
       "SledResultsPage": {
@@ -14790,6 +14229,18 @@
           }
         ]
       },
+      "NameSortMode": {
+        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"name\"",
+            "type": "string",
+            "enum": [
+              "name_ascending"
+            ]
+          }
+        ]
+      },
       "NameOrIdSortMode": {
         "description": "Supported set of sort modes for scanning by name or id",
         "oneOf": [
@@ -14812,18 +14263,6 @@
             "type": "string",
             "enum": [
               "id_ascending"
-            ]
-          }
-        ]
-      },
-      "NameSortMode": {
-        "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"name\"",
-            "type": "string",
-            "enum": [
-              "name_ascending"
             ]
           }
         ]
