@@ -104,9 +104,9 @@ async fn instance_launch() -> Result<()> {
     let ip_addr = ctx
         .client
         .instance_external_ip_list()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
-        .instance_name(instance.name.clone())
+        .organization(ctx.org_name.clone())
+        .project(ctx.project_name.clone())
+        .instance(instance.name.clone())
         .send()
         .await?
         .items
