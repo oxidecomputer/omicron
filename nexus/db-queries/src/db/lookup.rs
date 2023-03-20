@@ -410,6 +410,14 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
+    pub fn user_builtin_id<'b>(self, id: Uuid) -> UserBuiltin<'b>
+    where
+        'a: 'b,
+    {
+        UserBuiltin::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type UserBuiltin, identified by its `name`
     pub fn user_builtin_name<'b, 'c>(self, name: &'b Name) -> UserBuiltin<'c>
     where
         'a: 'c,
