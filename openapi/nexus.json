@@ -10,85 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/by-id/disks/{id}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Fetch a disk by id",
-        "description": "Use `GET /v1/disks/{disk}` instead",
-        "operationId": "disk_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/by-id/images/{id}": {
-      "get": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Fetch an image by id",
-        "operationId": "image_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Image"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/by-id/instances/{id}": {
       "get": {
         "tags": [
@@ -155,86 +76,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/by-id/projects/{id}": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project by id",
-        "description": "Use `GET /v1/projects/{project}` instead",
-        "operationId": "project_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/by-id/snapshots/{id}": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Fetch a snapshot by id",
-        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
                 }
               }
             }
@@ -895,838 +736,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "List projects",
-        "description": "Use `GET /v1/projects` instead",
-        "operationId": "project_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Create a project",
-        "description": "Use `POST /v1/projects` instead",
-        "operationId": "project_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project",
-        "description": "Use `GET /v1/projects/{project}` instead",
-        "operationId": "project_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Update a project",
-        "description": "Use `PUT /v1/projects/{project}` instead",
-        "operationId": "project_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Delete a project",
-        "description": "Use `DELETE /v1/projects/{project}` instead",
-        "operationId": "project_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/disks": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "List disks",
-        "description": "Use `GET /v1/disks` instead",
-        "operationId": "disk_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiskResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Use `POST /v1/disks` instead",
-        "operationId": "disk_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiskCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Fetch a disk",
-        "description": "Use `GET /v1/disks/{disk}` instead",
-        "operationId": "disk_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Disk"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Use `DELETE /v1/disks/{disk}` instead",
-        "operationId": "disk_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}": {
-      "get": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Fetch disk metrics",
-        "description": "Use `/v1/disks/{disk}/{metric}` instead",
-        "operationId": "disk_metrics_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "metric_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DiskMetricName"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "end_time",
-            "description": "An exclusive end time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "start_time",
-            "description": "An inclusive start time of metrics.",
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeasurementResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/images": {
-      "get": {
-        "tags": [
-          "images"
-        ],
-        "summary": "List images",
-        "description": "List images in a project. The images are returned sorted by creation date, with the most recent images appearing first. Use `GET /v1/images` instead",
-        "operationId": "image_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImageResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Create an image",
-        "description": "Create a new image in a project.",
-        "operationId": "image_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImageCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Image"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/images/{image_name}": {
-      "get": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Fetch an image",
-        "description": "Fetch the details for a specific image in a project.",
-        "operationId": "image_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "image_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Image"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Delete an image",
-        "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
-        "operationId": "image_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "image_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2551,345 +1560,6 @@
         "deprecated": true
       }
     },
-    "/organizations/{organization_name}/projects/{project_name}/policy": {
-      "get": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Fetch a project's IAM policy",
-        "description": "Use `GET /v1/projects/{project}/policy` instead",
-        "operationId": "project_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "projects"
-        ],
-        "summary": "Update a project's IAM policy",
-        "operationId": "project_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProjectRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/snapshots": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "List snapshots",
-        "description": "Use `GET /v1/snapshots` instead.",
-        "operationId": "snapshot_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          },
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SnapshotResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Create a snapshot",
-        "description": "Use `POST /v1/snapshots` instead.",
-        "operationId": "snapshot_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "description": "The organization's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "description": "The project's unique name within the organization.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SnapshotCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}": {
-      "get": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Fetch a snapshot",
-        "description": "Use `GET /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "snapshot_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Snapshot"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "snapshots"
-        ],
-        "summary": "Delete a snapshot",
-        "description": "Use `DELETE /v1/snapshots/{snapshot}` instead.",
-        "operationId": "snapshot_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "project_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "snapshot_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/policy": {
       "get": {
         "tags": [
@@ -2954,94 +1624,6 @@
           }
         },
         "deprecated": true
-      }
-    },
-    "/roles": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "List built-in roles",
-        "operationId": "role_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RoleResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/roles/{role_name}": {
-      "get": {
-        "tags": [
-          "roles"
-        ],
-        "summary": "Fetch a built-in role",
-        "operationId": "role_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "role_name",
-            "description": "The built-in role's unique name.",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Role"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/session/me": {
@@ -3319,46 +1901,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GlobalImage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/by-id/ip-pools/{id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch an IP pool by id",
-        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
-        "operationId": "ip_pool_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
                 }
               }
             }
@@ -4070,521 +2612,6 @@
         "deprecated": true
       }
     },
-    "/system/ip-pools": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List IP pools",
-        "description": "Use `GET /v1/system/ip-pools` instead",
-        "operationId": "ip_pool_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create an IP pool",
-        "description": "Use `POST /v1/system/ip-pools` instead",
-        "operationId": "ip_pool_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpPoolCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools/{pool_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch an IP pool",
-        "description": "Use `GET /v1/system/ip-pools/{pool}` instead",
-        "operationId": "ip_pool_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Update an IP Pool",
-        "description": "Use `PUT /v1/system/ip-pools/{pool}` instead",
-        "operationId": "ip_pool_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpPoolUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete an IP Pool",
-        "description": "Use `DELETE /v1/system/ip-pools/{pool}` instead",
-        "operationId": "ip_pool_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools/{pool_name}/ranges": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools/{pool}/ranges` instead",
-        "operationId": "ip_pool_range_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/ip-pools/{pool_name}/ranges/add": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Add a range to an IP pool",
-        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/add` instead",
-        "operationId": "ip_pool_range_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRange"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools/{pool_name}/ranges/remove": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Remove a range from an IP pool",
-        "description": "Use `POST /v1/system/ip-pools/{pool}/ranges/remove` instead.",
-        "operationId": "ip_pool_range_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools-service": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch the IP pool used for Oxide services.",
-        "description": "Use `GET /v1/system/ip-pools-service` instead",
-        "operationId": "ip_pool_service_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools-service/ranges": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address. Use `GET /v1/system/ip-pools-service/ranges` instead.",
-        "operationId": "ip_pool_service_range_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/ip-pools-service/ranges/add": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Add a range to an IP pool used for Oxide services.",
-        "description": "Use `POST /v1/system/ip-pools-service/ranges/add` instead",
-        "operationId": "ip_pool_service_range_add",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRange"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/ip-pools-service/ranges/remove": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Remove a range from an IP pool used for Oxide services.",
-        "description": "Use `POST /v1/system/ip-pools-service/ranges/remove` instead",
-        "operationId": "ip_pool_service_range_remove",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/system/policy": {
       "get": {
         "tags": [
@@ -4917,318 +2944,6 @@
         "deprecated": true
       }
     },
-    "/system/silos/{silo_name}/identity-providers": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List a silo's IDPs",
-        "description": "Use `/v1/system/silos/{silo}/identity-providers` instead.",
-        "operationId": "silo_identity_provider_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IdentityProviderResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a user",
-        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
-        "operationId": "local_idp_user_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}": {
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a user",
-        "description": "Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead",
-        "operationId": "local_idp_user_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "description": "The user's internal id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Set or invalidate a user's password",
-        "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`. Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead",
-        "operationId": "local_idp_user_set_password",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "description": "The user's internal id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UserPassword"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/saml": {
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a SAML IDP",
-        "description": "Use `POST /v1/system/identity-providers/saml` instead.",
-        "operationId": "saml_identity_provider_create",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SamlIdentityProviderCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/identity-providers/saml/{provider_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a SAML IDP",
-        "description": "Use `GET /v1/system/identity-providers/saml/{provider_name}` instead",
-        "operationId": "saml_identity_provider_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "provider_name",
-            "description": "The SAML identity provider's name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SamlIdentityProvider"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
     "/system/silos/{silo_name}/policy": {
       "get": {
         "tags": [
@@ -5435,101 +3150,6 @@
         "deprecated": true
       }
     },
-    "/system/user": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List built-in users",
-        "operationId": "system_user_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltinResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/user/{user_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a built-in user",
-        "operationId": "system_user_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "user_name",
-            "description": "The built-in user's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserBuiltin"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/users": {
       "get": {
         "tags": [
@@ -5595,7 +3215,7 @@
           "disks"
         ],
         "summary": "List disks",
-        "operationId": "disk_list_v1",
+        "operationId": "disk_list",
         "parameters": [
           {
             "in": "query",
@@ -5664,7 +3284,7 @@
           "disks"
         ],
         "summary": "Create a disk",
-        "operationId": "disk_create_v1",
+        "operationId": "disk_create",
         "parameters": [
           {
             "in": "query",
@@ -5718,7 +3338,7 @@
           "disks"
         ],
         "summary": "Fetch a disk",
-        "operationId": "disk_view_v1",
+        "operationId": "disk_view",
         "parameters": [
           {
             "in": "path",
@@ -5767,7 +3387,7 @@
           "disks"
         ],
         "summary": "Delete a disk",
-        "operationId": "disk_delete_v1",
+        "operationId": "disk_delete",
         "parameters": [
           {
             "in": "path",
@@ -5811,7 +3431,7 @@
           "disks"
         ],
         "summary": "Fetch disk metrics",
-        "operationId": "disk_metrics_list_v1",
+        "operationId": "disk_metrics_list",
         "parameters": [
           {
             "in": "path",
@@ -6005,7 +3625,7 @@
         ],
         "summary": "List images",
         "description": "List images which are global or scoped to the specified project. The images are returned sorted by creation date, with the most recent images appearing first.",
-        "operationId": "image_list_v1",
+        "operationId": "image_list",
         "parameters": [
           {
             "in": "query",
@@ -6075,7 +3695,7 @@
         ],
         "summary": "Create an image",
         "description": "Create a new image in a project.",
-        "operationId": "image_create_v1",
+        "operationId": "image_create",
         "parameters": [
           {
             "in": "query",
@@ -6130,7 +3750,7 @@
         ],
         "summary": "Fetch an image",
         "description": "Fetch the details for a specific image in a project.",
-        "operationId": "image_view_v1",
+        "operationId": "image_view",
         "parameters": [
           {
             "in": "path",
@@ -6180,7 +3800,7 @@
         ],
         "summary": "Delete an image",
         "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
-        "operationId": "image_delete_v1",
+        "operationId": "image_delete",
         "parameters": [
           {
             "in": "path",
@@ -7936,7 +5556,7 @@
           "projects"
         ],
         "summary": "List projects",
-        "operationId": "project_list_v1",
+        "operationId": "project_list",
         "parameters": [
           {
             "in": "query",
@@ -7998,7 +5618,7 @@
           "projects"
         ],
         "summary": "Create a project",
-        "operationId": "project_create_v1",
+        "operationId": "project_create",
         "parameters": [
           {
             "in": "query",
@@ -8045,7 +5665,7 @@
           "projects"
         ],
         "summary": "Fetch a project",
-        "operationId": "project_view_v1",
+        "operationId": "project_view",
         "parameters": [
           {
             "in": "path",
@@ -8087,7 +5707,7 @@
           "projects"
         ],
         "summary": "Update a project",
-        "operationId": "project_update_v1",
+        "operationId": "project_update",
         "parameters": [
           {
             "in": "path",
@@ -8139,7 +5759,7 @@
           "projects"
         ],
         "summary": "Delete a project",
-        "operationId": "project_delete_v1",
+        "operationId": "project_delete",
         "parameters": [
           {
             "in": "path",
@@ -8176,7 +5796,7 @@
           "projects"
         ],
         "summary": "Fetch a project's IAM policy",
-        "operationId": "project_policy_view_v1",
+        "operationId": "project_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -8218,7 +5838,7 @@
           "projects"
         ],
         "summary": "Update a project's IAM policy",
-        "operationId": "project_policy_update_v1",
+        "operationId": "project_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -8272,7 +5892,7 @@
           "snapshots"
         ],
         "summary": "List snapshots",
-        "operationId": "snapshot_list_v1",
+        "operationId": "snapshot_list",
         "parameters": [
           {
             "in": "query",
@@ -8342,7 +5962,7 @@
         ],
         "summary": "Create a snapshot",
         "description": "Creates a point-in-time snapshot from a disk.",
-        "operationId": "snapshot_create_v1",
+        "operationId": "snapshot_create",
         "parameters": [
           {
             "in": "query",
@@ -8396,7 +6016,7 @@
           "snapshots"
         ],
         "summary": "Fetch a snapshot",
-        "operationId": "snapshot_view_v1",
+        "operationId": "snapshot_view",
         "parameters": [
           {
             "in": "path",
@@ -8445,7 +6065,7 @@
           "snapshots"
         ],
         "summary": "Delete a snapshot",
-        "operationId": "snapshot_delete_v1",
+        "operationId": "snapshot_delete",
         "parameters": [
           {
             "in": "path",
@@ -8966,7 +6586,7 @@
           "system"
         ],
         "summary": "List a silo's IDPs_name",
-        "operationId": "silo_identity_provider_list_v1",
+        "operationId": "silo_identity_provider_list",
         "parameters": [
           {
             "in": "query",
@@ -9031,7 +6651,7 @@
         ],
         "summary": "Create a user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider. Use `POST /v1/system/identity-providers/local/users` instead",
-        "operationId": "local_idp_user_create_v1",
+        "operationId": "local_idp_user_create",
         "parameters": [
           {
             "in": "query",
@@ -9079,7 +6699,7 @@
           "system"
         ],
         "summary": "Delete a user",
-        "operationId": "local_idp_user_delete_v1",
+        "operationId": "local_idp_user_delete",
         "parameters": [
           {
             "in": "path",
@@ -9120,7 +6740,7 @@
         ],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
-        "operationId": "local_idp_user_set_password_v1",
+        "operationId": "local_idp_user_set_password",
         "parameters": [
           {
             "in": "path",
@@ -9170,7 +6790,7 @@
           "system"
         ],
         "summary": "Create a SAML IDP",
-        "operationId": "saml_identity_provider_create_v1",
+        "operationId": "saml_identity_provider_create",
         "parameters": [
           {
             "in": "query",
@@ -9217,7 +6837,7 @@
           "system"
         ],
         "summary": "Fetch a SAML IDP",
-        "operationId": "saml_identity_provider_view_v1",
+        "operationId": "saml_identity_provider_view",
         "parameters": [
           {
             "in": "path",
@@ -9262,7 +6882,7 @@
           "system"
         ],
         "summary": "List IP pools",
-        "operationId": "ip_pool_list_v1",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -9317,7 +6937,7 @@
           "system"
         ],
         "summary": "Create an IP pool",
-        "operationId": "ip_pool_create_v1",
+        "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9354,7 +6974,7 @@
           "system"
         ],
         "summary": "Fetch an IP pool",
-        "operationId": "ip_pool_view_v1",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -9389,7 +7009,7 @@
           "system"
         ],
         "summary": "Update an IP Pool",
-        "operationId": "ip_pool_update_v1",
+        "operationId": "ip_pool_update",
         "parameters": [
           {
             "in": "path",
@@ -9434,7 +7054,7 @@
           "system"
         ],
         "summary": "Delete an IP Pool",
-        "operationId": "ip_pool_delete_v1",
+        "operationId": "ip_pool_delete",
         "parameters": [
           {
             "in": "path",
@@ -9465,7 +7085,7 @@
         ],
         "summary": "List ranges for an IP pool",
         "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_range_list_v1",
+        "operationId": "ip_pool_range_list",
         "parameters": [
           {
             "in": "path",
@@ -9523,7 +7143,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool",
-        "operationId": "ip_pool_range_add_v1",
+        "operationId": "ip_pool_range_add",
         "parameters": [
           {
             "in": "path",
@@ -9570,7 +7190,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool",
-        "operationId": "ip_pool_range_remove_v1",
+        "operationId": "ip_pool_range_remove",
         "parameters": [
           {
             "in": "path",
@@ -9610,7 +7230,7 @@
           "system"
         ],
         "summary": "Fetch the IP pool used for Oxide services.",
-        "operationId": "ip_pool_service_view_v1",
+        "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -9638,7 +7258,7 @@
         ],
         "summary": "List ranges for the IP pool used for Oxide services.",
         "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_service_range_list_v1",
+        "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
             "in": "query",
@@ -9688,7 +7308,7 @@
           "system"
         ],
         "summary": "Add a range to an IP pool used for Oxide services.",
-        "operationId": "ip_pool_service_range_add_v1",
+        "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9725,7 +7345,7 @@
           "system"
         ],
         "summary": "Remove a range from an IP pool used for Oxide services.",
-        "operationId": "ip_pool_service_range_remove_v1",
+        "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9903,7 +7523,7 @@
           "roles"
         ],
         "summary": "List built-in roles",
-        "operationId": "role_list_v1",
+        "operationId": "role_list",
         "parameters": [
           {
             "in": "query",
@@ -9953,7 +7573,7 @@
           "roles"
         ],
         "summary": "Fetch a built-in role",
-        "operationId": "role_view_v1",
+        "operationId": "role_view",
         "parameters": [
           {
             "in": "path",

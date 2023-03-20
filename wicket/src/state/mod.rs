@@ -10,11 +10,14 @@ mod status;
 mod update;
 
 pub use inventory::{
-    Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
+    Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
+    ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
 pub use update::{artifact_title, RackUpdateState, UpdateState};
+
+use slog::Logger;
 
 /// The global state of wicket
 ///
@@ -30,21 +33,15 @@ pub struct State {
     pub update_state: RackUpdateState,
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl State {
-    pub fn new() -> State {
+    pub fn new(log: &Logger) -> State {
         State {
             screen_height: 0,
             screen_width: 0,
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
-            update_state: RackUpdateState::new(),
+            update_state: RackUpdateState::new(log),
         }
     }
 }

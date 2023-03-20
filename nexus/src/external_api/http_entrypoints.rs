@@ -110,38 +110,19 @@ pub fn external_api() -> NexusApiDescription {
         api.register(project_list)?;
         api.register(project_create)?;
         api.register(project_view)?;
-        api.register(project_view_by_id)?;
         api.register(project_delete)?;
         api.register(project_update)?;
         api.register(project_policy_view)?;
         api.register(project_policy_update)?;
 
-        api.register(project_list_v1)?;
-        api.register(project_create_v1)?;
-        api.register(project_view_v1)?;
-        api.register(project_delete_v1)?;
-        api.register(project_update_v1)?;
-        api.register(project_policy_view_v1)?;
-        api.register(project_policy_update_v1)?;
-
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
         api.register(ip_pool_view)?;
-        api.register(ip_pool_view_by_id)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
         // Variants for internal services
         api.register(ip_pool_service_view)?;
-
-        // Operator-Accessible IP Pools API
-        api.register(ip_pool_list_v1)?;
-        api.register(ip_pool_create_v1)?;
-        api.register(ip_pool_view_v1)?;
-        api.register(ip_pool_delete_v1)?;
-        api.register(ip_pool_update_v1)?;
-        // Variants for internal services
-        api.register(ip_pool_service_view_v1)?;
 
         // Operator-Accessible IP Pool Range API
         api.register(ip_pool_range_list)?;
@@ -152,27 +133,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(ip_pool_service_range_add)?;
         api.register(ip_pool_service_range_remove)?;
 
-        // Operator-Accessible IP Pool Range API
-        api.register(ip_pool_range_list_v1)?;
-        api.register(ip_pool_range_add_v1)?;
-        api.register(ip_pool_range_remove_v1)?;
-        // Variants for internal services
-        api.register(ip_pool_service_range_list_v1)?;
-        api.register(ip_pool_service_range_add_v1)?;
-        api.register(ip_pool_service_range_remove_v1)?;
-
         api.register(disk_list)?;
         api.register(disk_create)?;
         api.register(disk_view)?;
-        api.register(disk_view_by_id)?;
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
-
-        api.register(disk_list_v1)?;
-        api.register(disk_create_v1)?;
-        api.register(disk_view_v1)?;
-        api.register(disk_delete_v1)?;
-        api.register(disk_metrics_list_v1)?;
 
         api.register(instance_list)?;
         api.register(instance_create)?;
@@ -203,29 +168,15 @@ pub fn external_api() -> NexusApiDescription {
         api.register(instance_serial_console_v1)?;
         api.register(instance_serial_console_stream_v1)?;
 
-        // Project-scoped images API
         api.register(image_list)?;
         api.register(image_create)?;
         api.register(image_view)?;
-        api.register(image_view_by_id)?;
         api.register(image_delete)?;
-
-        // Silo-scoped images API
-        api.register(image_list_v1)?;
-        api.register(image_create_v1)?;
-        api.register(image_view_v1)?;
-        api.register(image_delete_v1)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
         api.register(snapshot_view)?;
-        api.register(snapshot_view_by_id)?;
         api.register(snapshot_delete)?;
-
-        api.register(snapshot_list_v1)?;
-        api.register(snapshot_create_v1)?;
-        api.register(snapshot_view_v1)?;
-        api.register(snapshot_delete_v1)?;
 
         api.register(vpc_list)?;
         api.register(vpc_create)?;
@@ -283,17 +234,11 @@ pub fn external_api() -> NexusApiDescription {
         api.register(saga_list_v1)?;
         api.register(saga_view_v1)?;
 
-        api.register(system_user_list)?;
-        api.register(system_user_view)?;
-
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
 
         api.register(role_list)?;
         api.register(role_view)?;
-
-        api.register(role_list_v1)?;
-        api.register(role_view_v1)?;
 
         api.register(session_sshkey_list)?;
         api.register(session_sshkey_view)?;
@@ -313,7 +258,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_view)?;
         api.register(silo_view_by_id)?;
         api.register(silo_delete)?;
-        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
 
@@ -321,23 +265,16 @@ pub fn external_api() -> NexusApiDescription {
         api.register(silo_create_v1)?;
         api.register(silo_view_v1)?;
         api.register(silo_delete_v1)?;
-        api.register(silo_identity_provider_list_v1)?;
+        api.register(silo_identity_provider_list)?;
         api.register(silo_policy_view_v1)?;
         api.register(silo_policy_update_v1)?;
 
         api.register(saml_identity_provider_create)?;
         api.register(saml_identity_provider_view)?;
 
-        api.register(saml_identity_provider_create_v1)?;
-        api.register(saml_identity_provider_view_v1)?;
-
         api.register(local_idp_user_create)?;
         api.register(local_idp_user_delete)?;
         api.register(local_idp_user_set_password)?;
-
-        api.register(local_idp_user_create_v1)?;
-        api.register(local_idp_user_delete_v1)?;
-        api.register(local_idp_user_set_password_v1)?;
 
         api.register(certificate_list)?;
         api.register(certificate_create)?;
@@ -1175,7 +1112,7 @@ async fn silo_user_view(
     path = "/v1/system/identity-providers",
     tags = ["system"],
 }]
-async fn silo_identity_provider_list_v1(
+async fn silo_identity_provider_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::SiloSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
@@ -1204,46 +1141,6 @@ async fn silo_identity_provider_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List a silo's IDPs
-/// Use `/v1/system/silos/{silo}/identity-providers` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_identity_provider_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<IdentityProvider>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let identity_providers = nexus
-            .identity_provider_list(
-                &opctx,
-                &silo_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|x| x.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            identity_providers,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // Silo SAML identity providers
 
 /// Create a SAML IDP
@@ -1252,7 +1149,7 @@ async fn silo_identity_provider_list(
     path = "/v1/system/identity-providers/saml",
     tags = ["system"],
 }]
-async fn saml_identity_provider_create_v1(
+async fn saml_identity_provider_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_provider: TypedBody<params::SamlIdentityProviderCreate>,
@@ -1275,45 +1172,13 @@ async fn saml_identity_provider_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a SAML IDP
-/// Use `POST /v1/system/identity-providers/saml` instead.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/saml",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn saml_identity_provider_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_provider: TypedBody<params::SamlIdentityProviderCreate>,
-) -> Result<HttpResponseCreated<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let provider = nexus
-            .saml_identity_provider_create(
-                &opctx,
-                &silo_lookup,
-                new_provider.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a SAML IDP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
     tags = ["system"],
 }]
-async fn saml_identity_provider_view_v1(
+async fn saml_identity_provider_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProviderPath>,
     query_params: Query<params::SiloSelector>,
@@ -1341,45 +1206,6 @@ async fn saml_identity_provider_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Silo SAML identity provider requests
-#[derive(Deserialize, JsonSchema)]
-struct SiloSamlPathParam {
-    /// The silo's unique name.
-    silo_name: Name,
-    /// The SAML identity provider's name
-    provider_name: Name,
-}
-
-/// Fetch a SAML IDP
-/// Use `GET /v1/system/identity-providers/saml/{provider_name}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/identity-providers/saml/{provider_name}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn saml_identity_provider_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloSamlPathParam>,
-) -> Result<HttpResponseOk<views::SamlIdentityProvider>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path_params = path_params.into_inner();
-        let provider_selector = params::SamlIdentityProviderSelector::new(
-            Some(path_params.silo_name.into()),
-            path_params.provider_name.into(),
-        );
-        let (.., provider) = nexus
-            .saml_identity_provider_lookup(&opctx, &provider_selector)?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(provider.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // TODO: no DELETE for identity providers?
 
 // "Local" Identity Provider
@@ -1396,7 +1222,7 @@ async fn saml_identity_provider_view(
     tags = ["system"],
     deprecated = true
 }]
-async fn local_idp_user_create_v1(
+async fn local_idp_user_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::SiloSelector>,
     new_user_params: TypedBody<params::UserCreate>,
@@ -1407,39 +1233,6 @@ async fn local_idp_user_create_v1(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        let user = nexus
-            .local_idp_create_user(
-                &opctx,
-                &silo_lookup,
-                new_user_params.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a user
-///
-/// Users can only be created in Silos with `provision_type` == `Fixed`.
-/// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
-/// logs in using an external Identity Provider.
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users",
-    tags = ["system"],
-}]
-async fn local_idp_user_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    new_user_params: TypedBody<params::UserCreate>,
-) -> Result<HttpResponseCreated<User>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let silo = path_params.into_inner().silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let user = nexus
             .local_idp_create_user(
                 &opctx,
@@ -1458,7 +1251,7 @@ async fn local_idp_user_create(
     path = "/v1/system/identity-providers/local/users/{user_id}",
     tags = ["system"],
 }]
-async fn local_idp_user_delete_v1(
+async fn local_idp_user_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloSelector>,
@@ -1476,31 +1269,6 @@ async fn local_idp_user_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a user
-/// Use `DELETE /v1/system/identity-providers/local/users/{user_id}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Set or invalidate a user's password
 ///
 /// Passwords can only be updated for users in Silos with identity mode
@@ -1510,7 +1278,7 @@ async fn local_idp_user_delete(
     path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
     tags = ["system"],
 }]
-async fn local_idp_user_set_password_v1(
+async fn local_idp_user_set_password(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UserParam>,
     query_params: Query<params::SiloPath>,
@@ -1523,42 +1291,6 @@ async fn local_idp_user_set_password_v1(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        nexus
-            .local_idp_user_set_password(
-                &opctx,
-                &silo_lookup,
-                path.user_id,
-                update.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Set or invalidate a user's password
-///
-/// Passwords can only be updated for users in Silos with identity mode
-/// `LocalOnly`.
-/// Use `POST /v1/system/identity-providers/local/users/{user_id}/set-password` instead
-#[endpoint {
-    method = POST,
-    path = "/system/silos/{silo_name}/identity-providers/local/users/{user_id}/set-password",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn local_idp_user_set_password(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-    update: TypedBody<params::UserPassword>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,
@@ -2050,7 +1782,7 @@ async fn organization_policy_update(
     path = "/v1/projects",
     tags = ["projects"],
 }]
-async fn project_list_v1(
+async fn project_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
@@ -2079,55 +1811,13 @@ async fn project_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List projects
-/// Use `GET /v1/projects` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects",
-    tags = ["projects"],
-    deprecated = true,
-}]
-async fn project_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-    path_params: Path<OrganizationPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let projects = nexus
-            .project_list(&opctx, &organization_lookup, &paginated_by)
-            .await?
-            .into_iter()
-            .map(|p| p.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            projects,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a project
 #[endpoint {
     method = POST,
     path = "/v1/projects",
     tags = ["projects"],
 }]
-async fn project_create_v1(
+async fn project_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
@@ -2153,48 +1843,13 @@ async fn project_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a project
-/// Use `POST /v1/projects` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<OrganizationPathParam>,
-    new_project: TypedBody<params::ProjectCreate>,
-) -> Result<HttpResponseCreated<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let organization_selector = &params::OrganizationSelector {
-            organization: path.organization_name.into(),
-        };
-        let organization_lookup =
-            nexus.organization_lookup(&opctx, &organization_selector)?;
-        let project = nexus
-            .project_create(
-                &opctx,
-                &organization_lookup,
-                &new_project.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseCreated(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a project
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_view_v1(
+async fn project_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2225,67 +1880,13 @@ struct ProjectPathParam {
     project_name: Name,
 }
 
-/// Fetch a project
-/// Use `GET /v1/projects/{project}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let (.., project) =
-            nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
-        Ok(HttpResponseOk(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a project by id
-/// Use `GET /v1/projects/{project}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/projects/{id}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector =
-            params::ProjectSelector::new(None, path.id.into());
-        let (.., project) =
-            nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
-        Ok(HttpResponseOk(project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a project
 #[endpoint {
     method = DELETE,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_delete_v1(
+async fn project_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2307,41 +1908,18 @@ async fn project_delete_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a project
-/// Use `DELETE /v1/projects/{project}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        nexus.project_delete(&opctx, &project_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
+// TODO-correctness: Is it valid for PUT to accept application/json that's a
+// subset of what the resource actually represents?  If not, is that a problem?
+// (HTTP may require that this be idempotent.)  If so, can we get around that
+// having this be a slightly different content-type (e.g.,
+// "application/json-patch")?  We should see what other APIs do.
 /// Update a project
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}",
     tags = ["projects"],
 }]
-async fn project_update_v1(
+async fn project_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2367,53 +1945,13 @@ async fn project_update_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project
-// TODO-correctness: Is it valid for PUT to accept application/json that's a
-// subset of what the resource actually represents?  If not, is that a problem?
-// (HTTP may require that this be idempotent.)  If so, can we get around that
-// having this be a slightly different content-type (e.g.,
-// "application/json-patch")?  We should see what other APIs do.
-/// Use `PUT /v1/projects/{project}` instead
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    updated_project: TypedBody<params::ProjectUpdate>,
-) -> Result<HttpResponseOk<Project>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let new_project = nexus
-            .project_update(
-                &opctx,
-                &project_lookup,
-                &updated_project.into_inner(),
-            )
-            .await?;
-        Ok(HttpResponseOk(new_project.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a project's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}/policy",
     tags = ["projects"],
 }]
-async fn project_policy_view_v1(
+async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2436,42 +1974,13 @@ async fn project_policy_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project's IAM policy
-/// Use `GET /v1/projects/{project}/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/policy",
-    tags = ["projects"],
-    deprecated = true
-}]
-async fn project_policy_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let policy =
-            nexus.project_fetch_policy(&opctx, &project_lookup).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Update a project's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}/policy",
     tags = ["projects"],
 }]
-async fn project_policy_update_v1(
+async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
     query_params: Query<params::OptionalOrganizationSelector>,
@@ -2497,39 +2006,6 @@ async fn project_policy_update_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project's IAM policy
-#[endpoint {
-    method = PUT,
-    path = "/organizations/{organization_name}/projects/{project_name}/policy",
-    tags = ["projects"],
-}]
-async fn project_policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let new_policy = new_policy.into_inner();
-    let handler = async {
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let policy = nexus
-            .project_update_policy(&opctx, &project_lookup, &new_policy)
-            .await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // IP Pools
 
 /// List IP pools
@@ -2538,7 +2014,7 @@ async fn project_policy_update(
     path = "/v1/system/ip-pools",
     tags = ["system"],
 }]
-async fn ip_pool_list_v1(
+async fn ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
@@ -2570,48 +2046,13 @@ pub struct IpPoolPathParam {
     pub pool_name: Name,
 }
 
-/// List IP pools
-/// Use `GET /v1/system/ip-pools` instead
-#[endpoint {
-    method = GET,
-    path = "/system/ip-pools",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pag_params = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanByNameOrId::from_query(&query)?;
-        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let pools = nexus
-            .ip_pools_list(&opctx, &paginated_by)
-            .await?
-            .into_iter()
-            .map(IpPool::from)
-            .collect();
-        Ok(HttpResponseOk(ScanByNameOrId::results_page(
-            &query,
-            pools,
-            &marker_for_name_or_id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create an IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools",
     tags = ["system"],
 }]
-async fn ip_pool_create_v1(
+async fn ip_pool_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     pool_params: TypedBody<params::IpPoolCreate>,
 ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
@@ -2626,36 +2067,13 @@ async fn ip_pool_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an IP pool
-/// Use `POST /v1/system/ip-pools` instead
-#[endpoint {
-    method = POST,
-    path = "/system/ip-pools",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    pool_params: TypedBody<params::IpPoolCreate>,
-) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let pool_params = pool_params.into_inner();
-        let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
-        Ok(HttpResponseCreated(IpPool::from(pool)))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch an IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
     tags = ["system"],
 }]
-async fn ip_pool_view_v1(
+async fn ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
 ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
@@ -2671,97 +2089,22 @@ async fn ip_pool_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
-/// Use `GET /v1/system/ip-pools/{pool}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/ip-pools/{pool_name}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let (.., pool) = nexus
-            .ip_pool_lookup(&opctx, &path.pool_name.into())?
-            .fetch()
-            .await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an IP pool by id
-/// Use `GET /v1/system/ip-pools/{pool}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/by-id/ip-pools/{id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let (.., pool) =
-            nexus.ip_pool_lookup(&opctx, &path.id.into())?.fetch().await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete an IP Pool
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
     tags = ["system"],
-}]
-async fn ip_pool_delete_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::IpPoolPath>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an IP Pool
-/// Use `DELETE /v1/system/ip-pools/{pool}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/system/ip-pools/{pool_name}",
-    tags = ["system"],
-    deprecated = true
 }]
 async fn ip_pool_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
+    path_params: Path<params::IpPoolPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let pool_selector = path.pool_name.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
         Ok(HttpResponseDeleted())
     };
@@ -2774,7 +2117,7 @@ async fn ip_pool_delete(
     path = "/v1/system/ip-pools/{pool}",
     tags = ["system"],
 }]
-async fn ip_pool_update_v1(
+async fn ip_pool_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     updates: TypedBody<params::IpPoolUpdate>,
@@ -2786,33 +2129,6 @@ async fn ip_pool_update_v1(
         let path = path_params.into_inner();
         let updates = updates.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
-        Ok(HttpResponseOk(pool.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update an IP Pool
-/// Use `PUT /v1/system/ip-pools/{pool}` instead
-#[endpoint {
-    method = PUT,
-    path = "/system/ip-pools/{pool_name}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
-    updates: TypedBody<params::IpPoolUpdate>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let updates = updates.into_inner();
-        let pool_selector = &path.pool_name.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
         let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
     };
@@ -2824,27 +2140,6 @@ async fn ip_pool_update(
     method = GET,
     path = "/v1/system/ip-pools-service",
     tags = ["system"],
-}]
-async fn ip_pool_service_view_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let pool = nexus.ip_pool_service_fetch(&opctx).await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the IP pool used for Oxide services.
-/// Use `GET /v1/system/ip-pools-service` instead
-#[endpoint {
-    method = GET,
-    path = "/system/ip-pools-service",
-    tags = ["system"],
-    deprecated = true
 }]
 async fn ip_pool_service_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2869,7 +2164,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
     path = "/v1/system/ip-pools/{pool}/ranges",
     tags = ["system"],
 }]
-async fn ip_pool_range_list_v1(
+async fn ip_pool_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     query_params: Query<IpPoolRangePaginationParams>,
@@ -2890,55 +2185,6 @@ async fn ip_pool_range_list_v1(
             marker,
         };
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        let ranges = nexus
-            .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
-            .await?
-            .into_iter()
-            .map(|range| range.into())
-            .collect();
-        Ok(HttpResponseOk(ResultsPage::new(
-            ranges,
-            &EmptyScanParams {},
-            |range: &IpPoolRange, _| {
-                IpNetwork::from(range.range.first_address())
-            },
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List ranges for an IP pool
-///
-/// Ranges are ordered by their first address.
-/// Use `GET /v1/system/ip-pools/{pool}/ranges` instead
-#[endpoint {
-    method = GET,
-    path = "/system/ip-pools/{pool_name}/ranges",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_range_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
-    query_params: Query<IpPoolRangePaginationParams>,
-) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let marker = match query.page {
-            WhichPage::First(_) => None,
-            WhichPage::Next(ref addr) => Some(addr),
-        };
-        let pag_params = DataPageParams {
-            limit: rqctx.page_limit(&query)?,
-            direction: PaginationOrder::Ascending,
-            marker,
-        };
-        let pool_selector = &path.pool_name.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
         let ranges = nexus
             .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
             .await?
@@ -2962,7 +2208,7 @@ async fn ip_pool_range_list(
     path = "/v1/system/ip-pools/{pool}/ranges/add",
     tags = ["system"],
 }]
-async fn ip_pool_range_add_v1(
+async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     range_params: TypedBody<shared::IpRange>,
@@ -2974,33 +2220,6 @@ async fn ip_pool_range_add_v1(
         let path = path_params.into_inner();
         let range = range_params.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
-        Ok(HttpResponseCreated(out.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Add a range to an IP pool
-/// Use `POST /v1/system/ip-pools/{pool}/ranges/add` instead
-#[endpoint {
-    method = POST,
-    path = "/system/ip-pools/{pool_name}/ranges/add",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_range_add(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
-    range_params: TypedBody<shared::IpRange>,
-) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-    let apictx = &rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let range = range_params.into_inner();
-        let pool_selector = &path.pool_name.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
         let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
@@ -3013,7 +2232,7 @@ async fn ip_pool_range_add(
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
     tags = ["system"],
 }]
-async fn ip_pool_range_remove_v1(
+async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
     range_params: TypedBody<shared::IpRange>,
@@ -3025,33 +2244,6 @@ async fn ip_pool_range_remove_v1(
         let path = path_params.into_inner();
         let range = range_params.into_inner();
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
-        nexus.ip_pool_delete_range(&opctx, &pool_lookup, &range).await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Remove a range from an IP pool
-/// Use `POST /v1/system/ip-pools/{pool}/ranges/remove` instead.
-#[endpoint {
-    method = POST,
-    path = "/system/ip-pools/{pool_name}/ranges/remove",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_range_remove(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<IpPoolPathParam>,
-    range_params: TypedBody<shared::IpRange>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = &rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let range = range_params.into_inner();
-        let pool_selector = path.pool_name.into();
-        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
         nexus.ip_pool_delete_range(&opctx, &pool_lookup, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -3066,7 +2258,7 @@ async fn ip_pool_range_remove(
     path = "/v1/system/ip-pools-service/ranges",
     tags = ["system"],
 }]
-async fn ip_pool_service_range_list_v1(
+async fn ip_pool_service_range_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<IpPoolRangePaginationParams>,
 ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
@@ -3075,51 +2267,6 @@ async fn ip_pool_service_range_list_v1(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let marker = match query.page {
-            WhichPage::First(_) => None,
-            WhichPage::Next(ref addr) => Some(addr),
-        };
-        let pag_params = DataPageParams {
-            limit: rqctx.page_limit(&query)?,
-            direction: PaginationOrder::Ascending,
-            marker,
-        };
-        let ranges = nexus
-            .ip_pool_service_list_ranges(&opctx, &pag_params)
-            .await?
-            .into_iter()
-            .map(|range| range.into())
-            .collect();
-        Ok(HttpResponseOk(ResultsPage::new(
-            ranges,
-            &EmptyScanParams {},
-            |range: &IpPoolRange, _| {
-                IpNetwork::from(range.range.first_address())
-            },
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List ranges for the IP pool used for Oxide services.
-///
-/// Ranges are ordered by their first address.
-/// Use `GET /v1/system/ip-pools-service/ranges` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/ip-pools-service/ranges",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_service_range_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<IpPoolRangePaginationParams>,
-) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let marker = match query.page {
             WhichPage::First(_) => None,
             WhichPage::Next(ref addr) => Some(addr),
@@ -3152,7 +2299,7 @@ async fn ip_pool_service_range_list(
     path = "/v1/system/ip-pools-service/ranges/add",
     tags = ["system"],
 }]
-async fn ip_pool_service_range_add_v1(
+async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
@@ -3161,29 +2308,6 @@ async fn ip_pool_service_range_add_v1(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let range = range_params.into_inner();
-        let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
-        Ok(HttpResponseCreated(out.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Add a range to an IP pool used for Oxide services.
-/// Use `POST /v1/system/ip-pools-service/ranges/add` instead
-#[endpoint {
-    method = POST,
-    path = "/system/ip-pools-service/ranges/add",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_service_range_add(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    range_params: TypedBody<shared::IpRange>,
-) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-    let apictx = &rqctx.context();
-    let nexus = &apictx.nexus;
-    let range = range_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
@@ -3196,7 +2320,7 @@ async fn ip_pool_service_range_add(
     path = "/v1/system/ip-pools-service/ranges/remove",
     tags = ["system"],
 }]
-async fn ip_pool_service_range_remove_v1(
+async fn ip_pool_service_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -3205,29 +2329,6 @@ async fn ip_pool_service_range_remove_v1(
     let range = range_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.ip_pool_service_delete_range(&opctx, &range).await?;
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Remove a range from an IP pool used for Oxide services.
-/// Use `POST /v1/system/ip-pools-service/ranges/remove` instead
-#[endpoint {
-    method = POST,
-    path = "/system/ip-pools-service/ranges/remove",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn ip_pool_service_range_remove(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    range_params: TypedBody<shared::IpRange>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = &rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let range = range_params.into_inner();
         nexus.ip_pool_service_delete_range(&opctx, &range).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
@@ -3242,7 +2343,7 @@ async fn ip_pool_service_range_remove(
     path = "/v1/disks",
     tags = ["disks"],
 }]
-async fn disk_list_v1(
+async fn disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
@@ -3271,56 +2372,14 @@ async fn disk_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List disks
-/// Use `GET /v1/disks` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"],
-    deprecated = true
-}]
-async fn disk_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Disk>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let disks = nexus
-            .disk_list(
-                &opctx,
-                &project_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            disks,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
+// TODO-correctness See note about instance create.  This should be async.
 /// Create a disk
 #[endpoint {
     method = POST,
     path = "/v1/disks",
     tags = ["disks"]
 }]
-async fn disk_create_v1(
+async fn disk_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_disk: TypedBody<params::DiskCreate>,
@@ -3339,45 +2398,13 @@ async fn disk_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// TODO-correctness See note about instance create.  This should be async.
-/// Use `POST /v1/disks` instead
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks",
-    tags = ["disks"],
-    deprecated = true
-}]
-async fn disk_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_disk: TypedBody<params::DiskCreate>,
-) -> Result<HttpResponseCreated<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let new_disk_params = &new_disk.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let disk = nexus
-            .project_create_disk(&opctx, &project_lookup, &new_disk_params)
-            .await?;
-        Ok(HttpResponseCreated(disk.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch a disk
 #[endpoint {
     method = GET,
     path = "/v1/disks/{disk}",
     tags = ["disks"]
 }]
-async fn disk_view_v1(
+async fn disk_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::DiskPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -3392,69 +2419,6 @@ async fn disk_view_v1(
             disk: path.disk,
             project_selector: query.project_selector,
         };
-        let (.., disk) =
-            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
-        Ok(HttpResponseOk(disk.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Disk requests
-#[derive(Deserialize, JsonSchema)]
-struct DiskPathParam {
-    organization_name: Name,
-    project_name: Name,
-    disk_name: Name,
-}
-
-/// Fetch a disk
-/// Use `GET /v1/disks/{disk}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["disks"],
-    deprecated = true
-}]
-async fn disk_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseOk<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let disk_selector = params::DiskSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.disk_name.into(),
-        );
-        let (.., disk) =
-            nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
-        Ok(HttpResponseOk(disk.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a disk by id
-/// Use `GET /v1/disks/{disk}` instead
-#[endpoint {
-    method = GET,
-    path = "/by-id/disks/{id}",
-    tags = ["disks"],
-    deprecated = true
-}]
-async fn disk_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Disk>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let disk_selector =
-            params::DiskSelector::new(None, None, path.id.into());
         let (.., disk) =
             nexus.disk_lookup(&opctx, &disk_selector)?.fetch().await?;
         Ok(HttpResponseOk(disk.into()))
@@ -3468,7 +2432,7 @@ async fn disk_view_by_id(
     path = "/v1/disks/{disk}",
     tags = ["disks"],
 }]
-async fn disk_delete_v1(
+async fn disk_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::DiskPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -3483,34 +2447,6 @@ async fn disk_delete_v1(
             disk: path.disk,
             project_selector: query.project_selector,
         };
-        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
-        nexus.project_delete_disk(&opctx, &disk_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Use `DELETE /v1/disks/{disk}` instead
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}",
-    tags = ["disks"],
-    deprecated = true
-}]
-async fn disk_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<DiskPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let disk_selector = params::DiskSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.disk_name.into(),
-        );
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector)?;
         nexus.project_delete_disk(&opctx, &disk_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -3530,61 +2466,6 @@ pub enum DiskMetricName {
     WriteBytes,
 }
 
-/// Path parameters for metrics requests where `/metrics/{metric_name}` is
-/// appended to an existing path parameter type
-#[derive(Deserialize, JsonSchema)]
-struct MetricsPathParam<T, M> {
-    #[serde(flatten)]
-    inner: T,
-    metric_name: M,
-}
-
-/// Fetch disk metrics
-/// Use `/v1/disks/{disk}/{metric}` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/disks/{disk_name}/metrics/{metric_name}",
-    tags = ["disks"],
-    deprecated = true,
-}]
-async fn disk_metrics_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<MetricsPathParam<DiskPathParam, DiskMetricName>>,
-    query_params: Query<
-        PaginationParams<params::ResourceMetrics, params::ResourceMetrics>,
-    >,
-) -> Result<HttpResponseOk<ResultsPage<oximeter_db::Measurement>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let limit = rqctx.page_limit(&query)?;
-        let disk_selector = params::DiskSelector::new(
-            Some(path.inner.organization_name.into()),
-            Some(path.inner.project_name.into()),
-            path.inner.disk_name.into(),
-        );
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let (.., authz_disk) = nexus
-            .disk_lookup(&opctx, &disk_selector)?
-            .lookup_for(authz::Action::Read)
-            .await?;
-
-        let result = nexus
-            .select_timeseries(
-                &format!("crucible_upstairs:{}", path.metric_name),
-                &[&format!("upstairs_uuid=={}", authz_disk.id())],
-                query,
-                limit,
-            )
-            .await?;
-
-        Ok(HttpResponseOk(result))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 #[derive(Serialize, Deserialize, JsonSchema)]
 struct DiskMetricsPath {
     disk: NameOrId,
@@ -3597,7 +2478,7 @@ struct DiskMetricsPath {
     path = "/v1/disks/{disk}/metrics/{metric}",
     tags = ["disks"],
 }]
-async fn disk_metrics_list_v1(
+async fn disk_metrics_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<DiskMetricsPath>,
     query_params: Query<
@@ -4932,7 +3813,7 @@ async fn system_image_delete(
     path = "/v1/images",
     tags = ["images"],
 }]
-async fn image_list_v1(
+async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
@@ -4961,52 +3842,6 @@ async fn image_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List images
-///
-/// List images in a project. The images are returned sorted by creation date,
-/// with the most recent images appearing first.
-/// Use `GET /v1/images` instead
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/images",
-    tags = ["images"],
-    deprecated = true,
-}]
-async fn image_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let images = nexus
-            .image_list(
-                &opctx,
-                &project_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            images,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create an image
 ///
 /// Create a new image in a project.
@@ -5015,7 +3850,7 @@ async fn image_list(
     path = "/v1/images",
     tags = ["images"]
 }]
-async fn image_create_v1(
+async fn image_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_image: TypedBody<params::ImageCreate>,
@@ -5034,39 +3869,6 @@ async fn image_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an image
-///
-/// Create a new image in a project.
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/images",
-    tags = ["images"],
-    deprecated = true,
-}]
-async fn image_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_image: TypedBody<params::ImageCreate>,
-) -> Result<HttpResponseCreated<Image>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let new_image_params = &new_image.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let image = nexus
-            .image_create(&opctx, &project_lookup, &new_image_params)
-            .await?;
-        Ok(HttpResponseCreated(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Fetch an image
 ///
 /// Fetch the details for a specific image in a project.
@@ -5074,84 +3876,22 @@ async fn image_create(
     method = GET,
     path = "/v1/images/{image}",
     tags = ["images"],
-}]
-async fn image_view_v1(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::ImagePath>,
-    query_params: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseOk<Image>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let query = query_params.into_inner();
-        let image_selector = params::ImageSelector {
-            image: path.image,
-            project_selector: query.project_selector,
-        };
-        let (.., image) =
-            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
-        Ok(HttpResponseOk(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-/// Path parameters for Image requests
-#[derive(Deserialize, JsonSchema)]
-struct ImagePathParam {
-    organization_name: Name,
-    project_name: Name,
-    image_name: Name,
-}
-
-/// Fetch an image
-///
-/// Fetch the details for a specific image in a project.
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
-    tags = ["images"],
-    deprecated = true,
 }]
 async fn image_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ImagePathParam>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::OptionalProjectSelector>,
 ) -> Result<HttpResponseOk<Image>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let image_selector = params::ImageSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.image_name.into(),
-        );
-        let (.., image) =
-            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
-        Ok(HttpResponseOk(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch an image by id
-#[endpoint {
-    method = GET,
-    path = "/by-id/images/{id}",
-    tags = ["images"],
-    deprecated = true,
-}]
-async fn image_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Image>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let image_selector =
-            params::ImageSelector::new(None, None, path.id.into());
+        let query = query_params.into_inner();
+        let image_selector = params::ImageSelector {
+            image: path.image,
+            project_selector: query.project_selector,
+        };
         let (.., image) =
             nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
         Ok(HttpResponseOk(image.into()))
@@ -5169,7 +3909,7 @@ async fn image_view_by_id(
     path = "/v1/images/{image}",
     tags = ["images"],
 }]
-async fn image_delete_v1(
+async fn image_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ImagePath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5184,38 +3924,6 @@ async fn image_delete_v1(
             image: path.image,
             project_selector: query.project_selector,
         };
-        let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
-        nexus.image_delete(&opctx, &image_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an image
-///
-/// Permanently delete an image from a project. This operation cannot be undone.
-/// Any instances in the project using the image will continue to run, however
-/// new instances can not be created with this image.
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/images/{image_name}",
-    tags = ["images"],
-    deprecated = true,
-}]
-async fn image_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ImagePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let image_selector = params::ImageSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.image_name.into(),
-        );
         let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -5436,7 +4144,7 @@ async fn instance_external_ip_list(
     path = "/v1/snapshots",
     tags = ["snapshots"],
 }]
-async fn snapshot_list_v1(
+async fn snapshot_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
@@ -5465,49 +4173,6 @@ async fn snapshot_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List snapshots
-/// Use `GET /v1/snapshots` instead.
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
-    tags = ["snapshots"],
-    deprecated = true
-}]
-async fn snapshot_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-    path_params: Path<ProjectPathParam>,
-) -> Result<HttpResponseOk<ResultsPage<Snapshot>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let path = path_params.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let snapshots = nexus
-            .snapshot_list(
-                &opctx,
-                &project_lookup,
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            snapshots,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Create a snapshot
 ///
 /// Creates a point-in-time snapshot from a disk.
@@ -5516,7 +4181,7 @@ async fn snapshot_list(
     path = "/v1/snapshots",
     tags = ["snapshots"],
 }]
-async fn snapshot_create_v1(
+async fn snapshot_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::ProjectSelector>,
     new_snapshot: TypedBody<params::SnapshotCreate>,
@@ -5536,53 +4201,13 @@ async fn snapshot_create_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a snapshot
-/// Use `POST /v1/snapshots` instead.
-#[endpoint {
-    method = POST,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots",
-    tags = ["snapshots"],
-    deprecated = true,
-}]
-async fn snapshot_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ProjectPathParam>,
-    new_snapshot: TypedBody<params::SnapshotCreate>,
-) -> Result<HttpResponseCreated<Snapshot>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let new_snapshot_params = &new_snapshot.into_inner();
-        let project_selector = params::ProjectSelector::new(
-            Some(path.organization_name.into()),
-            path.project_name.into(),
-        );
-        let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
-        let snapshot = nexus
-            .snapshot_create(&opctx, project_lookup, &new_snapshot_params)
-            .await?;
-        Ok(HttpResponseCreated(snapshot.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Snapshot requests
-#[derive(Deserialize, JsonSchema)]
-struct SnapshotPathParam {
-    organization_name: Name,
-    project_name: Name,
-    snapshot_name: Name,
-}
-
 /// Fetch a snapshot
 #[endpoint {
     method = GET,
     path = "/v1/snapshots/{snapshot}",
     tags = ["snapshots"],
 }]
-async fn snapshot_view_v1(
+async fn snapshot_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SnapshotPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5604,70 +4229,13 @@ async fn snapshot_view_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a snapshot
-/// Use `GET /v1/snapshots/{snapshot}` instead.
-#[endpoint {
-    method = GET,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
-    tags = ["snapshots"],
-    deprecated = true
-}]
-async fn snapshot_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SnapshotPathParam>,
-) -> Result<HttpResponseOk<Snapshot>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let selector = params::SnapshotSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.snapshot_name.into(),
-        );
-        let (.., snapshot) =
-            nexus.snapshot_lookup(&opctx, &selector)?.fetch().await?;
-        Ok(HttpResponseOk(snapshot.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a snapshot by id
-/// Use `GET /v1/snapshots/{snapshot}` instead.
-#[endpoint {
-    method = GET,
-    path = "/by-id/snapshots/{id}",
-    tags = ["snapshots"],
-    deprecated = true,
-}]
-async fn snapshot_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<Snapshot>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let selector = params::SnapshotSelector {
-            project_selector: None,
-            snapshot: path.id.into(),
-        };
-        let (.., snapshot) =
-            nexus.snapshot_lookup(&opctx, &selector)?.fetch().await?;
-        Ok(HttpResponseOk(snapshot.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Delete a snapshot
 #[endpoint {
     method = DELETE,
     path = "/v1/snapshots/{snapshot}",
     tags = ["snapshots"],
 }]
-async fn snapshot_delete_v1(
+async fn snapshot_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SnapshotPath>,
     query_params: Query<params::OptionalProjectSelector>,
@@ -5682,36 +4250,6 @@ async fn snapshot_delete_v1(
             project_selector: query.project_selector,
             snapshot: path.snapshot,
         };
-        let snapshot_lookup =
-            nexus.snapshot_lookup(&opctx, &snapshot_selector)?;
-        nexus.snapshot_delete(&opctx, &snapshot_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a snapshot
-/// Use `DELETE /v1/snapshots/{snapshot}` instead.
-#[endpoint {
-    method = DELETE,
-    path = "/organizations/{organization_name}/projects/{project_name}/snapshots/{snapshot_name}",
-    tags = ["snapshots"],
-    deprecated = true
-}]
-async fn snapshot_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SnapshotPathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let snapshot_selector = params::SnapshotSelector::new(
-            Some(path.organization_name.into()),
-            Some(path.project_name.into()),
-            path.snapshot_name.into(),
-        );
         let snapshot_lookup =
             nexus.snapshot_lookup(&opctx, &snapshot_selector)?;
         nexus.snapshot_delete(&opctx, &snapshot_lookup).await?;
@@ -7457,70 +5995,6 @@ async fn group_view(
 /// List built-in users
 #[endpoint {
     method = GET,
-    path = "/system/user",
-    tags = ["system"],
-}]
-async fn system_user_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<UserBuiltin>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams =
-        data_page_params_for(&rqctx, &query)?.map_name(|n| Name::ref_cast(n));
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let users = nexus
-            .users_builtin_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            users,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for global (system) user requests
-#[derive(Deserialize, JsonSchema)]
-struct BuiltinUserPathParam {
-    /// The built-in user's unique name.
-    user_name: Name,
-}
-
-/// Fetch a built-in user
-#[endpoint {
-    method = GET,
-    path = "/system/user/{user_name}",
-    tags = ["system"],
-}]
-async fn system_user_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<BuiltinUserPathParam>,
-) -> Result<HttpResponseOk<UserBuiltin>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let user_selector = params::UserBuiltinSelector {
-            user: NameOrId::Name(path.user_name.into()),
-        };
-        let (.., user) =
-            nexus.user_builtin_lookup(&opctx, &user_selector)?.fetch().await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List built-in users
-#[endpoint {
-    method = GET,
     path = "/v1/system/users-builtin",
     tags = ["system"],
 }]
@@ -7581,80 +6055,11 @@ struct RolePage {
     last_seen: String,
 }
 
-/// List built-in roles
-#[endpoint {
-    method = GET,
-    path = "/roles",
-    tags = ["roles"],
-}]
-async fn role_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
-) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let marker = match &query.page {
-            WhichPage::First(..) => None,
-            WhichPage::Next(RolePage { last_seen }) => {
-                Some(last_seen.split_once('.').ok_or_else(|| {
-                    Error::InvalidValue {
-                        label: last_seen.clone(),
-                        message: String::from("bad page token"),
-                    }
-                })?)
-                .map(|(s1, s2)| (s1.to_string(), s2.to_string()))
-            }
-        };
-        let pagparams = DataPageParams {
-            limit: rqctx.page_limit(&query)?,
-            direction: PaginationOrder::Ascending,
-            marker: marker.as_ref(),
-        };
-        let roles = nexus
-            .roles_builtin_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(dropshot::ResultsPage::new(
-            roles,
-            &EmptyScanParams {},
-            |role: &Role, _| RolePage { last_seen: role.name.to_string() },
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Path parameters for global (system) role requests
 #[derive(Deserialize, JsonSchema)]
 struct RolePathParam {
     /// The built-in role's unique name.
     role_name: String,
-}
-
-/// Fetch a built-in role
-#[endpoint {
-    method = GET,
-    path = "/roles/{role_name}",
-    tags = ["roles"],
-}]
-async fn role_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<RolePathParam>,
-) -> Result<HttpResponseOk<Role>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let role_name = &path.role_name;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let role = nexus.role_builtin_fetch(&opctx, &role_name).await?;
-        Ok(HttpResponseOk(role.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// List built-in roles
@@ -7663,7 +6068,7 @@ async fn role_view(
     path = "/v1/system/roles",
     tags = ["roles"],
 }]
-async fn role_list_v1(
+async fn role_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
 ) -> Result<HttpResponseOk<ResultsPage<Role>>, HttpError> {
@@ -7710,7 +6115,7 @@ async fn role_list_v1(
     path = "/v1/system/roles/{role_name}",
     tags = ["roles"],
 }]
-async fn role_view_v1(
+async fn role_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<RolePathParam>,
 ) -> Result<HttpResponseOk<Role>, HttpError> {
