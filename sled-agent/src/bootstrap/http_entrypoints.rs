@@ -55,7 +55,7 @@ async fn components_get(
 /// Initializes the rack with the provided configuration.
 #[endpoint {
     method = POST,
-    path = "/rack-initailize",
+    path = "/rack-initialize",
 }]
 async fn rack_initialize(
     rqctx: RequestContext<Arc<Agent>>,
