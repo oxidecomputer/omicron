@@ -3,37 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Result;
-use rustyline::{error::ReadlineError, DefaultEditor};
+use reedline::{DefaultPrompt, Reedline, Signal};
 use wicket_dbg::Client;
 
 fn main() -> Result<()> {
     let mut client = Client::connect("::1:9010")?;
 
-    let mut rl = DefaultEditor::new()?;
+    let mut rl = Reedline::create();
+    let prompt = DefaultPrompt::default();
 
-    //    loop {
-    let readline = rl.readline(">> ");
-    match readline {
-        Ok(line) => {
-            //            rl.add_history_entry(line.as_str())?;
-            let output = process(&mut client, line)?;
-            println!("{}", output);
-            //                client.send(&wicket_dbg::Cmd::Load("SOME RECORDING".into()))?;
-        }
-        Err(ReadlineError::Interrupted) => {
-            println!("CTRL-C");
-            //      break;
-        }
-        Err(ReadlineError::Eof) => {
-            println!("CTRL-D");
-            //    break;
-        }
-        Err(err) => {
-            println!("Error: {:?}", err);
-            //                break;
+    loop {
+        let sig = rl.read_line(&prompt);
+        match sig {
+            Ok(Signal::Success(line)) => {
+                let output = process(&mut client, line)?;
+                println!("{}", output);
+            }
+            Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => {
+                println!("\nAborted!");
+                break;
+            }
+            _ => {}
         }
     }
-    //  }
 
     Ok(())
 }
@@ -48,7 +40,12 @@ fn process(client: &mut Client, line: String) -> anyhow::Result<String> {
     }
 
     match cmd.unwrap() {
-        "load" | "l" => Ok("LOAD".to_string()),
+        "load" | "l" => {
+            let rsp = client.send::<Result<(), String>>(
+                &wicket_dbg::Cmd::Load("SOME RECORDING".into()),
+            )?;
+            Ok(format!("{:?}", rsp))
+        }
         _ => Ok("Error: Unknown Command".to_string()),
     }
 }

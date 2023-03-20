@@ -12,6 +12,7 @@ wicket.workspace = true
 
 # used only by wicket-dbg
 rustyline = "11.0.0"
+reedline = "0.17.0"
 
 [[bin]]
 name = "wicket-dbg"

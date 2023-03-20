@@ -4,6 +4,7 @@
 
 use crate::Cmd;
 use serde::de::DeserializeOwned;
+use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 
 /// A client driven from the wicket-dbg CLI
@@ -28,8 +29,20 @@ impl Client {
         &mut self,
         cmd: &Cmd,
     ) -> anyhow::Result<T> {
-        bincode::serialize_into(&mut self.sock, cmd)?;
-        let val = bincode::deserialize_from(&mut self.sock)?;
+        // write 4 byte le size header, followed by data
+        let size: u32 = bincode::serialized_size(cmd)?.try_into()?;
+        self.sock.write_all(&size.to_le_bytes())?;
+        let buf = bincode::serialize(cmd)?;
+        self.sock.write_all(&buf)?;
+
+        // Read 4 byte le size header, followed by data
+        let mut size_buf = [0u8; 4];
+        self.sock.read_exact(&mut size_buf[..])?;
+        let size = u32::from_le_bytes(size_buf) as usize;
+        let mut buf = vec![0; size];
+        self.sock.read_exact(&mut buf)?;
+        let val = bincode::deserialize(&buf)?;
+
         Ok(val)
     }
 }
