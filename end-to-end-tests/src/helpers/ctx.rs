@@ -113,7 +113,7 @@ pub fn nexus_addr() -> SocketAddr {
 
     // If we can find config-rss.toml, look for an external_address.
     let rss_config_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../smf/sled-agent/nongimlet/config-rss.toml");
+        .join("../smf/sled-agent/non-gimlet/config-rss.toml");
     if rss_config_path.exists() {
         if let Ok(config) = SetupServiceConfig::from_file(rss_config_path) {
             return (config.nexus_external_address, 80).into();

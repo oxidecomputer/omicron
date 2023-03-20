@@ -176,7 +176,7 @@ async fn test_role_assignments_silo(cptestctx: &ControlPlaneTestContext) {
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
             format!(
-                "/system/silos/{}/policy",
+                "/v1/system/silos/{}/policy",
                 fixed_data::silo::DEFAULT_SILO.identity().name
             )
         }
@@ -231,7 +231,7 @@ async fn test_role_assignments_silo_implicit(
         const ROLE: Self::RoleType = authz::SiloRole::Admin;
         const VISIBLE_TO_UNPRIVILEGED: bool = true;
         fn policy_url(&self) -> String {
-            "/policy".to_string()
+            "/v1/policy".to_string()
         }
 
         fn verify_initial<'a, 'b, 'c, 'd>(
@@ -280,7 +280,7 @@ async fn test_role_assignments_organization(
     let client = &cptestctx.external_client;
     let org_name = "test-org";
     create_organization(client, org_name).await;
-    let org_url = format!("/organizations/{}", org_name);
+    let org_url = format!("/v1/organizations/{}", org_name);
 
     struct OrganizationRoleAssignmentTest {
         org_name: String,
@@ -342,7 +342,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     create_organization(client, org_name).await;
     create_project(client, org_name, project_name).await;
     let project_url =
-        format!("/organizations/{}/projects/{}", org_name, project_name);
+        format!("/v1/projects/{}?organization={}", project_name, org_name);
 
     struct ProjectRoleAssignmentTest {
         project_name: String,
@@ -352,7 +352,10 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let test_case = ProjectRoleAssignmentTest {
         project_name: String::from(project_name),
         project_url: project_url.clone(),
-        policy_url: format!("{}/policy", project_url),
+        policy_url: format!(
+            "/v1/projects/{}/policy?organization={}",
+            project_name, org_name
+        ),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
         type RoleType = authz::ProjectRole;

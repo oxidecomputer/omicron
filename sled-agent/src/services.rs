@@ -998,6 +998,7 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Wicketd,
                 ]
             }
         };

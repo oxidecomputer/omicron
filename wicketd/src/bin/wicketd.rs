@@ -8,7 +8,7 @@ use clap::Parser;
 use omicron_common::cmd::{fatal, CmdError};
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
-use wicketd::{self, run_openapi, run_server, Config};
+use wicketd::{self, run_openapi, Config, Server};
 
 #[derive(Debug, Parser)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
@@ -62,7 +62,12 @@ async fn do_run() -> Result<(), CmdError> {
             })?;
 
             let args = wicketd::Args { address, artifact_address, mgs_address };
-            run_server(config, args).await.map_err(CmdError::Failure)
+            let log = config.log.to_logger("wicketd").map_err(|msg| {
+                CmdError::Failure(format!("initializing logger: {}", msg))
+            })?;
+            let server =
+                Server::start(log, args).await.map_err(CmdError::Failure)?;
+            server.wait_for_finish().await.map_err(CmdError::Failure)
         }
     }
 }

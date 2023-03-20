@@ -44,7 +44,7 @@ source.paths = [
   { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
   # Valid options for "machine" include:
   # - gimlet: Assumes control of real hardware, does not emulate hardware
-  # - nongimlet: Used for testing on development illumos machines
+  # - non-gimlet: Used for testing on development illumos machines
   { from = "smf/sled-agent/{{machine}}", to = "pkg" }
 ]
 output.type = "tarball"
@@ -177,6 +177,11 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["wicket"]
 source.rust.release = true
+source.paths = [
+  { from = "smf/switch_zone_setup", to = "/var/svc/manifest/site/switch_zone_setup" },
+  { from = "wicket/scripts/switch_zone_setup", to = "/opt/oxide/wicket/bin/switch_zone_setup" },
+  { from = "wicket/zone-etc", to = "/etc" },
+]
 output.type = "zone"
 output.intermediate_only = true
 
