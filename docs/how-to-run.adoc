@@ -55,6 +55,15 @@ internet connectivity. Set the `PHYSICAL_LINK` environment variable to override
 the default logic used to automatically determine the physical network connection
 used for external communication. For example:
 
+=== Set up simulated scrimlet/sidecar dependencies.
+
+To access the outside world or other gimlets, we'll need to set up a virtual sidecar
+device for those network paths.
+
+----
+./tools/install_softnpu_machinery.sh
+----
+
 ----
 $ GATEWAY_IP=10.85.0.1 PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
 ----
@@ -64,16 +73,6 @@ This script requires Omicron be uninstalled, e.g., with `pfexec
 ./target/release/omicron-package uninstall`, and a warning will be printed if
 that is not the case. The script will then remove the file-based vdevs and the
 VNICs created by `create_virtual_hardware.sh`.
-
-=== Set up a scrimlet/sidecar device.
-
-To access the outside world or other gimlets, we'll need to set up a sidecar
-device for those network paths.
-
-----
-./tools/install_scrimlet_machinery.sh
-./tools/launch_scrimlet.sh
-----
 
 === Make me a certificate!
 
@@ -100,30 +99,6 @@ automatically be detected on discovered disks), but for now it remains
 hard-coded.
 
 === Getting into your guests
-
-Omicron currently implements a bit of a hack to allow external connectivity into
-guest instances. This overrides the default behavior of the Oxide Packet
-Transformation Engine (OPTE, the kernel module which provides the private
-virtual networking to guests). To make this work, OPTE needs to know about the
-local networking configuration, in this case the MAC address of the local
-internet gateway. To be able to get into your instances, you _must_ specify this
-in the `gateway.mac` field of the config file `smf/sled-agent/config-rss.toml`.
-
-The value there is correct for the lab environment, so if you're running there,
-no changes are needed. If you're running elsewhere, you find the value with:
-
-[source,text]
-----
-$ arp -an | grep $(netstat -rn | awk '{ if ($1 == "default") print $2 }')
-igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
-----
-
-That MAC address in the far right column should be provided in place of the
-current value. Note that it can be specified as a string or an array of hex
-values. If you have multiple gateways, e.g., different gateways for different
-data links, you must choose the value for the physical link over which
-`create_virtual_hardware.sh` will create the underlay VNICs. That is, this must
-be a value in the same L2 segment as OPTE.
 
 [source,text]
 ----

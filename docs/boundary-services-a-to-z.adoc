@@ -36,8 +36,9 @@ script.
 ./tools/create_self_signed_cert.sh
 
 cargo build --release --bin omicron-package
-./target/release/omicron-package -t switch_variant=softnpu package
-pfexec ./target/release/omicron-package -t switch_variant=softnpu install
+./target/release/omicron-package -t <target_name> target create -i standard -m non-gimlet -s softnpu
+./target/release/omicron-package package
+pfexec ./target/release/omicron-package install
 ----
 
 The control plane is now starting, reference the Running Omicron (Non-Simulated)
