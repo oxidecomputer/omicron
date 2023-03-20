@@ -11,6 +11,7 @@ members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "gateway-test-utils",
     "illumos-utils",
     "installinator",
     "installinator-artifact-client",
@@ -61,6 +62,7 @@ default-members = [
     "gateway",
     "gateway-cli",
     "gateway-client",
+    "gateway-test-utils",
     "illumos-utils",
     "installinator",
     "installinator-artifact-client",
@@ -104,9 +106,9 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.8"
+assert_cmd = "2.0.10"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.66"
+async-trait = "0.1.67"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -147,6 +149,7 @@ futures = "0.3.27"
 gateway-client = { path = "gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
+gateway-test-utils = { path = "gateway-test-utils" }
 headers = "0.3.8"
 heck = "0.4"
 hex = "0.4.3"
@@ -182,6 +185,7 @@ nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 omicron-common = { path = "common" }
+omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
@@ -225,7 +229,7 @@ rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
-regress = "0.4.1"
+regress = "0.5.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
