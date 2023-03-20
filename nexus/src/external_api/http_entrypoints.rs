@@ -280,6 +280,13 @@ pub fn external_api() -> NexusApiDescription {
         api.register(role_list)?;
         api.register(role_view)?;
 
+        api.register(current_user_view)?;
+        api.register(current_user_groups)?;
+        api.register(current_user_ssh_key_list)?;
+        api.register(current_user_ssh_key_view)?;
+        api.register(current_user_ssh_key_create)?;
+        api.register(current_user_ssh_key_delete)?;
+
         // Fleet-wide API operations
         api.register(silo_list)?;
         api.register(silo_create)?;

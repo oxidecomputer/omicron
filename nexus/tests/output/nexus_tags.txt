@@ -110,6 +110,15 @@ OPERATION ID                             URL PATH
 role_list                                /v1/system/roles
 role_view                                /v1/system/roles/{role_name}
 
+API operations found with tag "session"
+OPERATION ID                             URL PATH
+current_user_groups                      /v1/me/groups
+current_user_ssh_key_create              /v1/me/ssh-keys
+current_user_ssh_key_delete              /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list                /v1/me/ssh-keys
+current_user_ssh_key_view                /v1/me/ssh-keys/{ssh_key}
+current_user_view                        /v1/me
+
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
 group_list                               /groups
