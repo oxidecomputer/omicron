@@ -543,7 +543,7 @@ impl HardwareManager {
                     false,
                 ),
                 ScrimletMode::Stub => HardwareView::new_stub_tofino(true),
-                // TODO: @internet-diglett
+                // TODO: correctness
                 // I'm not sure whether or not we should be treating softnpu
                 // as a stub or treating it as a real ASIC here, so this
                 // might change.

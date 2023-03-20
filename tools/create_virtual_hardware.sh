@@ -116,17 +116,9 @@ function ensure_softnpu_zone {
 
         zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
 
-        # TODO-remove
-        # Is this command still necessary with a omicron1 zone?
-        # pkg set-publisher --search-first helios-dev
-
         zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
         zoneadm -z softnpu install
         zoneadm -z softnpu boot
-
-        # TODO-remove
-        # Is this command still necessary with a omicron1 zone?
-        # pkg set-publisher --search-first helios-netdev
     }
     success "softnpu zone exists"
 }

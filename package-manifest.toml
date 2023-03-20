@@ -263,10 +263,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-# TODO: @internet-diglett
-# point this back to dendrite `main` before merging
-source.commit = "2df15b15426b03f47656eed03be7946fc54f7882"
-source.sha256 = "0219e395fa6b528526fefc14a11fb00e5657df358e5e131b98b70e737711f8a1"
+source.commit = "231ad14027c01df2ce239b455220a90a24d4afc7"
+source.sha256 = "240e43417c4f637d2a19b5a343097a134a7d6ac344ff3b62a0824e9f9b7417ad"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -284,10 +282,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-# TODO: @internet-diglett
-# point this back to dendrite `main` before merging
-source.commit = "2df15b15426b03f47656eed03be7946fc54f7882"
-source.sha256 = "4f06146d78d439178bc97867463758b4ed8e951216d6c80d751e542024520db9"
+source.commit = "231ad14027c01df2ce239b455220a90a24d4afc7"
+source.sha256 = "939e839deb9cbe399f36873907521ee0daf4b9ab5139336f89fa03f1262b97e3"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -305,10 +301,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-# TODO: @internet-diglett
-# point this back to dendrite `main` before merging
-source.commit = "2df15b15426b03f47656eed03be7946fc54f7882"
-source.sha256 = "8a18dfb61e385ca3bc5e5992fcbdb4156f5604215cae834baa502ddf280db13f"
+source.commit = "231ad14027c01df2ce239b455220a90a24d4afc7"
+source.sha256 = "b175f795fb966b2c58cc772620b5a3affeb5bc978fe72720df2093576d480e15"
 output.type = "zone"
 output.intermediate_only = true
 
