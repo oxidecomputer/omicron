@@ -8,17 +8,12 @@ use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use crate::rack_setup::sled_interface::SledInterface;
 use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
     DNS_SERVER_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
-use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
-};
 use serde::{Deserialize, Serialize};
-use sled_agent_client::{
-    types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
-};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -39,14 +34,11 @@ const OXIMETER_COUNT: usize = 1;
 // when Nexus provisions Clickhouse.
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
-// when Nexus provisions Crucible.
-const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
 const PANTRY_COUNT: usize = 1;
 
-fn rss_service_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-service-plan.toml")
+fn rss_service_plan_path(path: &Path) -> PathBuf {
+    path.join("rss-service-plan.toml")
 }
 
 /// Describes errors which may occur while generating a plan for services.
@@ -62,14 +54,11 @@ pub enum PlanError {
     #[error("Cannot deserialize TOML file at {path}: {err}")]
     Toml { path: PathBuf, err: toml::de::Error },
 
-    #[error("Error making HTTP request to Sled Agent: {0}")]
-    SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
+    #[error(transparent)]
+    Sled(#[from] crate::rack_setup::sled_interface::Error),
 
-    #[error("Error initializing sled via sled-agent: {0}")]
-    SledInitialization(String),
-
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(reqwest::Error),
+    #[error("Not enough sleds with U.2s to provision necessary services")]
+    NotEnoughDisks,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -89,10 +78,13 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Plan>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        directory: &Path,
+    ) -> Result<Option<Plan>, PlanError> {
         // If we already created a plan for this RSS to allocate
         // services to sleds, re-use that existing plan.
-        let rss_service_plan_path = rss_service_plan_path();
+        let rss_service_plan_path = rss_service_plan_path(directory);
         if rss_service_plan_path.exists() {
             info!(log, "RSS plan already created, loading from file");
 
@@ -116,66 +108,10 @@ impl Plan {
         }
     }
 
-    // Gets zpool UUIDs from U.2 devices on the sled.
-    async fn get_u2_zpools_from_sled(
+    pub(crate) async fn create(
         log: &Logger,
-        address: SocketAddrV6,
-    ) -> Result<Vec<Uuid>, PlanError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(PlanError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", address),
-            client,
-            log.new(o!("SledAgentClient" => address.to_string())),
-        );
-
-        let get_u2_zpools = || async {
-            let zpools: Vec<Uuid> = client
-                .zpools_get()
-                .await
-                .map(|response| {
-                    response
-                        .into_inner()
-                        .into_iter()
-                        .filter_map(|zpool| match zpool.disk_type {
-                            SledAgentTypes::DiskType::U2 => Some(zpool.id),
-                            SledAgentTypes::DiskType::M2 => None,
-                        })
-                        .collect()
-                })
-                .map_err(|err| {
-                    BackoffError::transient(PlanError::SledApi(err))
-                })?;
-
-            if zpools.len() < MINIMUM_U2_ZPOOL_COUNT {
-                return Err(BackoffError::transient(
-                    PlanError::SledInitialization(
-                        "Awaiting zpools".to_string(),
-                    ),
-                ));
-            }
-
-            Ok(zpools)
-        };
-        let log_failure = |error, _| {
-            warn!(log, "failed to get zpools"; "error" => ?error);
-        };
-        let u2_zpools = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            get_u2_zpools,
-            log_failure,
-        )
-        .await?;
-
-        Ok(u2_zpools)
-    }
-
-    pub async fn create(
-        log: &Logger,
+        directory: &Path,
+        sleds: &impl SledInterface,
         config: &Config,
         sled_addrs: &Vec<SocketAddrV6>,
     ) -> Result<Self, PlanError> {
@@ -184,12 +120,14 @@ impl Plan {
 
         let mut allocations = vec![];
 
+        let mut remaining_crdb_needed = CRDB_COUNT;
+        let mut remaining_clickhouse_needed = CLICKHOUSE_COUNT;
+
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];
             let subnet: Ipv6Subnet<SLED_PREFIX> =
                 Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip());
-            let u2_zpools =
-                Self::get_u2_zpools_from_sled(log, sled_address).await?;
+            let u2_zpools = sleds.get_u2_zpools(log, sled_address).await?;
             let mut addr_alloc = AddressBumpAllocator::new(subnet);
 
             let mut request = SledRequest::default();
@@ -222,9 +160,9 @@ impl Plan {
                 })
             }
 
-            // The first enumerated sleds host the CRDB datasets, using
-            // zpools described from the underlying config file.
-            if idx < CRDB_COUNT {
+            // The first enumerated sleds with disks host the CRDB datasets,
+            // using zpools described from the underlying config file.
+            if remaining_crdb_needed > 0 && u2_zpools.len() > 0 {
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
                     omicron_common::address::COCKROACH_PORT,
@@ -239,10 +177,11 @@ impl Plan {
                     },
                     address,
                 });
+                remaining_crdb_needed -= 1;
             }
 
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            if idx < CLICKHOUSE_COUNT {
+            if remaining_clickhouse_needed > 0 && u2_zpools.len() > 0 {
                 let address = SocketAddrV6::new(
                     addr_alloc.next().expect("Not enough addrs"),
                     omicron_common::address::CLICKHOUSE_PORT,
@@ -255,6 +194,7 @@ impl Plan {
                     dataset_kind: crate::params::DatasetKind::Clickhouse,
                     address,
                 });
+                remaining_clickhouse_needed -= 1;
             }
 
             // Each zpool gets a crucible zone.
@@ -314,6 +254,10 @@ impl Plan {
             allocations.push((sled_address, request));
         }
 
+        if remaining_crdb_needed > 0 || remaining_clickhouse_needed > 0 {
+            return Err(PlanError::NotEnoughDisks);
+        }
+
         let mut services = std::collections::HashMap::new();
         for (addr, allocation) in allocations {
             services.insert(addr, allocation);
@@ -330,7 +274,7 @@ impl Plan {
             .expect("Cannot turn config to string");
 
         info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_service_plan_path();
+        let path = rss_service_plan_path(directory);
         tokio::fs::write(&path, plan_str).await.map_err(|err| {
             PlanError::Io {
                 message: format!("Storing RSS service plan to {path:?}"),

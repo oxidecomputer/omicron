@@ -17,9 +17,7 @@ use uuid::Uuid;
 /// Configuration for the "rack setup service".
 ///
 /// The Rack Setup Service should be responsible for one-time setup actions,
-/// such as CockroachDB placement and initialization.  Without operator
-/// intervention, however, these actions need a way to be automated in our
-/// deployment.
+/// such as CockroachDB placement and initialization.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,

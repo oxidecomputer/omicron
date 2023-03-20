@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
-fn rss_sled_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
+fn rss_sled_plan_path(path: &Path) -> PathBuf {
+    path.join("rss-sled-plan.toml")
 }
 
 pub fn generate_rack_secret<'a>(
@@ -92,10 +92,13 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Self>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        directory: &Path,
+    ) -> Result<Option<Self>, PlanError> {
         // If we already created a plan for this RSS to allocate
         // subnets/requests to sleds, re-use that existing plan.
-        let rss_sled_plan_path = rss_sled_plan_path();
+        let rss_sled_plan_path = rss_sled_plan_path(directory);
         if rss_sled_plan_path.exists() {
             info!(log, "RSS plan already created, loading from file");
 
@@ -118,6 +121,7 @@ impl Plan {
 
     pub async fn create(
         log: &Logger,
+        directory: &Path,
         config: &Config,
         bootstrap_addrs: Vec<Ipv6Addr>,
     ) -> Result<Self, PlanError> {
@@ -165,7 +169,7 @@ impl Plan {
             .expect("Cannot turn config to string");
 
         info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_sled_plan_path();
+        let path = rss_sled_plan_path(directory);
         tokio::fs::write(&path, plan_str).await.map_err(|err| {
             PlanError::Io {
                 message: format!("Storing RSS sled plan to {path:?}"),
