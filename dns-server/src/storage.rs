@@ -883,4 +883,17 @@ mod test {
         // what it does
         tc.cleanup_successful();
     }
+
+    // XXX-dap TODO-coverage
+    // A thought on testing the storage stuff: maybe the thing to do is to set
+    // up the Db in a particular way, then apply an update, then inspect the
+    // contents of the Db?  That is, the primitive operation that we're testing
+    // is: given this Db, apply this update?  That will let us verify a bunch of
+    // cases:
+    // - update to a generation that had an aborted update (i.e., left turds
+    //   around)
+    // - update to a generation older than current
+    // - cleanup of older generations' data (including cases where we keep say 3
+    //   generations' worth that might span 5 generation numbers (if we never
+    //   updated to those intermediate ones))
 }
