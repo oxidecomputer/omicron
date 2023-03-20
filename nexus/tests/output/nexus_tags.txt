@@ -122,10 +122,8 @@ project_view_v1                          /v1/projects/{project}
 
 API operations found with tag "roles"
 OPERATION ID                             URL PATH
-role_list                                /roles
-role_list_v1                             /v1/system/roles
-role_view                                /roles/{role_name}
-role_view_v1                             /v1/system/roles/{role_name}
+role_list                                /v1/system/roles
+role_view                                /v1/system/roles/{role_name}
 
 API operations found with tag "session"
 OPERATION ID                             URL PATH
@@ -239,8 +237,6 @@ system_update_refresh                    /v1/system/update/refresh
 system_update_start                      /v1/system/update/start
 system_update_stop                       /v1/system/update/stop
 system_update_view                       /v1/system/update/updates/{version}
-system_user_list                         /system/user
-system_user_view                         /system/user/{user_name}
 system_version                           /v1/system/update/version
 update_deployment_view                   /v1/system/update/deployments/{id}
 update_deployments_list                  /v1/system/update/deployments
