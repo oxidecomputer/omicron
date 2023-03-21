@@ -4,44 +4,13 @@
 
 //! Interfaces for working with RSS config.
 
-use crate::bootstrap::params::Gateway;
 use crate::config::ConfigError;
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
-use serde::Deserialize;
-use serde::Serialize;
-use std::net::{IpAddr, Ipv6Addr};
 use std::path::Path;
 
-/// Configuration for the "rack setup service", which is controlled during
-/// bootstrap.
-///
-/// The Rack Setup Service should be responsible for one-time setup actions,
-/// such as CockroachDB placement and initialization.  Without operator
-/// intervention, however, these actions need a way to be automated in our
-/// deployment.
-///
-/// By injecting this (optional) configuration into the bootstrap agent, it
-/// can act as a stand-in initialization service.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-pub struct SetupServiceConfig {
-    pub rack_subnet: Ipv6Addr,
-
-    /// The minimum number of sleds required to unlock the rack secret.
-    ///
-    /// If this value is less than 2, no rack secret will be created on startup;
-    /// this is the typical case for single-server test/development.
-    pub rack_secret_threshold: usize,
-
-    /// Internet gateway information.
-    pub gateway: Gateway,
-
-    /// The address on which Nexus should serve an external interface.
-    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
-    // this should be pulled from a pool of addresses.
-    pub nexus_external_address: IpAddr,
-}
+pub use crate::bootstrap::params::RackInitializeRequest as SetupServiceConfig;
 
 impl SetupServiceConfig {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
@@ -70,13 +39,18 @@ impl SetupServiceConfig {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::bootstrap::params::Gateway;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_subnets() {
         let cfg = SetupServiceConfig {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             rack_secret_threshold: 0,
-            gateway: Gateway { address: None, mac: macaddr::MacAddr6::nil() },
+            gateway: Gateway {
+                address: None,
+                mac: macaddr::MacAddr6::nil().into(),
+            },
             nexus_external_address: "192.168.1.20".parse().unwrap(),
         };
 

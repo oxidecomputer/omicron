@@ -10,6 +10,7 @@ use super::config::{
 };
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
+use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -85,6 +86,9 @@ pub enum BootstrapError {
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
 
+    #[error("Failed to initialize rack: {0}")]
+    RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
+
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
 
@@ -126,7 +130,7 @@ enum SledAgentState {
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
-pub(crate) struct Agent {
+pub struct Agent {
     /// Debug log
     log: Logger,
     /// Store the parent log - without "component = BootstrapAgent" - so
@@ -139,8 +143,8 @@ pub(crate) struct Agent {
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
 
-    rss: Mutex<Option<RssHandle>>,
     sled_state: Mutex<SledAgentState>,
+    config: Config,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
@@ -235,14 +239,14 @@ async fn cleanup_all_old_global_state(
 impl Agent {
     pub async fn new(
         log: Logger,
+        config: Config,
         sled_config: SledConfig,
-        link: PhysicalLink,
         sp: Option<SpHandle>,
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
         ));
-
+        let link = config.link.clone();
         let ip = bootstrap_ip(link.clone(), 1)?;
 
         // The only zone with a bootstrap ip address besides the global zone,
@@ -361,10 +365,10 @@ impl Agent {
             parent_log: log,
             ip,
             share: Mutex::new(None),
-            rss: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(Some(
                 hardware_monitor,
             ))),
+            config: config.clone(),
             sled_config,
             sp,
             ddmd_client,
@@ -703,28 +707,25 @@ impl Agent {
         Ok(rack_secret)
     }
 
-    /// Initializes the Rack Setup Service, if requested by `config`.
-    pub async fn start_rss(
+    /// Runs the rack setup service to completion
+    pub async fn rack_initialize(
         &self,
-        config: &Config,
+        request: RackInitializeRequest,
     ) -> Result<(), BootstrapError> {
-        if let Some(rss_config) = &config.rss_config {
-            info!(&self.log, "bootstrap service initializing RSS");
-            let rss = RssHandle::start_rss(
-                &self.parent_log,
-                rss_config.clone(),
-                self.ip,
-                self.sp.clone(),
-                // TODO-cleanup: Remove this arg once RSS can discover the trust
-                // quorum members over the management network.
-                config
-                    .sp_config
-                    .as_ref()
-                    .map(|sp_config| sp_config.trust_quorum_members.clone())
-                    .unwrap_or_default(),
-            );
-            self.rss.lock().await.replace(rss);
-        }
+        RssHandle::run_rss(
+            &self.parent_log,
+            request,
+            self.ip,
+            self.sp.clone(),
+            // TODO-cleanup: Remove this arg once RSS can discover the trust
+            // quorum members over the management network.
+            self.config
+                .sp_config
+                .as_ref()
+                .map(|sp_config| sp_config.trust_quorum_members.clone())
+                .unwrap_or_default(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -801,7 +802,7 @@ mod tests {
                 rack_id: Uuid::new_v4(),
                 gateway: crate::bootstrap::params::Gateway {
                     address: None,
-                    mac: MacAddr6::nil(),
+                    mac: MacAddr6::nil().into(),
                 },
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),

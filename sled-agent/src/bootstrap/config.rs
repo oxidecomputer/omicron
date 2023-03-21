@@ -22,6 +22,5 @@ pub struct Config {
     pub link: PhysicalLink,
     pub log: ConfigLogging,
     pub updates: ConfigUpdates,
-    pub rss_config: Option<crate::rack_setup::config::SetupServiceConfig>,
     pub sp_config: Option<SimSpConfig>,
 }
