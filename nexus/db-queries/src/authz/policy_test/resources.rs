@@ -220,25 +220,19 @@ async fn make_organization(
     for i in 0..nprojects {
         let project_name = format!("{}-proj{}", organization_name, i + 1);
         let create_project_users = first_branch && i == 0;
-        make_project(
-            builder,
-            &organization,
-            &project_name,
-            create_project_users,
-        )
-        .await;
+        make_project(builder, &silo, &project_name, create_project_users).await;
     }
 }
 
 /// Helper for `make_resources()` that constructs a small Project hierarchy
 async fn make_project(
     builder: &mut ResourceBuilder<'_>,
-    organization: &authz::Organization,
+    silo: &authz::Silo,
     project_name: &str,
     first_branch: bool,
 ) {
     let project = authz::Project::new(
-        organization.clone(),
+        silo.clone(),
         Uuid::new_v4(),
         LookupType::ByName(project_name.to_string()),
     );

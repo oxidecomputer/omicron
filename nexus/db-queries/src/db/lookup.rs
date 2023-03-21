@@ -819,7 +819,6 @@ lookup_resource! {
 mod test {
     use super::Instance;
     use super::LookupPath;
-    use super::Organization;
     use super::Project;
     use crate::context::OpContext;
     use crate::db::model::Name;
@@ -836,25 +835,28 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-        let org_name: Name = Name("my-org".parse().unwrap());
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
         let leaf = LookupPath::new(&opctx, &datastore)
-            .organization_name(&org_name)
             .project_name(&project_name)
             .instance_name(&instance_name);
         assert!(matches!(&leaf,
-            Instance::Name(Project::Name(Organization::Name(_, o) , p) , i)
-            if **o == org_name && **p == project_name && **i == instance_name));
+            Instance::Name(Project::Name(_, p), i)
+            if **p == project_name && **i == instance_name));
 
-        let org_id = "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
-        let leaf = LookupPath::new(&opctx, &datastore)
-            .organization_id(org_id)
-            .project_name(&project_name);
+        let leaf =
+            LookupPath::new(&opctx, &datastore).project_name(&project_name);
         assert!(matches!(&leaf,
-            Project::Name(Organization::PrimaryKey(_, o), p)
-            if *o == org_id && **p == project_name));
+            Project::Name(_, p)
+            if **p == project_name));
+
+        let project_id =
+            "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
+        let leaf = LookupPath::new(&opctx, &datastore).project_id(project_id);
+        assert!(matches!(&leaf,
+            Project::PrimaryKey(_, p)
+            if *p == project_id));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
