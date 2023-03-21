@@ -3,7 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Result;
+use wicket_dbg::Runner;
 
 fn main() -> Result<()> {
-    wicket_dbg::Server::run("::1:9010")
+    let drain = slog::Discard;
+    let root = slog::Logger::root(drain, slog::o!());
+    let runner = Runner::new(root);
+    wicket_dbg::Server::run("::1:9010", runner)
 }

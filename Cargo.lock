@@ -8093,8 +8093,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ciborium",
+ "crossterm 0.26.1",
  "reedline",
  "serde",
+ "slog",
+ "tui",
  "wicket",
 ]
 

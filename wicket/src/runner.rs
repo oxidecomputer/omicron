@@ -49,7 +49,7 @@ pub struct RunnerCore {
     pub terminal: Term,
 
     // Our friendly neighborhood logger
-    log: slog::Logger,
+    pub log: slog::Logger,
 }
 
 impl RunnerCore {

@@ -19,4 +19,4 @@ pub use crate::runner::*;
 pub use events::{Action, Event, Recorder, Snapshot};
 pub use keymap::{Cmd, KeyHandler};
 pub use state::State;
-pub use ui::Control;
+pub use ui::{Control, Screen};

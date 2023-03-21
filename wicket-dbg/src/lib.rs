@@ -5,9 +5,11 @@
 //! A library capable of playing and inspecting wicket recordings
 
 mod client;
+mod runner;
 mod server;
 
 pub use client::Client;
+pub use runner::Runner;
 pub use server::Server;
 
 use serde::{Deserialize, Serialize};
