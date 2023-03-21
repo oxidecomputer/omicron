@@ -765,10 +765,13 @@ impl ServiceManager {
                     )?;
 
                     if let Some(address) = request.addresses.get(0) {
-                        smfh.addpropvalue(
-                            "config/address",
-                            &format!("[{address}]:{MGS_PORT}"),
-                        )?;
+                        // Don't use localhost twice
+                        if *address != Ipv6Addr::LOCALHOST {
+                            smfh.addpropvalue(
+                                "config/address",
+                                &format!("[{address}]:{MGS_PORT}"),
+                            )?;
+                        }
                     }
 
                     smfh.refresh()?;
