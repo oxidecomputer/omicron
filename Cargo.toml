@@ -286,7 +286,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.7"
-toml = "0.7.2"
+toml = "0.7.3"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
