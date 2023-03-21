@@ -4,7 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::params::NetworkInterface;
 use crate::opte::params::SourceNatConfig;
