@@ -2,7 +2,6 @@ API endpoints with no coverage in authz tests:
 session_sshkey_delete                    (delete "/session/me/sshkeys/{ssh_key_name}")
 system_image_delete                      (delete "/system/images/{image_name}")
 silo_delete                              (delete "/system/silos/{silo_name}")
-group_list                               (get    "/groups")
 login_saml_begin                         (get    "/login/{silo_name}/saml/{provider_name}")
 policy_view                              (get    "/policy")
 session_me                               (get    "/session/me")
