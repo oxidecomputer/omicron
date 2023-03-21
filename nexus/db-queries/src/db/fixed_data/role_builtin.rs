@@ -107,9 +107,6 @@ mod test {
         // roles that are not exposed to end users.
         check_public_roles::<authz::FleetRole>(ResourceType::Fleet);
         check_public_roles::<authz::SiloRole>(ResourceType::Silo);
-        check_public_roles::<authz::OrganizationRole>(
-            ResourceType::Organization,
-        );
         check_public_roles::<authz::ProjectRole>(ResourceType::Project);
     }
 

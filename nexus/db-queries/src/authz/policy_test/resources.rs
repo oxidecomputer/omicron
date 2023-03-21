@@ -189,36 +189,9 @@ async fn make_silo(
         LookupType::ByName(format!("{}-group", silo_name)),
     ));
 
-    let norganizations = if first_branch { 2 } else { 1 };
-    for i in 0..norganizations {
-        let organization_name = format!("{}-org{}", silo_name, i + 1);
-        let org_first_branch = first_branch && i == 0;
-        make_organization(builder, &silo, &organization_name, org_first_branch)
-            .await;
-    }
-}
-
-/// Helper for `make_resources()` that constructs a small Organization hierarchy
-async fn make_organization(
-    builder: &mut ResourceBuilder<'_>,
-    silo: &authz::Silo,
-    organization_name: &str,
-    first_branch: bool,
-) {
-    let organization = authz::Organization::new(
-        silo.clone(),
-        Uuid::new_v4(),
-        LookupType::ByName(organization_name.to_string()),
-    );
-    if first_branch {
-        builder.new_resource_with_users(organization.clone()).await;
-    } else {
-        builder.new_resource(organization.clone());
-    }
-
     let nprojects = if first_branch { 2 } else { 1 };
     for i in 0..nprojects {
-        let project_name = format!("{}-proj{}", organization_name, i + 1);
+        let project_name = format!("{}-proj{}", silo_name, i + 1);
         let create_project_users = first_branch && i == 0;
         make_project(builder, &silo, &project_name, create_project_users).await;
     }

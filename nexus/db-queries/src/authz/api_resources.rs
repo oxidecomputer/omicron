@@ -958,7 +958,6 @@ authz_resource! {
 #[cfg(test)]
 mod test {
     use super::FleetRole;
-    use super::OrganizationRole;
     use super::ProjectRole;
     use super::SiloRole;
     use crate::db::test_database_string_impl;
@@ -970,9 +969,6 @@ mod test {
         );
         test_database_string_impl::<SiloRole, _>(
             "tests/output/authz-roles-silo.txt",
-        );
-        test_database_string_impl::<OrganizationRole, _>(
-            "tests/output/authz-roles-organization.txt",
         );
         test_database_string_impl::<ProjectRole, _>(
             "tests/output/authz-roles-project.txt",
