@@ -524,7 +524,7 @@ impl HardwareManager {
     /// If this argument is not supplied, we assume the device is a gimlet until
     /// device scanning informs us otherwise (normal behavior).
     pub fn new(
-        log: Logger,
+        log: &Logger,
         scrimlet_override: Option<ScrimletMode>,
     ) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
@@ -545,8 +545,8 @@ impl HardwareManager {
                 ScrimletMode::Stub => HardwareView::new_stub_tofino(true),
                 // TODO: correctness
                 // I'm not sure whether or not we should be treating softnpu
-                // as a stub or treating it as a real ASIC here, so this
-                // might change.
+                // as a stub or treating it as a different HardwareView variant,
+                // so this might change.
                 ScrimletMode::Softnpu => HardwareView::new_stub_tofino(true),
             },
         }

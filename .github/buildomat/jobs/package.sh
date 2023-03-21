@@ -20,10 +20,6 @@
 #: series = "image"
 #: name = "trampoline-global-zone-packages"
 #: from_output = "/work/trampoline-global-zone-packages.tar.gz"
-#:
-#: access_repos = [
-#:   "oxidecomputer/dendrite",
-#: ]
 
 set -o errexit
 set -o pipefail

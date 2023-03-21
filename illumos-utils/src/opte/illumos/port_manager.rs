@@ -88,7 +88,6 @@ impl PortManager {
     /// interfaces
     pub fn new(
         log: Logger,
-        _data_link: PhysicalLink,
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> Self {
@@ -336,7 +335,6 @@ impl PortManager {
                 instance_id,
                 &port_name,
             );
-            //self.inner.update_secondary_macs(&mut ports)?;
             (port, ticket)
         };
 
@@ -466,20 +464,6 @@ impl PortTicket {
                 "instance_id" => ?self.id,
                 "port_name" => &self.port_name,
             );
-            /*
-            if let Err(e) = manager.update_secondary_macs(&mut ports) {
-                warn!(
-                    manager.log,
-                    "Failed to update secondary-macs linkprop when \
-                    releasing OPTE ports for instance";
-                    "instance_id" => ?self.id,
-                    "err" => ?e,
-                );
-                return Err(e);
-            } else {
-                return Ok(());
-            }
-            */
             return Ok(());
         }
         Ok(())

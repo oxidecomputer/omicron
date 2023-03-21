@@ -25,5 +25,5 @@ if_exists = "append"
 address = "[fd00:1122:3344:0101::6]:8123"
 
 # Configuration for interacting with the dataplane daemon
-[dpd_api]
+[dendrite]
 address = "[fd00:1122:3344:101::2]:12224"

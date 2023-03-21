@@ -45,7 +45,7 @@ pub enum HardwareUpdate {
 #[serde(rename_all = "snake_case")]
 pub enum ScrimletMode {
     /// Force sled to run as a Gimlet
-    /// this is to preserve the old behavior of `scrimlet_override = false`,
+    /// this is to preserve the old behavior of `stub_scrimlet = false`,
     /// but I haven't found where that logic has actually been leveraged...
     Disabled,
     /// Force sled to run in Scrimlet mode with a stub switch

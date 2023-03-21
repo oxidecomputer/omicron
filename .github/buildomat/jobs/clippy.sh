@@ -5,10 +5,6 @@
 #: target = "helios-latest"
 #: rust_toolchain = "1.66.1"
 #: output_rules = []
-#:
-#: access_repos = [
-#:   "oxidecomputer/dendrite",
-#: ]
 
 # Run clippy on illumos (not just other systems) because a bunch of our code
 # (that we want to check) is conditionally-compiled on illumos only.

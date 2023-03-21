@@ -220,7 +220,7 @@ enum SwitchZone {
         worker: Option<Task>,
         // Filesystems for the switch zone to mount
         // Since Softnpu is currently managed via a UNIX socket, we need to
-        // pass those files in to the SwitchZone so Dendrite can mmanage Softnpu
+        // pass those files in to the SwitchZone so Dendrite can manage Softnpu
         filesystems: Vec<zone::Fs>,
     },
     // The Zone is currently running.
@@ -500,7 +500,7 @@ impl ServiceManager {
     async fn initialize_zone(
         &self,
         request: &ServiceZoneRequest,
-        filesystems: &Vec<zone::Fs>,
+        filesystems: &[zone::Fs],
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
         let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
@@ -921,7 +921,7 @@ impl ServiceManager {
                 .initialize_zone(
                     req,
                     // filesystems=
-                    &vec![],
+                    &[],
                 )
                 .await?;
             existing_zones.push(running_zone);

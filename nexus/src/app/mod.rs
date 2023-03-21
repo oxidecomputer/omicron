@@ -211,7 +211,7 @@ impl Nexus {
                 "component" => "DpdClient"
             )),
         };
-        let dpd_address = config.pkg.dpd_api.address;
+        let dpd_address = config.pkg.dendrite.address;
         let dpd_host = dpd_address.ip().to_string();
         let dpd_port = dpd_address.port();
         let dpd_client = Arc::new(dpd_client::Client::new(
@@ -279,7 +279,7 @@ impl Nexus {
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
-            dpd_client: Arc::clone(&dpd_client),
+            dpd_client,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

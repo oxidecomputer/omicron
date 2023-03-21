@@ -22,7 +22,6 @@ Any additional prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ source tools/setup_path.sh
 $ pfexec ./tools/install_prerequisites.sh
 ----
 

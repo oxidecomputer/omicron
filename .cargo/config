@@ -15,7 +15,3 @@ rustdocflags = "--document-private-items"
 rustflags = [
     "-C", "link-arg=-Wl,-znocompstrtab"
 ]
-
-# We need to enable this to access private repos
-[net]
-git-fetch-with-cli = true

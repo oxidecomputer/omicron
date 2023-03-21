@@ -414,11 +414,14 @@ async fn sic_add_network_config(
 
     debug!(log, "checking for existing nat mapping for {target_ip:#?}");
 
-    // TODO: currently if we have this environment variable set, we want to
+    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
+    //
+    // currently if we have this environment variable set, we want to
     // bypass all calls to DPD. This is mainly to facilitate some tests where
     // we don't have dpd running. In the future we should probably have these
     // testing environments running dpd-stub so that the full path can be tested.
     if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
+        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
         return Ok(());
     };
 
@@ -519,11 +522,14 @@ async fn sic_remove_network_config(
         })?
         .to_owned();
 
-    // TODO: currently if we have this environment variable set, we want to
+    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
+    //
+    // currently if we have this environment variable set, we want to
     // bypass all calls to DPD. This is mainly to facilitate some tests where
     // we don't have dpd running. In the future we should probably have these
     // testing environments running dpd-stub so that the full path can be tested.
     if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
+        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
         return Ok(());
     };
 

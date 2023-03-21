@@ -15,10 +15,6 @@
 #:
 #: [dependencies.build-end-to-end-tests]
 #: job = "helios / build-end-to-end-tests"
-#
-#: access_repos = [
-#:   "oxidecomputer/dendrite",
-#: ]
 
 set -o errexit
 set -o pipefail

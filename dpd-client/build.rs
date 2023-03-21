@@ -3,6 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // Copyright 2022 Oxide Computer Company
+//
+// TODO: remove
+// This code is only required at the moment because the source repo
+// for `Dendrite` is not yet public. Once `Dendrite` has been made
+// public, we can remove this and point the services in `omicron`
+// that require the `dpd-client` library to the `Dendrite` repo.
 
 use anyhow::bail;
 use anyhow::Context;

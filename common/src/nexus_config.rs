@@ -173,7 +173,7 @@ pub struct TimeseriesDbConfig {
     pub address: Option<SocketAddr>,
 }
 
-/// Configuration for the dataplane daemon.
+/// Configuration for the `Dendrite` dataplane daemon.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DpdConfig {
     pub address: SocketAddr,
@@ -284,8 +284,8 @@ pub struct PackageConfig {
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
-    /// dataplane daemon configuration
-    pub dpd_api: DpdConfig,
+    /// `Dendrite` dataplane daemon configuration
+    pub dendrite: DpdConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -490,7 +490,7 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dpd_api]
+            [dendrite]
             address = "[::1]:12224"
             "##,
         )
@@ -541,7 +541,7 @@ mod test {
                         default_base_url: "http://example.invalid/".into(),
                     }),
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
-                    dpd_api: DpdConfig {
+                    dendrite: DpdConfig {
                         address: SocketAddr::from_str("[::1]:12224").unwrap()
                     },
                 },
@@ -578,7 +578,7 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dpd_api]
+            [dendrite]
             address = "[::1]:12224"
             "##,
         )

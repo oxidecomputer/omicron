@@ -271,7 +271,7 @@ impl SledAgent {
         );
 
         let hardware =
-            HardwareManager::new(parent_log.clone(), config.scrimlet_override)
+            HardwareManager::new(&parent_log, config.scrimlet_override)
                 .map_err(|e| Error::Hardware(e))?;
 
         let update_config =

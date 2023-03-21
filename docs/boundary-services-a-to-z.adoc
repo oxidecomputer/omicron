@@ -1,12 +1,8 @@
 = Boundary Services A-Z
 
-This document describes how to run a RAP environment with boundary services.
+This document describes how to run an environment with boundary services.
 It's a quick rundown and assumes knowledge of the basic setup described in the
 Running Omicron (Non-Simulated) document.
-
-Since we're using virtual network hardware, the OPTE hack is no longer needed.
-The hack will automatically be disabled during the `create_virtual_hardware.sh`
-script.
 
 == 0. Install softnpu ASIC emulator machinery
 
@@ -22,8 +18,8 @@ PHYSICAL_LINK=<wan interface> pfexec ./tools/create_virtual_hardware.sh
 Note that the `PHYSICAL_LINK` environment variable is optional. If not supplied,
 the first link in `dladm show-phys` will be used.
 
-The virtual hardware is a bit different than what's currently being used. What
-we'll eventually wind up with looks like this.
+The virtual hardware is a bit different than what has previously been used. What
+we now have looks like this.
 
 image::plumbing.png[]
 
@@ -91,76 +87,31 @@ fe80::aae1:deff:fe00:1          a8:e1:de:00:00:01  0s
 == 4. Populating the system
 
 Follow the
-https://github.com/oxidecomputer/meta/blob/master/engineering/remote-access-preview-demo-setup.adoc#setting-up-the-cli[RAP document]
+https://github.com/oxidecomputer/omicron/blob/main/docs/how-to-run.adoc[how-to-run.adoc]
 to set up IPs, images, disks, instances etc. Things to pay particular attention
 to here are the following.
 
 - The address range in the IP pool should be on a subnet in your local network that
   can NAT out to the Internet.
 - Be sure to set up an external IP for the instance you create.
-- You will need to set up `proxy-arp` if your VM external IP addresses are on the
-  same L2 network as the router or other non-oxide hosts.
 
-Once your host has been populated with images, you can use the script at
-`tools/quickstart.sh` to quickly create a VM and set up the `proxy-arp`. Please
-be sure to edit the `ip_pool_start` and `ip_pool_end` variables to match your
-desired address ranges.
+You will need to set up `proxy-arp` if your VM external IP addresses are on the
+same L2 network as the router or other non-oxide hosts:
+----
+pfexec /opt/oxide/softnpu/stuff/scadm \
+  --server /opt/oxide/softnpu/stuff/server \
+  --client /opt/oxide/softnpu/stuff/client \
+  standalone \
+  add-proxy-arp \
+  $ip_pool_start \
+  $ip_pool_end \
+  $softnpu_mac
+----
 
 == 5. Configuring scrimlet/sidecar
 
-A this point we have an instance up and running. At the time of writing there is
-not control plane driven boundary services automation so we're going to
-configure the scrimlet by hand.
-
-First we need to collect some information. In particular we need to know about
-the virtual network our instance is sitting on. We can get that info from
-`opteadm`.
-
-....
-pfexec /opt/oxide/opte/bin/opteadm dump-v2p
-
-Virtual to Physical Mappings
-======================================================================
-
-VPC 15103089
-----------------------------------------------------------------------
-
-IPv4 mappings
-----------------------------------------------------------------------
-VPC IP                   VPC MAC ADDR      UNDERLAY IP
-172.30.0.5               A8:40:25:F2:84:3F fd00:1122:3344:101::1
-
-IPv6 mappings
-----------------------------------------------------------------------
-VPC IP                   VPC MAC ADDR      UNDERLAY IP
-....
-
-The key pieces of information we need here are the following. Please note these
-will vary from instance to instance.
-
-1. The VNI = `15103089`
-2. The MAC = `A8:40:25:F2:84:3F`
-3. The underlay = `fd00:1122:3344:101::1`
-
-We also need to know what external IP has been assigned to our instance. The
-only way I know how to do this right now is by looking at the web console. Go to
-the instances page and navigate to the network tab. You'll see an External IP
-field in the table. Let's assume that is `10.100.0.6` for this example.
-
-Now we need to go tell boundary services about this information.
-
-This can be accomplished via the following `swadm` command:
-
-----
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" nat add \
-    -e 10.100.0.6 \
-    -l 1024 \
-    -h 65535 \
-    -i fd00:1122:3344:101::1 \
-    -m A8:40:25:F2:84:3F \
-    -v 15103089
-----
-
+A this point we have an instance up and running with external connectivity
+configured via boundary services:
 ----
 ry@korgano:~/omicron$ ~/propolis/target/release/propolis-cli --server fd00:1122:3344:101::c serial
 
