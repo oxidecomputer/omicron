@@ -23,9 +23,7 @@ use nexus_types::external_api::views::Certificate;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
-use nexus_types::external_api::views::{
-    Project, Silo, Vpc, VpcRouter,
-};
+use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;

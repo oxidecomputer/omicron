@@ -43,7 +43,6 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
-use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -83,9 +82,6 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(policy_view)?;
         api.register(policy_update)?;
-
-        api.register(policy_view_v1)?;
-        api.register(policy_update_v1)?;
 
         api.register(project_list)?;
         api.register(project_create)?;
@@ -205,17 +201,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(role_list)?;
         api.register(role_view)?;
 
-        api.register(session_sshkey_list)?;
-        api.register(session_sshkey_view)?;
-        api.register(session_sshkey_create)?;
-        api.register(session_sshkey_delete)?;
-
-        api.register(current_user_view_v1)?;
-        api.register(current_user_groups_v1)?;
-        api.register(current_user_ssh_key_list_v1)?;
-        api.register(current_user_ssh_key_view_v1)?;
-        api.register(current_user_ssh_key_create_v1)?;
-        api.register(current_user_ssh_key_delete_v1)?;
+        api.register(current_user_view)?;
+        api.register(current_user_groups)?;
+        api.register(current_user_ssh_key_list)?;
+        api.register(current_user_ssh_key_view)?;
+        api.register(current_user_ssh_key_create)?;
+        api.register(current_user_ssh_key_delete)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -265,11 +256,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(update_deployments_list)?;
         api.register(update_deployment_view)?;
 
-        api.register(user_list)?;
-        api.register(silo_users_list)?;
-        api.register(silo_user_view)?;
-        api.register(group_list)?;
-
         api.register(user_list_v1)?;
         api.register(silo_user_list_v1)?;
         api.register(silo_user_view_v1)?;
@@ -285,8 +271,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::session_me)?;
-        api.register(console_api::session_me_groups)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
@@ -403,41 +387,12 @@ async fn system_policy_update(
     path = "/v1/policy",
     tags = ["silos"],
  }]
-pub async fn policy_view_v1(
+pub async fn policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo: NameOrId = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current silo")?
-            .id()
-            .into();
-
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the current silo's IAM policy
-/// Use `GET /v1/policy` instead
-#[endpoint {
-    method = GET,
-    path = "/policy",
-    tags = ["silos"],
-    deprecated = true,
- }]
-pub async fn policy_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let silo: NameOrId = opctx
             .authn
@@ -459,7 +414,7 @@ pub async fn policy_view(
     path = "/v1/policy",
     tags = ["silos"],
 }]
-async fn policy_update_v1(
+async fn policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
@@ -467,41 +422,6 @@ async fn policy_update_v1(
     let handler = async {
         let nexus = &apictx.nexus;
         let new_policy = new_policy.into_inner();
-        let nasgns = new_policy.role_assignments.len();
-        // This should have been validated during parsing.
-        bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let silo: NameOrId = opctx
-            .authn
-            .silo_required()
-            .internal_context("loading current silo")?
-            .id()
-            .into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let policy =
-            nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
-        Ok(HttpResponseOk(policy))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Update the current silo's IAM policy
-/// Use `PUT /v1/policy` instead
-#[endpoint {
-    method = PUT,
-    path = "/policy",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn policy_update(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_policy: TypedBody<shared::Policy<authz::SiloRole>>,
-) -> Result<HttpResponseOk<shared::Policy<authz::SiloRole>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_policy = new_policy.into_inner();
-
-    let handler = async {
         let nasgns = new_policy.role_assignments.len();
         // This should have been validated during parsing.
         bail_unless!(nasgns <= shared::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE);
@@ -912,42 +832,6 @@ async fn silo_user_list_v1(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List users in a silo
-/// Use `GET /v1/system/users` instead.
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/users/all",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_users_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SiloPathParam>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let silo = path_params.into_inner().silo_name.into();
-        let query = query_params.into_inner();
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
-        let users = nexus
-            .silo_list_users(&opctx, &silo_lookup, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            users,
-            &|_, user: &User| user.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 /// Path parameters for Silo User requests
 #[derive(Deserialize, JsonSchema)]
 struct UserParam {
@@ -973,41 +857,6 @@ async fn silo_user_view_v1(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
-        let user =
-            nexus.silo_user_fetch(&opctx, &silo_lookup, path.user_id).await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Silo User requests
-#[derive(Deserialize, JsonSchema)]
-struct UserPathParam {
-    /// The silo's unique name.
-    silo_name: Name,
-    /// The user's internal id
-    user_id: Uuid,
-}
-
-/// Fetch a user
-/// Use `GET /v1/system/users/{user_id}` instead
-#[endpoint {
-    method = GET,
-    path = "/system/silos/{silo_name}/users/id/{user_id}",
-    tags = ["system"],
-    deprecated = true
-}]
-async fn silo_user_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UserPathParam>,
-) -> Result<HttpResponseOk<User>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let silo = path.silo_name.into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
         let user =
             nexus.silo_user_fetch(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseOk(user.into()))
@@ -4627,39 +4476,6 @@ async fn saga_view(
 // Silo users
 
 /// List users
-/// Use `GET /v1/users` instead
-#[endpoint {
-    method = GET,
-    path = "/users",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn user_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<User>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let users = nexus
-            .silo_users_list_current(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            users,
-            &|_, user: &User| user.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List users
 #[endpoint {
     method = GET,
     path = "/v1/users",
@@ -4699,39 +4515,6 @@ async fn user_list_v1(
 }
 
 // Silo groups
-
-/// List groups
-/// Use `GET /v1/groups` instead
-#[endpoint {
-    method = GET,
-    path = "/groups",
-    tags = ["silos"],
-    deprecated = true,
-}]
-async fn group_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Group>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let groups = nexus
-            .silo_groups_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            groups,
-            &|_, group: &Group| group.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// List groups
 #[endpoint {
@@ -4935,7 +4718,7 @@ async fn role_view(
    path = "/v1/me",
    tags = ["session"],
 }]
-pub async fn current_user_view_v1(
+pub async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<views::User>, HttpError> {
     let apictx = rqctx.context();
@@ -4954,7 +4737,7 @@ pub async fn current_user_view_v1(
     path = "/v1/me/groups",
     tags = ["session"],
  }]
-pub async fn current_user_groups_v1(
+pub async fn current_user_groups(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
@@ -4988,50 +4771,10 @@ pub async fn current_user_groups_v1(
 /// Lists SSH public keys for the currently authenticated user.
 #[endpoint {
     method = GET,
-    path = "/session/me/sshkeys",
-    tags = ["session"],
-}]
-async fn session_sshkey_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("listing current user's ssh keys")?;
-        let ssh_keys = nexus
-            .ssh_keys_list(
-                &opctx,
-                actor.actor_id(),
-                &PaginatedBy::Name(data_page_params_for(&rqctx, &query)?),
-            )
-            .await?
-            .into_iter()
-            .map(SshKey::from)
-            .collect::<Vec<SshKey>>();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            ssh_keys,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List SSH public keys
-///
-/// Lists SSH public keys for the currently authenticated user.
-#[endpoint {
-    method = GET,
     path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_list_v1(
+async fn current_user_ssh_key_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
@@ -5067,38 +4810,10 @@ async fn current_user_ssh_key_list_v1(
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
     method = POST,
-    path = "/session/me/sshkeys",
-    tags = ["session"],
-}]
-async fn session_sshkey_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_key: TypedBody<params::SshKeyCreate>,
-) -> Result<HttpResponseCreated<SshKey>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("creating ssh key for current user")?;
-        let ssh_key = nexus
-            .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
-            .await?;
-        Ok(HttpResponseCreated(ssh_key.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create an SSH public key
-///
-/// Create an SSH public key for the currently authenticated user.
-#[endpoint {
-    method = POST,
     path = "/v1/me/ssh-keys",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_create_v1(
+async fn current_user_ssh_key_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     new_key: TypedBody<params::SshKeyCreate>,
 ) -> Result<HttpResponseCreated<SshKey>, HttpError> {
@@ -5114,48 +4829,6 @@ async fn current_user_ssh_key_create_v1(
             .ssh_key_create(&opctx, actor.actor_id(), new_key.into_inner())
             .await?;
         Ok(HttpResponseCreated(ssh_key.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for SSH key requests by name
-#[derive(Deserialize, JsonSchema)]
-struct SshKeyPathParams {
-    ssh_key_name: Name,
-}
-
-/// Fetch an SSH public key
-///
-/// Fetch an SSH public key associated with the currently authenticated user.
-/// Use `GET /v1/me/ssh-keys` instead
-#[endpoint {
-    method = GET,
-    path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["session"],
-    deprecated = true,
-}]
-async fn session_sshkey_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SshKeyPathParams>,
-) -> Result<HttpResponseOk<SshKey>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let &actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("fetching one of current user's ssh keys")?;
-        let ssh_key_selector = params::SshKeySelector {
-            silo_user_id: actor.actor_id(),
-            ssh_key: path.ssh_key_name.into(),
-        };
-        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-        let (.., silo_user, _, ssh_key) = ssh_key_lookup.fetch().await?;
-        // Ensure the SSH key exists in the current silo
-        assert_eq!(silo_user.id(), actor.actor_id());
-        Ok(HttpResponseOk(ssh_key.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -5168,7 +4841,7 @@ async fn session_sshkey_view(
     path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_view_v1(
+async fn current_user_ssh_key_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseOk<SshKey>, HttpError> {
@@ -5199,42 +4872,10 @@ async fn current_user_ssh_key_view_v1(
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = DELETE,
-    path = "/session/me/sshkeys/{ssh_key_name}",
-    tags = ["session"],
-}]
-async fn session_sshkey_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SshKeyPathParams>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let actor = opctx
-            .authn
-            .actor_required()
-            .internal_context("deleting one of current user's ssh keys")?;
-        let ssh_key_selector = params::SshKeySelector {
-            silo_user_id: actor.actor_id(),
-            ssh_key: path.ssh_key_name.into(),
-        };
-        let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
-        nexus.ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete an SSH public key
-///
-/// Delete an SSH public key associated with the currently authenticated user.
-#[endpoint {
-    method = DELETE,
     path = "/v1/me/ssh-keys/{ssh_key}",
     tags = ["session"],
 }]
-async fn current_user_ssh_key_delete_v1(
+async fn current_user_ssh_key_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SshKeyPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {

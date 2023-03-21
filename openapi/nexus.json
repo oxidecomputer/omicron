@@ -101,65 +101,6 @@
         }
       }
     },
-    "/groups": {
-      "get": {
-        "tags": [
-          "silos"
-        ],
-        "summary": "List groups",
-        "description": "Use `GET /v1/groups` instead",
-        "operationId": "group_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
     "/login": {
       "post": {
         "tags": [
@@ -354,322 +295,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/policy": {
-      "get": {
-        "tags": [
-          "silos"
-        ],
-        "summary": "Fetch the current silo's IAM policy",
-        "description": "Use `GET /v1/policy` instead",
-        "operationId": "policy_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "silos"
-        ],
-        "summary": "Update the current silo's IAM policy",
-        "description": "Use `PUT /v1/policy` instead",
-        "operationId": "policy_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SiloRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/session/me": {
-      "get": {
-        "tags": [
-          "hidden"
-        ],
-        "summary": "Fetch the user associated with the current session",
-        "description": "Use `GET /v1/me` instead",
-        "operationId": "session_me",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/session/me/groups": {
-      "get": {
-        "tags": [
-          "hidden"
-        ],
-        "summary": "Fetch the silo groups the current user belongs to",
-        "description": "Use `GET /v1/me/groups` instead",
-        "operationId": "session_me_groups",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/session/me/sshkeys": {
-      "get": {
-        "tags": [
-          "session"
-        ],
-        "summary": "List SSH public keys",
-        "description": "Lists SSH public keys for the currently authenticated user.",
-        "operationId": "session_sshkey_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SshKeyResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "session"
-        ],
-        "summary": "Create an SSH public key",
-        "description": "Create an SSH public key for the currently authenticated user.",
-        "operationId": "session_sshkey_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SshKeyCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SshKey"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/session/me/sshkeys/{ssh_key_name}": {
-      "get": {
-        "tags": [
-          "session"
-        ],
-        "summary": "Fetch an SSH public key",
-        "description": "Fetch an SSH public key associated with the currently authenticated user. Use `GET /v1/me/ssh-keys` instead",
-        "operationId": "session_sshkey_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "ssh_key_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SshKey"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "session"
-        ],
-        "summary": "Delete an SSH public key",
-        "description": "Delete an SSH public key associated with the currently authenticated user.",
-        "operationId": "session_sshkey_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "ssh_key_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1603,183 +1228,6 @@
           }
         },
         "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/users/all": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List users in a silo",
-        "description": "Use `GET /v1/system/users` instead.",
-        "operationId": "silo_users_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/silos/{silo_name}/users/id/{user_id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a user",
-        "description": "Use `GET /v1/system/users/{user_id}` instead",
-        "operationId": "silo_user_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          },
-          {
-            "in": "path",
-            "name": "user_id",
-            "description": "The user's internal id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/User"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/users": {
-      "get": {
-        "tags": [
-          "silos"
-        ],
-        "summary": "List users",
-        "description": "Use `GET /v1/users` instead",
-        "operationId": "user_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
       }
     },
     "/v1/disks": {
@@ -3066,7 +2514,7 @@
           "session"
         ],
         "summary": "Fetch the user associated with the current session",
-        "operationId": "current_user_view_v1",
+        "operationId": "current_user_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -3093,7 +2541,7 @@
           "session"
         ],
         "summary": "Fetch the silo groups the current user belongs to",
-        "operationId": "current_user_groups_v1",
+        "operationId": "current_user_groups",
         "parameters": [
           {
             "in": "query",
@@ -3151,7 +2599,7 @@
         ],
         "summary": "List SSH public keys",
         "description": "Lists SSH public keys for the currently authenticated user.",
-        "operationId": "current_user_ssh_key_list_v1",
+        "operationId": "current_user_ssh_key_list",
         "parameters": [
           {
             "in": "query",
@@ -3207,7 +2655,7 @@
         ],
         "summary": "Create an SSH public key",
         "description": "Create an SSH public key for the currently authenticated user.",
-        "operationId": "current_user_ssh_key_create_v1",
+        "operationId": "current_user_ssh_key_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3245,7 +2693,7 @@
         ],
         "summary": "Fetch an SSH public key",
         "description": "Fetch an SSH public key associated with the currently authenticated user.",
-        "operationId": "current_user_ssh_key_view_v1",
+        "operationId": "current_user_ssh_key_view",
         "parameters": [
           {
             "in": "path",
@@ -3281,7 +2729,7 @@
         ],
         "summary": "Delete an SSH public key",
         "description": "Delete an SSH public key associated with the currently authenticated user.",
-        "operationId": "current_user_ssh_key_delete_v1",
+        "operationId": "current_user_ssh_key_delete",
         "parameters": [
           {
             "in": "path",
@@ -3587,7 +3035,7 @@
           "silos"
         ],
         "summary": "Fetch the current silo's IAM policy",
-        "operationId": "policy_view_v1",
+        "operationId": "policy_view",
         "responses": {
           "200": {
             "description": "successful operation",
@@ -3612,7 +3060,7 @@
           "silos"
         ],
         "summary": "Update the current silo's IAM policy",
-        "operationId": "policy_update_v1",
+        "operationId": "policy_update",
         "requestBody": {
           "content": {
             "application/json": {
