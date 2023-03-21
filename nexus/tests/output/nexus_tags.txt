@@ -80,11 +80,11 @@ current_user_view                        /v1/me
 
 API operations found with tag "silos"
 OPERATION ID                             URL PATH
-group_list_v1                            /v1/groups
+group_list                               /v1/groups
 group_view                               /v1/groups/{group}
 policy_update                            /v1/policy
 policy_view                              /v1/policy
-user_list_v1                             /v1/users
+user_list                                /v1/users
 
 API operations found with tag "snapshots"
 OPERATION ID                             URL PATH
@@ -114,40 +114,25 @@ ip_pool_view                             /v1/system/ip-pools/{pool}
 local_idp_user_create                    /v1/system/identity-providers/local/users
 local_idp_user_delete                    /v1/system/identity-providers/local/users/{user_id}
 local_idp_user_set_password              /v1/system/identity-providers/local/users/{user_id}/set-password
-physical_disk_list                       /system/hardware/disks
-physical_disk_list_v1                    /v1/system/hardware/disks
-rack_list                                /system/hardware/racks
-rack_list_v1                             /v1/system/hardware/racks
-rack_view                                /system/hardware/racks/{rack_id}
-rack_view_v1                             /v1/system/hardware/racks/{rack_id}
-saga_list                                /system/sagas
-saga_list_v1                             /v1/system/sagas
-saga_view                                /system/sagas/{saga_id}
-saga_view_v1                             /v1/system/sagas/{saga_id}
+physical_disk_list                       /v1/system/hardware/disks
+rack_list                                /v1/system/hardware/racks
+rack_view                                /v1/system/hardware/racks/{rack_id}
+saga_list                                /v1/system/sagas
+saga_view                                /v1/system/sagas/{saga_id}
 saml_identity_provider_create            /v1/system/identity-providers/saml
 saml_identity_provider_view              /v1/system/identity-providers/saml/{provider}
-silo_create                              /system/silos
-silo_create_v1                           /v1/system/silos
-silo_delete                              /system/silos/{silo_name}
-silo_delete_v1                           /v1/system/silos/{silo}
+silo_create                              /v1/system/silos
+silo_delete                              /v1/system/silos/{silo}
 silo_identity_provider_list              /v1/system/identity-providers
-silo_list                                /system/silos
-silo_list_v1                             /v1/system/silos
-silo_policy_update                       /system/silos/{silo_name}/policy
-silo_policy_update_v1                    /v1/system/silos/{silo}/policy
-silo_policy_view                         /system/silos/{silo_name}/policy
-silo_policy_view_v1                      /v1/system/silos/{silo}/policy
-silo_user_list_v1                        /v1/system/users
-silo_user_view_v1                        /v1/system/users/{user_id}
-silo_view                                /system/silos/{silo_name}
-silo_view_by_id                          /system/by-id/silos/{id}
-silo_view_v1                             /v1/system/silos/{silo}
-sled_list                                /system/hardware/sleds
-sled_list_v1                             /v1/system/hardware/sleds
-sled_physical_disk_list                  /system/hardware/sleds/{sled_id}/disks
-sled_physical_disk_list_v1               /v1/system/hardware/sleds/{sled_id}/disks
-sled_view                                /system/hardware/sleds/{sled_id}
-sled_view_v1                             /v1/system/hardware/sleds/{sled_id}
+silo_list                                /v1/system/silos
+silo_policy_update                       /v1/system/silos/{silo}/policy
+silo_policy_view                         /v1/system/silos/{silo}/policy
+silo_user_list                           /v1/system/users
+silo_user_view                           /v1/system/users/{user_id}
+silo_view                                /v1/system/silos/{silo}
+sled_list                                /v1/system/hardware/sleds
+sled_physical_disk_list                  /v1/system/hardware/sleds/{sled_id}/disks
+sled_view                                /v1/system/hardware/sleds/{sled_id}
 system_component_version_list            /v1/system/update/components
 system_image_create                      /system/images
 system_image_delete                      /system/images/{image_name}
