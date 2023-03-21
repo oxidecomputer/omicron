@@ -28,8 +28,8 @@ const PROJECT_NAME: &str = "myproj";
 const ORG_NAME_2: &str = "myorg2";
 const PROJECT_NAME_2: &str = "myproj2";
 
-fn get_images_url(org_name: &str, project_name: &str) -> String {
-    format!("/v1/images?organization={}&project={}", org_name, project_name)
+fn get_images_url(_org_name: &str, project_name: &str) -> String {
+    format!("/v1/images?project={}", project_name)
 }
 
 fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
@@ -321,8 +321,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
         size: ByteCount::from_gibibytes_u32(1),
     };
 
-    let disks_url =
-        format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME);
+    let disks_url = format!("/v1/disks?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &disks_url, &new_disk)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -376,8 +375,7 @@ async fn test_make_disk_from_image_too_small(
         size: ByteCount::from(4096 * 500),
     };
 
-    let disks_url =
-        format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME);
+    let disks_url = format!("/v1/disks?project={}", PROJECT_NAME);
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&new_disk))

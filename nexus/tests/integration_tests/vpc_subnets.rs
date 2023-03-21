@@ -41,14 +41,10 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let _ = create_project(&client, org_name, project_name).await;
     populate_ip_pool(client, "default", None).await;
 
-    let subnets_url = format!(
-        "/v1/vpc-subnets?organization={}&project={}&vpc=default",
-        org_name, project_name
-    );
-    let subnet_url = format!(
-        "/v1/vpc-subnets/default?organization={}&project={}&vpc=default",
-        org_name, project_name
-    );
+    let subnets_url =
+        format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
+    let subnet_url =
+        format!("/v1/vpc-subnets/default?project={}&vpc=default", project_name);
 
     // get subnets should return the default subnet
     let subnets =
@@ -57,9 +53,8 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
 
     // Create an instance in the default VPC and VPC Subnet. Verify that we
     // cannot delete the subnet until the instance is gone.
-    let instance_url = format!(
-        "/v1/instances/{instance_name}?organization={org_name}&project={project_name}"
-    );
+    let instance_url =
+        format!("/v1/instances/{instance_name}?project={project_name}");
     let instance =
         create_instance(client, &org_name, project_name, instance_name).await;
     instance_simulate(nexus, &instance.identity.id).await;
@@ -94,7 +89,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     NexusRequest::object_delete(
         &client,
         &format!(
-            "/v1/vpc-subnets/{}?organization={org_name}&project={project_name}&vpc=default",
+            "/v1/vpc-subnets/{}?project={project_name}&vpc=default",
             subnets[0].identity.name
         ),
     )
@@ -120,10 +115,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let vpc_name = "vpc1";
     let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
 
-    let subnets_url = format!(
-        "/v1/vpc-subnets?organization={}&project={}&vpc={}",
-        org_name, project_name, vpc_name
-    );
+    let subnets_url =
+        format!("/v1/vpc-subnets?project={}&vpc={}", project_name, vpc_name);
 
     // get subnets should return the default subnet
     let subnets =
@@ -134,8 +127,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::object_delete(
         &client,
         &format!(
-            "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
-            subnets[0].identity.name, org_name, project_name, vpc_name
+            "/v1/vpc-subnets/{}?project={}&vpc={}",
+            subnets[0].identity.name, project_name, vpc_name
         ),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -150,8 +143,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     let subnet_name = "subnet1";
     let subnet_url = format!(
-        "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
-        subnet_name, org_name, project_name, vpc_name
+        "/v1/vpc-subnets/{}?project={}&vpc={}",
+        subnet_name, project_name, vpc_name
     );
 
     // fetching a particular subnet should 404
@@ -282,8 +275,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     let subnet2_name = "subnet2";
     let subnet2_url = format!(
-        "/v1/vpc-subnets/{}?organization={}&project={}&vpc={}",
-        subnet2_name, org_name, project_name, vpc_name
+        "/v1/vpc-subnets/{}?project={}&vpc={}",
+        subnet2_name, project_name, vpc_name
     );
 
     // second subnet 404s before it's created
@@ -361,8 +354,8 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-subnet with name \"subnet1\"");
 
     let subnet_url = format!(
-        "/v1/vpc-subnets/new-name?organization={}&project={}&vpc={}",
-        org_name, project_name, vpc_name
+        "/v1/vpc-subnets/new-name?project={}&vpc={}",
+        project_name, vpc_name
     );
 
     // fetching by new name works
@@ -431,7 +424,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     let subnet_same_name: VpcSubnet = NexusRequest::objects_post(
         client,
-        format!("/v1/vpc-subnets?organization={org_name}&project={project_name}&vpc={vpc2_name}").as_str(),
+        &format!("/v1/vpc-subnets?project={project_name}&vpc={vpc2_name}"),
         &new_subnet,
     )
     .authn_as(AuthnMode::PrivilegedUser)

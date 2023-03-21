@@ -30,8 +30,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let project_name = "springfield-squidport";
     create_project(&client, &org_name, &project_name).await;
 
-    let project_selector =
-        format!("organization={}&project={}", org_name, project_name);
+    let project_selector = format!("project={}", project_name);
     // Each project has a default VPC. Make sure it has the default rules.
     let default_vpc_url = format!("/v1/vpcs/default?{}", project_selector);
     let default_vpc: Vpc = NexusRequest::object_get(client, &default_vpc_url)

@@ -96,18 +96,16 @@ lazy_static! {
     pub static ref DEMO_PROJECT_URL: String =
         format!("/v1/projects/{}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_SELECTOR: String =
-        format!("organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_POLICY_URL: String =
         format!("/v1/projects/{}/policy", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
-        format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/disks?project={}",  *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
-        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
-    pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
-    pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String =
-        format!("/v1/snapshots?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
-    pub static ref DEMO_PROJECT_URL_VPCS: String =
-        format!("/v1/vpcs?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/images?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_INSTANCES: String = format!("/v1/instances?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_SNAPSHOTS: String = format!("/v1/snapshots?project={}", *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_URL_VPCS: String = format!("/v1/vpcs?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_CREATE: params::ProjectCreate =
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
@@ -122,7 +120,7 @@ lazy_static! {
         format!("/v1/vpcs/{}?{}", *DEMO_VPC_NAME, *DEMO_PROJECT_SELECTOR);
 
     pub static ref DEMO_VPC_SELECTOR: String =
-        format!("organization={}&project={}&vpc={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("project={}&vpc={}", *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_URL_FIREWALL_RULES: String =
         format!("/v1/vpc-firewall-rules?{}", *DEMO_VPC_SELECTOR);
     pub static ref DEMO_VPC_URL_ROUTERS: String =
@@ -160,9 +158,9 @@ lazy_static! {
     pub static ref DEMO_VPC_ROUTER_NAME: Name =
         "demo-vpc-router".parse().unwrap();
     pub static ref DEMO_VPC_ROUTER_URL: String =
-        format!("/v1/vpc-routers/{}?organization={}&project={}&vpc={}", *DEMO_VPC_ROUTER_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
+        format!("/v1/vpc-routers/{}?project={}&vpc={}", *DEMO_VPC_ROUTER_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME);
     pub static ref DEMO_VPC_ROUTER_URL_ROUTES: String =
-        format!("/v1/vpc-router-routes?organization={}&project={}&vpc={}&router={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
+        format!("/v1/vpc-router-routes?project={}&vpc={}&router={}", *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
     pub static ref DEMO_VPC_ROUTER_CREATE: params::VpcRouterCreate =
         params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
@@ -175,7 +173,7 @@ lazy_static! {
     pub static ref DEMO_ROUTER_ROUTE_NAME: Name =
         "demo-router-route".parse().unwrap();
     pub static ref DEMO_ROUTER_ROUTE_URL: String =
-        format!("/v1/vpc-router-routes/{}?organization={}&project={}&vpc={}&router={}", *DEMO_ROUTER_ROUTE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
+        format!("/v1/vpc-router-routes/{}?project={}&vpc={}&router={}", *DEMO_ROUTER_ROUTE_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_VPC_ROUTER_NAME);
     pub static ref DEMO_ROUTER_ROUTE_CREATE: params::RouterRouteCreate =
         params::RouterRouteCreate {
             identity: IdentityMetadataCreateParams {
@@ -246,7 +244,7 @@ lazy_static! {
         format!("/v1/instances/{}/disks/detach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
 
     pub static ref DEMO_INSTANCE_NICS_URL: String =
-        format!("/v1/network-interfaces?organization={}&project={}&instance={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/network-interfaces?project={}&instance={}", *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
         format!("/v1/instances/{}/external-ips?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
@@ -272,7 +270,7 @@ lazy_static! {
     pub static ref DEMO_INSTANCE_NIC_NAME: Name =
         nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
-        format!("/v1/network-interfaces/{}?organization={}&project={}&instance={}", *DEMO_INSTANCE_NIC_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
+        format!("/v1/network-interfaces/{}?project={}&instance={}", *DEMO_INSTANCE_NIC_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
         params::NetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
@@ -318,9 +316,9 @@ lazy_static! {
     // Project Images
     pub static ref DEMO_IMAGE_NAME: Name = "demo-image".parse().unwrap();
     pub static ref DEMO_PROJECT_IMAGES_URL: String =
-        format!("/v1/images?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/images?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
-        format!("/v1/images/{}?organization={}&project={}", *DEMO_IMAGE_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/images/{}?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -368,7 +366,7 @@ lazy_static! {
     // Snapshots
     pub static ref DEMO_SNAPSHOT_NAME: Name = "demo-snapshot".parse().unwrap();
     pub static ref DEMO_SNAPSHOT_URL: String =
-        format!("/v1/snapshots/{}?organization={}&project={}", *DEMO_SNAPSHOT_NAME, *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
+        format!("/v1/snapshots/{}?project={}", *DEMO_SNAPSHOT_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_SNAPSHOT_CREATE: params::SnapshotCreate =
         params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {

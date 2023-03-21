@@ -85,7 +85,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: list instances in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances?organization=test-org&project=nonexistent",
+            uri: "/v1/instances?project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -93,7 +93,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances/my-instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my-instance?project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -101,7 +101,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance with an invalid name
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my_instance?project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: Some("".into()),
@@ -109,7 +109,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: delete an instance with an invalid name
         TestCase {
             method: Method::DELETE,
-            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my_instance?project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: Some("".into()),
@@ -224,20 +224,17 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // - The default VPC
     NexusRequest::object_delete(
         client,
-        "/v1/vpc-subnets/default?organization=test-org&project=simproject2&vpc=default",
+        "/v1/vpc-subnets/default?project=simproject2&vpc=default",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .unwrap();
-    NexusRequest::object_delete(
-        client,
-        "/v1/vpcs/default?organization=test-org&project=simproject2",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    NexusRequest::object_delete(client, "/v1/vpcs/default?project=simproject2")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
     NexusRequest::object_delete(client, "/v1/projects/simproject2")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

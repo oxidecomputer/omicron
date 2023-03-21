@@ -28,16 +28,13 @@ static PROJECT_NAME: &str = "springfield-squidport";
 static PROJECT_NAME_2: &str = "peeky-park";
 
 fn get_vpc_url(vpc_name: &str) -> String {
-    format!(
-        "/v1/vpcs/{vpc_name}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/vpcs/{vpc_name}?project={}", PROJECT_NAME)
 }
 
 fn get_subnet_url(vpc_name: &str, subnet_name: &str) -> String {
     format!(
-        "/v1/vpc-subnets/{subnet_name}?organization={}&project={}&vpc={}",
-        ORG_NAME, PROJECT_NAME, vpc_name
+        "/v1/vpc-subnets/{subnet_name}?project={}&vpc={}",
+        PROJECT_NAME, vpc_name
     )
 }
 
@@ -46,8 +43,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let vpcs_url =
-        format!("/v1/vpcs?organization={}&project={}", ORG_NAME, PROJECT_NAME);
+    let vpcs_url = format!("/v1/vpcs?project={}", PROJECT_NAME);
     let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME).await;
     let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME_2).await;
 

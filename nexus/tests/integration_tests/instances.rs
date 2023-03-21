@@ -61,7 +61,7 @@ static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
 fn get_project_selector() -> String {
-    format!("organization={}&project={}", ORGANIZATION_NAME, PROJECT_NAME)
+    format!("project={}", PROJECT_NAME)
 }
 
 fn get_instances_url() -> String {
@@ -174,7 +174,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project={}&organization=abc",
+            "/v1/instances/{}?project={}",
             instance.identity.name, project.identity.name
         )
         .as_str(),
@@ -186,7 +186,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project={}&organization=abc",
+            "/v1/instances/{}?project={}",
             instance.identity.name, project.identity.name
         )
         .as_str(),
@@ -269,8 +269,8 @@ async fn test_instances_create_reboot_halt(
 
     // Check that the instance got a network interface
     let nics_url = format!(
-        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
-        ORGANIZATION_NAME, PROJECT_NAME
+        "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
+        PROJECT_NAME
     );
     let network_interfaces =
         objects_list_page_authz::<NetworkInterface>(client, &nics_url)
@@ -465,8 +465,8 @@ async fn test_instances_create_reboot_halt(
     // Check that the network interfaces for that instance are gone, peeking
     // at the subnet-scoped URL so we don't 404 at the instance-scoped route.
     let url_interfaces = format!(
-        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
-        ORGANIZATION_NAME, PROJECT_NAME,
+        "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
+        PROJECT_NAME,
     );
     let interfaces =
         objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
@@ -1137,8 +1137,8 @@ async fn test_instance_with_new_custom_network_interfaces(
     // Check that both interfaces actually appear correct.
     let nics_url = |subnet_name: &Name| {
         format!(
-            "/v1/vpc-subnets/{}/network-interfaces?organization={}&project={}&vpc=default",
-            subnet_name, ORGANIZATION_NAME, PROJECT_NAME
+            "/v1/vpc-subnets/{}/network-interfaces?project={}&vpc=default",
+            subnet_name, PROJECT_NAME
         )
     };
 
@@ -1249,8 +1249,8 @@ async fn test_instance_create_delete_network_interface(
 
     // Verify there are no interfaces
     let url_interfaces = format!(
-        "/v1/network-interfaces?organization={}&project={}&instance={}",
-        ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
+        "/v1/network-interfaces?project={}&instance={}",
+        PROJECT_NAME, instance.identity.name,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client,
@@ -1488,8 +1488,8 @@ async fn test_instance_update_network_interfaces(
     .expect("Failed to create instance with two network interfaces");
     let instance = response.parsed_body::<Instance>().unwrap();
     let url_interfaces = format!(
-        "/v1/network-interfaces?organization={}&project={}&instance={}",
-        ORGANIZATION_NAME, PROJECT_NAME, instance.identity.name,
+        "/v1/network-interfaces?project={}&instance={}",
+        PROJECT_NAME, instance.identity.name,
     );
 
     // Parameters for each interface to try to modify.
@@ -1879,8 +1879,8 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
 
     // Verify that there are no NICs at all in the subnet.
     let url_nics = format!(
-        "/v1/vpc-subnets/default/network-interfaces?organization={}&project={}&vpc=default",
-        ORGANIZATION_NAME, PROJECT_NAME,
+        "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
+        PROJECT_NAME,
     );
     let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
         client, &url_nics, "", None,
@@ -2316,10 +2316,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
         .await;
     }
 
-    let disks_url = format!(
-        "/v1/disks?organization={}&project={}",
-        org_name, project_name,
-    );
+    let disks_url = format!("/v1/disks?project={}", project_name,);
 
     // Assert we created 9 disks
     let disks: Vec<Disk> =
@@ -2354,10 +2351,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
         start: true,
     };
 
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        org_name, project_name
-    );
+    let url_instances = format!("/v1/instances?project={}", project_name);
 
     let builder =
         RequestBuilder::new(client, http::Method::POST, &url_instances)
@@ -2568,10 +2562,7 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 
     // Stop and delete instance
-    let instance_url = format!(
-        "/v1/instances/nfs?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
 
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -2850,8 +2841,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     // Fetch the external IPs for the instance.
     let ips_url = format!(
-        "/v1/instances/{}/external-ips?organization={}&project={}",
-        instance_params.identity.name, ORGANIZATION_NAME, PROJECT_NAME
+        "/v1/instances/{}/external-ips?project={}",
+        instance_params.identity.name, PROJECT_NAME
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -2934,10 +2925,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         disks: vec![],
         start: true,
     };
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        ORGANIZATION_NAME, PROJECT_NAME
-    );
+    let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
         .authn_as(AuthnMode::SiloUser(user_id))
         .execute()

@@ -156,7 +156,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     NexusRequest::object_delete(
         client,
         &format!(
-            "/v1/vpc-subnets/default?organization=abc&project={}&vpc=default",
+            "/v1/vpc-subnets/default?project={}&vpc=default",
             project_name
         ),
     )
@@ -167,7 +167,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // delete VPC from project so we can delete the project later
     NexusRequest::object_delete(
         client,
-        &format!("/v1/vpcs/default?organization=abc&project={}", project_name),
+        &format!("/v1/vpcs/default?project={}", project_name),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()

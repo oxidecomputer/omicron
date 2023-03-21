@@ -38,25 +38,19 @@ const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
 fn get_disks_url() -> String {
-    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
 fn get_disk_url(disk: &str) -> String {
-    format!(
-        "/v1/disks/{}?organization={}&project={}",
-        disk, ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/disks/{}?project={}", disk, PROJECT_NAME)
 }
 
 fn get_snapshots_url() -> String {
-    format!("/v1/snapshots?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/snapshots?project={}", PROJECT_NAME)
 }
 
 fn get_snapshot_url(snapshot: &str) -> String {
-    format!(
-        "/v1/snapshots/{}?organization={}&project={}",
-        snapshot, ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/snapshots/{}?project={}", snapshot, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -96,10 +90,7 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let images_url = format!(
-        "/v1/images?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

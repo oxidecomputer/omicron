@@ -65,14 +65,12 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
 }
 
 async fn delete_project_default_subnet(
-    org: &str,
+    _org: &str,
     project: &str,
     client: &ClientTestContext,
 ) {
-    let subnet_url = format!(
-        "/v1/vpc-subnets/default?organization={}&project={}&vpc=default",
-        org, project
-    );
+    let subnet_url =
+        format!("/v1/vpc-subnets/default?project={}&vpc=default", project);
     NexusRequest::object_delete(&client, &subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -81,12 +79,11 @@ async fn delete_project_default_subnet(
 }
 
 async fn delete_project_default_vpc(
-    org: &str,
+    _org: &str,
     project: &str,
     client: &ClientTestContext,
 ) {
-    let vpc_url =
-        format!("/v1/vpcs/default?organization={}&project={}", org, project);
+    let vpc_url = format!("/v1/vpcs/default?project={}", project);
     NexusRequest::object_delete(&client, &vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -165,7 +162,7 @@ async fn test_project_deletion_with_instance(
 
     let _: Instance = object_create(
         client,
-        &format!("/v1/instances?organization={}&project={}", org_name, name),
+        &format!("/v1/instances?project={}", name),
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-instance".parse().unwrap(),
@@ -191,10 +188,7 @@ async fn test_project_deletion_with_instance(
 
     NexusRequest::object_delete(
         client,
-        &format!(
-            "/v1/instances/my-instance?organization={}&project={}",
-            org_name, name
-        ),
+        &format!("/v1/instances/my-instance?project={}", name),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -223,8 +217,7 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
         "project to be deleted contains a disk: my-disk",
         delete_project_expect_fail(&url, &client).await,
     );
-    let disk_url =
-        format!("/v1/disks/my-disk?organization={}&project={}", org_name, name);
+    let disk_url = format!("/v1/disks/my-disk?project={}", name);
     NexusRequest::object_delete(&client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -261,8 +254,7 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
 
-    let images_url =
-        format!("/v1/images?organization={}&project={}", org_name, name);
+    let images_url = format!("/v1/images?project={}", name);
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -323,7 +315,7 @@ async fn test_project_deletion_with_snapshot(
 
     let _: views::Snapshot = object_create(
         client,
-        &format!("/v1/snapshots?organization={}&project={}", org_name, name),
+        &format!("/v1/snapshots?project={}", name),
         &params::SnapshotCreate {
             identity: IdentityMetadataCreateParams {
                 name: "my-snapshot".parse().unwrap(),
@@ -334,8 +326,7 @@ async fn test_project_deletion_with_snapshot(
     )
     .await;
 
-    let disk_url =
-        format!("/v1/disks/my-disk?organization={}&project={}", org_name, name);
+    let disk_url = format!("/v1/disks/my-disk?project={}", name);
     NexusRequest::object_delete(&client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -347,10 +338,7 @@ async fn test_project_deletion_with_snapshot(
         delete_project_expect_fail(&project_url, &client).await,
     );
 
-    let snapshot_url = format!(
-        "/v1/snapshots/my-snapshot?organization={}&project={}",
-        org_name, name
-    );
+    let snapshot_url = format!("/v1/snapshots/my-snapshot?project={}", name);
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &snapshot_url)
             .expect_status(Some(StatusCode::NO_CONTENT)),
@@ -385,14 +373,9 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
         delete_project_expect_fail(&project_url, &client).await,
     );
 
-    let vpc_url = format!(
-        "/v1/vpcs/{vpc_name}?organization={}&project={}",
-        org_name, name
-    );
-    let default_subnet_url = format!(
-        "/v1/vpc-subnets/default?organization={}&project={}&vpc={}",
-        org_name, name, vpc_name
-    );
+    let vpc_url = format!("/v1/vpcs/{vpc_name}?project={}", name);
+    let default_subnet_url =
+        format!("/v1/vpc-subnets/default?project={}&vpc={}", name, vpc_name);
     NexusRequest::object_delete(client, &default_subnet_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

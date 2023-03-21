@@ -53,34 +53,28 @@ const DISK_NAME: &str = "just-rainsticks";
 const INSTANCE_NAME: &str = "just-rainsticks";
 
 fn get_disks_url() -> String {
-    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
 fn get_disk_url(disk_name: &str) -> String {
-    format!(
-        "/v1/disks/{disk_name}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/disks/{disk_name}?project={}", PROJECT_NAME)
 }
 
 fn get_instance_disks_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{instance_name}/disks?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/instances/{instance_name}/disks?project={}", PROJECT_NAME)
 }
 
 fn get_disk_attach_url(instance_name: &str) -> String {
     format!(
-        "/v1/instances/{instance_name}/disks/attach?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
+        "/v1/instances/{instance_name}/disks/attach?project={}",
+        PROJECT_NAME
     )
 }
 
 fn get_disk_detach_url(instance_name: &str) -> String {
     format!(
-        "/v1/instances/{instance_name}/disks/detach?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
+        "/v1/instances/{instance_name}/disks/detach?project={}",
+        PROJECT_NAME
     )
 }
 
@@ -143,8 +137,8 @@ async fn set_instance_state(
     state: &str,
 ) -> Instance {
     let url = format!(
-        "/v1/instances/{instance_name}/{state}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
+        "/v1/instances/{instance_name}/{state}?project={}",
+        PROJECT_NAME
     );
 
     NexusRequest::new(
@@ -1026,10 +1020,7 @@ async fn test_disk_virtual_provisioning_collection(
     //
     // Each project should be using "one disk" of real storage, but the org
     // should be using both.
-    let disks_url = format!(
-        "/v1/disks?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME_2
-    );
+    let disks_url = format!("/v1/disks?project={}", PROJECT_NAME_2);
     let disk_one = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
@@ -1078,10 +1069,8 @@ async fn test_disk_virtual_provisioning_collection(
 
     // Delete the disk we just created, observe the utilization drop
     // accordingly.
-    let disk_url = format!(
-        "/v1/disks/{}?organization={}&project={}",
-        "disk-two", ORG_NAME, PROJECT_NAME_2
-    );
+    let disk_url =
+        format!("/v1/disks/{}?project={}", "disk-two", PROJECT_NAME_2);
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1381,12 +1370,11 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
     let metric_url = |metric: &str| {
         format!(
-            "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&organization={}&project={}",
+            "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&project={}",
             DISK_NAME,
             metric,
             Utc::now() - chrono::Duration::seconds(10),
             Utc::now() + chrono::Duration::seconds(10),
-            ORG_NAME,
             PROJECT_NAME,
         )
     };
@@ -1456,8 +1444,8 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
     for metric in &ALL_METRICS {
         let collection_url = format!(
-            "/v1/disks/{}/metrics/{}?organization={}&project={}",
-            DISK_NAME, metric, ORG_NAME, PROJECT_NAME
+            "/v1/disks/{}/metrics/{}?project={}",
+            DISK_NAME, metric, PROJECT_NAME
         );
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",

@@ -87,19 +87,13 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // Create a project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
     create_project(&client, organization_name, project_name).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        organization_name, project_name
-    );
+    let url_instances = format!("/v1/instances?project={}", project_name);
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
     let subnet_size =
         cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
-    let vpc_selector = format!(
-        "organization={}&project={}&vpc=default",
-        organization_name, project_name
-    );
+    let vpc_selector = format!("project={}&vpc=default", project_name);
     let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);

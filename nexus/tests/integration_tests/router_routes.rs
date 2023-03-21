@@ -35,15 +35,15 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
 
     let get_routes_url = |router_name: &str| -> String {
         format!(
-            "/v1/vpc-router-routes?organization={}&project={}&vpc={}&router={}",
-            organization_name, project_name, vpc_name, router_name
+            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+            project_name, vpc_name, router_name
         )
     };
 
     let get_route_url = |router_name: &str, route_name: &str| -> String {
         format!(
-            "/v1/vpc-router-routes/{}?organization={}&project={}&vpc={}&router={}",
-            route_name, organization_name, project_name, vpc_name, router_name
+            "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
+            route_name, project_name, vpc_name, router_name
         )
     };
 

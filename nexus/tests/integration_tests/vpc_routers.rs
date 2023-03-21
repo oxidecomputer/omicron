@@ -35,10 +35,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let vpc =
         create_vpc(&client, organization_name, project_name, vpc_name).await;
 
-    let routers_url = format!(
-        "/v1/vpc-routers?organization={}&project={}&vpc={}",
-        organization_name, project_name, vpc_name
-    );
+    let routers_url =
+        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
     let routers =
@@ -48,8 +46,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     let router_name = "router1";
     let router_url = format!(
-        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
-        router_name, organization_name, project_name, vpc_name
+        "/v1/vpc-routers/{}?project={}&vpc={}",
+        router_name, project_name, vpc_name
     );
 
     // fetching a particular router should 404
@@ -117,8 +115,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     let router2_name = "router2";
     let router2_url = format!(
-        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
-        router2_name, organization_name, project_name, vpc_name
+        "/v1/vpc-routers/{}?project={}&vpc={}",
+        router2_name, project_name, vpc_name
     );
 
     // second router 404s before it's created
@@ -194,8 +192,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
 
     let router_url = format!(
-        "/v1/vpc-routers/new-name?organization={}&project={}&vpc={}",
-        organization_name, project_name, vpc_name
+        "/v1/vpc-routers/new-name?project={}&vpc={}",
+        project_name, vpc_name
     );
 
     // fetching by new name works
