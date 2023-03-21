@@ -814,7 +814,6 @@ async fn test_instances_invalid_creation_returns_bad_request(
     // passed through properly.
 
     let client = &cptestctx.external_client;
-
     let error = client
         .make_request_with_body(
             Method::POST,
@@ -1058,7 +1057,6 @@ async fn test_instance_with_new_custom_network_interfaces(
     let client = &cptestctx.external_client;
 
     create_org_and_project(&client).await;
-
     // Create a VPC Subnet other than the default.
     //
     // We'll create one interface in the default VPC Subnet and one in this new
@@ -2364,13 +2362,13 @@ async fn test_cannot_attach_nine_disks_to_instance(
         start: true,
     };
 
-    let instances_url = format!(
+    let url_instances = format!(
         "/v1/instances?organization={}&project={}",
-        org_name, project_name,
+        org_name, project_name
     );
 
     let builder =
-        RequestBuilder::new(client, http::Method::POST, &instances_url)
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
             .body(Some(&instance_params))
             .expect_status(Some(http::StatusCode::BAD_REQUEST));
 
@@ -2578,7 +2576,10 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 
     // Stop and delete instance
-    let instance_url = format!("/v1/instances/nfs?{}", get_project_selector());
+    let instance_url = format!(
+        "/v1/instances/nfs?organization={}&project={}",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
 
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -2958,7 +2959,11 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         disks: vec![],
         start: true,
     };
-    NexusRequest::objects_post(client, &get_instances_url(), &instance_params)
+    let url_instances = format!(
+        "/v1/instances?organization={}&project={}",
+        ORGANIZATION_NAME, PROJECT_NAME
+    );
+    NexusRequest::objects_post(client, &url_instances, &instance_params)
         .authn_as(AuthnMode::SiloUser(user_id))
         .execute()
         .await

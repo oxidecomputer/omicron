@@ -390,6 +390,7 @@ impl JsonSchema for NameOrId {
     FromStr,
 )]
 #[display("{0}")]
+#[serde(transparent)]
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {
@@ -2098,6 +2099,9 @@ impl std::fmt::Display for Digest {
 
 #[cfg(test)]
 mod test {
+    use serde::Deserialize;
+    use serde::Serialize;
+
     use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
@@ -2158,6 +2162,19 @@ mod test {
                 "invalid input {input} should not match validation regex"
             );
         }
+    }
+
+    #[test]
+    fn test_semver_serialize() {
+        #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+        struct MyStruct {
+            version: SemverVersion,
+        }
+
+        let v = MyStruct { version: SemverVersion::new(1, 2, 3) };
+        let expected = "{\"version\":\"1.2.3\"}";
+        assert_eq!(serde_json::to_string(&v).unwrap(), expected);
+        assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
     }
 
     #[test]
