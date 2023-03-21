@@ -298,24 +298,24 @@ pub fn external_api() -> NexusApiDescription {
 
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
-// Generally, HTTP resources are grouped within some collection.  For a
+// Generally, HTTP resources are grouped within some collection. For a
 // relatively simple example:
 //
-//   GET    v1/organizations                (list the organizations in the collection)
-//   POST   v1/organizations                (create a organization in the collection)
-//   GET    v1/organizations/{organization} (look up a organization in the collection)
-//   DELETE v1/organizations/{organization} (delete a organization in the collection)
-//   PUT    v1/organizations/{organization} (update a organization in the collection)
+//   GET    v1/projects                (list the projects in the collection)
+//   POST   v1/projects                (create a project in the collection)
+//   GET    v1/projects/{project}      (look up a project in the collection)
+//   DELETE v1/projects/{project}      (delete a project in the collection)
+//   PUT    v1/projects/{project}      (update a project in the collection)
 //
 // We pick a name for the function that implements a given API entrypoint
 // based on how we expect it to appear in the CLI subcommand hierarchy. For
 // example:
 //
-//   GET    v1/organizations                    -> organization_list()
-//   POST   v1/organizations                    -> organization_create()
-//   GET    v1/organizations/{organization}     -> organization_view()
-//   DELETE v1/organizations/{organization}     -> organization_delete()
-//   PUT    v1/organizations/{organization}     -> organization_update()
+//   GET    v1/projects                 -> project_list()
+//   POST   v1/projects                 -> project_create()
+//   GET    v1/projects/{project}       -> project_view()
+//   DELETE v1/projects/{project}       -> project_delete()
+//   PUT    v1/projects/{project}       -> project_update()
 //
 // Note that the path typically uses the entity's plural form while the
 // function name uses its singular.
@@ -951,10 +951,10 @@ async fn saml_identity_provider_view(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let saml_identity_provider_selector =
-            params::SamlIdentityProviderSelector::new(
-                Some(query.silo),
-                path.provider,
-            );
+            params::SamlIdentityProviderSelector {
+                silo_selector: Some(query),
+                saml_identity_provider: path.provider,
+            };
         let (.., provider) = nexus
             .saml_identity_provider_lookup(
                 &opctx,
@@ -2635,14 +2635,6 @@ async fn instance_network_interface_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfacePathParam {
-    pub organization_name: Name,
-    pub project_name: Name,
-    pub instance_name: Name,
-    pub interface_name: Name,
-}
-
 /// Delete a network interface
 ///
 /// Note that the primary interface for an instance cannot be deleted if there
@@ -3353,7 +3345,7 @@ async fn vpc_router_list(
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::RouterPath>,
-    query_params: Query<params::VpcSelector>,
+    query_params: Query<params::OptionalVpcSelector>,
 ) -> Result<HttpResponseOk<VpcRouter>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -3362,7 +3354,7 @@ async fn vpc_router_view(
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let router_selector = params::RouterSelector {
-            vpc_selector: Some(query),
+            vpc_selector: query.vpc_selector,
             router: path.router,
         };
         let (.., vpc_router) =

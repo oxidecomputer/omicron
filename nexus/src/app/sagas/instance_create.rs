@@ -1416,11 +1416,13 @@ pub mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let instance_selector = params::InstanceSelector::new(
-            Some(ORG_NAME.to_string().try_into().unwrap()),
-            Some(PROJECT_NAME.to_string().try_into().unwrap()),
-            INSTANCE_NAME.to_string().try_into().unwrap(),
-        );
+        let project_selector = params::ProjectSelector {
+            project: PROJECT_NAME.to_string().try_into().unwrap(),
+        };
+        let instance_selector = params::InstanceSelector {
+            project_selector: Some(project_selector),
+            instance: INSTANCE_NAME.to_string().try_into().unwrap(),
+        };
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();

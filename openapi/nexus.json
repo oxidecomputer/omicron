@@ -6619,7 +6619,6 @@
           {
             "in": "query",
             "name": "vpc",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -12937,13 +12936,6 @@
     {
       "name": "metrics",
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
-      "name": "organizations",
-      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

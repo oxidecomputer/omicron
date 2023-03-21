@@ -20,12 +20,6 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
-// TODO-v1: Post migration rename `*Path` to `*Identifier`
-#[derive(Deserialize, JsonSchema)]
-pub struct OrganizationPath {
-    pub organization: NameOrId,
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct ProjectPath {
     pub project: NameOrId,
@@ -114,19 +108,6 @@ pub struct SamlIdentityProviderSelector {
     pub saml_identity_provider: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl SamlIdentityProviderSelector {
-    pub fn new(
-        silo: Option<NameOrId>,
-        saml_identity_provider: NameOrId,
-    ) -> Self {
-        SamlIdentityProviderSelector {
-            silo_selector: silo.map(|s| SiloSelector { silo: s }),
-            saml_identity_provider,
-        }
-    }
-}
-
 // Only by ID because groups have an `external_id` instead of a name and
 // therefore don't implement `ObjectIdentity`, which makes lookup by name
 // inconvenient. We should figure this out more generally, as there are several
@@ -145,27 +126,9 @@ pub struct SshKeySelector {
     pub ssh_key: NameOrId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct OrganizationSelector {
-    pub organization: NameOrId,
-}
-
-impl From<Name> for OrganizationSelector {
-    fn from(name: Name) -> Self {
-        OrganizationSelector { organization: name.into() }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     pub project: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl ProjectSelector {
-    pub fn new(_organization: Option<NameOrId>, project: NameOrId) -> Self {
-        ProjectSelector { project }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -181,39 +144,11 @@ pub struct DiskSelector {
     pub disk: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl DiskSelector {
-    pub fn new(
-        _organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        disk: NameOrId,
-    ) -> Self {
-        DiskSelector {
-            project_selector: project.map(|p| ProjectSelector { project: p }),
-            disk,
-        }
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
     pub snapshot: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl SnapshotSelector {
-    pub fn new(
-        _organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        snapshot: NameOrId,
-    ) -> Self {
-        SnapshotSelector {
-            project_selector: project.map(|p| ProjectSelector { project: p }),
-            snapshot,
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -223,39 +158,11 @@ pub struct ImageSelector {
     pub image: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl ImageSelector {
-    pub fn new(
-        _organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        image: NameOrId,
-    ) -> Self {
-        ImageSelector {
-            project_selector: project.map(|p| ProjectSelector { project: p }),
-            image,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
     pub instance: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl InstanceSelector {
-    pub fn new(
-        _organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        instance: NameOrId,
-    ) -> Self {
-        InstanceSelector {
-            project_selector: project.map(|p| ProjectSelector { project: p }),
-            instance,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -271,23 +178,6 @@ pub struct NetworkInterfaceSelector {
     pub network_interface: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl NetworkInterfaceSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        instance: Option<NameOrId>,
-        network_interface: NameOrId,
-    ) -> Self {
-        NetworkInterfaceSelector {
-            instance_selector: instance.map(|instance| {
-                InstanceSelector::new(organization, project, instance)
-            }),
-            network_interface,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
     #[serde(flatten)]
@@ -301,20 +191,6 @@ pub struct OptionalVpcSelector {
     pub vpc_selector: Option<VpcSelector>,
 }
 
-// TODO-v1: delete this post migration
-impl VpcSelector {
-    pub fn new(
-        _organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: NameOrId,
-    ) -> Self {
-        VpcSelector {
-            project_selector: project.map(|p| ProjectSelector { project: p }),
-            vpc,
-        }
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     #[serde(flatten)]
@@ -322,43 +198,11 @@ pub struct SubnetSelector {
     pub subnet: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl SubnetSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        subnet: NameOrId,
-    ) -> Self {
-        SubnetSelector {
-            vpc_selector: vpc
-                .map(|vpc| VpcSelector::new(organization, project, vpc)),
-            subnet,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RouterSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
     pub router: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl RouterSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        router: NameOrId,
-    ) -> Self {
-        RouterSelector {
-            vpc_selector: vpc
-                .map(|vpc| VpcSelector::new(organization, project, vpc)),
-            router,
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -372,24 +216,6 @@ pub struct RouteSelector {
     #[serde(flatten)]
     pub router_selector: Option<RouterSelector>,
     pub route: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl RouteSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        router: Option<NameOrId>,
-        route: NameOrId,
-    ) -> Self {
-        RouteSelector {
-            router_selector: router.map(|router| {
-                RouterSelector::new(organization, project, vpc, router)
-            }),
-            route,
-        }
-    }
 }
 
 // Silos

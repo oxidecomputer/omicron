@@ -23,7 +23,6 @@ impl Context {
     pub async fn from_client(client: Client) -> Result<Context> {
         let project_name = client
             .project_create()
-            .organization("org")
             .body(ProjectCreate {
                 name: generate_name("proj")?,
                 description: String::new(),

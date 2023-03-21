@@ -1025,11 +1025,14 @@ pub(crate) mod test {
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
-        let disk_selector = params::DiskSelector::new(
-            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
-            Some(Name::try_from(PROJECT_NAME.to_string()).unwrap().into()),
-            Name::try_from(DISK_NAME.to_string()).unwrap().into(),
-        );
+        let disk_selector = params::DiskSelector {
+            project_selector: Some(params::ProjectSelector {
+                project: Name::try_from(PROJECT_NAME.to_string())
+                    .unwrap()
+                    .into(),
+            }),
+            disk: Name::try_from(DISK_NAME.to_string()).unwrap().into(),
+        };
         let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector).unwrap();
 
         nexus

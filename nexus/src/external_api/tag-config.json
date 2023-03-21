@@ -62,12 +62,6 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "organizations": {
-      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "policy": {
       "description": "System-wide IAM policy",
       "external_docs": {
