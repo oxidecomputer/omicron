@@ -57,7 +57,6 @@ use nexus_test_utils_macros::nexus_test;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-static ORGANIZATION_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 
 fn get_project_selector() -> String {
@@ -82,7 +81,7 @@ fn default_vpc_subnets_url() -> String {
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     populate_ip_pool(&client, "default", None).await;
-    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
@@ -93,7 +92,7 @@ async fn test_instances_access_before_create_returns_not_found(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let _ = create_project(&client, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
     let instances = instances_list(&client, &get_instances_url()).await;
@@ -142,13 +141,11 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     populate_ip_pool(&client, "default", None).await;
-    let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
 
     // Create an instance.
     let instance_name = "test-instance";
-    let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
-            .await;
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
 
     // Fetch instance by id
     let fetched_instance = instance_get(
@@ -182,7 +179,7 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // Fetch instance by name, project_name, and organization_name
+    // Fetch instance by name and project_name
     let fetched_instance = instance_get(
         &client,
         format!(
@@ -208,9 +205,7 @@ async fn test_instances_create_reboot_halt(
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
-    let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
-            .await;
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     assert_eq!(instance.identity.name, instance_name);
     assert_eq!(
         instance.identity.description,
@@ -531,10 +526,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an IP pool and project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
-        .await
-        .identity
-        .id;
+    let project_id = create_project(&client, PROJECT_NAME).await.identity.id;
 
     // Query the view of these metrics stored within CRDB
     let opctx =
@@ -584,8 +576,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance.
     let instance_name = "just-rainsticks";
-    create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
-        .await;
+    create_instance(client, PROJECT_NAME, instance_name).await;
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
         .await
@@ -755,9 +746,7 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
-    let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
-            .await;
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
 
     // Simulate the instance booting.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -1821,7 +1810,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let _ = create_project(&client, PROJECT_NAME).await;
 
     // Create two interfaces, in the same VPC Subnet. This will trigger an
     // error on creation of the second NIC, and we'll make sure that both are
@@ -1905,7 +1894,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -1977,7 +1966,7 @@ async fn test_instance_fails_to_boot_with_disk(
     create_org_and_project(&client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -2044,13 +2033,8 @@ async fn test_instance_create_attach_disks(
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
     create_org_and_project(&client).await;
-    let attachable_disk = create_disk(
-        &client,
-        ORGANIZATION_NAME,
-        PROJECT_NAME,
-        "attachable-disk",
-    )
-    .await;
+    let attachable_disk =
+        create_disk(&client, PROJECT_NAME, "attachable-disk").await;
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -2123,12 +2107,8 @@ async fn test_instance_create_attach_disks_undo(
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
     create_org_and_project(&client).await;
-    let regular_disk =
-        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "a-reg-disk")
-            .await;
-    let faulted_disk =
-        create_disk(&client, ORGANIZATION_NAME, PROJECT_NAME, "faulted-disk")
-            .await;
+    let regular_disk = create_disk(&client, PROJECT_NAME, "a-reg-disk").await;
+    let faulted_disk = create_disk(&client, PROJECT_NAME, "faulted-disk").await;
 
     // set `faulted_disk` to the faulted state
     let apictx = &cptestctx.server.apictx();
@@ -2223,13 +2203,8 @@ async fn test_attach_eight_disks_to_instance(
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(
-            &client,
-            ORGANIZATION_NAME,
-            PROJECT_NAME,
-            &format!("probablydata{}", i,),
-        )
-        .await;
+        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
+            .await;
     }
 
     // Assert we created 8 disks
@@ -2298,22 +2273,16 @@ async fn test_cannot_attach_nine_disks_to_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    let org_name = "bobs-barrel-of-bytes";
     let project_name = "bit-barrel";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_project(client, org_name, project_name).await;
+    create_project(client, project_name).await;
 
     // Make 9 disks
     for i in 0..9 {
-        create_disk(
-            &client,
-            org_name,
-            project_name,
-            &format!("probablydata{}", i,),
-        )
-        .await;
+        create_disk(&client, project_name, &format!("probablydata{}", i,))
+            .await;
     }
 
     let disks_url = format!("/v1/disks?project={}", project_name,);
@@ -2387,13 +2356,8 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(
-            &client,
-            ORGANIZATION_NAME,
-            PROJECT_NAME,
-            &format!("probablydata{}", i,),
-        )
-        .await;
+        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
+            .await;
     }
 
     // Assert we created 8 disks
@@ -2492,13 +2456,8 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Make 8 disks
     for i in 0..8 {
-        create_disk(
-            &client,
-            ORGANIZATION_NAME,
-            PROJECT_NAME,
-            &format!("probablydata{}", i,),
-        )
-        .await;
+        create_disk(&client, PROJECT_NAME, &format!("probablydata{}", i,))
+            .await;
     }
 
     // Assert we created 8 disks
@@ -2723,9 +2682,7 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Create an instance.
-    let instance =
-        create_instance(client, ORGANIZATION_NAME, PROJECT_NAME, instance_name)
-            .await;
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
 
     // Now, simulate completion of instance boot and check the state reported.
     instance_simulate(nexus, &instance.identity.id).await;
@@ -2786,7 +2743,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     let client = &cptestctx.external_client;
 
     // Create test organization and projects.
-    let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
+    let _ = create_project(&client, PROJECT_NAME).await;
 
     // Create two IP pools.
     //

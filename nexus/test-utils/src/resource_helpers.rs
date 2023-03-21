@@ -263,7 +263,6 @@ pub async fn create_local_user(
 
 pub async fn create_project(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
 ) -> Project {
     object_create(
@@ -281,7 +280,6 @@ pub async fn create_project(
 
 pub async fn create_disk(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     disk_name: &str,
 ) -> Disk {
@@ -305,7 +303,6 @@ pub async fn create_disk(
 
 pub async fn delete_disk(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     disk_name: &str,
 ) {
@@ -318,13 +315,11 @@ pub async fn delete_disk(
 /// Wrapper around [`create_instance_with`].
 pub async fn create_instance(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
     create_instance_with(
         client,
-        organization_name,
         project_name,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
@@ -337,7 +332,6 @@ pub async fn create_instance(
 /// Creates an instance with attached resources.
 pub async fn create_instance_with(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     instance_name: &str,
     nics: &params::InstanceNetworkInterfaceAttachment,
@@ -369,7 +363,6 @@ pub async fn create_instance_with(
 
 pub async fn create_vpc(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     vpc_name: &str,
 ) -> Vpc {
@@ -392,7 +385,6 @@ pub async fn create_vpc(
 // just generates the create params since that's the noisiest part
 pub async fn create_vpc_with_error(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     vpc_name: &str,
     status: StatusCode,
@@ -423,7 +415,6 @@ pub async fn create_vpc_with_error(
 
 pub async fn create_router(
     client: &ClientTestContext,
-    _organization_name: &str,
     project_name: &str,
     vpc_name: &str,
     router_name: &str,

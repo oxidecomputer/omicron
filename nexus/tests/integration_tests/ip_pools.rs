@@ -589,12 +589,10 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     // an IP address from this range (since it's the only one that exists),
     // though we currently have no way to verify this as source NAT external IPs
     // are not part of the public API.
-    const ORG_NAME: &str = "myorg";
     const PROJECT_NAME: &str = "myproj";
     const INSTANCE_NAME: &str = "myinst";
-    create_project(client, ORG_NAME, PROJECT_NAME).await;
-    let instance =
-        create_instance(client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    create_project(client, PROJECT_NAME).await;
+    let instance = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // We should not be able to delete the range, since there's an external IP
     // address in use out of it.

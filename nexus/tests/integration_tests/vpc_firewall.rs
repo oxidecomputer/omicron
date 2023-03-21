@@ -26,9 +26,8 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let org_name = "test-org";
     let project_name = "springfield-squidport";
-    create_project(&client, &org_name, &project_name).await;
+    create_project(&client, &project_name).await;
 
     let project_selector = format!("project={}", project_name);
     // Each project has a default VPC. Make sure it has the default rules.
@@ -52,7 +51,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let other_vpc_selector = format!("{}&vpc={}", project_selector, other_vpc);
     let other_vpc_firewall =
         format!("/v1/vpc-firewall-rules?{}", other_vpc_selector);
-    let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
+    let vpc2 = create_vpc(&client, &project_name, &other_vpc).await;
     let rules = get_rules(client, &other_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(other_vpc, &rules));

@@ -46,7 +46,6 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 const PROJECT_NAME_2: &str = "bouncymeadow-octopusharbor-disks";
 const DISK_NAME: &str = "just-rainsticks";
@@ -80,7 +79,7 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     populate_ip_pool(&client, "default", None).await;
-    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
@@ -171,7 +170,7 @@ async fn test_disk_create_attach_detach_delete(
 
     // Create a disk.
     let disk_url = get_disk_url(DISK_NAME);
-    let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     assert_eq!(disk.identity.name, DISK_NAME);
     assert_eq!(disk.identity.description, "sells rainsticks");
     assert_eq!(disk.project_id, project_id);
@@ -200,8 +199,7 @@ async fn test_disk_create_attach_detach_delete(
     disks_eq(&disks[0], &disk);
 
     // Create an instance to attach the disk.
-    let instance =
-        create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
@@ -309,7 +307,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
-    let _ = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let _ = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     let disk_url = get_disk_url(DISK_NAME);
     let disk = disk_get(&client, &disk_url).await;
 
@@ -346,11 +344,10 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Create a disk.
     let disk_url = get_disk_url(DISK_NAME);
-    let disk = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let disk = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 
     // Create an instance to attach the disk.
-    let instance =
-        create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
     // Instances must be stopped before disks can be attached - this
@@ -391,8 +388,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
 
     // Create a second instance and try to attach the disk to that.  This should
     // fail and the disk should remain attached to the first instance.
-    let instance2 =
-        create_instance(&client, ORG_NAME, PROJECT_NAME, "instance2").await;
+    let instance2 = create_instance(&client, PROJECT_NAME, "instance2").await;
     let instance_next = set_instance_state(&client, "instance2", "stop").await;
     instance_simulate(nexus, &instance_next.identity.id).await;
 
@@ -555,7 +551,7 @@ async fn test_disk_creation_region_requested_then_started(
 
     // The disk is created successfully, even when this "requested" -> "started"
     // transition occurs.
-    create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    create_disk(client, PROJECT_NAME, DISK_NAME).await;
 }
 
 // Tests that region allocation failure causes disk allocation to fail.
@@ -639,7 +635,7 @@ async fn test_disk_region_creation_failure(
                 .await;
         }
     }
-    let _ = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let _ = create_disk(client, PROJECT_NAME, DISK_NAME).await;
 }
 
 // Tests that invalid block sizes are rejected
@@ -906,10 +902,8 @@ async fn test_disk_virtual_provisioning_collection(
     let _test = DiskTest::new(&cptestctx).await;
 
     populate_ip_pool(&client, "default", None).await;
-    let project_id1 =
-        create_project(client, ORG_NAME, PROJECT_NAME).await.identity.id;
-    let project_id2 =
-        create_project(client, ORG_NAME, PROJECT_NAME_2).await.identity.id;
+    let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+    let project_id2 = create_project(client, PROJECT_NAME_2).await.identity.id;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -1340,7 +1334,6 @@ async fn test_multiple_disks_multiple_zpools(
 async fn create_instance_with_disk(client: &ClientTestContext) {
     create_instance_with(
         &client,
-        ORG_NAME,
         PROJECT_NAME,
         INSTANCE_NAME,
         &params::InstanceNetworkInterfaceAttachment::Default,
@@ -1364,7 +1357,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     let project_id = create_org_and_project(client).await;
-    let disk = create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
     // Whenever we grab this URL, get the surrounding few seconds of metrics.
@@ -1437,7 +1430,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
     create_org_and_project(client).await;
-    create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+    create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
 
     let oximeter = &cptestctx.oximeter;

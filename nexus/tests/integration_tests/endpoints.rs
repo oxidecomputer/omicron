@@ -88,9 +88,6 @@ lazy_static! {
         DEFAULT_SILO.identity().name,
     );
 
-    // Organization used for testing
-    pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
-
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     pub static ref DEMO_PROJECT_URL: String =

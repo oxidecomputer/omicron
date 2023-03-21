@@ -39,7 +39,6 @@ use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
 fn get_disks_url() -> String {
@@ -47,7 +46,7 @@ fn get_disks_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 

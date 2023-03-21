@@ -81,12 +81,11 @@ async fn create_instance_expect_failure(
 async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let organization_name = "test-org";
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    create_project(&client, organization_name, project_name).await;
+    create_project(&client, project_name).await;
     let url_instances = format!("/v1/instances?project={}", project_name);
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
@@ -137,7 +136,6 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     for i in 0..subnet_size {
         create_instance_with(
             client,
-            organization_name,
             project_name,
             &format!("i{}", i),
             &nic,

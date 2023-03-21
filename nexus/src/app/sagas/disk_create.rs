@@ -714,12 +714,11 @@ pub(crate) mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 

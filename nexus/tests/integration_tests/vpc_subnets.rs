@@ -35,10 +35,9 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     let nexus = &apictx.nexus;
 
     // Create a project that we'll use for testing.
-    let org_name = "test-org";
     let project_name = "springfield-squidport";
     let instance_name = "inst";
-    let _ = create_project(&client, org_name, project_name).await;
+    let _ = create_project(&client, project_name).await;
     populate_ip_pool(client, "default", None).await;
 
     let subnets_url =
@@ -55,8 +54,7 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // cannot delete the subnet until the instance is gone.
     let instance_url =
         format!("/v1/instances/{instance_name}?project={project_name}");
-    let instance =
-        create_instance(client, &org_name, project_name, instance_name).await;
+    let instance = create_instance(client, &project_name, instance_name).await;
     instance_simulate(nexus, &instance.identity.id).await;
     let err: HttpErrorResponseBody = NexusRequest::expect_failure(
         &client,
@@ -107,13 +105,12 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let org_name = "test-org";
     let project_name = "springfield-squidport";
-    let _ = create_project(&client, org_name, project_name).await;
+    let _ = create_project(&client, project_name).await;
 
     // Create a VPC.
     let vpc_name = "vpc1";
-    let vpc = create_vpc(&client, org_name, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, project_name, vpc_name).await;
 
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc={}", project_name, vpc_name);
@@ -420,7 +417,7 @@ async fn test_vpc_subnets(cptestctx: &ControlPlaneTestContext) {
 
     // Creating a subnet with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 = create_vpc(&client, org_name, project_name, vpc2_name).await;
+    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
 
     let subnet_same_name: VpcSubnet = NexusRequest::objects_post(
         client,

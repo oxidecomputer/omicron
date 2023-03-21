@@ -123,8 +123,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
     let project_name = "someproj";
-    let new_proj_in_default_silo =
-        create_project(&client, "abc", project_name).await;
+    let new_proj_in_default_silo = create_project(&client, project_name).await;
 
     // Create a Project of the same name in a different Silo to verify
     // that's possible.

@@ -23,7 +23,6 @@ use omicron_nexus::external_api::{params, views::Vpc};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-static ORG_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 static PROJECT_NAME_2: &str = "peeky-park";
 
@@ -44,8 +43,8 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let vpcs_url = format!("/v1/vpcs?project={}", PROJECT_NAME);
-    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME).await;
-    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME_2).await;
+    let _ = create_project(&client, &PROJECT_NAME).await;
+    let _ = create_project(&client, &PROJECT_NAME_2).await;
 
     // List vpcs.  We see the default VPC, and nothing else.
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -97,7 +96,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a VPC.
     let vpc_name = "just-rainsticks";
-    let vpc = create_vpc(&client, ORG_NAME, PROJECT_NAME, vpc_name).await;
+    let vpc = create_vpc(&client, PROJECT_NAME, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
@@ -114,7 +113,6 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     // Attempt to create a second VPC with a conflicting name.
     let error = create_vpc_with_error(
         &client,
-        ORG_NAME,
         PROJECT_NAME,
         vpc_name,
         StatusCode::BAD_REQUEST,
@@ -123,8 +121,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     // creating a VPC with the same name in another project works, though
-    let vpc2: Vpc =
-        create_vpc(&client, ORG_NAME, PROJECT_NAME_2, vpc_name).await;
+    let vpc2: Vpc = create_vpc(&client, PROJECT_NAME_2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     // List VPCs again and expect to find the one we just created.

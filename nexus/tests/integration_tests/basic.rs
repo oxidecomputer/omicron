@@ -460,7 +460,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         // a uuid though, so we'll use a prefix.
         let mut name = Uuid::new_v4().to_string();
         name.insert_str(0, "project-");
-        let project = create_project(&client, "test-org", &name).await;
+        let project = create_project(&client, &name).await;
         projects_created.push(project.identity);
     }
 

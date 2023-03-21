@@ -275,9 +275,8 @@ async fn test_role_assignments_silo_implicit(
 #[nexus_test]
 async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let org_name = "test-org";
     let project_name = "test-project";
-    create_project(client, org_name, project_name).await;
+    create_project(client, project_name).await;
     let project_url = format!("/v1/projects/{}", project_name);
 
     struct ProjectRoleAssignmentTest {

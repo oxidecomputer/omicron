@@ -29,13 +29,11 @@ type ControlPlaneTestContext =
 async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let p1_name = "springfield-squidport";
     let p2_name = "cairo-airport";
-    create_project(&client, &org_name, &p1_name).await;
-    create_project(&client, &org_name, &p2_name).await;
+    create_project(&client, &p1_name).await;
+    create_project(&client, &p2_name).await;
 
     let p1_url = format!("/v1/projects/{}", p1_name);
     let project: Project = project_get(&client, &p1_url).await;
@@ -65,7 +63,6 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
 }
 
 async fn delete_project_default_subnet(
-    _org: &str,
     project: &str,
     client: &ClientTestContext,
 ) {
@@ -78,11 +75,7 @@ async fn delete_project_default_subnet(
         .expect("failed to make request");
 }
 
-async fn delete_project_default_vpc(
-    _org: &str,
-    project: &str,
-    client: &ClientTestContext,
-) {
+async fn delete_project_default_vpc(project: &str, client: &ClientTestContext) {
     let vpc_url = format!("/v1/vpcs/default?project={}", project);
     NexusRequest::object_delete(&client, &vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -122,24 +115,22 @@ async fn delete_project_expect_fail(
 async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
     // Project deletion will fail while the subnet & VPC remain.
-    create_project(&client, &org_name, &name).await;
+    create_project(&client, &name).await;
     assert_eq!(
         "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
-    delete_project_default_subnet(&org_name, &name, &client).await;
+    delete_project_default_subnet(&name, &client).await;
     assert_eq!(
         "project to be deleted contains a vpc: default",
         delete_project_expect_fail(&url, &client).await,
     );
-    delete_project_default_vpc(&org_name, &name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
     delete_project(&url, &client).await;
 }
 
@@ -149,16 +140,15 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
     populate_ip_pool(&client, "default", None).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&org_name, &name, &client).await;
-    delete_project_default_vpc(&org_name, &name, &client).await;
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
 
     let _: Instance = object_create(
         client,
@@ -203,16 +193,14 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
 
     let _test = DiskTest::new(&cptestctx).await;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&org_name, &name, &client).await;
-    delete_project_default_vpc(&org_name, &name, &client).await;
-    create_disk(&client, &org_name, &name, "my-disk").await;
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    create_disk(&client, &name, "my-disk").await;
     assert_eq!(
         "project to be deleted contains a disk: my-disk",
         delete_project_expect_fail(&url, &client).await,
@@ -231,15 +219,13 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
 async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let url = format!("/v1/projects/{}", name);
 
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&org_name, &name, &client).await;
-    delete_project_default_vpc(&org_name, &name, &client).await;
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
 
     let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
@@ -302,16 +288,14 @@ async fn test_project_deletion_with_snapshot(
 
     let _test = DiskTest::new(&cptestctx).await;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let project_url = format!("/v1/projects/{}", name);
 
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&org_name, &name, &client).await;
-    delete_project_default_vpc(&org_name, &name, &client).await;
-    create_disk(&client, &org_name, &name, "my-disk").await;
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    create_disk(&client, &name, "my-disk").await;
 
     let _: views::Snapshot = object_create(
         client,
@@ -355,18 +339,16 @@ async fn test_project_deletion_with_snapshot(
 async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
     let project_url = format!("/v1/projects/{}", name);
 
-    create_project(&client, &org_name, &name).await;
-    delete_project_default_subnet(&org_name, &name, &client).await;
-    delete_project_default_vpc(&org_name, &name, &client).await;
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
 
     let vpc_name = "just-rainsticks";
-    create_vpc(&client, org_name, name, vpc_name).await;
+    create_vpc(&client, name, vpc_name).await;
 
     assert_eq!(
         "project to be deleted contains a vpc: just-rainsticks",
