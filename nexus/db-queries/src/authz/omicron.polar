@@ -170,33 +170,6 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
 	if silo in actor.silo;
 
-resource Organization {
-	permissions = [
-	    "list_children",
-	    "modify",
-	    "read",
-	    "create_child",
-	];
-	roles = [ "admin", "collaborator", "viewer" ];
-
-	# Roles implied by other roles on this resource
-	"viewer" if "collaborator";
-	"collaborator" if "admin";
-
-	# Permissions granted directly by roles on this resource
-	"list_children" if "viewer";
-	"read" if "viewer";
-	"create_child" if "collaborator";
-	"modify" if "admin";
-
-	# Roles implied by roles on this resource's parent (Silo)
-	relations = { parent_silo: Silo };
-	"admin" if "collaborator" on "parent_silo";
-	"viewer" if "viewer" on "parent_silo";
-}
-has_relation(silo: Silo, "parent_silo", organization: Organization)
-	if organization.silo = silo;
-
 resource Project {
 	permissions = [
 	    "list_children",
@@ -216,7 +189,7 @@ resource Project {
 	"create_child" if "collaborator";
 	"modify" if "admin";
 
-	# Roles implied by roles on this resource's parent (Organization)
+	# Roles implied by roles on this resource's parent (Silo)
 	relations = { parent_silo: Silo };
 	"admin" if "collaborator" on "parent_silo";
 	"viewer" if "viewer" on "parent_silo";
