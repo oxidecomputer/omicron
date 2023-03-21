@@ -120,10 +120,25 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    // Create organization with built-in user auth
+    // Create project with built-in user auth
     // Note: this currently goes to the built-in silo!
     let project_name = "someproj";
     let new_proj_in_default_silo = create_project(&client, project_name).await;
+
+    // default silo project shows up in default silo
+    let projects_in_default_silo =
+        NexusRequest::object_get(client, "/v1/projects")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
+            .await;
+    assert_eq!(projects_in_default_silo.items.len(), 1);
+
+    // default silo project does not show up in our silo
+    let projects_in_our_silo = NexusRequest::object_get(client, "/v1/projects")
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
+        .await;
+    assert_eq!(projects_in_our_silo.items.len(), 0);
 
     // Create a Project of the same name in a different Silo to verify
     // that's possible.
@@ -178,19 +193,6 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         objects_list_page_authz::<Project>(client, "/v1/projects").await.items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, "someproj");
-
-    // TODO: uncomment when silo users can have role assignments
-    /*
-    // Verify GET /organizations doesn't list anything if authing under
-    // different silo.
-    let organizations =
-        objects_list_page_authz_with_session::<Organization>(
-            client, "/v1/organizations", &session,
-        )
-        .await
-        .items;
-    assert_eq!(organizations.len(), 0);
-    */
 
     // Deleting discoverable silo fails because there's still a project in it
     NexusRequest::expect_failure(

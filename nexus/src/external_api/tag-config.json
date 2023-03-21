@@ -69,7 +69,7 @@
       }
     },
     "projects": {
-      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

@@ -9,15 +9,15 @@ use diesel::Selectable;
 use std::fmt::Debug;
 
 /// Trait to be implemented by any structs representing a collection.
-/// For example, since Organizations have a one-to-many relationship with
-/// Projects, the Organization datatype should implement this trait.
+/// For example, since Silos have a one-to-many relationship with
+/// Projects, the Silo datatype should implement this trait.
 /// ```
 /// # use diesel::prelude::*;
 /// # use nexus_db_model::DatastoreCollectionConfig;
 /// # use nexus_db_model::Generation;
 /// #
 /// # table! {
-/// #     test_schema.organization (id) {
+/// #     test_schema.silo (id) {
 /// #         id -> Uuid,
 /// #         time_deleted -> Nullable<Timestamptz>,
 /// #         rcgen -> Int8,
@@ -28,7 +28,7 @@ use std::fmt::Debug;
 /// #     test_schema.project (id) {
 /// #         id -> Uuid,
 /// #         time_deleted -> Nullable<Timestamptz>,
-/// #         organization_id -> Uuid,
+/// #         silo_id -> Uuid,
 /// #     }
 /// # }
 ///
@@ -37,25 +37,25 @@ use std::fmt::Debug;
 /// struct Project {
 ///     pub id: uuid::Uuid,
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
-///     pub organization_id: uuid::Uuid,
+///     pub silo_id: uuid::Uuid,
 /// }
 ///
 /// #[derive(Queryable, Insertable, Debug, Selectable)]
-/// #[diesel(table_name = organization)]
-/// struct Organization {
+/// #[diesel(table_name = silo)]
+/// struct Silo {
 ///     pub id: uuid::Uuid,
 ///     pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
 ///     pub rcgen: Generation,
 /// }
 ///
-/// impl DatastoreCollectionConfig<Project> for Organization {
-///     // Type of Organization::identity::id and Project::organization_id
+/// impl DatastoreCollectionConfig<Project> for Silo {
+///     // Type of Silo::identity::id and Project::silo_id
 ///     type CollectionId = uuid::Uuid;
 ///
-///     type GenerationNumberColumn = organization::dsl::rcgen;
-///     type CollectionTimeDeletedColumn = organization::dsl::time_deleted;
+///     type GenerationNumberColumn = silo::dsl::rcgen;
+///     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
 ///
-///     type CollectionIdColumn = project::dsl::organization_id;
+///     type CollectionIdColumn = project::dsl::silo_id;
 /// }
 /// ```
 pub trait DatastoreCollectionConfig<ResourceType> {

@@ -27,11 +27,11 @@ pub struct Input {
     /// this macro.  The snake case version of the name is taken as the name of
     /// the Diesel table interface in `db::schema`.
     ///
-    /// This value is typically PascalCase (e.g., "Organization").
+    /// This value is typically PascalCase (e.g., "Project").
     name: String,
     /// ordered list of resources that are ancestors of this resource, starting
     /// with the top of the hierarchy
-    /// (e.g., for an Instance, this would be `[ "Organization", "Project" ]`
+    /// (e.g., for an Instance, this would be `[ "Silo", "Project" ]`
     ancestors: Vec<String>,
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
@@ -81,12 +81,12 @@ pub struct Config {
 
     // The path to the resource
     /// list of type names for this resource and its parents
-    /// (e.g., [`Organization`, `Project`])
+    /// (e.g., [`Silo`, `Project`])
     path_types: Vec<syn::Ident>,
 
     /// list of identifiers used for the authz objects for this resource and its
     /// parents, in the same order as `authz_path_types` (e.g.,
-    /// [`authz_organization`, `authz_project`])
+    /// [`authz_silo`, `authz_project`])
     path_authz_names: Vec<syn::Ident>,
 
     // Child resources
@@ -464,8 +464,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                 // parent first.  Since this is recursive, we wind up
                 // hitting the database once for each item in the path,
                 // in order descending from the root of the tree.  (So
-                // we'll look up Organization, then Project, then
-                // Instance, etc.)
+                // we'll look up Project, then Instance, etc.)
                 // TODO-performance Instead of doing database queries at
                 // each level of recursion, we could be building up one
                 // big "join" query and hit the database just once.
@@ -654,8 +653,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     // the parent by id, then its parent, etc.  Like the
                     // by-name case, we wind up hitting the database once
                     // for each item in the path, but in the reverse order.
-                    // So we'll look up the Instance, then the Project, then
-                    // the Organization.
+                    // So we'll look up the Instance, then the Project.
                     // TODO-performance Instead of doing database queries at
                     // each level of recursion, we could be building up one
                     // big "join" query and hit the database just once.

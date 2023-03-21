@@ -338,7 +338,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
 /// Helper function for verifying the initial (unprivileged) conditions for most
 /// resources
 ///
-/// This is used for the Organization and Project tests today.  If we add
+/// This is used for the Project tests today.  If we add
 /// support for assigning roles on other kinds of resources, we'd likely use
 /// this for those, too.  (It's Fleet and Silo that are special cases.)
 fn resource_initial_conditions<'a, 'b, 'c, 'd, T>(
@@ -375,7 +375,7 @@ where
 
 /// Helper function for verifying the privileged conditions for most resources
 ///
-/// This is used for the Organization and Project tests today.  If we add
+/// This is used for the Project tests today.  If we add
 /// support for assigning roles on other kinds of resources, we'd likely use
 /// this for those, too.  (It's Fleet and Silo that are special cases.)
 fn resource_privileged_conditions<'a, 'b, 'c, 'd, V>(

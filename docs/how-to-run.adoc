@@ -227,10 +227,9 @@ other services and allocating them with vNICs and IPv6 addresses.
 Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
 command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
 
-1. Create an organization and project that the resources will live under:
+1. Create a project that the resources will live under:
 
-    oxide org create myorg
-    oxide project create -o myorg myproj
+    oxide project create myproj
 
 2. Create an IP Pool, for providing external connectivity to the instance later.
 We need to create an IP Pool itself, and a range of IP addresses in that pool.
