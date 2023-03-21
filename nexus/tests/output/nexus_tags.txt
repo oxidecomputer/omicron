@@ -51,16 +51,6 @@ login_local                              /login/{silo_name}/local
 login_saml                               /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         /login/{silo_name}/saml/{provider_name}
 
-API operations found with tag "organizations"
-OPERATION ID                             URL PATH
-organization_create                      /v1/organizations
-organization_delete                      /v1/organizations/{organization}
-organization_list                        /v1/organizations
-organization_policy_update               /v1/organizations/{organization}/policy
-organization_policy_view                 /v1/organizations/{organization}/policy
-organization_update                      /v1/organizations/{organization}
-organization_view                        /v1/organizations/{organization}
-
 API operations found with tag "policy"
 OPERATION ID                             URL PATH
 system_policy_update                     /v1/system/policy

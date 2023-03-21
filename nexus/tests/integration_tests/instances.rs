@@ -2898,23 +2898,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     // Populate IP Pool
     populate_ip_pool(&client, "default", None).await;
 
-    // Create test organization and projects.
-    NexusRequest::objects_post(
-        client,
-        "/v1/organizations",
-        &params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: ORGANIZATION_NAME.parse().unwrap(),
-                description: String::new(),
-            },
-        },
-    )
-    .authn_as(AuthnMode::SiloUser(user_id))
-    .execute()
-    .await
-    .expect("failed to create Organization")
-    .parsed_body::<views::Organization>()
-    .expect("failed to parse new Organization");
+    // Create test projects
     NexusRequest::objects_post(
         client,
         &format!("/v1/projects?organization={ORGANIZATION_NAME}"),

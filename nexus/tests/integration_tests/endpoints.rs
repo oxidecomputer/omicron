@@ -90,18 +90,7 @@ lazy_static! {
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
-    pub static ref DEMO_ORG_URL: String =
-        format!("/v1/organizations/{}", *DEMO_ORG_NAME);
-    pub static ref DEMO_ORG_POLICY_URL: String =
-        format!("/v1/organizations/{}/policy", *DEMO_ORG_NAME);
     pub static ref DEMO_ORG_PROJECTS_URL: String = format!("/v1/projects?organization={}", *DEMO_ORG_NAME);
-    pub static ref DEMO_ORG_CREATE: params::OrganizationCreate =
-        params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_ORG_NAME.clone(),
-                description: String::from(""),
-            },
-        };
 
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
@@ -845,54 +834,6 @@ lazy_static! {
                 AllowedMethod::Post(serde_json::to_value(
                     params::UserPassword::InvalidPassword
                 ).unwrap()),
-            ],
-        },
-
-        /* Organizations */
-
-        VerifyEndpoint {
-            url: "/v1/organizations",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_ORG_CREATE).unwrap()
-                )
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ORG_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Delete,
-                AllowedMethod::Put(
-                    serde_json::to_value(&params::OrganizationUpdate {
-                        identity: IdentityMetadataUpdateParams {
-                            name: None,
-                            description: Some("different".to_string())
-                        }
-                    }).unwrap()
-                ),
-            ],
-        },
-
-        VerifyEndpoint {
-            url: &DEMO_ORG_POLICY_URL,
-            visibility: Visibility::Protected,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![
-                AllowedMethod::Get,
-                AllowedMethod::Put(
-                    serde_json::to_value(
-                        &shared::Policy::<authz::OrganizationRole> {
-                            role_assignments: vec![]
-                        }
-                    ).unwrap()
-                ),
             ],
         },
 

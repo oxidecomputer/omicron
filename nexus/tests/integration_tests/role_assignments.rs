@@ -273,66 +273,6 @@ async fn test_role_assignments_silo_implicit(
 }
 
 #[nexus_test]
-async fn test_role_assignments_organization(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let org_name = "test-org";
-    let org_url = format!("/v1/organizations/{}", org_name);
-
-    struct OrganizationRoleAssignmentTest {
-        org_name: String,
-        org_url: String,
-    }
-
-    let test_case = OrganizationRoleAssignmentTest {
-        org_name: String::from(org_name),
-        org_url: org_url.clone(),
-    };
-
-    impl RoleAssignmentTest for OrganizationRoleAssignmentTest {
-        type RoleType = authz::OrganizationRole;
-        const ROLE: Self::RoleType = authz::OrganizationRole::Admin;
-        const VISIBLE_TO_UNPRIVILEGED: bool = false;
-        fn policy_url(&self) -> String {
-            format!("{}/policy", self.org_url)
-        }
-
-        fn verify_initial<'a, 'b, 'c, 'd>(
-            &'a self,
-            client: &'b ClientTestContext,
-            current_policy: &'c shared::Policy<Self::RoleType>,
-        ) -> BoxFuture<'d, ()>
-        where
-            'a: 'd,
-            'b: 'd,
-            'c: 'd,
-        {
-            resource_initial_conditions(client, &self.org_url, current_policy)
-                .boxed()
-        }
-
-        fn verify_privileged<'a, 'b, 'c>(
-            &'a self,
-            client: &'b ClientTestContext,
-        ) -> BoxFuture<'c, ()>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
-            resource_privileged_conditions::<views::Organization>(
-                client,
-                &self.org_url,
-                &self.org_name,
-            )
-            .boxed()
-        }
-    }
-
-    run_test(client, test_case).await;
-}
-
-#[nexus_test]
 async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let org_name = "test-org";
