@@ -53,17 +53,17 @@ impl Context {
     pub async fn cleanup(self) -> Result<()> {
         self.client
             .vpc_subnet_delete()
-            .organization_name(self.org_name.clone())
-            .project_name(self.project_name.clone())
-            .vpc_name("default")
-            .subnet_name("default")
+            .organization(self.org_name.clone())
+            .project(self.project_name.clone())
+            .vpc("default")
+            .subnet("default")
             .send()
             .await?;
         self.client
             .vpc_delete()
-            .organization_name(self.org_name.clone())
-            .project_name(self.project_name.clone())
-            .vpc_name("default")
+            .organization(self.org_name.clone())
+            .project(self.project_name.clone())
+            .vpc("default")
             .send()
             .await?;
         self.client
