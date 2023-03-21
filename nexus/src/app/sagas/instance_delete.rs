@@ -175,7 +175,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Name,
+        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     };
     use std::num::NonZeroU32;
     use uuid::Uuid;
@@ -283,9 +283,6 @@ mod test {
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
-            organization_selector: Some(
-                Name::try_from(ORG_NAME.to_string()).unwrap().into(),
-            ),
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =

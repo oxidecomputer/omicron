@@ -1493,18 +1493,15 @@ async fn project_create(
 async fn project_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    query_params: Query<params::OptionalOrganizationSelector>,
+    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector {
-            organization_selector: query.organization_selector,
-            project: path.project,
-        };
+        let project_selector =
+            params::ProjectSelector { project: path.project };
         let (.., project) =
             nexus.project_lookup(&opctx, &project_selector)?.fetch().await?;
         Ok(HttpResponseOk(project.into()))
@@ -1521,18 +1518,15 @@ async fn project_view(
 async fn project_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    query_params: Query<params::OptionalOrganizationSelector>,
+    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector {
-            organization_selector: query.organization_selector,
-            project: path.project,
-        };
+        let project_selector =
+            params::ProjectSelector { project: path.project };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         nexus.project_delete(&opctx, &project_lookup).await?;
         Ok(HttpResponseDeleted())
@@ -1554,20 +1548,17 @@ async fn project_delete(
 async fn project_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    query_params: Query<params::OptionalOrganizationSelector>,
+    _query_params: Query<params::OptionalOrganizationSelector>,
     updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let updated_project = updated_project.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector {
-            organization_selector: query.organization_selector,
-            project: path.project,
-        };
+        let project_selector =
+            params::ProjectSelector { project: path.project };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let project = nexus
             .project_update(&opctx, &project_lookup, &updated_project)
@@ -1586,18 +1577,15 @@ async fn project_update(
 async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    query_params: Query<params::OptionalOrganizationSelector>,
+    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector {
-            organization_selector: query.organization_selector,
-            project: path.project,
-        };
+        let project_selector =
+            params::ProjectSelector { project: path.project };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         let policy =
             nexus.project_fetch_policy(&opctx, &project_lookup).await?;
@@ -1615,20 +1603,17 @@ async fn project_policy_view(
 async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    query_params: Query<params::OptionalOrganizationSelector>,
+    _query_params: Query<params::OptionalOrganizationSelector>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
-    let query = query_params.into_inner();
     let new_policy = new_policy.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_selector = params::ProjectSelector {
-            organization_selector: query.organization_selector,
-            project: path.project,
-        };
+        let project_selector =
+            params::ProjectSelector { project: path.project };
         let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
         nexus
             .project_update_policy(&opctx, &project_lookup, &new_policy)

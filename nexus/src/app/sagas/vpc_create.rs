@@ -505,7 +505,7 @@ pub(crate) mod test {
     ) -> authz::Project {
         let nexus = &cptestctx.server.apictx().nexus;
         let project_selector =
-            params::ProjectSelector::new(None, NameOrId::Id(project_id));
+            params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, &project_selector)

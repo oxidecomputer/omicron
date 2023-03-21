@@ -189,10 +189,9 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector::new(
-            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
-            Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
-        );
+        let project_selector = params::ProjectSelector {
+            project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
+        };
         let project_lookup =
             nexus.project_lookup(&opctx, &project_selector).unwrap();
 

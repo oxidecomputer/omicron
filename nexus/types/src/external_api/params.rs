@@ -164,19 +164,13 @@ pub struct OptionalOrganizationSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
-    #[serde(flatten)]
-    pub organization_selector: Option<OrganizationSelector>,
     pub project: NameOrId,
 }
 
 // TODO-v1: delete this post migration
 impl ProjectSelector {
-    pub fn new(organization: Option<NameOrId>, project: NameOrId) -> Self {
-        ProjectSelector {
-            organization_selector: organization
-                .map(|o| OrganizationSelector { organization: o }),
-            project,
-        }
+    pub fn new(_organization: Option<NameOrId>, project: NameOrId) -> Self {
+        ProjectSelector { project }
     }
 }
 
@@ -196,13 +190,12 @@ pub struct DiskSelector {
 // TODO-v1: delete this post migration
 impl DiskSelector {
     pub fn new(
-        organization: Option<NameOrId>,
+        _organization: Option<NameOrId>,
         project: Option<NameOrId>,
         disk: NameOrId,
     ) -> Self {
         DiskSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
+            project_selector: project.map(|p| ProjectSelector { project: p }),
             disk,
         }
     }
@@ -218,13 +211,12 @@ pub struct SnapshotSelector {
 // TODO-v1: delete this post migration
 impl SnapshotSelector {
     pub fn new(
-        organization: Option<NameOrId>,
+        _organization: Option<NameOrId>,
         project: Option<NameOrId>,
         snapshot: NameOrId,
     ) -> Self {
         SnapshotSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
+            project_selector: project.map(|p| ProjectSelector { project: p }),
             snapshot,
         }
     }
@@ -240,13 +232,12 @@ pub struct ImageSelector {
 // TODO-v1: delete this post migration
 impl ImageSelector {
     pub fn new(
-        organization: Option<NameOrId>,
+        _organization: Option<NameOrId>,
         project: Option<NameOrId>,
         image: NameOrId,
     ) -> Self {
         ImageSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
+            project_selector: project.map(|p| ProjectSelector { project: p }),
             image,
         }
     }
@@ -262,13 +253,12 @@ pub struct InstanceSelector {
 // TODO-v1: delete this post migration
 impl InstanceSelector {
     pub fn new(
-        organization: Option<NameOrId>,
+        _organization: Option<NameOrId>,
         project: Option<NameOrId>,
         instance: NameOrId,
     ) -> Self {
         InstanceSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
+            project_selector: project.map(|p| ProjectSelector { project: p }),
             instance,
         }
     }
@@ -320,13 +310,12 @@ pub struct OptionalVpcSelector {
 // TODO-v1: delete this post migration
 impl VpcSelector {
     pub fn new(
-        organization: Option<NameOrId>,
+        _organization: Option<NameOrId>,
         project: Option<NameOrId>,
         vpc: NameOrId,
     ) -> Self {
         VpcSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
+            project_selector: project.map(|p| ProjectSelector { project: p }),
             vpc,
         }
     }

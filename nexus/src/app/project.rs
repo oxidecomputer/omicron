@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Project APIs, contained within organizations
+//! Project APIs
 
 use crate::app::sagas;
 use crate::authn;
@@ -33,31 +33,15 @@ impl super::Nexus {
         opctx: &'a OpContext,
         project_selector: &'a params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
-        match project_selector {
-            params::ProjectSelector {
-                project: NameOrId::Id(id),
-                organization_selector: None,
-            } => {
-                Ok(LookupPath::new(opctx, &self.db_datastore).project_id(*id))
+        let lookup_path = LookupPath::new(opctx, &self.db_datastore);
+        Ok(match project_selector {
+            params::ProjectSelector { project: NameOrId::Id(id) } => {
+                lookup_path.project_id(*id)
             }
-            params::ProjectSelector {
-                project: NameOrId::Name(name),
-                organization_selector: Some(_organization_selector),
-            } => {
-               Ok(LookupPath::new(opctx, &self.db_datastore).project_name(Name::ref_cast(name)))
+            params::ProjectSelector { project: NameOrId::Name(name) } => {
+                lookup_path.project_name(Name::ref_cast(name))
             }
-            params::ProjectSelector {
-                project: NameOrId::Id(_),
-                organization_selector: Some(_)
-            } => {
-                Err(Error::invalid_request(
-                    "when providing project as an ID, organization should not be specified",
-                ))
-            }
-            _ => Err(Error::invalid_request(
-                    "project should either be specified by id or organization should be specified"
-            )),
-        }
+        })
     }
 
     pub async fn project_create(
