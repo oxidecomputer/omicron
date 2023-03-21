@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Cmd;
+use std::fs::File;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use wicket::Snapshot;
@@ -34,7 +35,7 @@ impl Server {
 
     fn handle_client(&mut self, mut stream: TcpStream) -> anyhow::Result<()> {
         loop {
-            let cmd: Cmd = bincode::deserialize_from(&mut stream)?;
+            let cmd: Cmd = ciborium::de::from_reader(&mut stream)?;
             println!("{:#?}", cmd);
             self.handle(cmd, &mut stream)?;
         }
@@ -46,11 +47,29 @@ impl Server {
         stream: &mut TcpStream,
     ) -> anyhow::Result<()> {
         match cmd {
-            Cmd::Load(file) => {
-                self.recording_path = Some(file);
-                let res: Result<(), String> = Ok(());
-                bincode::serialize_into(stream, &res)?;
-            }
+            Cmd::Load(path) => match File::open(&path) {
+                Ok(file) => match ciborium::de::from_reader(&file) {
+                    Ok(snapshot) => {
+                        self.recording_path = Some(path);
+                        self.snapshot = Some(snapshot);
+                        println!("{:#?}", self.snapshot);
+                        let res: Result<(), String> = Ok(());
+                        ciborium::ser::into_writer(&res, stream)?;
+                    }
+                    Err(e) => {
+                        let res: Result<(), String> = Err(format!(
+                            "Failed to deserialize recording: {}",
+                            e.to_string()
+                        ));
+                        ciborium::ser::into_writer(&res, stream)?;
+                    }
+                },
+                Err(e) => {
+                    let res: Result<(), String> =
+                        Err(format!("{e}: {}", path.display()));
+                    ciborium::ser::into_writer(&res, stream)?;
+                }
+            },
             _ => unreachable!(),
         }
         Ok(())

@@ -82,7 +82,7 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    pub fn new(max_events: usize) -> Self {
+    pub fn new(max_events: u32) -> Self {
         Recorder { snapshot: Snapshot::new(max_events) }
     }
 
@@ -109,38 +109,39 @@ impl Recorder {
             }
         };
         path.push(format!("{}.wicket.dump", timestamp));
-        let file = File::create(path)?;
-        bincode::serialize_into(file, &self.snapshot)?;
+        let mut file = File::create(path)?;
+        ciborium::ser::into_writer(&self.snapshot, &mut file)?;
+        file.sync_all()?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
-    pub version: usize,
-    pub start: usize,
+    pub version: u32,
+    pub start: u32,
     pub state: State,
     pub history: Vec<Event>,
-    pub max_events: usize,
+    pub max_events: u32,
 }
 
 impl Snapshot {
-    fn new(max_events: usize) -> Self {
+    fn new(max_events: u32) -> Self {
         Snapshot {
             version: 1,
             start: 0,
             state: State::new(&slog::Logger::root(slog::Discard, slog::o!())),
-            history: Vec::with_capacity(max_events),
+            history: Vec::with_capacity(max_events as usize),
             max_events,
         }
     }
 
     fn history_full(&self) -> bool {
-        self.max_events == self.history.len()
+        self.max_events as usize == self.history.len()
     }
 
     fn take(&mut self, state: &State, event: Event) {
-        self.start += self.history.len();
+        self.start += u32::try_from(self.history.len()).unwrap();
         self.state = state.clone();
         self.history.clear();
         self.history.push(event);

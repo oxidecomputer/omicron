@@ -28,8 +28,8 @@ impl Client {
         &mut self,
         cmd: &Cmd,
     ) -> anyhow::Result<T> {
-        bincode::serialize_into(&mut self.sock, cmd)?;
-        let val = bincode::deserialize_from(&mut self.sock)?;
+        ciborium::ser::into_writer(cmd, &mut self.sock)?;
+        let val = ciborium::de::from_reader(&mut self.sock)?;
         Ok(val)
     }
 }

@@ -30,7 +30,7 @@ pub type Term = Terminal<CrosstermBackend<Stdout>>;
 pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
 const TICK_INTERVAL: Duration = Duration::from_millis(30);
-const MAX_RECORDED_EVENTS: usize = 10000;
+const MAX_RECORDED_EVENTS: u32 = 10000;
 
 /// The `Runner` owns the main UI thread, and starts a tokio runtime
 /// for interaction with downstream services.

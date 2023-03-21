@@ -41,10 +41,14 @@ fn process(client: &mut Client, line: String) -> anyhow::Result<String> {
 
     match cmd.unwrap() {
         "load" | "l" => {
-            let rsp = client.send::<Result<(), String>>(
-                &wicket_dbg::Cmd::Load("SOME RECORDING".into()),
-            )?;
-            Ok(format!("{:?}", rsp))
+            if let Some(path) = args.next() {
+                let rsp = client.send::<Result<(), String>>(
+                    &wicket_dbg::Cmd::Load(path.into()),
+                )?;
+                Ok(format!("{:?}", rsp))
+            } else {
+                Ok("Error: Missing path".to_string())
+            }
         }
         _ => Ok("Error: Unknown Command".to_string()),
     }

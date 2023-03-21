@@ -6,12 +6,11 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-bincode.workspace = true
 serde.workspace = true
 wicket.workspace = true
+ciborium.workspace = true
 
 # used only by wicket-dbg
-rustyline = "11.0.0"
 reedline = "0.17.0"
 
 [[bin]]
