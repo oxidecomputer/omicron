@@ -10,7 +10,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use slog::Logger;
-use std::io::{stdout, Stdout};
+use std::io::stdout;
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 

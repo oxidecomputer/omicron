@@ -8093,6 +8093,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ciborium",
+ "clap 4.1.9",
  "crossterm 0.26.1",
  "reedline",
  "serde",
