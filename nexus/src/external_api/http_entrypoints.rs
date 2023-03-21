@@ -271,6 +271,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
+        api.register(console_api::console_page_orgs)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
@@ -1072,7 +1073,7 @@ async fn local_idp_user_set_password(
 }]
 async fn project_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::OrganizationSelector>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<Project>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -1105,7 +1106,6 @@ async fn project_list(
 }]
 async fn project_create(
     rqctx: RequestContext<Arc<ServerContext>>,
-    _query_params: Query<params::OrganizationSelector>,
     new_project: TypedBody<params::ProjectCreate>,
 ) -> Result<HttpResponseCreated<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1128,7 +1128,6 @@ async fn project_create(
 async fn project_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1153,7 +1152,6 @@ async fn project_view(
 async fn project_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1183,7 +1181,6 @@ async fn project_delete(
 async fn project_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    _query_params: Query<params::OptionalOrganizationSelector>,
     updated_project: TypedBody<params::ProjectUpdate>,
 ) -> Result<HttpResponseOk<Project>, HttpError> {
     let apictx = rqctx.context();
@@ -1212,7 +1209,6 @@ async fn project_update(
 async fn project_policy_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    _query_params: Query<params::OptionalOrganizationSelector>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -1238,7 +1234,6 @@ async fn project_policy_view(
 async fn project_policy_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::ProjectPath>,
-    _query_params: Query<params::OptionalOrganizationSelector>,
     new_policy: TypedBody<shared::Policy<authz::ProjectRole>>,
 ) -> Result<HttpResponseOk<shared::Policy<authz::ProjectRole>>, HttpError> {
     let apictx = rqctx.context();

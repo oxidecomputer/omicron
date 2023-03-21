@@ -263,13 +263,12 @@ pub async fn create_local_user(
 
 pub async fn create_project(
     client: &ClientTestContext,
-    organization_name: &str,
+    _organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
-        &url,
+        "/v1/projects",
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),

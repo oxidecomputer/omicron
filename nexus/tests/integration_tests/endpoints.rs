@@ -90,16 +90,15 @@ lazy_static! {
 
     // Organization used for testing
     pub static ref DEMO_ORG_NAME: Name = "demo-org".parse().unwrap();
-    pub static ref DEMO_ORG_PROJECTS_URL: String = format!("/v1/projects?organization={}", *DEMO_ORG_NAME);
 
     // Project used for testing
     pub static ref DEMO_PROJECT_NAME: Name = "demo-project".parse().unwrap();
     pub static ref DEMO_PROJECT_URL: String =
-        format!("/v1/projects/{}?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
+        format!("/v1/projects/{}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_SELECTOR: String =
         format!("organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_POLICY_URL: String =
-        format!("/v1/projects/{}/policy?organization={}", *DEMO_PROJECT_NAME, *DEMO_ORG_NAME);
+        format!("/v1/projects/{}/policy", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_DISKS: String =
         format!("/v1/disks?organization={}&project={}", *DEMO_ORG_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_URL_IMAGES: String =
@@ -849,7 +848,7 @@ lazy_static! {
         // incredibly expensive to determine in general.
         // TODO: reevaluate the above comment and the change to unprivileged_access below
         VerifyEndpoint {
-            url: &DEMO_ORG_PROJECTS_URL,
+            url: "/v1/projects",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![

@@ -3112,13 +3112,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -3160,16 +3153,6 @@
         ],
         "summary": "Create a project",
         "operationId": "project_create",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3215,13 +3198,6 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           }
         ],
         "responses": {
@@ -3254,13 +3230,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3309,13 +3278,6 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           }
         ],
         "responses": {
@@ -3343,13 +3305,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3385,13 +3340,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }

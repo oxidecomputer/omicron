@@ -156,12 +156,6 @@ impl From<Name> for OrganizationSelector {
     }
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct OptionalOrganizationSelector {
-    #[serde(flatten)]
-    pub organization_selector: Option<OrganizationSelector>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
     pub project: NameOrId,
@@ -787,22 +781,6 @@ where
     }
 
     Ok(v)
-}
-
-// ORGANIZATIONS
-
-/// Create-time parameters for an [`Organization`](crate::external_api::views::Organization)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct OrganizationCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-}
-
-/// Updateable properties of an [`Organization`](crate::external_api::views::Organization)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct OrganizationUpdate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
 }
 
 // PROJECTS

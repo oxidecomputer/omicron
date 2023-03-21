@@ -2901,7 +2901,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     // Create test projects
     NexusRequest::objects_post(
         client,
-        &format!("/v1/projects?organization={ORGANIZATION_NAME}"),
+        "/v1/projects",
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: PROJECT_NAME.parse().unwrap(),

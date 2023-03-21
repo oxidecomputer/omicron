@@ -52,16 +52,12 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(
-        &testctx,
-        Method::POST,
-        "/v1/projects?organization=abc",
-    )
-    .body(Some(&project_params))
-    .expect_status(Some(StatusCode::UNAUTHORIZED))
-    .execute()
-    .await
-    .expect("failed to 401 on unauthed API request");
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .body(Some(&project_params))
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
     RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
@@ -94,18 +90,14 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(
-        &testctx,
-        Method::POST,
-        "/v1/projects?organization=abc",
-    )
-    .header(header::COOKIE, &session_token)
-    .body(Some(&project_params))
-    // TODO: explicit expect_status not needed. decide whether to keep it anyway
-    .expect_status(Some(StatusCode::CREATED))
-    .execute()
-    .await
-    .expect("failed to create org with session cookie");
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .header(header::COOKIE, &session_token)
+        .body(Some(&project_params))
+        // TODO: explicit expect_status not needed. decide whether to keep it anyway
+        .expect_status(Some(StatusCode::CREATED))
+        .execute()
+        .await
+        .expect("failed to create org with session cookie");
 
     RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
         .header(header::COOKIE, &session_token)
@@ -135,17 +127,13 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(
-        &testctx,
-        Method::POST,
-        "/v1/projects?organization=abc",
-    )
-    .header(header::COOKIE, &session_token)
-    .body(Some(&project_params))
-    .expect_status(Some(StatusCode::UNAUTHORIZED))
-    .execute()
-    .await
-    .expect("failed to get 401 for unauthed API request");
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .header(header::COOKIE, &session_token)
+        .body(Some(&project_params))
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("failed to get 401 for unauthed API request");
 
     RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
         .header(header::COOKIE, &session_token)

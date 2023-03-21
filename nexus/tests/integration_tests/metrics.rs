@@ -30,6 +30,9 @@ pub async fn query_for_latest_metric(
     let measurements: ResultsPage<Measurement> =
         objects_list_page_authz(client, path).await;
 
+    // prevent more confusing 'attempt to subtract with overflow' on next line
+    assert!(measurements.items.len() > 0, "Expected at least one measurement");
+
     let item = &measurements.items[measurements.items.len() - 1];
     let datum = match item.datum() {
         Datum::I64(c) => c,

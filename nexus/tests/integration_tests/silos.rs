@@ -130,7 +130,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // that's possible.
     let new_proj_in_our_silo = NexusRequest::objects_post(
         client,
-        "/v1/projects?organization=abc",
+        "/v1/projects",
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
@@ -175,12 +175,8 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to delete test Vpc");
 
     // Verify GET /v1/projects works with built-in user auth
-    let projects = objects_list_page_authz::<Project>(
-        client,
-        "/v1/projects?organization=abc",
-    )
-    .await
-    .items;
+    let projects =
+        objects_list_page_authz::<Project>(client, "/v1/projects").await.items;
     assert_eq!(projects.len(), 1);
     assert_eq!(projects[0].identity.name, "someproj");
 
@@ -210,14 +206,11 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete project
-    NexusRequest::object_delete(
-        &client,
-        &"/v1/projects/someproj?organization=abc",
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("failed to make request");
+    NexusRequest::object_delete(&client, &"/v1/projects/someproj")
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .expect("failed to make request");
 
     // Verify silo DELETE now works
     NexusRequest::object_delete(&client, &discoverable_url)
@@ -305,7 +298,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     // Create a project
     let _org = NexusRequest::objects_post(
         client,
-        "/v1/projects?organization=abc",
+        "/v1/projects",
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: "myproj".parse().unwrap(),

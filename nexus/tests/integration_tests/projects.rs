@@ -35,21 +35,20 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     let p1_name = "springfield-squidport";
     let p2_name = "cairo-airport";
     create_project(&client, &org_name, &p1_name).await;
-
     create_project(&client, &org_name, &p2_name).await;
 
-    let p1_url = format!("/v1/projects/{}?organization={}", p1_name, org_name);
+    let p1_url = format!("/v1/projects/{}", p1_name);
     let project: Project = project_get(&client, &p1_url).await;
     assert_eq!(project.identity.name, p1_name);
 
-    let p2_url = format!("/v1/projects/{}?organization={}", p2_name, org_name);
+    let p2_url = format!("/v1/projects/{}", p2_name);
     let project: Project = project_get(&client, &p2_url).await;
     assert_eq!(project.identity.name, p2_name);
 
     // Verify the list of Projects.
     let projects = NexusRequest::iter_collection_authn::<Project>(
         &client,
-        &format!("/v1/projects?organization={}", org_name),
+        "/v1/projects",
         "",
         None,
     )
@@ -61,26 +60,8 @@ async fn test_projects(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(projects[0].identity.name, p2_name);
     assert_eq!(projects[1].identity.name, p1_name);
 
-    // Create a second organization and make sure we can have two projects with
-    // the same name across organizations
-    // let org2_name = "test-org2";
-    // create_organization(&client, &org2_name).await;
-    // let org2_p1_id =
-    //     create_project(&client, &org2_name, &p1_name).await.identity.id;
-    // assert_ne!(org_p1_id, org2_p1_id);
-
-    // // Make sure the list projects results for the new org make sense
-    // let projects = NexusRequest::iter_collection_authn::<Project>(
-    //     &client,
-    //     &format!("/v1/projects?organization={}", org2_name),
-    //     "",
-    //     None,
-    // )
-    // .await
-    // .expect("failed to list projects")
-    // .all_items;
-    // assert_eq!(projects.len(), 1);
-    // assert_eq!(projects[0].identity.name, p1_name);
+    // TODO: test that we can make a project with the same name in another silo
+    // and when we list projects we only get the ones in each silo
 }
 
 async fn delete_project_default_subnet(
@@ -148,7 +129,7 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/v1/projects/{}?organization={}", name, org_name);
+    let url = format!("/v1/projects/{}", name);
 
     // Project deletion will fail while the subnet & VPC remain.
     create_project(&client, &org_name, &name).await;
@@ -176,7 +157,7 @@ async fn test_project_deletion_with_instance(
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/v1/projects/{}?organization={}", name, org_name);
+    let url = format!("/v1/projects/{}", name);
 
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&org_name, &name, &client).await;
@@ -232,7 +213,7 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/v1/projects/{}?organization={}", name, org_name);
+    let url = format!("/v1/projects/{}", name);
 
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&org_name, &name, &client).await;
@@ -261,7 +242,7 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let url = format!("/v1/projects/{}?organization={}", name, org_name);
+    let url = format!("/v1/projects/{}", name);
 
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&org_name, &name, &client).await;
@@ -333,8 +314,7 @@ async fn test_project_deletion_with_snapshot(
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let project_url =
-        format!("/v1/projects/{}?organization={}", name, org_name);
+    let project_url = format!("/v1/projects/{}", name);
 
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&org_name, &name, &client).await;
@@ -391,8 +371,7 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
-    let project_url =
-        format!("/v1/projects/{}?organization={}", name, org_name);
+    let project_url = format!("/v1/projects/{}", name);
 
     create_project(&client, &org_name, &name).await;
     delete_project_default_subnet(&org_name, &name, &client).await;

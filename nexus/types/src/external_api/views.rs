@@ -79,16 +79,6 @@ pub struct SamlIdentityProvider {
     pub public_cert: Option<String>,
 }
 
-// ORGANIZATIONS
-
-/// Client view of an [`Organization`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Organization {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    // Important: Silo ID does not get presented to user
-}
-
 // PROJECTS
 
 /// Client view of a [`Project`]

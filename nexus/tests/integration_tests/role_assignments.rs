@@ -278,8 +278,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let org_name = "test-org";
     let project_name = "test-project";
     create_project(client, org_name, project_name).await;
-    let project_url =
-        format!("/v1/projects/{}?organization={}", project_name, org_name);
+    let project_url = format!("/v1/projects/{}", project_name);
 
     struct ProjectRoleAssignmentTest {
         project_name: String,
@@ -289,10 +288,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let test_case = ProjectRoleAssignmentTest {
         project_name: String::from(project_name),
         project_url: project_url.clone(),
-        policy_url: format!(
-            "/v1/projects/{}/policy?organization={}",
-            project_name, org_name
-        ),
+        policy_url: format!("/v1/projects/{}/policy", project_name),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
         type RoleType = authz::ProjectRole;

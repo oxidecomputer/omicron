@@ -215,7 +215,7 @@ lazy_static! {
         },
         // Create a Project in the Organization
         SetupReq::Post {
-            url: &DEMO_ORG_PROJECTS_URL,
+            url: "/v1/projects",
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
             id_routes: vec![],
         },
