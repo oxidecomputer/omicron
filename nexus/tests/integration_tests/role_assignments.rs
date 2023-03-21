@@ -12,7 +12,6 @@ use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -279,7 +278,6 @@ async fn test_role_assignments_organization(
 ) {
     let client = &cptestctx.external_client;
     let org_name = "test-org";
-    create_organization(client, org_name).await;
     let org_url = format!("/v1/organizations/{}", org_name);
 
     struct OrganizationRoleAssignmentTest {
@@ -339,7 +337,6 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let org_name = "test-org";
     let project_name = "test-project";
-    create_organization(client, org_name).await;
     create_project(client, org_name, project_name).await;
     let project_url =
         format!("/v1/projects/{}?organization={}", project_name, org_name);

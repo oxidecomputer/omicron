@@ -13,7 +13,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -48,7 +47,6 @@ fn get_disks_url() -> String {
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id
 }

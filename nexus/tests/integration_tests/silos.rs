@@ -6,8 +6,8 @@ use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_local_user, create_organization, create_silo, grant_iam,
-    object_create, objects_list_page_authz,
+    create_local_user, create_project, create_silo, grant_iam, object_create,
+    objects_list_page_authz,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -22,7 +22,7 @@ use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::views::{
-    self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
+    self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use omicron_nexus::external_api::{params, shared};
 
@@ -122,18 +122,18 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     // Create organization with built-in user auth
     // Note: this currently goes to the built-in silo!
-    let org_name: Name = "someorg".parse().unwrap();
-    let new_org_in_default_silo =
-        create_organization(&client, org_name.as_str()).await;
+    let project_name = "someproj";
+    let new_proj_in_default_silo =
+        create_project(&client, "abc", project_name).await;
 
-    // Create an Organization of the same name in a different Silo to verify
+    // Create a Project of the same name in a different Silo to verify
     // that's possible.
-    let new_org_in_our_silo = NexusRequest::objects_post(
+    let new_proj_in_our_silo = NexusRequest::objects_post(
         client,
-        "/v1/organizations",
-        &params::OrganizationCreate {
+        "/v1/projects?organization=abc",
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
-                name: org_name.clone(),
+                name: project_name.parse().unwrap(),
                 description: String::new(),
             },
         },
@@ -141,34 +141,58 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
     .await
-    .expect("failed to create same-named Organization in a different Silo")
-    .parsed_body::<views::Organization>()
-    .expect("failed to parse new Organization");
+    .expect("failed to create same-named Project in a different Silo")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse new Project");
     assert_eq!(
-        new_org_in_default_silo.identity.name,
-        new_org_in_our_silo.identity.name
+        new_proj_in_default_silo.identity.name,
+        new_proj_in_our_silo.identity.name
     );
     assert_ne!(
-        new_org_in_default_silo.identity.id,
-        new_org_in_our_silo.identity.id
+        new_proj_in_default_silo.identity.id,
+        new_proj_in_our_silo.identity.id
     );
-    // Delete it so that we can delete the Silo later.
+    // delete default subnet from VPC so we can delete the VPC
     NexusRequest::object_delete(
         client,
-        &format!("/v1/organizations/{}", org_name),
+        &format!(
+            "/v1/vpc-subnets/default?organization=abc&project={}&vpc=default",
+            project_name
+        ),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
     .await
-    .expect("failed to delete test Organization");
+    .expect("failed to delete test Vpc");
+    // delete VPC from project so we can delete the project
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/vpcs/default?organization=abc&project={}", project_name),
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to delete test Vpc");
 
-    // Verify GET /organizations works with built-in user auth
-    let organizations =
-        objects_list_page_authz::<Organization>(client, "/v1/organizations")
-            .await
-            .items;
-    assert_eq!(organizations.len(), 1);
-    assert_eq!(organizations[0].identity.name, "someorg");
+    // Delete it so that we can delete the Silo later.
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/projects/{}?organization=abc", project_name),
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to delete test Project");
+
+    // Verify GET /v1/projects works with built-in user auth
+    let projects = objects_list_page_authz::<Project>(
+        client,
+        "/v1/projects?organization=abc",
+    )
+    .await
+    .items;
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].identity.name, "someproj");
 
     // TODO: uncomment when silo users can have role assignments
     /*
@@ -183,8 +207,8 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(organizations.len(), 0);
     */
 
-    // Verify DELETE doesn't work if organizations exist
-    // TODO: put someorg in discoverable silo, not built-in
+    // Verify DELETE doesn't work if projects exist
+    // TODO: put someproj in discoverable silo, not built-in
     NexusRequest::expect_failure(
         &client,
         StatusCode::BAD_REQUEST,
@@ -197,11 +221,14 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .expect("failed to make request");
 
     // Delete organization
-    NexusRequest::object_delete(&client, &"/v1/organizations/someorg")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to make request");
+    NexusRequest::object_delete(
+        &client,
+        &"/v1/projects/someproj?organization=abc",
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to make request");
 
     // Verify silo DELETE works
     NexusRequest::object_delete(&client, &"/v1/system/silos/discoverable")
@@ -286,23 +313,23 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(group_memberships.len(), 1);
 
-    // Create an organization
+    // Create a project
     let _org = NexusRequest::objects_post(
         client,
-        "/v1/organizations",
-        &params::OrganizationCreate {
+        "/v1/projects?organization=abc",
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
-                name: "myorg".parse().unwrap(),
-                description: "some org".into(),
+                name: "myproj".parse().unwrap(),
+                description: "some proj".into(),
             },
         },
     )
     .authn_as(AuthnMode::SiloUser(admin_group_user.id()))
     .execute()
     .await
-    .expect("failed to create Organization")
-    .parsed_body::<views::Organization>()
-    .expect("failed to parse as Organization");
+    .expect("failed to create Project")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse as Project");
 }
 
 // Test listing providers

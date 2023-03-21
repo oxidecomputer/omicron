@@ -24,7 +24,7 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{
-    Organization, Project, Silo, Vpc, VpcRouter,
+    Project, Silo, Vpc, VpcRouter,
 };
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
@@ -259,23 +259,6 @@ pub async fn create_local_user(
         client,
         &url,
         &params::UserCreate { external_id: username.to_owned(), password },
-    )
-    .await
-}
-
-pub async fn create_organization(
-    client: &ClientTestContext,
-    organization_name: &str,
-) -> Organization {
-    object_create(
-        client,
-        "/v1/organizations",
-        &params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: organization_name.parse().unwrap(),
-                description: "an org".to_string(),
-            },
-        },
     )
     .await
 }

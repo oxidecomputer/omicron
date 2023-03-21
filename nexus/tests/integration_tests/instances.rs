@@ -34,6 +34,7 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
+use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -50,9 +51,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
-use nexus_test_utils::resource_helpers::{
-    create_instance, create_organization, create_project,
-};
+use nexus_test_utils::resource_helpers::{create_instance, create_project};
 use nexus_test_utils_macros::nexus_test;
 
 type ControlPlaneTestContext =
@@ -83,7 +82,6 @@ fn default_vpc_subnets_url() -> String {
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
     project.identity.id
 }
@@ -95,7 +93,6 @@ async fn test_instances_access_before_create_returns_not_found(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    create_organization(&client, ORGANIZATION_NAME).await;
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // List instances.  There aren't any yet.
@@ -145,7 +142,6 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     populate_ip_pool(&client, "default", None).await;
-    let org = create_organization(&client, ORGANIZATION_NAME).await;
     let project = create_project(client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create an instance.
@@ -178,8 +174,8 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project={}&organization={}",
-            instance.identity.name, project.identity.name, org.identity.id
+            "/v1/instances/{}?project={}&organization=abc",
+            instance.identity.name, project.identity.name
         )
         .as_str(),
     )
@@ -190,8 +186,8 @@ async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
     let fetched_instance = instance_get(
         &client,
         format!(
-            "/v1/instances/{}?project={}&organization={}",
-            instance.identity.name, project.identity.name, org.identity.name
+            "/v1/instances/{}?project={}&organization=abc",
+            instance.identity.name, project.identity.name
         )
         .as_str(),
     )
@@ -535,8 +531,6 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Create an IP pool and project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    let organization_id =
-        create_organization(&client, ORGANIZATION_NAME).await.identity.id;
     let project_id = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME)
         .await
         .identity
@@ -561,7 +555,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         )
     };
     oximeter.force_collect().await;
-    for id in &[organization_id, project_id] {
+    for id in &[*SILO_ID, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
@@ -629,7 +623,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
         expected_ram
     );
     oximeter.force_collect().await;
-    for id in &[organization_id, project_id] {
+    for id in &[*SILO_ID, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
@@ -670,7 +664,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(virtual_provisioning_collection.cpus_provisioned, 0);
     assert_eq!(virtual_provisioning_collection.ram_provisioned.to_bytes(), 0);
     oximeter.force_collect().await;
-    for id in &[organization_id, project_id] {
+    for id in &[*SILO_ID, project_id] {
         assert_eq!(
             query_for_latest_metric(
                 client,
@@ -1827,7 +1821,6 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    create_organization(&client, ORGANIZATION_NAME).await;
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two interfaces, in the same VPC Subnet. This will trigger an
@@ -2310,7 +2303,6 @@ async fn test_cannot_attach_nine_disks_to_instance(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_organization(&client, org_name).await;
     create_project(client, org_name, project_name).await;
 
     // Make 9 disks
@@ -2803,7 +2795,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     let client = &cptestctx.external_client;
 
     // Create test organization and projects.
-    create_organization(&client, ORGANIZATION_NAME).await;
     let _ = create_project(&client, ORGANIZATION_NAME, PROJECT_NAME).await;
 
     // Create two IP pools.

@@ -10,7 +10,6 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
@@ -80,7 +79,6 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     .expect("Expected 404");
 
     // create the project, now we expect an empty list
-    create_organization(client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let images = NexusRequest::object_get(client, &images_url)
@@ -112,7 +110,6 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(images[0].identity.name, "alpine-edge");
 
     // create another project, which is empty until we promote the image to global
-    create_organization(client, ORG_NAME_2).await;
     create_project(client, ORG_NAME_2, PROJECT_NAME_2).await;
 
     let project_2_images_url = get_images_url(ORG_NAME_2, PROJECT_NAME_2);
@@ -134,7 +131,6 @@ async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
 
     // need a project to post to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
@@ -173,7 +169,6 @@ async fn test_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
 
     // need a project to post to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let image_create_params = get_image_create(params::ImageSource::Url {
@@ -207,7 +202,6 @@ async fn test_image_create_bad_content_length(
     DiskTest::new(&cptestctx).await;
 
     // need a project to post to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
@@ -248,7 +242,6 @@ async fn test_image_create_bad_image_size(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
 
     // need a project to post to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
@@ -290,7 +283,6 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
     DiskTest::new(&cptestctx).await;
 
     // need a project to post both disk and image to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();
@@ -346,7 +338,6 @@ async fn test_make_disk_from_image_too_small(
     DiskTest::new(&cptestctx).await;
 
     // need a project to post both disk and image to
-    create_organization(&client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
 
     let server = ServerBuilder::new().run().unwrap();

@@ -12,7 +12,6 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
@@ -593,7 +592,6 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     const ORG_NAME: &str = "myorg";
     const PROJECT_NAME: &str = "myproj";
     const INSTANCE_NAME: &str = "myinst";
-    create_organization(client, ORG_NAME).await;
     create_project(client, ORG_NAME, PROJECT_NAME).await;
     let instance =
         create_instance(client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;

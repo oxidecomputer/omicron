@@ -1062,7 +1062,6 @@ pub mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
@@ -1084,7 +1083,6 @@ pub mod test {
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         populate_ip_pool(&client, "default", None).await;
-        create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
         project.identity.id

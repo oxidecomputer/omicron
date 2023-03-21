@@ -14,9 +14,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
-use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
@@ -86,7 +86,6 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, organization_name).await;
     create_project(&client, organization_name, project_name).await;
     let url_instances = format!(
         "/v1/instances?organization={}&project={}",

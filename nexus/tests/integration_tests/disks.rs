@@ -23,7 +23,6 @@ use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -87,7 +86,6 @@ fn get_disk_detach_url(instance_name: &str) -> String {
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, ORG_NAME).await;
     let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
     project.identity.id
 }
@@ -914,7 +912,6 @@ async fn test_disk_virtual_provisioning_collection(
     let _test = DiskTest::new(&cptestctx).await;
 
     populate_ip_pool(&client, "default", None).await;
-    let org_id = create_organization(&client, ORG_NAME).await.identity.id;
     let project_id1 =
         create_project(client, ORG_NAME, PROJECT_NAME).await.identity.id;
     let project_id2 =
@@ -936,16 +933,6 @@ async fn test_disk_virtual_provisioning_collection(
     );
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id2)
-        .await
-        .unwrap();
-    assert_eq!(
-        virtual_provisioning_collection
-            .virtual_disk_bytes_provisioned
-            .to_bytes(),
-        0
-    );
-    let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, org_id)
         .await
         .unwrap();
     assert_eq!(
@@ -1019,14 +1006,6 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, org_id)
-        .await
-        .unwrap();
-    assert_eq!(
-        virtual_provisioning_collection.virtual_disk_bytes_provisioned.0,
-        disk_size
-    );
-    let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
@@ -1087,7 +1066,7 @@ async fn test_disk_virtual_provisioning_collection(
         disk_size
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, org_id)
+        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
     assert_eq!(
@@ -1127,7 +1106,7 @@ async fn test_disk_virtual_provisioning_collection(
         0
     );
     let virtual_provisioning_collection = datastore
-        .virtual_provisioning_collection_get(&opctx, org_id)
+        .virtual_provisioning_collection_get(&opctx, *SILO_ID)
         .await
         .unwrap();
     assert_eq!(

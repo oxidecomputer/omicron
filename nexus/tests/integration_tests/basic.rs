@@ -22,7 +22,6 @@ use uuid::Uuid;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 
@@ -32,9 +31,6 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     struct TestCase<'a> {
         method: http::Method,
@@ -149,8 +145,6 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
 async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
     let projects_url = "/v1/projects?organization=test-org";
 
     // Verify that there are no projects to begin with.
@@ -466,9 +460,6 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-
     // Verify that there are no projects to begin with.
     let projects_url = "/v1/projects?organization=test-org";
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
@@ -484,7 +475,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         // a uuid though, so we'll use a prefix.
         let mut name = Uuid::new_v4().to_string();
         name.insert_str(0, "project-");
-        let project = create_project(&client, org_name, &name).await;
+        let project = create_project(&client, "test-org", &name).await;
         projects_created.push(project.identity);
     }
 

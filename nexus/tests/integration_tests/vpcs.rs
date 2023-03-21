@@ -12,7 +12,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc, create_vpc_with_error,
+    create_project, create_vpc, create_vpc_with_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -46,7 +46,6 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    create_organization(&client, &ORG_NAME).await;
     let vpcs_url =
         format!("/v1/vpcs?organization={}&project={}", ORG_NAME, PROJECT_NAME);
     let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME).await;

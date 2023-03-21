@@ -5,9 +5,7 @@
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
-};
+use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
@@ -29,7 +27,6 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
 
     // Create a project that we'll use for testing.
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
     create_project(&client, &org_name, &project_name).await;
 

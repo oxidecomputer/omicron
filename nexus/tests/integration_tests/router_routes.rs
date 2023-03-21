@@ -18,7 +18,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_router, create_vpc,
+    create_project, create_router, create_vpc,
 };
 
 type ControlPlaneTestContext =
@@ -47,7 +47,6 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
         )
     };
 
-    create_organization(&client, organization_name).await;
     let _ = create_project(&client, organization_name, project_name).await;
 
     // Create a vpc

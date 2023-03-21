@@ -1593,7 +1593,6 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
@@ -1814,7 +1813,6 @@ mod test {
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
         create_project(client, ORG_NAME, PROJECT_NAME).await;
         create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await.identity.id
     }

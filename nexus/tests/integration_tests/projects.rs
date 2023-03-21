@@ -10,8 +10,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_organization, create_project, create_vpc,
-    object_create, populate_ip_pool, project_get, DiskTest,
+    create_disk, create_project, create_vpc, object_create, populate_ip_pool,
+    project_get, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ByteCount;
@@ -145,7 +145,6 @@ async fn test_project_deletion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -174,7 +173,6 @@ async fn test_project_deletion_with_instance(
 
     let org_name = "test-org";
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -231,7 +229,6 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
     let _test = DiskTest::new(&cptestctx).await;
 
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -261,7 +258,6 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -334,7 +330,6 @@ async fn test_project_deletion_with_snapshot(
     let _test = DiskTest::new(&cptestctx).await;
 
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -393,7 +388,6 @@ async fn test_project_deletion_with_vpc(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";

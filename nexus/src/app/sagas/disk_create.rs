@@ -700,7 +700,6 @@ pub(crate) mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
@@ -720,7 +719,6 @@ pub(crate) mod test {
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
         let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
         project.identity.id
     }
