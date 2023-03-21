@@ -32,11 +32,130 @@ pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 const TICK_INTERVAL: Duration = Duration::from_millis(30);
 const MAX_RECORDED_EVENTS: u32 = 10000;
 
+/// The core of a runner that handles events and redraws the screen
+///
+/// The `RunnerCore` can be used by both the `Runner` and debugger
+pub struct RunnerCore {
+    /// The UI that handles input events and renders widgets to the screen
+    pub screen: Screen,
+
+    // All global state managed by wicket.
+    //
+    // This state is updated from user input and events from downstream
+    // services.
+    pub state: State,
+
+    // The terminal we are rendering to
+    pub terminal: Term,
+
+    // Our friendly neighborhood logger
+    log: slog::Logger,
+}
+
+impl RunnerCore {
+    /// Resize and draw the initial screen before handling `Event`s
+    pub fn init_screen(&mut self) -> anyhow::Result<()> {
+        // Size the initial screen
+        let rect = self.terminal.get_frame().size();
+        self.screen.resize(&mut self.state, rect.width, rect.height);
+
+        // Draw the initial screen
+        self.screen.draw(&self.state, &mut self.terminal)
+    }
+
+    /// Handle an individual `Event`
+    ///
+    /// Return true on `Event::Shutdown`, false otherwise.
+    pub fn handle_event(
+        &mut self,
+        event: Event,
+        recorder: Option<&mut Recorder>,
+        wicketd: Option<&WicketdHandle>,
+    ) -> anyhow::Result<bool> {
+        match event {
+            Event::Tick => {
+                // We want to periodically to update the status bar
+                // By default this is every 1s.
+                let redraw =
+                    self.state.service_status.advance_all(TICK_INTERVAL);
+                let action = self.screen.on(&mut self.state, Cmd::Tick);
+                let already_drawn =
+                    action.as_ref().map_or(false, |a| a.should_redraw());
+                self.handle_action(action, wicketd)?;
+                if redraw && !already_drawn {
+                    self.screen.draw(&self.state, &mut self.terminal)?;
+                }
+            }
+            Event::Term(cmd) => {
+                if cmd == Cmd::DumpSnapshot {
+                    // TODO: Show a graphical indicator?
+                    if let Some(recorder) = recorder {
+                        if let Err(e) = recorder.dump() {
+                            error!(self.log, "{}", e);
+                        }
+                    }
+                } else {
+                    let action = self.screen.on(&mut self.state, cmd);
+                    self.handle_action(action, wicketd)?;
+                }
+            }
+            Event::Resize { width, height } => {
+                self.screen.resize(&mut self.state, width, height);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::Inventory { inventory, mgs_last_seen } => {
+                self.state.service_status.reset_mgs(mgs_last_seen);
+                self.state.service_status.reset_wicketd(Duration::ZERO);
+                self.state.inventory.update_inventory(inventory)?;
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::UpdateArtifacts { system_version, artifacts } => {
+                self.state.service_status.reset_wicketd(Duration::ZERO);
+                self.state
+                    .update_state
+                    .update_artifacts(system_version, artifacts);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::UpdateLog(logs) => {
+                self.state.service_status.reset_wicketd(Duration::ZERO);
+                debug!(self.log, "{:#?}", logs);
+                self.state.update_state.update_logs(logs);
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Event::Shutdown => return Ok(true),
+        }
+        Ok(false)
+    }
+
+    fn handle_action(
+        &mut self,
+        action: Option<Action>,
+        wicketd: Option<&WicketdHandle>,
+    ) -> anyhow::Result<()> {
+        let Some(action) = action else {
+         return Ok(());
+        };
+
+        match action {
+            Action::Redraw => {
+                self.screen.draw(&self.state, &mut self.terminal)?;
+            }
+            Action::Update(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    wicketd.tx.blocking_send(wicketd::Request::StartUpdate(
+                        component_id,
+                    ))?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The `Runner` owns the main UI thread, and starts a tokio runtime
 /// for interaction with downstream services.
 pub struct Runner {
-    /// The UI that handles input events and renders widgets to the screen
-    screen: Screen,
+    core: RunnerCore,
 
     // The [`Runner`]'s main_loop is purely single threaded. Every interaction
     // with the outside world is via channels. All input from the outside world
@@ -46,12 +165,6 @@ pub struct Runner {
     // We save a copy here so we can hand it out to event producers
     events_tx: UnboundedSender<Event>,
 
-    // All global state managed by wicket.
-    //
-    // This state is updated from user input and events from downstream
-    // services.
-    state: State,
-
     // A mechanism for interacting with `wicketd`
     #[allow(unused)]
     wicketd: WicketdHandle,
@@ -59,12 +172,6 @@ pub struct Runner {
     // When [`Runner::run`] is called, this is extracted and moved into a tokio
     // task.
     wicketd_manager: Option<WicketdManager>,
-
-    // The terminal we are rendering to
-    terminal: Term,
-
-    // Our friendly neighborhood logger
-    log: slog::Logger,
 
     // The tokio runtime for everything outside the main thread
     tokio_rt: tokio::runtime::Runtime,
@@ -77,24 +184,25 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let state = State::new(&log);
         let backend = CrosstermBackend::new(stdout());
-        let terminal = Terminal::new(backend).unwrap();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
-        Runner {
+        let core = RunnerCore {
             screen: Screen::new(&log),
+            state: State::new(&log),
+            terminal: Terminal::new(backend).unwrap(),
+            log,
+        };
+        Runner {
+            core,
             events_rx,
             events_tx,
-            state,
             wicketd,
             wicketd_manager: Some(wicketd_manager),
-            terminal,
-            log,
             tokio_rt,
             recorder: Recorder::new(MAX_RECORDED_EVENTS),
         }
@@ -103,94 +211,28 @@ impl Runner {
     pub fn run(&mut self) -> anyhow::Result<()> {
         self.start_tokio_runtime();
         enable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), EnterAlternateScreen,)?;
+        execute!(self.core.terminal.backend_mut(), EnterAlternateScreen,)?;
         self.main_loop()?;
         disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen,)?;
+        execute!(self.core.terminal.backend_mut(), LeaveAlternateScreen,)?;
         Ok(())
     }
 
     fn main_loop(&mut self) -> anyhow::Result<()> {
-        info!(self.log, "Starting main loop");
-
-        // Size the initial screen
-        let rect = self.terminal.get_frame().size();
-        self.screen.resize(&mut self.state, rect.width, rect.height);
-
-        // Draw the initial screen
-        self.screen.draw(&self.state, &mut self.terminal)?;
+        info!(self.core.log, "Starting main loop");
+        self.core.init_screen()?;
 
         loop {
             // unwrap is safe because we always hold onto a UnboundedSender
             let event = self.events_rx.blocking_recv().unwrap();
-            self.recorder.push(&self.state, event.clone());
-            match event {
-                Event::Tick => {
-                    // We want to periodically to update the status bar
-                    // By default this is every 1s.
-                    let redraw =
-                        self.state.service_status.advance_all(TICK_INTERVAL);
-                    let action = self.screen.on(&mut self.state, Cmd::Tick);
-                    let already_drawn =
-                        action.as_ref().map_or(false, |a| a.should_redraw());
-                    self.handle_action(action)?;
-                    if redraw && !already_drawn {
-                        self.screen.draw(&self.state, &mut self.terminal)?;
-                    }
-                }
-                Event::Term(cmd) => {
-                    if cmd == Cmd::DumpSnapshot {
-                        // TODO: Show a graphical indicator?
-                        if let Err(e) = self.recorder.dump() {
-                            error!(self.log, "{}", e);
-                        }
-                    } else {
-                        let action = self.screen.on(&mut self.state, cmd);
-                        self.handle_action(action)?;
-                    }
-                }
-                Event::Resize { width, height } => {
-                    self.screen.resize(&mut self.state, width, height);
-                    self.screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Event::Inventory { inventory, mgs_last_seen } => {
-                    self.state.service_status.reset_mgs(mgs_last_seen);
-                    self.state.service_status.reset_wicketd(Duration::ZERO);
-                    self.state.inventory.update_inventory(inventory)?;
-                    self.screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Event::UpdateArtifacts { system_version, artifacts } => {
-                    self.state.service_status.reset_wicketd(Duration::ZERO);
-                    self.state
-                        .update_state
-                        .update_artifacts(system_version, artifacts);
-                    self.screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Event::UpdateLog(logs) => {
-                    self.state.service_status.reset_wicketd(Duration::ZERO);
-                    debug!(self.log, "{:#?}", logs);
-                    self.state.update_state.update_logs(logs);
-                    self.screen.draw(&self.state, &mut self.terminal)?;
-                }
-                Event::Shutdown => break,
-            }
-        }
-        Ok(())
-    }
-
-    fn handle_action(&mut self, action: Option<Action>) -> anyhow::Result<()> {
-        let Some(action) = action else {
-         return Ok(());
-        };
-
-        match action {
-            Action::Redraw => {
-                self.screen.draw(&self.state, &mut self.terminal)?;
-            }
-            Action::Update(component_id) => {
-                self.wicketd.tx.blocking_send(
-                    wicketd::Request::StartUpdate(component_id),
-                )?;
+            self.recorder.push(&self.core.state, event.clone());
+            if self.core.handle_event(
+                event,
+                Some(&mut self.recorder),
+                Some(&mut self.wicketd),
+            )? {
+                // Event::Shutdown received
+                break;
             }
         }
         Ok(())
@@ -198,7 +240,7 @@ impl Runner {
 
     fn start_tokio_runtime(&mut self) {
         let events_tx = self.events_tx.clone();
-        let log = self.log.clone();
+        let log = self.core.log.clone();
         let wicketd_manager = self.wicketd_manager.take().unwrap();
         self.tokio_rt.block_on(async {
             run_event_listener(log.clone(), events_tx).await;
