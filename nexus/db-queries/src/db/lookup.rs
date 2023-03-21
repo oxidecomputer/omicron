@@ -43,8 +43,8 @@ use uuid::Uuid;
 // resource.  They use this builder interface to _select_ a specific resource.
 // Example selection paths:
 //
-// - From the root, select Organization with name "org1", then Project with name
-//   "proj1", then Instance with name "instance1".
+// - From the root, select Project with name "proj1", then Instance with name
+//   "instance1".
 //
 // - From the root, select Project with id 123, then Instance "instance1".
 //
@@ -64,16 +64,11 @@ use uuid::Uuid;
 //                  +-----+
 //                  |
 //                  v
-//              Organization::Name(r, "org1")
-//                                 |
-//                      +----------+
-//                      |
-//                      v
-//                  Silo::PrimaryKey(r, id)
-//                                   |
-//                      +------------+
-//                      |
-//                      v
+//               Silo::PrimaryKey(r, id)
+//                                |
+//                   +------------+
+//                   |
+//                   v
 //                  Root
 //                      lookup_root: LookupPath (references OpContext and
 //                                               DataStore)
@@ -84,9 +79,7 @@ use uuid::Uuid;
 //
 //     let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 //         LookupPath::new(opctx, datastore)   // returns LookupPath
-//             .organization_name("org1")      // consumes LookupPath,
-//                                             //   returns Organization
-//             .project_name("proj1")          // consumes Organization,
+//             .project_name("proj1")          // consumes LookupPath,
 //                                                  returns Project
 //             .instance_name("instance1")     // consumes Project,
 //                                                  returns Instance

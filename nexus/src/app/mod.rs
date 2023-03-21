@@ -497,7 +497,7 @@ impl Nexus {
     ///     project_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
+    ///     let (.., _authz_proj) = LookupPath::new(opctx, datastore)
     ///         .project_name(project_name)
     ///         .lookup_for(authz::Action::ListChildren)
     ///         .await?;

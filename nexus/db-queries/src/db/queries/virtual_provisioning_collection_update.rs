@@ -21,27 +21,8 @@ use diesel::{
     NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
-    all_collections, do_update, parent_org, parent_silo,
+    all_collections, do_update, parent_silo,
 };
-
-#[derive(Subquery, QueryId)]
-#[subquery(name = parent_org)]
-struct ParentOrg {
-    query: Box<dyn CteQuery<SqlType = parent_org::SqlType>>,
-}
-
-impl ParentOrg {
-    fn new(project_id: uuid::Uuid) -> Self {
-        use crate::db::schema::project::dsl;
-        Self {
-            query: Box::new(
-                dsl::project.filter(dsl::id.eq(project_id)).select((
-                    ExpressionAlias::new::<parent_org::dsl::id>(dsl::silo_id),
-                )),
-            ),
-        }
-    }
-}
 
 #[derive(Subquery, QueryId)]
 #[subquery(name = parent_silo)]
@@ -50,17 +31,13 @@ struct ParentSilo {
 }
 
 impl ParentSilo {
-    fn new(parent_org: &ParentOrg) -> Self {
-        use crate::db::schema::organization::dsl;
+    fn new(project_id: uuid::Uuid) -> Self {
+        use crate::db::schema::project::dsl;
         Self {
             query: Box::new(
-                dsl::organization
-                    .filter(dsl::id.eq_any(
-                        parent_org.query_source().select(parent_org::id),
-                    ))
-                    .select((ExpressionAlias::new::<parent_silo::dsl::id>(
-                        dsl::silo_id,
-                    ),)),
+                dsl::project.filter(dsl::id.eq(project_id)).select((
+                    ExpressionAlias::new::<parent_silo::dsl::id>(dsl::silo_id),
+                )),
             ),
         }
     }
@@ -75,7 +52,6 @@ struct AllCollections {
 impl AllCollections {
     fn new(
         project_id: uuid::Uuid,
-        parent_org: &ParentOrg,
         parent_silo: &ParentSilo,
         fleet_id: uuid::Uuid,
     ) -> Self {
@@ -86,11 +62,6 @@ impl AllCollections {
                 diesel::select((ExpressionAlias::new::<
                     all_collections::dsl::id,
                 >(project_id),))
-                .union(parent_org.query_source().select((
-                    ExpressionAlias::new::<all_collections::dsl::id>(
-                        parent_org::id,
-                    ),
-                )))
                 .union(parent_silo.query_source().select((
                     ExpressionAlias::new::<all_collections::dsl::id>(
                         parent_silo::id,
@@ -237,7 +208,6 @@ impl VirtualProvisioningCollectionUpdate {
     //
     // Propagated updates include:
     // - Project
-    // - Organization
     // - Silo
     // - Fleet
     //
@@ -261,11 +231,9 @@ impl VirtualProvisioningCollectionUpdate {
         <V as diesel::AsChangeset>::Changeset:
             QueryFragment<Pg> + Send + 'static,
     {
-        let parent_org = ParentOrg::new(project_id);
-        let parent_silo = ParentSilo::new(&parent_org);
+        let parent_silo = ParentSilo::new(project_id);
         let all_collections = AllCollections::new(
             project_id,
-            &parent_org,
             &parent_silo,
             *crate::db::fixed_data::FLEET_ID,
         );
@@ -281,7 +249,6 @@ impl VirtualProvisioningCollectionUpdate {
         );
 
         let cte = CteBuilder::new()
-            .add_subquery(parent_org)
             .add_subquery(parent_silo)
             .add_subquery(all_collections)
             .add_subquery(do_update)
@@ -317,7 +284,7 @@ impl VirtualProvisioningCollectionUpdate {
                 .on_conflict_do_nothing()
                 .returning(virtual_provisioning_resource::all_columns),
             ),
-            // Within this project, org, silo, fleet...
+            // Within this project, silo, fleet...
             project_id,
             // ... We add the disk usage.
             (
@@ -346,7 +313,7 @@ impl VirtualProvisioningCollectionUpdate {
                     .filter(resource_dsl::id.eq(id))
                     .returning(virtual_provisioning_resource::all_columns),
             ),
-            // Within this project, org, silo, fleet...
+            // Within this project, silo, fleet...
             project_id,
             // ... We subtract the disk usage.
             (
@@ -386,7 +353,7 @@ impl VirtualProvisioningCollectionUpdate {
                 .on_conflict_do_nothing()
                 .returning(virtual_provisioning_resource::all_columns),
             ),
-            // Within this project, org, silo, fleet...
+            // Within this project, silo, fleet...
             project_id,
             // ... We update the resource usage.
             (
@@ -417,7 +384,7 @@ impl VirtualProvisioningCollectionUpdate {
                     .filter(resource_dsl::id.eq(id))
                     .returning(virtual_provisioning_resource::all_columns),
             ),
-            // Within this project, org, silo, fleet...
+            // Within this project, silo, fleet...
             project_id,
             // ... We update the resource usage.
             (
