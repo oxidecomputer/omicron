@@ -450,7 +450,6 @@ pub(crate) mod test {
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
@@ -462,13 +461,11 @@ pub(crate) mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         populate_ip_pool(&client, "default", None).await;
-        create_organization(&client, ORG_NAME).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -505,7 +502,7 @@ pub(crate) mod test {
     ) -> authz::Project {
         let nexus = &cptestctx.server.apictx().nexus;
         let project_selector =
-            params::ProjectSelector::new(None, NameOrId::Id(project_id));
+            params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
             .project_lookup(&opctx, &project_selector)

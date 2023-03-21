@@ -1062,7 +1062,6 @@ pub mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
@@ -1078,15 +1077,13 @@ pub mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const INSTANCE_NAME: &str = "my-instance";
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         populate_ip_pool(&client, "default", None).await;
-        create_organization(&client, ORG_NAME).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
-        create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
     }
 
@@ -1418,11 +1415,13 @@ pub mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let instance_selector = params::InstanceSelector::new(
-            Some(ORG_NAME.to_string().try_into().unwrap()),
-            Some(PROJECT_NAME.to_string().try_into().unwrap()),
-            INSTANCE_NAME.to_string().try_into().unwrap(),
-        );
+        let project_selector = params::ProjectSelector {
+            project: PROJECT_NAME.to_string().try_into().unwrap(),
+        };
+        let instance_selector = params::InstanceSelector {
+            project_selector: Some(project_selector),
+            instance: INSTANCE_NAME.to_string().try_into().unwrap(),
+        };
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();

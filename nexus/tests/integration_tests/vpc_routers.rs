@@ -10,9 +10,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_router;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
-};
+use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -28,20 +26,15 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let organization_name = "test-org";
     let project_name = "springfield-squidport";
-    create_organization(&client, organization_name).await;
-    let _ = create_project(&client, organization_name, project_name).await;
+    let _ = create_project(&client, project_name).await;
 
     // Create a VPC.
     let vpc_name = "vpc1";
-    let vpc =
-        create_vpc(&client, organization_name, project_name, vpc_name).await;
+    let vpc = create_vpc(&client, project_name, vpc_name).await;
 
-    let routers_url = format!(
-        "/v1/vpc-routers?organization={}&project={}&vpc={}",
-        organization_name, project_name, vpc_name
-    );
+    let routers_url =
+        format!("/v1/vpc-routers?project={}&vpc={}", project_name, vpc_name);
 
     // get routers should have only the system router created w/ the VPC
     let routers =
@@ -51,8 +44,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     let router_name = "router1";
     let router_url = format!(
-        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
-        router_name, organization_name, project_name, vpc_name
+        "/v1/vpc-routers/{}?project={}&vpc={}",
+        router_name, project_name, vpc_name
     );
 
     // fetching a particular router should 404
@@ -71,14 +64,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
 
     // Create a VPC Router.
-    let router = create_router(
-        &client,
-        organization_name,
-        project_name,
-        vpc_name,
-        router_name,
-    )
-    .await;
+    let router =
+        create_router(&client, project_name, vpc_name, router_name).await;
     assert_eq!(router.identity.name, router_name);
     assert_eq!(router.identity.description, "router description");
     assert_eq!(router.vpc_id, vpc.identity.id);
@@ -120,8 +107,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     let router2_name = "router2";
     let router2_url = format!(
-        "/v1/vpc-routers/{}?organization={}&project={}&vpc={}",
-        router2_name, organization_name, project_name, vpc_name
+        "/v1/vpc-routers/{}?project={}&vpc={}",
+        router2_name, project_name, vpc_name
     );
 
     // second router 404s before it's created
@@ -140,14 +127,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-router with name \"router2\"");
 
     // create second custom router
-    let router2 = create_router(
-        client,
-        organization_name,
-        project_name,
-        vpc_name,
-        router2_name,
-    )
-    .await;
+    let router2 =
+        create_router(client, project_name, vpc_name, router2_name).await;
     assert_eq!(router2.identity.name, router2_name);
     assert_eq!(router2.vpc_id, vpc.identity.id);
     assert_eq!(router2.kind, VpcRouterKind::Custom);
@@ -197,8 +178,8 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "not found: vpc-router with name \"router1\"");
 
     let router_url = format!(
-        "/v1/vpc-routers/new-name?organization={}&project={}&vpc={}",
-        organization_name, project_name, vpc_name
+        "/v1/vpc-routers/new-name?project={}&vpc={}",
+        project_name, vpc_name
     );
 
     // fetching by new name works
@@ -264,17 +245,10 @@ async fn test_vpc_routers(cptestctx: &ControlPlaneTestContext) {
 
     // Creating a router with the same name in a different VPC is allowed
     let vpc2_name = "vpc2";
-    let vpc2 =
-        create_vpc(&client, organization_name, project_name, vpc2_name).await;
+    let vpc2 = create_vpc(&client, project_name, vpc2_name).await;
 
-    let router_same_name = create_router(
-        &client,
-        organization_name,
-        project_name,
-        vpc2_name,
-        router2_name,
-    )
-    .await;
+    let router_same_name =
+        create_router(&client, project_name, vpc2_name, router2_name).await;
     assert_eq!(router_same_name.identity.name, router2_name);
     assert_eq!(router_same_name.vpc_id, vpc2.identity.id);
 }

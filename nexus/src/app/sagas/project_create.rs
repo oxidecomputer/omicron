@@ -22,7 +22,7 @@ use steno::ActionError;
 pub struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
-    pub authz_org: authz::Organization,
+    pub authz_silo: authz::Silo,
 }
 
 // project create saga: actions
@@ -82,10 +82,10 @@ async fn spc_create_record(
     );
 
     let db_project =
-        db::model::Project::new(params.authz_org.id(), params.project_create);
+        db::model::Project::new(params.authz_silo.id(), params.project_create);
     osagactx
         .datastore()
-        .project_create(&opctx, &params.authz_org, db_project)
+        .project_create(&opctx, db_project)
         .await
         .map_err(ActionError::action_failed)
 }
@@ -100,7 +100,7 @@ async fn spc_create_record_undo(
         &params.serialized_authn,
     );
 
-    let (_authz_project, project) =
+    let (.., project) =
         sagactx.lookup::<(authz::Project, db::model::Project)>("project")?;
 
     let (.., authz_project, project) =
@@ -163,31 +163,15 @@ mod test {
         OptionalExtension,
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
-    use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
-    use nexus_test_utils::resource_helpers::create_organization;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::NameOrId;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const ORG_NAME: &str = "test-org";
-
-    async fn create_org(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
-        let org = create_organization(&client, ORG_NAME).await;
-        org.identity.id
-    }
-
     // Helper for creating project create parameters
-    fn new_test_params(
-        opctx: &OpContext,
-        authz_org: authz::Organization,
-    ) -> Params {
+    fn new_test_params(opctx: &OpContext, authz_silo: authz::Silo) -> Params {
         Params {
             serialized_authn: Serialized::for_opctx(opctx),
             project_create: params::ProjectCreate {
@@ -196,7 +180,7 @@ mod test {
                     description: "My Project".to_string(),
                 },
             },
-            authz_org,
+            authz_silo,
         }
     }
 
@@ -205,24 +189,6 @@ mod test {
             cptestctx.logctx.log.new(o!()),
             cptestctx.server.apictx().nexus.datastore().clone(),
         )
-    }
-
-    async fn get_authz_org(
-        cptestctx: &ControlPlaneTestContext,
-        org_id: Uuid,
-        action: authz::Action,
-    ) -> authz::Organization {
-        let nexus = &cptestctx.server.apictx().nexus;
-        let org_selector =
-            params::OrganizationSelector { organization: NameOrId::Id(org_id) };
-        let opctx = test_opctx(&cptestctx);
-        let (.., authz_org) = nexus
-            .organization_lookup(&opctx, &org_selector)
-            .expect("Invalid parameters constructing organization lookup")
-            .lookup_for(action)
-            .await
-            .expect("Organization does not exist");
-        authz_org
     }
 
     async fn verify_clean_slate(datastore: &DataStore) {
@@ -283,18 +249,15 @@ mod test {
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let org_id = create_org(&client).await;
 
         // Before running the test, confirm we have no records of any projects.
         verify_clean_slate(nexus.datastore()).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_org =
-            get_authz_org(&cptestctx, org_id, authz::Action::CreateChild).await;
-        let params = new_test_params(&opctx, authz_org);
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let params = new_test_params(&opctx, authz_silo);
         let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
         let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
 
@@ -308,15 +271,12 @@ mod test {
     ) {
         let log = &cptestctx.logctx.log;
 
-        let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let org_id = create_org(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_org =
-            get_authz_org(&cptestctx, org_id, authz::Action::CreateChild).await;
-        let params = new_test_params(&opctx, authz_org);
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let params = new_test_params(&opctx, authz_silo);
         let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
 
         for node in dag.get_nodes() {

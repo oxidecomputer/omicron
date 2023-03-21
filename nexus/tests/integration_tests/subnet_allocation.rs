@@ -14,9 +14,9 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
-use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
@@ -81,26 +81,18 @@ async fn create_instance_expect_failure(
 async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let organization_name = "test-org";
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, organization_name).await;
-    create_project(&client, organization_name, project_name).await;
-    let url_instances = format!(
-        "/v1/instances?organization={}&project={}",
-        organization_name, project_name
-    );
+    create_project(&client, project_name).await;
+    let url_instances = format!("/v1/instances?project={}", project_name);
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
     let subnet_size =
         cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
-    let vpc_selector = format!(
-        "organization={}&project={}&vpc=default",
-        organization_name, project_name
-    );
+    let vpc_selector = format!("project={}&vpc=default", project_name);
     let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
@@ -144,7 +136,6 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     for i in 0..subnet_size {
         create_instance_with(
             client,
-            organization_name,
             project_name,
             &format!("i{}", i),
             &nic,

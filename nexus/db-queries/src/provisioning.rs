@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 /// Describes a collection that holds other resources.
 ///
-/// Example targets might include projects, organizations, silos or fleets.
+/// Example targets might include projects, silos or fleets.
 #[derive(Debug, Clone, Target)]
 struct CollectionTarget {
     id: Uuid,

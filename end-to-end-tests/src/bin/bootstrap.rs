@@ -5,7 +5,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, IpRange, Ipv4Range,
 };
-use oxide_client::{ClientDisksExt, ClientOrganizationsExt, ClientSystemExt};
+use oxide_client::{ClientDisksExt, ClientProjectsExt, ClientSystemExt};
 use std::time::Duration;
 
 #[tokio::main]
@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     wait_for_condition(
         || async {
             client
-                .organization_list()
+                .project_list()
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
@@ -45,7 +45,6 @@ async fn main() -> Result<()> {
         || async {
             ctx.client
                 .disk_create()
-                .organization(ctx.org_name.clone())
                 .project(ctx.project_name.clone())
                 .body(DiskCreate {
                     name: disk_name.clone(),
@@ -65,7 +64,6 @@ async fn main() -> Result<()> {
     .await?;
     ctx.client
         .disk_delete()
-        .organization(ctx.org_name.clone())
         .project(ctx.project_name.clone())
         .disk(disk_name)
         .send()

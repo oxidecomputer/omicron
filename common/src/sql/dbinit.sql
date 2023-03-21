@@ -222,7 +222,6 @@ CREATE UNIQUE INDEX ON omicron.public.certificate (
 -- A table describing virtual resource provisioning which may be associated
 -- with a collection of objects, including:
 -- - Projects
--- - Organizations
 -- - Silos
 -- - Fleet
 CREATE TABLE omicron.public.virtual_provisioning_collection (
@@ -645,34 +644,6 @@ CREATE UNIQUE INDEX ON omicron.public.ssh_key (
     time_deleted IS NULL;
 
 /*
- * Organizations
- */
-
-CREATE TABLE omicron.public.organization (
-    /* Identity metadata */
-    id UUID PRIMARY KEY,
-
-    /* FK into Silo table */
-    silo_id UUID NOT NULL,
-
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-
-    /* child resource generation number, per RFD 192 */
-    rcgen INT NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.organization (
-    silo_id,
-    name
-) WHERE
-    time_deleted IS NULL;
-
-/*
  * Projects
  */
 
@@ -689,12 +660,12 @@ CREATE TABLE omicron.public.project (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    /* Which organization this project belongs to */
-    organization_id UUID NOT NULL /* foreign key into "Organization" table */
+    /* Which silo this project belongs to */
+    silo_id UUID NOT NULL /* foreign key into "silo" table */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.project (
-    organization_id,
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;

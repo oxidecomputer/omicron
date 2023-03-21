@@ -1251,13 +1251,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -1307,13 +1300,6 @@
         "summary": "Create a disk",
         "operationId": "disk_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -1371,13 +1357,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1414,13 +1393,6 @@
             "in": "path",
             "name": "disk",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1506,13 +1478,6 @@
             "schema": {
               "type": "string",
               "format": "date-time"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -1661,13 +1626,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -1718,13 +1676,6 @@
         "description": "Create a new image in a project.",
         "operationId": "image_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -1783,13 +1734,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1833,13 +1777,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1876,13 +1813,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -1938,13 +1868,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "required": true,
             "schema": {
@@ -1992,13 +1915,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2039,13 +1955,6 @@
         "summary": "Delete an instance",
         "operationId": "instance_delete",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -2092,13 +2001,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -2172,13 +2074,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2233,13 +2128,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2286,13 +2174,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2335,13 +2216,6 @@
         "summary": "Migrate an instance",
         "operationId": "instance_migrate",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -2396,13 +2270,6 @@
         "summary": "Reboot an instance",
         "operationId": "instance_reboot",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -2490,13 +2357,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2541,13 +2401,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2575,13 +2428,6 @@
         "summary": "Boot an instance",
         "operationId": "instance_start",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -2626,13 +2472,6 @@
         "summary": "Stop an instance",
         "operationId": "instance_stop",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -2942,13 +2781,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -3002,13 +2834,6 @@
             "in": "query",
             "name": "instance",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3076,13 +2901,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3126,13 +2944,6 @@
           {
             "in": "query",
             "name": "instance",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3199,13 +3010,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3215,290 +3019,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/organizations": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "List organizations",
-        "operationId": "organization_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Create an organization",
-        "operationId": "organization_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/organizations/{organization}": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization",
-        "operationId": "organization_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization",
-        "operationId": "organization_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationUpdate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Organization"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Delete an organization",
-        "operationId": "organization_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/organizations/{organization}/policy": {
-      "get": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Fetch an organization's IAM policy",
-        "operationId": "organization_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "organizations"
-        ],
-        "summary": "Update an organization's IAM policy",
-        "operationId": "organization_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationRolePolicy"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3592,13 +3112,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -3640,16 +3153,6 @@
         ],
         "summary": "Create a project",
         "operationId": "project_create",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -3695,13 +3198,6 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           }
         ],
         "responses": {
@@ -3734,13 +3230,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3789,13 +3278,6 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           }
         ],
         "responses": {
@@ -3823,13 +3305,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3865,13 +3340,6 @@
             "in": "path",
             "name": "project",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3928,13 +3396,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -3985,13 +3446,6 @@
         "description": "Creates a point-in-time snapshot from a disk.",
         "operationId": "snapshot_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -4049,13 +3503,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4092,13 +3539,6 @@
             "in": "path",
             "name": "snapshot",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6632,13 +6072,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6679,13 +6112,6 @@
         "summary": "Replace firewall rules",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -6754,13 +6180,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -6824,13 +6243,6 @@
         "summary": "Create a router",
         "operationId": "vpc_router_route_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -6902,13 +6314,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6960,13 +6365,6 @@
             "in": "path",
             "name": "route",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7039,13 +6437,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7096,13 +6487,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -7163,13 +6547,6 @@
         "summary": "Create a VPC router",
         "operationId": "vpc_router_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -7234,13 +6611,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7249,7 +6619,6 @@
           {
             "in": "query",
             "name": "vpc",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7285,13 +6654,6 @@
             "in": "path",
             "name": "router",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7357,13 +6719,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7407,13 +6762,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -7474,13 +6822,6 @@
         "summary": "Create a subnet",
         "operationId": "vpc_subnet_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -7545,13 +6886,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7595,13 +6929,6 @@
             "in": "path",
             "name": "subnet",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7667,13 +6994,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7725,13 +7045,6 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -7807,13 +7120,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -7863,13 +7169,6 @@
         "summary": "Create a VPC",
         "operationId": "vpc_create",
         "parameters": [
-          {
-            "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
           {
             "in": "query",
             "name": "project",
@@ -7927,13 +7226,6 @@
           },
           {
             "in": "query",
-            "name": "organization",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -7970,13 +7262,6 @@
             "in": "path",
             "name": "vpc",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8029,13 +7314,6 @@
             "in": "path",
             "name": "vpc",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "organization",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -10753,146 +10031,6 @@
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
       },
-      "Organization": {
-        "description": "Client view of an [`Organization`]",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "name",
-          "time_created",
-          "time_modified"
-        ]
-      },
-      "OrganizationCreate": {
-        "description": "Create-time parameters for an [`Organization`](crate::external_api::views::Organization)",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          }
-        },
-        "required": [
-          "description",
-          "name"
-        ]
-      },
-      "OrganizationResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Organization"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "OrganizationRole": {
-        "type": "string",
-        "enum": [
-          "admin",
-          "collaborator",
-          "viewer"
-        ]
-      },
-      "OrganizationRolePolicy": {
-        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
-        "type": "object",
-        "properties": {
-          "role_assignments": {
-            "description": "Roles directly assigned on this resource",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrganizationRoleRoleAssignment"
-            }
-          }
-        },
-        "required": [
-          "role_assignments"
-        ]
-      },
-      "OrganizationRoleRoleAssignment": {
-        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
-        "type": "object",
-        "properties": {
-          "identity_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "identity_type": {
-            "$ref": "#/components/schemas/IdentityType"
-          },
-          "role_name": {
-            "$ref": "#/components/schemas/OrganizationRole"
-          }
-        },
-        "required": [
-          "identity_id",
-          "identity_type",
-          "role_name"
-        ]
-      },
-      "OrganizationUpdate": {
-        "description": "Updateable properties of an [`Organization`](crate::external_api::views::Organization)",
-        "type": "object",
-        "properties": {
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        }
-      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -10996,10 +10134,6 @@
               }
             ]
           },
-          "organization_id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -11015,7 +10149,6 @@
           "description",
           "id",
           "name",
-          "organization_id",
           "time_created",
           "time_modified"
         ]
@@ -13808,13 +12941,6 @@
       }
     },
     {
-      "name": "organizations",
-      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
-      "externalDocs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    {
       "name": "policy",
       "description": "System-wide IAM policy",
       "externalDocs": {
@@ -13823,7 +12949,7 @@
     },
     {
       "name": "projects",
-      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

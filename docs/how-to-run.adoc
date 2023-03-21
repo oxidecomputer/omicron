@@ -227,10 +227,9 @@ other services and allocating them with vNICs and IPv6 addresses.
 Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
 command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
 
-1. Create an organization and project that the resources will live under:
+1. Create a project that the resources will live under:
 
-    oxide org create myorg
-    oxide project create -o myorg myproj
+    oxide project create myproj
 
 2. Create an IP Pool, for providing external connectivity to the instance later.
 We need to create an IP Pool itself, and a range of IP addresses in that pool.
@@ -252,7 +251,7 @@ the exact addresses that are available depends on the environment.
 
  a. This can be the alpine.iso image that ships with propolis:
 
-    oxide api /v1/images?organization=<org>&project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "boot from propolis zone blob!",
@@ -269,7 +268,7 @@ the exact addresses that are available depends on the environment.
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /v1/images?organization=<org>&project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -287,7 +286,7 @@ the exact addresses that are available depends on the environment.
 
 4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
-    oxide api /v1/disks?organization=myorg&project=myproj --method POST --input - <<EOF
+    oxide api /v1/disks?project=myproj --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "alpine.iso blob",
@@ -302,7 +301,7 @@ the exact addresses that are available depends on the environment.
 
 5. Create an instance, attaching the alpine disk created above:
 
-    oxide api /v1/instances?organization=myorg&project=myproj --method POST --input - <<EOF
+    oxide api /v1/instances?project=myproj --method POST --input - <<EOF
     {
       "name": "myinst",
       "description": "my inst",

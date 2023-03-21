@@ -65,7 +65,6 @@ async fn instance_launch() -> Result<()> {
     let disk_name = ctx
         .client
         .disk_create()
-        .organization(ctx.org_name.clone())
         .project(ctx.project_name.clone())
         .body(DiskCreate {
             name: disk_name.clone(),
@@ -82,7 +81,6 @@ async fn instance_launch() -> Result<()> {
     let instance = ctx
         .client
         .instance_create()
-        .organization(ctx.org_name.clone())
         .project(ctx.project_name.clone())
         .body(InstanceCreate {
             name: generate_name("instance")?,
@@ -104,7 +102,6 @@ async fn instance_launch() -> Result<()> {
     let ip_addr = ctx
         .client
         .instance_external_ip_list()
-        .organization(ctx.org_name.clone())
         .project(ctx.project_name.clone())
         .instance(instance.name.clone())
         .send()
@@ -126,7 +123,6 @@ async fn instance_launch() -> Result<()> {
             let data = String::from_utf8_lossy(
                 &ctx.client
                     .instance_serial_console()
-                    .organization(ctx.org_name.clone())
                     .project(ctx.project_name.clone())
                     .instance(instance.name.clone())
                     .from_start(0)
@@ -210,7 +206,6 @@ async fn instance_launch() -> Result<()> {
     let data = String::from_utf8_lossy(
         &ctx.client
             .instance_serial_console()
-            .organization(ctx.org_name.clone())
             .project(ctx.project_name.clone())
             .instance(instance.name.clone())
             .most_recent(1024 * 1024)
@@ -230,7 +225,6 @@ async fn instance_launch() -> Result<()> {
     eprintln!("stopping instance");
     ctx.client
         .instance_stop()
-        .organization(ctx.org_name.clone())
         .project(ctx.project_name.clone())
         .instance(instance.name.clone())
         .send()
@@ -241,7 +235,6 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .instance_delete()
-                .organization(ctx.org_name.clone())
                 .project(ctx.project_name.clone())
                 .instance(instance.name.clone())
                 .send()
@@ -258,7 +251,6 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .disk_delete()
-                .organization(ctx.org_name.clone())
                 .project(ctx.project_name.clone())
                 .disk(disk_name.clone())
                 .send()

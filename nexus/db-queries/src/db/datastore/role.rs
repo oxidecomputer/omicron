@@ -183,7 +183,7 @@ impl DataStore {
     /// included in this list.
     ///
     /// This function is generic over all resources that can accept roles (e.g.,
-    /// Fleet, Silo, Organization, etc.).
+    /// Fleet, Silo, etc.).
     // TODO-scalability In an ideal world, this would be paginated.  The impact
     // is mitigated because we cap the number of role assignments per resource
     // pretty tightly.
@@ -220,7 +220,7 @@ impl DataStore {
     /// assignments, modified them, and is giving us the complete new list.
     ///
     /// This function is generic over all resources that can accept roles (e.g.,
-    /// Fleet, Silo, Organization, etc.).
+    /// Fleet, Silo, etc.).
     // TODO-correctness As with the rest of the API, we're lacking an ability
     // for an ETag precondition check here.
     // TODO-scalability In an ideal world, this would update in batches.  That's

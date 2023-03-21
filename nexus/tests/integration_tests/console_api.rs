@@ -20,7 +20,7 @@ use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
-use omicron_nexus::external_api::params::OrganizationCreate;
+use omicron_nexus::external_api::params::ProjectCreate;
 use omicron_nexus::external_api::{shared, views};
 
 type ControlPlaneTestContext =
@@ -44,16 +44,16 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // log in and pull the token out of the header so we can use it for authed requests
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    let org_params = OrganizationCreate {
+    let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
-            name: "my-org".parse().unwrap(),
-            description: "an org".to_string(),
+            name: "my-proj".parse().unwrap(),
+            description: "a project".to_string(),
         },
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
-        .body(Some(&org_params))
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -90,9 +90,9 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
         .execute()
@@ -127,9 +127,9 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await

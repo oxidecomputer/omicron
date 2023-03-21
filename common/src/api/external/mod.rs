@@ -692,7 +692,6 @@ pub enum ResourceType {
     DeviceAuthRequest,
     DeviceAccessToken,
     GlobalImage,
-    Organization,
     Project,
     Dataset,
     Disk,

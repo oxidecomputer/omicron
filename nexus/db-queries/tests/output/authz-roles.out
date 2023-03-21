@@ -7,12 +7,9 @@ resource: authz::oso_generic::Database
   silo1-admin                      ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
@@ -24,12 +21,9 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: authz::ConsoleSessionList
@@ -41,12 +35,9 @@ resource: authz::ConsoleSessionList
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: authz::DeviceAuthRequestList
@@ -58,12 +49,9 @@ resource: authz::DeviceAuthRequestList
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: authz::GlobalImageList
@@ -75,12 +63,9 @@ resource: authz::GlobalImageList
   silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: authz::IpPoolList
@@ -92,12 +77,9 @@ resource: authz::IpPoolList
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1"
@@ -109,12 +91,9 @@ resource: Silo "silo1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1": identity provider list
@@ -126,12 +105,9 @@ resource: Silo "silo1": identity provider list
   silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: IdentityProvider "silo1-identity-provider"
@@ -143,12 +119,9 @@ resource: IdentityProvider "silo1-identity-provider"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SamlIdentityProvider "silo1-saml-identity-provider"
@@ -160,12 +133,9 @@ resource: SamlIdentityProvider "silo1-saml-identity-provider"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo1": user list
@@ -177,12 +147,9 @@ resource: Silo "silo1": user list
   silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SiloUser "silo1-user"
@@ -194,12 +161,9 @@ resource: SiloUser "silo1-user"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SshKey "silo1-user-ssh-key"
@@ -211,12 +175,9 @@ resource: SshKey "silo1-user-ssh-key"
   silo1-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-collaborator               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SiloGroup "silo1-group"
@@ -228,15 +189,12 @@ resource: SiloGroup "silo1-group"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Organization "silo1-org1"
+resource: Project "silo1-proj1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -245,15 +203,12 @@ resource: Organization "silo1-org1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Project "silo1-org1-proj1"
+resource: Disk "silo1-proj1-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -262,15 +217,12 @@ resource: Project "silo1-org1-proj1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Disk "silo1-org1-proj1-disk1"
+resource: Instance "silo1-proj1-instance1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -279,15 +231,12 @@ resource: Disk "silo1-org1-proj1-disk1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Instance "silo1-org1-proj1-instance1"
+resource: NetworkInterface "silo1-proj1-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -296,15 +245,12 @@ resource: Instance "silo1-org1-proj1-instance1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo1-org1-proj1-instance1-nic1"
+resource: Vpc "silo1-proj1-vpc1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -313,15 +259,12 @@ resource: NetworkInterface "silo1-org1-proj1-instance1-nic1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Vpc "silo1-org1-proj1-vpc1"
+resource: VpcSubnet "silo1-proj1-vpc1-subnet1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -330,15 +273,12 @@ resource: Vpc "silo1-org1-proj1-vpc1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: VpcSubnet "silo1-org1-proj1-vpc1-subnet1"
+resource: Snapshot "silo1-proj1-disk1-snapshot1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -347,15 +287,12 @@ resource: VpcSubnet "silo1-org1-proj1-vpc1-subnet1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Snapshot "silo1-org1-proj1-disk1-snapshot1"
+resource: Image "silo1-proj1-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -364,15 +301,12 @@ resource: Snapshot "silo1-org1-proj1-disk1-snapshot1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Image "silo1-org1-proj1-image1"
+resource: Project "silo1-proj2"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -381,15 +315,12 @@ resource: Image "silo1-org1-proj1-image1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Project "silo1-org1-proj2"
+resource: Disk "silo1-proj2-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -398,15 +329,12 @@ resource: Project "silo1-org1-proj2"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Disk "silo1-org1-proj2-disk1"
+resource: Instance "silo1-proj2-instance1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -415,15 +343,12 @@ resource: Disk "silo1-org1-proj2-disk1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Instance "silo1-org1-proj2-instance1"
+resource: NetworkInterface "silo1-proj2-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -432,15 +357,12 @@ resource: Instance "silo1-org1-proj2-instance1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo1-org1-proj2-instance1-nic1"
+resource: Vpc "silo1-proj2-vpc1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -449,15 +371,12 @@ resource: NetworkInterface "silo1-org1-proj2-instance1-nic1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Vpc "silo1-org1-proj2-vpc1"
+resource: VpcSubnet "silo1-proj2-vpc1-subnet1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -466,15 +385,12 @@ resource: Vpc "silo1-org1-proj2-vpc1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: VpcSubnet "silo1-org1-proj2-vpc1-subnet1"
+resource: Snapshot "silo1-proj2-disk1-snapshot1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -483,15 +399,12 @@ resource: VpcSubnet "silo1-org1-proj2-vpc1-subnet1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Snapshot "silo1-org1-proj2-disk1-snapshot1"
+resource: Image "silo1-proj2-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -500,182 +413,9 @@ resource: Snapshot "silo1-org1-proj2-disk1-snapshot1"
   silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Image "silo1-org1-proj2-image1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-collaborator          ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-org1-viewer                ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Organization "silo1-org2"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Project "silo1-org2-proj1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Disk "silo1-org2-proj1-disk1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Instance "silo1-org2-proj1-instance1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: NetworkInterface "silo1-org2-proj1-instance1-nic1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Vpc "silo1-org2-proj1-vpc1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: VpcSubnet "silo1-org2-proj1-vpc1-subnet1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Snapshot "silo1-org2-proj1-disk1-snapshot1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Image "silo1-org2-proj1-image1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo2"
@@ -687,12 +427,9 @@ resource: Silo "silo2"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo2": identity provider list
@@ -704,12 +441,9 @@ resource: Silo "silo2": identity provider list
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: IdentityProvider "silo2-identity-provider"
@@ -721,12 +455,9 @@ resource: IdentityProvider "silo2-identity-provider"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SamlIdentityProvider "silo2-saml-identity-provider"
@@ -738,12 +469,9 @@ resource: SamlIdentityProvider "silo2-saml-identity-provider"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Silo "silo2": user list
@@ -755,12 +483,9 @@ resource: Silo "silo2": user list
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SiloUser "silo2-user"
@@ -772,12 +497,9 @@ resource: SiloUser "silo2-user"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SshKey "silo2-user-ssh-key"
@@ -789,12 +511,9 @@ resource: SshKey "silo2-user-ssh-key"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SiloGroup "silo2-group"
@@ -806,15 +525,12 @@ resource: SiloGroup "silo2-group"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Organization "silo2-org1"
+resource: Project "silo2-proj1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -823,15 +539,12 @@ resource: Organization "silo2-org1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Project "silo2-org1-proj1"
+resource: Disk "silo2-proj1-disk1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -840,15 +553,12 @@ resource: Project "silo2-org1-proj1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Disk "silo2-org1-proj1-disk1"
+resource: Instance "silo2-proj1-instance1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -857,15 +567,12 @@ resource: Disk "silo2-org1-proj1-disk1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Instance "silo2-org1-proj1-instance1"
+resource: NetworkInterface "silo2-proj1-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -874,15 +581,12 @@ resource: Instance "silo2-org1-proj1-instance1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo2-org1-proj1-instance1-nic1"
+resource: Vpc "silo2-proj1-vpc1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -891,15 +595,12 @@ resource: NetworkInterface "silo2-org1-proj1-instance1-nic1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Vpc "silo2-org1-proj1-vpc1"
+resource: VpcSubnet "silo2-proj1-vpc1-subnet1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -908,15 +609,12 @@ resource: Vpc "silo2-org1-proj1-vpc1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
+resource: Snapshot "silo2-proj1-disk1-snapshot1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -925,15 +623,12 @@ resource: VpcSubnet "silo2-org1-proj1-vpc1-subnet1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Snapshot "silo2-org1-proj1-disk1-snapshot1"
+resource: Image "silo2-proj1-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -942,29 +637,9 @@ resource: Snapshot "silo2-org1-proj1-disk1-snapshot1"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: Image "silo2-org1-proj1-image1"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
@@ -976,12 +651,9 @@ resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
@@ -993,12 +665,9 @@ resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: GlobalImage id "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc"
@@ -1010,12 +679,9 @@ resource: GlobalImage id "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc"
   silo1-admin                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Certificate id "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc"
@@ -1027,12 +693,9 @@ resource: Certificate id "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: DeviceAuthRequest "a-device-user-code"
@@ -1044,12 +707,9 @@ resource: DeviceAuthRequest "a-device-user-code"
   silo1-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-collaborator               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-viewer                     ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-admin                 ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-collaborator          ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-viewer                ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-proj1-admin           ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-proj1-collaborator    ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
-  silo1-org1-proj1-viewer          ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: DeviceAccessToken "a-device-access-token"
@@ -1061,12 +721,9 @@ resource: DeviceAccessToken "a-device-access-token"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
@@ -1078,12 +735,9 @@ resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: UpdateDeployment id "c617a035-7c42-49ff-a36a-5dfeee382832"
@@ -1095,12 +749,9 @@ resource: UpdateDeployment id "c617a035-7c42-49ff-a36a-5dfeee382832"
   silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-admin           ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-collaborator    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  silo1-org1-proj1-viewer          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 ACTIONS:

@@ -53,7 +53,6 @@ mod image;
 mod instance;
 mod ip_pool;
 mod network_interface;
-mod organization;
 mod oximeter;
 mod physical_disk;
 mod project;
@@ -271,7 +270,6 @@ mod test {
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::SILO_ID;
     use crate::db::identity::Asset;
-    use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
@@ -288,7 +286,6 @@ mod test {
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use ref_cast::RefCast;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
@@ -318,18 +315,17 @@ mod test {
         let logctx = dev::test_setup_log("test_project_creation");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let organization = params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "org".parse().unwrap(),
-                description: "desc".to_string(),
-            },
-        };
 
-        let organization =
-            datastore.organization_create(&opctx, &organization).await.unwrap();
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        let (.., silo) = LookupPath::new(&opctx, &datastore)
+            .silo_id(authz_silo.id())
+            .fetch()
+            .await
+            .unwrap();
 
         let project = Project::new(
-            organization.id(),
+            authz_silo.id(),
             params::ProjectCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "project".parse().unwrap(),
@@ -337,22 +333,15 @@ mod test {
                 },
             },
         );
-        let (.., authz_org) = LookupPath::new(&opctx, &datastore)
-            .organization_id(organization.id())
-            .lookup_for(authz::Action::CreateChild)
-            .await
-            .unwrap();
-        datastore.project_create(&opctx, &authz_org, project).await.unwrap();
+        datastore.project_create(&opctx, project).await.unwrap();
 
-        let (.., organization_after_project_create) =
+        let (.., silo_after_project_create) =
             LookupPath::new(&opctx, &datastore)
-                .organization_name(db::model::Name::ref_cast(
-                    organization.name(),
-                ))
+                .silo_id(authz_silo.id())
                 .fetch()
                 .await
                 .unwrap();
-        assert!(organization_after_project_create.rcgen > organization.rcgen);
+        assert!(silo_after_project_create.rcgen > silo.rcgen);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

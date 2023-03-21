@@ -18,7 +18,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_router, create_vpc,
+    create_project, create_router, create_vpc,
 };
 
 type ControlPlaneTestContext =
@@ -28,30 +28,28 @@ type ControlPlaneTestContext =
 async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let organization_name = "test-org";
     let project_name = "springfield-squidport";
     let vpc_name = "vpc1";
     let router_name = "router1";
 
     let get_routes_url = |router_name: &str| -> String {
         format!(
-            "/v1/vpc-router-routes?organization={}&project={}&vpc={}&router={}",
-            organization_name, project_name, vpc_name, router_name
+            "/v1/vpc-router-routes?project={}&vpc={}&router={}",
+            project_name, vpc_name, router_name
         )
     };
 
     let get_route_url = |router_name: &str, route_name: &str| -> String {
         format!(
-            "/v1/vpc-router-routes/{}?organization={}&project={}&vpc={}&router={}",
-            route_name, organization_name, project_name, vpc_name, router_name
+            "/v1/vpc-router-routes/{}?project={}&vpc={}&router={}",
+            route_name, project_name, vpc_name, router_name
         )
     };
 
-    create_organization(&client, organization_name).await;
-    let _ = create_project(&client, organization_name, project_name).await;
+    let _ = create_project(&client, project_name).await;
 
     // Create a vpc
-    create_vpc(&client, organization_name, project_name, vpc_name).await;
+    create_vpc(&client, project_name, vpc_name).await;
 
     // Get the system router's routes
     let system_router_routes = objects_list_page_authz::<RouterRoute>(
@@ -84,14 +82,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "DELETE not allowed on system routes");
 
     // Create a custom router
-    create_router(
-        &client,
-        organization_name,
-        project_name,
-        vpc_name,
-        router_name,
-    )
-    .await;
+    create_router(&client, project_name, vpc_name, router_name).await;
 
     // Get routes list for custom router
     let routes = objects_list_page_authz::<RouterRoute>(

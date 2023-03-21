@@ -12,7 +12,6 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
@@ -590,13 +589,10 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     // an IP address from this range (since it's the only one that exists),
     // though we currently have no way to verify this as source NAT external IPs
     // are not part of the public API.
-    const ORG_NAME: &str = "myorg";
     const PROJECT_NAME: &str = "myproj";
     const INSTANCE_NAME: &str = "myinst";
-    create_organization(client, ORG_NAME).await;
-    create_project(client, ORG_NAME, PROJECT_NAME).await;
-    let instance =
-        create_instance(client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    create_project(client, PROJECT_NAME).await;
+    let instance = create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // We should not be able to delete the range, since there's an external IP
     // address in use out of it.
@@ -618,13 +614,11 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     );
 
     // Stop the instance, wait until it is in fact stopped.
-    let instance_url = format!(
-        "/v1/instances/{}?organization={}&project={}",
-        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
-    );
+    let instance_url =
+        format!("/v1/instances/{}?project={}", INSTANCE_NAME, PROJECT_NAME,);
     let instance_stop_url = format!(
-        "/v1/instances/{}/stop?organization={}&project={}",
-        INSTANCE_NAME, ORG_NAME, PROJECT_NAME,
+        "/v1/instances/{}/stop?project={}",
+        INSTANCE_NAME, PROJECT_NAME,
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instance_stop_url)

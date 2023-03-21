@@ -711,11 +711,12 @@ impl super::Nexus {
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector::new(
-                    None,
-                    Some(authz_project.id().into()),
+                &params::DiskSelector {
+                    project_selector: Some(params::ProjectSelector {
+                        project: authz_project.id().into(),
+                    }),
                     disk,
-                ),
+                },
             )?
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -769,11 +770,12 @@ impl super::Nexus {
         let (.., authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector::new(
-                    None,
-                    Some(authz_project.id().into()),
+                &params::DiskSelector {
+                    project_selector: Some(params::ProjectSelector {
+                        project: authz_project.id().into(),
+                    }),
                     disk,
-                ),
+                },
             )?
             .lookup_for(authz::Action::Modify)
             .await?;

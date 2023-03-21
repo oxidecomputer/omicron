@@ -22,7 +22,6 @@ use uuid::Uuid;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 
@@ -32,9 +31,6 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
 
     struct TestCase<'a> {
         method: http::Method,
@@ -58,7 +54,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // that does exist) from an authorized user results in a 404.
         TestCase {
             method: Method::GET,
-            uri: "/v1/projects/nonexistent?organization=test-org",
+            uri: "/v1/projects/nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: None,
@@ -67,21 +63,21 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // appropriate?
         TestCase {
             method: Method::GET,
-            uri: "/v1/projects/-invalid-name?organization=test-org",
+            uri: "/v1/projects/-invalid-name",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: None,
         },
         TestCase {
             method: Method::PUT,
-            uri: "/v1/projects?organization=test-org",
+            uri: "/v1/projects",
             expected_code: StatusCode::METHOD_NOT_ALLOWED,
             expected_error: "Method Not Allowed",
             body: None,
         },
         TestCase {
             method: Method::DELETE,
-            uri: "/v1/projects?organization=test-org",
+            uri: "/v1/projects",
             expected_code: StatusCode::METHOD_NOT_ALLOWED,
             expected_error: "Method Not Allowed",
             body: None,
@@ -89,7 +85,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: list instances in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances?organization=test-org&project=nonexistent",
+            uri: "/v1/instances?project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -97,7 +93,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance in a nonexistent project
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances/my-instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my-instance?project=nonexistent",
             expected_code: StatusCode::NOT_FOUND,
             expected_error: "not found: project with name \"nonexistent\"",
             body: Some("".into()),
@@ -105,7 +101,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: fetch an instance with an invalid name
         TestCase {
             method: Method::GET,
-            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my_instance?project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: Some("".into()),
@@ -113,7 +109,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
         // Error case: delete an instance with an invalid name
         TestCase {
             method: Method::DELETE,
-            uri: "/v1/instances/my_instance?organization=test-org&project=nonexistent",
+            uri: "/v1/instances/my_instance?project=nonexistent",
             expected_code: StatusCode::BAD_REQUEST,
             expected_error: "bad parameter in URL path: data did not match any variant of untagged enum NameOrId",
             body: Some("".into()),
@@ -149,9 +145,7 @@ async fn test_basic_failures(cptestctx: &ControlPlaneTestContext) {
 async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-    let projects_url = "/v1/projects?organization=test-org";
+    let projects_url = "/v1/projects";
 
     // Verify that there are no projects to begin with.
     let projects = projects_list(&client, &projects_url).await;
@@ -218,9 +212,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert!(initial_projects[2].identity.description.len() > 0);
 
     // Basic test of out-of-the-box GET project
-    let project =
-        project_get(&client, "/v1/projects/simproject2?organization=test-org")
-            .await;
+    let project = project_get(&client, "/v1/projects/simproject2").await;
     let expected = &initial_projects[1];
     assert_eq!(project.identity.id, expected.identity.id);
     assert_eq!(project.identity.name, expected.identity.name);
@@ -232,28 +224,22 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     // - The default VPC
     NexusRequest::object_delete(
         client,
-        "/v1/vpc-subnets/default?organization=test-org&project=simproject2&vpc=default",
+        "/v1/vpc-subnets/default?project=simproject2&vpc=default",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .unwrap();
-    NexusRequest::object_delete(
-        client,
-        "/v1/vpcs/default?organization=test-org&project=simproject2",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-    NexusRequest::object_delete(
-        client,
-        "/v1/projects/simproject2?organization=test-org",
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    NexusRequest::object_delete(client, "/v1/vpcs/default?project=simproject2")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+    NexusRequest::object_delete(client, "/v1/projects/simproject2")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
 
     // Having deleted "simproject2", verify "GET", "PUT", and "DELETE" on
     // it all 404
@@ -262,7 +248,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
             client,
             StatusCode::NOT_FOUND,
             method,
-            "/v1/projects/simproject2?organization=test-org",
+            "/v1/projects/simproject2",
         )
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -270,18 +256,14 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to make request");
     }
     NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::PUT,
-            "/v1/projects/simproject2?organization=test-org",
-        )
-        .body(Some(&params::ProjectUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-        }))
-        .expect_status(Some(StatusCode::NOT_FOUND)),
+        RequestBuilder::new(client, Method::PUT, "/v1/projects/simproject2")
+            .body(Some(&params::ProjectUpdate {
+                identity: IdentityMetadataUpdateParams {
+                    name: None,
+                    description: None,
+                },
+            }))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -293,8 +275,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         .iter()
         .filter(|p| p.identity.name != "simproject2")
         .collect();
-    let new_projects =
-        projects_list(&client, "/v1/projects?organization=test-org").await;
+    let new_projects = projects_list(&client, "/v1/projects").await;
     assert_eq!(new_projects.len(), expected_projects.len());
     assert_eq!(new_projects[0].identity.id, expected_projects[0].identity.id);
     assert_eq!(
@@ -325,7 +306,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     };
     let project = NexusRequest::object_put(
         client,
-        "/v1/projects/simproject3?organization=test-org",
+        "/v1/projects/simproject3",
         Some(&project_update),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -339,9 +320,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project.identity.description, "Li'l lightnin'");
 
     let expected = project;
-    let project =
-        project_get(&client, "/v1/projects/simproject3?organization=test-org")
-            .await;
+    let project = project_get(&client, "/v1/projects/simproject3").await;
     assert_eq!(project.identity.name, expected.identity.name);
     assert_eq!(project.identity.description, expected.identity.description);
     assert_eq!(project.identity.description, "Li'l lightnin'");
@@ -357,7 +336,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
     };
     let project = NexusRequest::object_put(
         client,
-        "/v1/projects/simproject3?organization=test-org",
+        "/v1/projects/simproject3",
         Some(&project_update),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -374,7 +353,7 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
         client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        "/v1/projects/simproject3?organization=test-org",
+        "/v1/projects/simproject3",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -466,11 +445,8 @@ async fn test_projects_basic(cptestctx: &ControlPlaneTestContext) {
 async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
-
     // Verify that there are no projects to begin with.
-    let projects_url = "/v1/projects?organization=test-org";
+    let projects_url = "/v1/projects";
     assert_eq!(projects_list(&client, &projects_url).await.len(), 0);
 
     // Create a large number of projects that we can page through.
@@ -484,7 +460,7 @@ async fn test_projects_list(cptestctx: &ControlPlaneTestContext) {
         // a uuid though, so we'll use a prefix.
         let mut name = Uuid::new_v4().to_string();
         name.insert_str(0, "project-");
-        let project = create_project(&client, org_name, &name).await;
+        let project = create_project(&client, &name).await;
         projects_created.push(project.identity);
     }
 
