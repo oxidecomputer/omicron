@@ -108,7 +108,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Grant the user "admin" privileges on that Silo.
     grant_iam(
         client,
-        "/v1/system/silos/discoverable",
+        discoverable_url,
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -164,7 +164,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to delete test Vpc");
-    // delete VPC from project so we can delete the project
+    // delete VPC from project so we can delete the project later
     NexusRequest::object_delete(
         client,
         &format!("/v1/vpcs/default?organization=abc&project={}", project_name),
@@ -173,16 +173,6 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .execute()
     .await
     .expect("failed to delete test Vpc");
-
-    // Delete it so that we can delete the Silo later.
-    NexusRequest::object_delete(
-        client,
-        &format!("/v1/projects/{}?organization=abc", project_name),
-    )
-    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-    .execute()
-    .await
-    .expect("failed to delete test Project");
 
     // Verify GET /v1/projects works with built-in user auth
     let projects = objects_list_page_authz::<Project>(
@@ -207,31 +197,30 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(organizations.len(), 0);
     */
 
-    // Verify DELETE doesn't work if projects exist
-    // TODO: put someproj in discoverable silo, not built-in
+    // Deleting discoverable silo fails because there's still a project in it
     NexusRequest::expect_failure(
         &client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
-        &"/v1/system/silos/default-silo",
+        &discoverable_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to make request");
 
-    // Delete organization
+    // Delete project
     NexusRequest::object_delete(
         &client,
         &"/v1/projects/someproj?organization=abc",
     )
-    .authn_as(AuthnMode::PrivilegedUser)
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
     .await
     .expect("failed to make request");
 
-    // Verify silo DELETE works
-    NexusRequest::object_delete(&client, &"/v1/system/silos/discoverable")
+    // Verify silo DELETE now works
+    NexusRequest::object_delete(&client, &discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await

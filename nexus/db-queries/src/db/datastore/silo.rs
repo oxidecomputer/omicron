@@ -230,31 +230,30 @@ impl DataStore {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
 
-        use db::schema::organization;
+        use db::schema::project;
         use db::schema::silo;
         use db::schema::silo_group;
         use db::schema::silo_group_membership;
         use db::schema::silo_user;
         use db::schema::silo_user_password_hash;
 
-        // Make sure there are no organizations present within this silo.
+        // Make sure there are no projects present within this silo.
         let id = authz_silo.id();
         let rcgen = db_silo.rcgen;
-        let org_found = diesel_pool_result_optional(
-            organization::dsl::organization
-                .filter(organization::dsl::silo_id.eq(id))
-                .filter(organization::dsl::time_deleted.is_null())
-                .select(organization::dsl::id)
+        let project_found = diesel_pool_result_optional(
+            project::dsl::project
+                .filter(project::dsl::silo_id.eq(id))
+                .filter(project::dsl::time_deleted.is_null())
+                .select(project::dsl::id)
                 .limit(1)
                 .first_async::<Uuid>(self.pool_authorized(opctx).await?)
                 .await,
         )
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))?;
 
-        if org_found.is_some() {
+        if project_found.is_some() {
             return Err(Error::InvalidRequest {
-                message: "silo to be deleted contains an organization"
-                    .to_string(),
+                message: "silo to be deleted contains a project".to_string(),
             });
         }
 

@@ -490,15 +490,15 @@ impl Nexus {
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
-    /// async fn organization_list_my_thing(
+    /// async fn project_list_my_thing(
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
+    ///     project_name: &Name,
     /// ) -> Result<(), Error>
     /// {
     ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
-    ///         .organization_name(organization_name)
+    ///         .project_name(project_name)
     ///         .lookup_for(authz::Action::ListChildren)
     ///         .await?;
     ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
@@ -526,7 +526,6 @@ impl Nexus {
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {

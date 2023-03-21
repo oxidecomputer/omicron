@@ -847,9 +847,10 @@ lazy_static! {
         // the Organization.  Right now, the only real way to tell that is if
         // you have permissions on anything _inside_ the Organization, which is
         // incredibly expensive to determine in general.
+        // TODO: reevaluate the above comment and the change to unprivileged_access below
         VerifyEndpoint {
             url: &DEMO_ORG_PROJECTS_URL,
-            visibility: Visibility::Protected,
+            visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
