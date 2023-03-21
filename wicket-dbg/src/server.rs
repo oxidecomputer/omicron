@@ -6,7 +6,6 @@ use crate::{Cmd, Runner};
 use std::fs::File;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use wicket::Snapshot;
 
 /// The server used to handle wicket-dbg commands, run them, and return the
 /// response to the client.
@@ -73,6 +72,15 @@ impl Server {
                 // We can't really tolerate render failures
                 self.runner.restart().unwrap();
                 ok_reply(stream)?;
+            }
+            Cmd::Run { .. } => {
+                // TODO: speedup/slowdown
+                if let Err(e) = self.runner.run() {
+                    let res: Result<(), String> = Err(format!("{e}"));
+                    ciborium::ser::into_writer(&res, stream)?;
+                } else {
+                    ok_reply(stream)?;
+                }
             }
             _ => unreachable!(),
         }

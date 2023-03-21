@@ -4,6 +4,7 @@
 
 //! An executor for [`wicket::Event`]s in the [`wicket_dbg::Server`]
 
+use anyhow::bail;
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen,
@@ -14,7 +15,9 @@ use std::io::stdout;
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
-use wicket::{Event, Frame, RunnerCore, Screen, Snapshot, State, Term};
+use wicket::{
+    Event, Frame, RunnerCore, Screen, Snapshot, State, Term, TICK_INTERVAL,
+};
 
 /// A parallel to [`wicket::Runner`] that allows stepping through individual
 /// events, and doesn't interact with any external services. The only goal
@@ -57,7 +60,26 @@ impl Runner {
 
     /// Restart the debugger
     pub fn restart(&mut self) -> anyhow::Result<()> {
+        self.core.screen = Screen::new(&self.core.log);
+        self.core.state = State::new(&self.core.log);
         self.core.init_screen()?;
+        Ok(())
+    }
+
+    /// Play the recording
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        let Some(snapshot) = &self.snapshot else {
+            bail!("Please load a wicket recording");
+        };
+
+        self.core.init_screen()?;
+        for event in snapshot.history.clone() {
+            if let Event::Tick = event {
+                // TODO: Speedup/slowdown
+                std::thread::sleep(TICK_INTERVAL)
+            }
+            let _ = self.core.handle_event(event, None, None)?;
+        }
         Ok(())
     }
 }

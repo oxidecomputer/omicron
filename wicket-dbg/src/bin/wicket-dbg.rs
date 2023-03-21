@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, Reedline, Signal};
 use std::iter;
@@ -46,11 +47,18 @@ fn process(client: &mut Client, line: String) -> String {
 
     match cli.cmd {
         Cmds::Load { path } => {
-            let rsp = client.send::<String>(&wicket_dbg::Cmd::Load(path));
+            let rsp: Result<Result<(), String>> =
+                client.send(&wicket_dbg::Cmd::Load(path));
             format!("{:?}", rsp)
         }
         Cmds::Reset => {
-            let rsp = client.send::<()>(&wicket_dbg::Cmd::Reset);
+            let rsp: Result<Result<(), String>> =
+                client.send(&wicket_dbg::Cmd::Reset);
+            format!("{:?}", rsp)
+        }
+        Cmds::Run => {
+            let rsp: Result<Result<(), String>> = client
+                .send(&wicket_dbg::Cmd::Run { speedup: None, slowdown: None });
             format!("{:?}", rsp)
         }
     }
@@ -70,4 +78,8 @@ enum Cmds {
 
     /// Reset the debugger to the start of the recording
     Reset,
+
+    /// Play the recording
+    // TODO: speedup/slowdown
+    Run,
 }

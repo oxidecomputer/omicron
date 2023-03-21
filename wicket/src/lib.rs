@@ -5,6 +5,8 @@
 //! The TUI library that is used via the technician port to initialize a rack
 //! and perform disaster recovery.
 
+use std::time::Duration;
+
 mod dispatch;
 mod events;
 mod keymap;
@@ -13,6 +15,8 @@ mod state;
 mod ui;
 mod upload;
 mod wicketd;
+
+pub const TICK_INTERVAL: Duration = Duration::from_millis(30);
 
 pub use crate::dispatch::*;
 pub use crate::runner::*;

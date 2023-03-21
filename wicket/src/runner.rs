@@ -23,13 +23,12 @@ use tui::Terminal;
 
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
-use crate::{Action, Cmd, Event, KeyHandler, Recorder, State};
+use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
 
 // We can avoid a bunch of unnecessary type parameters by picking them ahead of time.
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 pub type Frame<'a> = tui::Frame<'a, CrosstermBackend<Stdout>>;
 
-const TICK_INTERVAL: Duration = Duration::from_millis(30);
 const MAX_RECORDED_EVENTS: u32 = 10000;
 
 /// The core of a runner that handles events and redraws the screen
