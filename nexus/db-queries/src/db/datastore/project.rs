@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -105,6 +106,7 @@ impl DataStore {
         opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
         let silo_id = authz_silo.id();
+        let authz_silo_inner = authz_silo.clone();
 
         use db::schema::project::dsl;
 
@@ -121,10 +123,7 @@ impl DataStore {
                 .await
                 .map_err(|e| match e {
                     AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Silo,
-                            lookup_type: LookupType::ById(silo_id),
-                        }
+                        authz_silo_inner.not_found()
                     }
                     AsyncInsertError::DatabaseError(e) => {
                         public_error_from_diesel_pool(

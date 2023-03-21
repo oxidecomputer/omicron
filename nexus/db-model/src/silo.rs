@@ -157,7 +157,7 @@ impl DatastoreCollectionConfig<Organization> for Silo {
 
 impl DatastoreCollectionConfig<Project> for Silo {
     type CollectionId = Uuid;
-    type GenerationNumberColumn = project::dsl::rcgen;
-    type CollectionTimeDeletedColumn = project::dsl::time_deleted;
+    type GenerationNumberColumn = silo::dsl::rcgen;
+    type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
     type CollectionIdColumn = project::dsl::silo_id;
 }

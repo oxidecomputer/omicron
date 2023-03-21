@@ -1866,7 +1866,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -1976,7 +1976,7 @@ mod test {
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2075,7 +2075,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2184,7 +2184,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
