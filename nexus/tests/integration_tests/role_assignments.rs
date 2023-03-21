@@ -101,7 +101,7 @@ trait RoleAssignmentTest {
 async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
     // There's no operation to read the Fleet directly, so we list Sleds as a
     // proxy for something that requires Fleet-level "read" permission.
-    const RESOURCE_URL: &'static str = "/system/hardware/sleds";
+    const RESOURCE_URL: &'static str = "/v1/system/hardware/sleds";
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
