@@ -183,35 +183,6 @@ impl<'a> LookupPath<'a> {
     // The top-level selection functions are implemented by hand because the
     // macro is not in a great position to do this.
 
-    /// Select a resource of type Organization, identified by its name
-    pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        match self
-            .opctx
-            .authn
-            .silo_required()
-            .internal_context("looking up Organization by name")
-        {
-            Ok(authz_silo) => {
-                let root = Root { lookup_root: self };
-                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
-                Organization::Name(silo_key, name)
-            }
-            Err(error) => {
-                let root = Root { lookup_root: self };
-                Organization::Error(root, error)
-            }
-        }
-    }
-
-    /// Select a resource of type Organization, identified by its id
-    pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Project, identified by its name
     pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
     where
@@ -517,7 +488,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider", "Project" ],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -579,15 +550,6 @@ lookup_resource! {
     name = "SshKey",
     ancestors = [ "Silo", "SiloUser" ],
     children = [],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "Organization",
-    ancestors = [ "Silo" ],
-    children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]

@@ -66,7 +66,6 @@ impl super::Nexus {
         params: &params::SnapshotCreate,
     ) -> CreateResult<db::model::Snapshot> {
         let authz_silo: authz::Silo;
-        let _authz_org: authz::Organization;
         let authz_project: authz::Project;
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
