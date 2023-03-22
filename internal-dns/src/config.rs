@@ -128,7 +128,7 @@ impl AAAA {
 /// RFD 248), but not true in general about DNS zones:
 ///
 /// - We assume that there are only two kinds of hosts: a "sled" (an illumos
-///   global zone) or a "zone (an illumos non-global zone).  (Both of these are
+///   global zone) or a "zone" (an illumos non-global zone).  (Both of these are
 ///   unrelated to DNS zones -- an unfortunate overlap in terminology.) It might
 ///   seem arbitrary to draw a line between these at all, but they play such
 ///   different roles in the control plane that it's useful to know when looking
