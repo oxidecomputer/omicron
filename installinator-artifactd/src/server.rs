@@ -48,7 +48,7 @@ impl ArtifactServer {
             // of items in a progress report, they can get pretty large if they
             // haven't gone through for a bit. Ensure that hitting the max
             // request size won't cause a failure by setting a generous upper
-            // bound for ther request size.
+            // bound for the request size.
             //
             // TODO: replace with an endpoint-specific option once
             // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
