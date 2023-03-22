@@ -103,10 +103,10 @@ impl<'a> Rack<'a> {
     }
 
     fn draw_power_shelf(&self, buf: &mut Buffer, power_shelf: Rect, i: u8) {
+        assert_eq!(i, 0, "current display only supports one power shelf");
         let component_id = ComponentId::Psc(i);
-        let mut block = Block::default()
-            .title(format!("PWR{}", i))
-            .borders(borders(power_shelf.height));
+        let mut block =
+            Block::default().title("PWR").borders(borders(power_shelf.height));
         if self.state.selected == component_id {
             block = block
                 .style(self.power_shelf_selected_style)
@@ -170,57 +170,42 @@ impl<'a> Widget for Rack<'a> {
 
 // We need to size the rack for large and small terminals
 // Width is not the issue, but height is.
-// We have the following constraints:
 //
-//  * Sleds, switches, and power shelves must be at least 2 lines high
-//    so they have a top border with label and black margin and one line for
-//    content drawing.
-//  * The top borders give a bottom border automatically to each component
-//    above them, and the top of the rack. However we also need a bottom
-//    border, so that's one more line.
-//
-// Therefore the minimum height of the rack is 2*16 + 2*2 + 2*2 + 1 = 41 lines.
-//
-// With a 5 line margin at the top and a 2 line margin at the bottom, the
-// minimum size of the terminal is 48 lines.
-//
-// If the terminal is smaller than 46 lines, the artistic rendering will
-// get progressively worse. XXX: We may want to bail on this instead.
-//
-// As much as possible we would like to also have a bottom margin, but we
-// don't sweat it.
-//
-// The calculations below follow from this logic
+// See inline comments for calculations.
 fn resize(rect: Rect) -> ComponentRects {
     let max_height = rect.height;
 
     // Let's size our components:
     let (rack_height, sled_height, other_height): (u16, u16, u16) =
-        if max_height < 20 {
+        if max_height < 19 {
             // The window is too short.
-            let text = Paragraph::new(Text::raw(format!(
-                "[window too short: resize to at least {} lines high]",
-                20
-            )))
-            .alignment(Alignment::Center);
+            let text = Paragraph::new(Text::raw("[window too short]"))
+                .alignment(Alignment::Center);
             // Center vertically.
             let text_rect =
                 Rect { y: rect.y + max_height / 2, height: 1, ..rect };
             return ComponentRects::WindowTooShort { text, text_rect };
-        } else if max_height < 37 {
-            (20, 1, 1)
-        } else if max_height < 41 {
-            (37, 2, 1)
-        } else if max_height < 56 {
-            (41, 2, 2)
-        } else if max_height < 60 {
-            (56, 3, 2)
-        } else if max_height < 80 {
-            // 80 = 4*16 (sled bays) + 4*2 (power shelves) + 4*2 (switches)
-            (60, 3, 3)
+        } else if max_height < 36 {
+            // 19 lines is just about enough to show a (very degraded)
+            // representation of the rack, since:
+            // 19 = 1*16 (sled bays) + 1*1 (power shelf) + 1*2 (switches)
+            (19, 1, 1)
+        } else if max_height < 39 {
+            // 36 = 2*16 + 1*1 + 1*2 + 1 line drawn below the bottom sled
+            (36, 2, 1)
+        } else if max_height < 54 {
+            // 39 = 2*16 + 2*1 + 2*2 + 1 line drawn below the bottom sled
+            (39, 2, 2)
+        } else if max_height < 57 {
+            // 54 = 3*16 + 2*1 + 2*2
+            (54, 3, 2)
+        } else if max_height < 76 {
+            // 57 = 3*16 + 3*1 + 3*2
+            (57, 3, 3)
         } else {
-            // Just divide evenly by 20 (16 sleds + 2 power shelves + 2 switches)
-            let component_height = max_height / 20;
+            // 76 = 4*16 + 4*1 + 4*2
+            // Just divide evenly by 20 (16 sleds + 1 power shelf + 2 switches)
+            let component_height = max_height / 19;
             (component_height * 20, component_height, component_height)
         };
 
@@ -259,21 +244,23 @@ fn resize(rect: Rect) -> ComponentRects {
     );
     rects_map.insert(ComponentId::Switch(1), top_switch_rect);
 
-    // Power Shelves
-    for i in [17, 18] {
-        let shelf_rect = Rect {
-            x: rack_rect.x,
-            y: rack_rect.y + sled_height * 8 + other_height * (i as u16 - 16),
-            width: sled_width * 2,
-            height: other_height,
-        };
-        rects_map.insert(ComponentId::Psc(18 - i), shelf_rect);
-    }
+    // Power Shelves. Current Oxide designs only use one power shelf (item 17),
+    // so skip the other one (18).
+    //
+    // When a second power shelf is added to the UI, all the y indexes below
+    // this point will have to be increased by other_height.
+    let shelf_rect = Rect {
+        x: rack_rect.x,
+        y: rack_rect.y + sled_height * 8 + other_height,
+        width: sled_width * 2,
+        height: other_height,
+    };
+    rects_map.insert(ComponentId::Psc(0), shelf_rect);
 
     // Bottom Switch
     let bottom_switch_rect = Rect {
         x: rack_rect.x,
-        y: rack_rect.y + sled_height * 8 + 3 * other_height,
+        y: rack_rect.y + sled_height * 8 + 2 * other_height,
         width: sled_width * 2,
         height: other_height,
     };
@@ -306,7 +293,7 @@ fn size_sled(
     sled_width: u16,
     other_height: u16,
 ) {
-    // The power shelves and switches are in between in the layout
+    // The power shelf and switches are in between in the layout
     let index = if i < 16 { i } else { i - 8 };
     let mut sled_index = 31 - index;
     // Swap left and right
@@ -326,7 +313,7 @@ fn size_sled(
     let y = if index < 16 {
         rack.y + sled_height * (index as u16 / 2)
     } else {
-        rack.y + sled_height * (index as u16 / 2) + other_height * 4
+        rack.y + sled_height * (index as u16 / 2) + other_height * 3
     };
     let height = if (index == 30 || index == 31) && sled_height == 2 {
         // We saved space for a bottom border

@@ -71,8 +71,7 @@ impl RackState {
                     ComponentId::Sled(17)
                 }
             }
-            ComponentId::Psc(0) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Switch(1),
+            ComponentId::Psc(0) => ComponentId::Switch(1),
             _ => unreachable!(),
         };
     }
@@ -81,7 +80,7 @@ impl RackState {
         self.selected = match self.selected {
             ComponentId::Sled(16 | 17) => ComponentId::Switch(1),
             ComponentId::Sled(i) => ComponentId::Sled((30 + i) % 32),
-            ComponentId::Switch(1) => ComponentId::Psc(1),
+            ComponentId::Switch(1) => ComponentId::Psc(0),
             ComponentId::Switch(0) => {
                 if self.left_column {
                     ComponentId::Sled(14)
@@ -90,7 +89,6 @@ impl RackState {
                 }
             }
             ComponentId::Psc(0) => ComponentId::Switch(0),
-            ComponentId::Psc(1) => ComponentId::Psc(0),
             _ => unreachable!(),
         };
     }
@@ -115,8 +113,7 @@ impl RackState {
             ComponentId::Sled(15) => ComponentId::Switch(0),
             ComponentId::Sled(i) => ComponentId::Sled((i + 1) % 32),
             ComponentId::Switch(0) => ComponentId::Psc(0),
-            ComponentId::Psc(0) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Switch(1),
+            ComponentId::Psc(0) => ComponentId::Switch(1),
             ComponentId::Switch(1) => ComponentId::Sled(16),
             _ => unreachable!(),
         };
@@ -128,8 +125,7 @@ impl RackState {
             ComponentId::Sled(16) => ComponentId::Switch(1),
             ComponentId::Sled(0) => ComponentId::Sled(31),
             ComponentId::Sled(i) => ComponentId::Sled(i - 1),
-            ComponentId::Switch(1) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Psc(0),
+            ComponentId::Switch(1) => ComponentId::Psc(0),
             ComponentId::Psc(0) => ComponentId::Switch(0),
             ComponentId::Switch(0) => ComponentId::Sled(15),
             _ => unreachable!(),

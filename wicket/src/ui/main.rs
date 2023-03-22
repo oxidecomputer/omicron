@@ -122,7 +122,9 @@ impl MainScreen {
     /// system to take.
     pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         match cmd {
-            Cmd::SwapPane => {
+            // There's just two panes, so next and previous do the same thing
+            // for now.
+            Cmd::NextPane | Cmd::PrevPane => {
                 if self.sidebar.active {
                     self.sidebar.active = false;
                     Some(Action::Redraw)
