@@ -20,75 +20,29 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectPath {
-    pub project: NameOrId,
+macro_rules! path_param {
+    ($struct:ident, $param:ident) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            pub $param: NameOrId,
+        }
+    };
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct InstancePath {
-    pub instance: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct NetworkInterfacePath {
-    pub interface: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct VpcPath {
-    pub vpc: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SubnetPath {
-    pub subnet: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RouterPath {
-    pub router: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RoutePath {
-    pub route: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskPath {
-    pub disk: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SnapshotPath {
-    pub snapshot: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ImagePath {
-    pub image: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SiloPath {
-    pub silo: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProviderPath {
-    pub provider: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct IpPoolPath {
-    pub pool: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SshKeyPath {
-    pub ssh_key: NameOrId,
-}
+path_param!(ProjectPath, project);
+path_param!(InstancePath, instance);
+path_param!(NetworkInterfacePath, interface);
+path_param!(VpcPath, vpc);
+path_param!(SubnetPath, subnet);
+path_param!(RouterPath, router);
+path_param!(RoutePath, route);
+path_param!(DiskPath, disk);
+path_param!(SnapshotPath, snapshot);
+path_param!(ImagePath, image);
+path_param!(SiloPath, silo);
+path_param!(ProviderPath, provider);
+path_param!(IpPoolPath, pool);
+path_param!(SshKeyPath, ssh_key);
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
