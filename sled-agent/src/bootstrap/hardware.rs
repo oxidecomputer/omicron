@@ -130,7 +130,7 @@ impl HardwareMonitor {
         bootstrap_etherstub: Etherstub,
         switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
-        let hardware = HardwareManager::new(log, sled_config.stub_scrimlet)
+        let hardware = HardwareManager::new(log, sled_config.scrimlet_override)
             .map_err(|e| Error::Hardware(e))?;
 
         let service_manager = ServiceManager::new(
@@ -138,7 +138,7 @@ impl HardwareMonitor {
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,
-            sled_config.stub_scrimlet,
+            sled_config.scrimlet_override,
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
         )
