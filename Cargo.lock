@@ -1700,7 +1700,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.7.2",
+ "toml 0.7.3",
 ]
 
 [[package]]
