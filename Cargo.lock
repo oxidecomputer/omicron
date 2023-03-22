@@ -1700,7 +1700,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.7.2",
+ "toml 0.7.3",
 ]
 
 [[package]]
@@ -8043,6 +8043,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "installinator",
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
