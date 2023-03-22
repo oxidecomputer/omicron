@@ -656,46 +656,45 @@ impl ServiceManager {
                         "Nexus VPC private IP: {}", private_ip,
                     );
 
-                    // TODO-remove: OPTE's DHCP "server" returns the list of routes to add
-                    // via option 121 (Classless Static Route). The illumos DHCP client
-                    // currently does not support this option, so we add the routes
-                    // manually here.
-                    // https://www.illumos.org/issues/11990
-                    let gateway_ip = match port.gateway().ip() {
-                        IpAddr::V4(gateway) => gateway.to_string(),
-                        // TODO-completeness: IPv6
-                        IpAddr::V6(_) => unreachable!("IPv6 OPTE gateway"),
-                    };
-                    running_zone
-                        .run_cmd(&[
-                            "/usr/sbin/route",
-                            "add",
-                            "-host",
-                            &gateway_ip,
-                            &private_ip.to_string(),
-                            "-interface",
-                            "-ifp",
-                            port.vnic_name(),
-                        ])
-                        .map_err(|err| Error::ZoneCommand {
-                            intent:
-                                "nexus: adding OPTE Local Subnet Router Entry"
-                                    .to_string(),
-                            err,
-                        })?;
-                    running_zone
-                        .run_cmd(&[
-                            "/usr/sbin/route",
-                            "add",
-                            "-inet",
-                            "default",
-                            &gateway_ip,
-                        ])
-                        .map_err(|err| Error::ZoneCommand {
-                            intent: "nexus: adding OPTE Default Router Entry"
-                                .to_string(),
-                            err,
-                        })?;
+                    if let IpAddr::V4(gateway_ip) = port.gateway().ip() {
+                        // TODO-remove: OPTE's DHCP "server" returns the list of routes to add
+                        // via option 121 (Classless Static Route). The illumos DHCP client
+                        // currently does not support this option, so we add the routes
+                        // manually here.
+                        // https://www.illumos.org/issues/11990
+                        let gateway_ip = gateway_ip.to_string();
+                        running_zone
+                            .run_cmd(&[
+                                "/usr/sbin/route",
+                                "add",
+                                "-host",
+                                &gateway_ip,
+                                &private_ip.to_string(),
+                                "-interface",
+                                "-ifp",
+                                port.vnic_name(),
+                            ])
+                            .map_err(|err| Error::ZoneCommand {
+                                intent:
+                                    "nexus: adding OPTE Local Subnet Router Entry"
+                                        .to_string(),
+                                err,
+                            })?;
+                        running_zone
+                            .run_cmd(&[
+                                "/usr/sbin/route",
+                                "add",
+                                "-inet",
+                                "default",
+                                &gateway_ip,
+                            ])
+                            .map_err(|err| Error::ZoneCommand {
+                                intent:
+                                    "nexus: adding OPTE Default Router Entry"
+                                        .to_string(),
+                                err,
+                            })?;
+                    }
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
