@@ -344,374 +344,6 @@
         "deprecated": true
       }
     },
-    "/system/by-id/silos/{id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a silo by id",
-        "description": "Use `GET /v1/system/silos/{id}` instead.",
-        "operationId": "silo_view_by_id",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Silo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/hardware/disks": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List physical disks",
-        "description": "Use `GET /v1/system/hardware/disks` instead",
-        "operationId": "physical_disk_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhysicalDiskResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/hardware/racks": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List racks",
-        "description": "Use `GET /v1/system/hardware/racks` instead",
-        "operationId": "rack_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RackResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/hardware/racks/{rack_id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a rack",
-        "description": "Use `GET /v1/system/hardware/racks/{rack_id}` instead",
-        "operationId": "rack_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rack_id",
-            "description": "The rack's unique ID.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Rack"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/hardware/sleds": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List sleds",
-        "description": "Use `GET /v1/system/hardware/sleds instead`",
-        "operationId": "sled_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/hardware/sleds/{sled_id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a sled",
-        "description": "Use `GET /v1/system/hardware/sleds/{sled_id}` instead",
-        "operationId": "sled_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "description": "The sled's unique ID.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Sled"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/hardware/sleds/{sled_id}/disks": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List physical disks attached to sleds",
-        "description": "Use `GET /v1/system/hardware/sleds/{sled_id}/disks` instead",
-        "operationId": "sled_physical_disk_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "description": "The sled's unique ID.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhysicalDiskResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
     "/system/images": {
       "get": {
         "tags": [
@@ -865,360 +497,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/sagas": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List sagas",
-        "description": "Use `GET v1/system/sagas` instead",
-        "operationId": "saga_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      }
-    },
-    "/system/sagas/{saga_id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a saga",
-        "description": "Use `GET v1/system/sagas/{saga_id}` instead",
-        "operationId": "saga_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "saga_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Saga"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List silos",
-        "description": "Lists silos that are discoverable based on the current permissions. Use `GET /v1/system/silos` instead",
-        "operationId": "silo_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true,
-        "x-dropshot-pagination": true
-      },
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a silo",
-        "description": "Use `POST /v1/system/silos` instead",
-        "operationId": "silo_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SiloCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Silo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a silo",
-        "description": "Fetch a silo by name. Use `GET /v1/system/silos/{silo}` instead.",
-        "operationId": "silo_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Silo"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a silo",
-        "description": "Delete a silo by name. Use `DELETE /v1/system/silos/{silo}` instead.",
-        "operationId": "silo_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      }
-    },
-    "/system/silos/{silo_name}/policy": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a silo's IAM policy",
-        "description": "Use `GET /v1/system/silos/{silo}/policy` instead.",
-        "operationId": "silo_policy_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "deprecated": true
-      },
-      "put": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Update a silo's IAM policy",
-        "description": "Use `PUT /v1/system/silos/{silo}/policy` instead",
-        "operationId": "silo_policy_update",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "description": "The silo's unique name.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SiloRolePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SiloRolePolicy"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1515,7 +793,7 @@
           "silos"
         ],
         "summary": "List groups",
-        "operationId": "group_list_v1",
+        "operationId": "group_list",
         "parameters": [
           {
             "in": "query",
@@ -3731,7 +3009,7 @@
           "system"
         ],
         "summary": "List physical disks",
-        "operationId": "physical_disk_list_v1",
+        "operationId": "physical_disk_list",
         "parameters": [
           {
             "in": "query",
@@ -3788,7 +3066,7 @@
           "system"
         ],
         "summary": "List racks",
-        "operationId": "rack_list_v1",
+        "operationId": "rack_list",
         "parameters": [
           {
             "in": "query",
@@ -3845,7 +3123,7 @@
           "system"
         ],
         "summary": "Fetch a rack",
-        "operationId": "rack_view_v1",
+        "operationId": "rack_view",
         "parameters": [
           {
             "in": "path",
@@ -3884,7 +3162,7 @@
           "system"
         ],
         "summary": "List sleds",
-        "operationId": "sled_list_v1",
+        "operationId": "sled_list",
         "parameters": [
           {
             "in": "query",
@@ -3941,7 +3219,7 @@
           "system"
         ],
         "summary": "Fetch a sled",
-        "operationId": "sled_view_v1",
+        "operationId": "sled_view",
         "parameters": [
           {
             "in": "path",
@@ -3980,7 +3258,7 @@
           "system"
         ],
         "summary": "List physical disks attached to sleds",
-        "operationId": "sled_physical_disk_list_v1",
+        "operationId": "sled_physical_disk_list",
         "parameters": [
           {
             "in": "path",
@@ -4111,7 +3389,7 @@
           "system"
         ],
         "summary": "Create a user",
-        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider. Use `POST /v1/system/identity-providers/local/users` instead",
+        "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
         "operationId": "local_idp_user_create",
         "parameters": [
           {
@@ -4150,8 +3428,7 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        },
-        "deprecated": true
+        }
       }
     },
     "/v1/system/identity-providers/local/users/{user_id}": {
@@ -5072,7 +4349,7 @@
           "system"
         ],
         "summary": "List sagas",
-        "operationId": "saga_list_v1",
+        "operationId": "saga_list",
         "parameters": [
           {
             "in": "query",
@@ -5129,7 +4406,7 @@
           "system"
         ],
         "summary": "Fetch a saga",
-        "operationId": "saga_view_v1",
+        "operationId": "saga_view",
         "parameters": [
           {
             "in": "path",
@@ -5168,7 +4445,7 @@
         ],
         "summary": "List silos",
         "description": "Lists silos that are discoverable based on the current permissions.",
-        "operationId": "silo_list_v1",
+        "operationId": "silo_list",
         "parameters": [
           {
             "in": "query",
@@ -5223,7 +4500,7 @@
           "system"
         ],
         "summary": "Create a silo",
-        "operationId": "silo_create_v1",
+        "operationId": "silo_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5261,7 +4538,7 @@
         ],
         "summary": "Fetch a silo",
         "description": "Fetch a silo by name.",
-        "operationId": "silo_view_v1",
+        "operationId": "silo_view",
         "parameters": [
           {
             "in": "path",
@@ -5297,7 +4574,7 @@
         ],
         "summary": "Delete a silo",
         "description": "Delete a silo by name.",
-        "operationId": "silo_delete_v1",
+        "operationId": "silo_delete",
         "parameters": [
           {
             "in": "path",
@@ -5327,7 +4604,7 @@
           "system"
         ],
         "summary": "Fetch a silo's IAM policy",
-        "operationId": "silo_policy_view_v1",
+        "operationId": "silo_policy_view",
         "parameters": [
           {
             "in": "path",
@@ -5362,7 +4639,7 @@
           "system"
         ],
         "summary": "Update a silo's IAM policy",
-        "operationId": "silo_policy_update_v1",
+        "operationId": "silo_policy_update",
         "parameters": [
           {
             "in": "path",
@@ -5797,7 +5074,7 @@
           "system"
         ],
         "summary": "List users in a silo",
-        "operationId": "silo_user_list_v1",
+        "operationId": "silo_user_list",
         "parameters": [
           {
             "in": "query",
@@ -5861,7 +5138,7 @@
           "system"
         ],
         "summary": "Fetch a user",
-        "operationId": "silo_user_view_v1",
+        "operationId": "silo_user_view",
         "parameters": [
           {
             "in": "path",
@@ -6002,7 +5279,7 @@
           "silos"
         ],
         "summary": "List users",
-        "operationId": "user_list_v1",
+        "operationId": "user_list",
         "parameters": [
           {
             "in": "query",
@@ -12798,18 +12075,6 @@
           }
         }
       },
-      "IdSortMode": {
-        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
-        "oneOf": [
-          {
-            "description": "sort in increasing order of \"id\"",
-            "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
-          }
-        ]
-      },
       "NameSortMode": {
         "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -12857,6 +12122,18 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "IdSortMode": {
+        "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
+        "oneOf": [
+          {
+            "description": "sort in increasing order of \"id\"",
+            "type": "string",
+            "enum": [
+              "id_ascending"
+            ]
+          }
         ]
       },
       "SystemMetricName": {

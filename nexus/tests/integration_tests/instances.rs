@@ -137,7 +137,7 @@ async fn test_instances_access_before_create_returns_not_found(
 }
 
 #[nexus_test]
-async fn test_v1_instance_access(cptestctx: &ControlPlaneTestContext) {
+async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     populate_ip_pool(&client, "default", None).await;
