@@ -127,7 +127,7 @@ pub struct Store {
     updating: Arc<Mutex<Option<UpdateInfo>>>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct CurrentConfig {
     generation: u64,
     zones: Vec<String>,
@@ -615,7 +615,7 @@ impl Store {
         // The name tree stores just the part of each name that doesn't include
         // the zone.  So we need to trim the zone part from the name provided in
         // the request.  (This basically duplicates work in `zone_of` above.)
-        let name_str = name.to_string();
+        let name_str = orig_name.to_string();
         let key = {
             let zone_name = Name::from_str(zone_name).unwrap();
             // This is implied by passing the `zone_of()` check above.
@@ -640,9 +640,7 @@ impl Store {
             .ok_or_else(|| QueryError::NoName(name_str.clone()))?;
 
         let records: Vec<DnsRecord> = serde_json::from_slice(&bits)
-            .with_context(|| {
-                format!("deserialize record for key {:?}", name_str.clone())
-            })
+            .with_context(|| format!("deserialize record for key {:?}", key))
             .map_err(QueryError::ParseFail)?;
 
         if records.is_empty() {
@@ -651,7 +649,7 @@ impl Store {
             warn!(
                 &self.log,
                 "found name with no records";
-                "dns_name" => &name_str
+                "key" => &key
             );
 
             return Err(QueryError::NoName(name_str));
@@ -731,16 +729,20 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
 
 #[cfg(test)]
 mod test {
-    use super::{Config, Store};
+    use super::{Config, Store, UpdateError};
     use crate::dns_types::DnsConfigParams;
     use crate::dns_types::DnsConfigZone;
     use crate::dns_types::DnsKV;
     use crate::dns_types::DnsRecord;
     use crate::dns_types::DnsRecordKey;
     use crate::storage::QueryError;
+    use anyhow::Context;
+    use camino::Utf8PathBuf;
     use omicron_test_utils::dev::test_setup_log;
+    use std::collections::BTreeSet;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
+    use std::sync::Arc;
     use trust_dns_client::rr::LowerName;
     use trust_dns_client::rr::Name;
 
@@ -750,6 +752,7 @@ mod test {
         logctx: dropshot::test_util::LogContext,
         tmpdir: tempdir::TempDir,
         store: Store,
+        db: Arc<sled::Db>,
     }
 
     impl TestContext {
@@ -757,19 +760,22 @@ mod test {
             let logctx = test_setup_log(test_name);
             let tmpdir = tempdir::TempDir::new("dns-server-storage-test")
                 .expect("failed to create tmp directory for test");
-            let storage_path = camino::Utf8PathBuf::from_path_buf(
-                tmpdir.path().to_path_buf(),
-            )
-            .expect(
-                "failed to create Utf8PathBuf for test temporary directory",
+            let storage_path =
+                Utf8PathBuf::from_path_buf(tmpdir.path().to_path_buf()).expect(
+                    "failed to create Utf8PathBuf for test temporary directory",
+                );
+
+            let db = Arc::new(
+                sled::open(&storage_path).context("creating db").unwrap(),
             );
-            let store = Store::new(
+            let store = Store::new_with_db(
                 logctx.log.clone(),
+                Arc::clone(&db),
                 &Config { storage_path, keep_old_generations: 3 },
             )
             .expect("failed to create test Store");
             assert!(store.is_new());
-            TestContext { logctx, tmpdir, store }
+            TestContext { logctx, tmpdir, store, db }
         }
 
         /// Invoke upon successful completion of a test to clean up the
@@ -819,14 +825,24 @@ mod test {
         }
     }
 
-    #[tokio::test]
-    async fn test_update_success() {
-        let tc = TestContext::new("test_update_success");
+    /// Returns an ordered list of the generation numbers that have trees in
+    /// the underlying Store's database.  This is used to verify the
+    /// behavior around pruning trees.
+    fn generations_with_trees(store: &Store) -> Vec<u64> {
+        store
+            .all_name_trees()
+            .map(|(gen, _)| gen)
+            .collect::<BTreeSet<u64>>()
+            .into_iter()
+            .collect()
+    }
 
-        // XXX-dap figure out how best to generalize this in terms of
-        // declarative generations.
+    #[tokio::test]
+    async fn test_update_basic() {
+        let tc = TestContext::new("test_update_basic");
 
         // Verify the initial configuration.
+        assert!(generations_with_trees(&tc.store).is_empty());
         let config = tc.store.dns_config().await.unwrap();
         assert_eq!(config.generation, 0);
         assert!(config.zones.is_empty());
@@ -834,7 +850,7 @@ mod test {
         expect(&tc.store, "Gen1_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
-        expect(&tc.store, "gen3_name.zone3.internal", Expect::NoZone);
+        expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
         // Update to generation 1, which contains one zone with one name.
         let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
@@ -857,6 +873,7 @@ mod test {
         };
 
         tc.store.dns_config_update(&update1, "my request id").await.unwrap();
+        assert_eq!(vec![1], generations_with_trees(&tc.store));
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
@@ -879,26 +896,305 @@ mod test {
         );
         expect(&tc.store, "enoent.zone1.internal", Expect::NoName);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
-        expect(&tc.store, "gen3_name.zone3.internal", Expect::NoZone);
+        expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
-        // XXX-dap when it comes time to test the update process, maybe the
-        // thing to is separate the existing do_update() into two phases that
-        // the test suite can call separately, with some checks in between.  Or
-        // maybe we can drop the store, keep the Db, make a new Store, and see
-        // what it does
+        // Update to generation 2, which contains an additional zone and removes
+        // one of the names from the existing zone.
+        let update2 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 2,
+            zones: vec![
+                DnsConfigZone {
+                    zone_name: "zone1.internal".to_string(),
+                    records: vec![DnsKV {
+                        key: DnsRecordKey { name: "shared_name".to_string() },
+                        records: vec![dummy_record.clone()],
+                    }],
+                },
+                DnsConfigZone {
+                    zone_name: "zone2.internal".to_string(),
+                    records: vec![DnsKV {
+                        key: DnsRecordKey { name: "gen2_name".to_string() },
+                        records: vec![dummy_record.clone()],
+                    }],
+                },
+            ],
+        };
+        tc.store.dns_config_update(&update2, "my request id").await.unwrap();
+        assert_eq!(vec![1, 2], generations_with_trees(&tc.store));
+        expect(&tc.store, "gen1_name.zone1.internal", Expect::NoName);
+        expect(&tc.store, "gen1_name.ZONE1.internal", Expect::NoName);
+        expect(&tc.store, "Gen1_name.zone1.internal", Expect::NoName);
+        expect(
+            &tc.store,
+            "shared_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(
+            &tc.store,
+            "gen2_name.zone2.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
+
+        // Do another update, but this time, skip several generation numbers.
+        let update8 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 8,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone8.internal".to_string(),
+                records: vec![DnsKV {
+                    key: DnsRecordKey { name: "gen8_name".to_string() },
+                    records: vec![dummy_record.clone()],
+                }],
+            }],
+        };
+        tc.store.dns_config_update(&update8, "my request id").await.unwrap();
+        assert_eq!(vec![1, 2, 8], generations_with_trees(&tc.store));
+        expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
+        expect(
+            &tc.store,
+            "gen8_name.zone8.internal",
+            Expect::Record(&dummy_record),
+        );
+
+        // Updating to generation 8 again should be a no-op.  It should succeed
+        // and show the same behavior.
+        tc.store.dns_config_update(&update8, "my request id").await.unwrap();
+        assert_eq!(vec![1, 2, 8], generations_with_trees(&tc.store));
+        expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
+        expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
+        expect(
+            &tc.store,
+            "gen8_name.zone8.internal",
+            Expect::Record(&dummy_record),
+        );
+
+        // Failure: try a backwards update.
+        println!("attempting invalid update to generation 2");
+        let error = tc
+            .store
+            .dns_config_update(&update2, "my request id")
+            .await
+            .expect_err("update unexpectedly succeeded");
+        println!("found error: {:#}", error);
+        println!("{:?}", error);
+        match &error {
+            UpdateError::BadUpdateGeneration {
+                current_generation: 8,
+                attempted_generation: 2,
+            } => (),
+            e => panic!("unexpected failure to update: {:#}", e),
+        };
+        assert_eq!(
+            error.to_string(),
+            "unsupported attempt to update to generation 2 \
+                     while at generation 8",
+        );
+
+        // Now make one more update and make sure we've pruned the oldest
+        // generation's trees.  (This assumes that we've configured the Store to
+        // keep three generations' worth of trees, which is what we did above.)
+        // We should have kept the last three trees that we saw (which includes
+        // generation 2), not the last three integers.
+        let update9 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 9,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone8.internal".to_string(),
+                records: vec![DnsKV {
+                    key: DnsRecordKey { name: "gen8_name".to_string() },
+                    records: vec![dummy_record.clone()],
+                }],
+            }],
+        };
+        tc.store.dns_config_update(&update9, "my request id").await.unwrap();
+        assert_eq!(vec![2, 8, 9], generations_with_trees(&tc.store));
+
         tc.cleanup_successful();
     }
 
-    // XXX-dap TODO-coverage
-    // A thought on testing the storage stuff: maybe the thing to do is to set
-    // up the Db in a particular way, then apply an update, then inspect the
-    // contents of the Db?  That is, the primitive operation that we're testing
-    // is: given this Db, apply this update?  That will let us verify a bunch of
-    // cases:
-    // - update to a generation that had an aborted update (i.e., left turds
-    //   around)
-    // - update to a generation older than current
-    // - cleanup of older generations' data (including cases where we keep say 3
-    //   generations' worth that might span 5 generation numbers (if we never
-    //   updated to those intermediate ones))
+    #[tokio::test]
+    async fn test_update_interrupted() {
+        let tc = TestContext::new("test_update_interrupted");
+
+        // Initial configuration.
+        assert!(generations_with_trees(&tc.store).is_empty());
+        let config = tc.store.dns_config().await.unwrap();
+        assert_eq!(config.generation, 0);
+        assert!(config.zones.is_empty());
+
+        // Make one normal update.
+        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let update1 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 1,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: vec![DnsKV {
+                    key: DnsRecordKey { name: "gen1_name".to_string() },
+                    records: vec![dummy_record.clone()],
+                }],
+            }],
+        };
+
+        tc.store.dns_config_update(&update1, "my request id").await.unwrap();
+        assert_eq!(vec![1], generations_with_trees(&tc.store));
+
+        // Now make an update to generation 2.  We're going to do this like
+        // normal, examine the state, and then we're going to unwind the very
+        // last step.  This should _look_ like an interrupted update.  We'll
+        // create a new Store atop that, verify that it reports being on
+        // generation 1, and that we can then successfully update to generation
+        // 2 again.
+        //
+        // This isn't a perfect test.  And it's unfortunate that we have to dig
+        // into the guts of the database.  But it's not a bad simulation, and
+        // it's better to test some of this behavior than none.
+        let update2 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 2,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone2.internal".to_string(),
+                records: vec![DnsKV {
+                    key: DnsRecordKey { name: "gen2_name".to_string() },
+                    records: vec![dummy_record.clone()],
+                }],
+            }],
+        };
+
+        let gen1_config = tc.store.read_config().unwrap();
+        assert_eq!(1, gen1_config.generation);
+        expect(
+            &tc.store,
+            "gen1_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
+
+        tc.store.dns_config_update(&update2, "my request id").await.unwrap();
+        assert_eq!(vec![1, 2], generations_with_trees(&tc.store));
+        let gen2_config = tc.store.read_config().unwrap();
+        assert_eq!(2, gen2_config.generation);
+        expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
+        expect(
+            &tc.store,
+            "gen2_name.zone2.internal",
+            Expect::Record(&dummy_record),
+        );
+
+        // Grab a reference to the database so we can muck with it and then
+        // create a new Store from it.  Then clean up the old Store.
+        let db = Arc::clone(&tc.db);
+        tc.cleanup_successful(); // drops "tc"
+
+        // Undo the last step of the update to make this look like an
+        // interrupted update.
+        db.insert(
+            &super::KEY_CONFIG,
+            serde_json::to_vec(&gen1_config).unwrap(),
+        )
+        .unwrap();
+
+        let logctx = test_setup_log("test_update_interrupted_2");
+        let store = Store::new_with_db(
+            logctx.log,
+            db,
+            &Config {
+                storage_path: Utf8PathBuf::from_str("/nonexistent_unused")
+                    .unwrap(),
+                keep_old_generations: 3,
+            },
+        )
+        .unwrap();
+        let config = store.read_config().unwrap();
+        assert_eq!(gen1_config, config);
+        // We ought to have pruned the tree associated with generation 2.
+        assert_eq!(vec![1], generations_with_trees(&store));
+        // The rest of the behavior ought to be like generation 1.
+        expect(
+            &store,
+            "gen1_name.zone1.internal",
+            Expect::Record(&dummy_record),
+        );
+        expect(&store, "gen2_name.zone2.internal", Expect::NoZone);
+
+        // Now we can do another update to generation 2.
+        store.dns_config_update(&update2, "my request id").await.unwrap();
+        assert_eq!(vec![1, 2], generations_with_trees(&store));
+        let gen2_config = store.read_config().unwrap();
+        assert_eq!(2, gen2_config.generation);
+        expect(&store, "gen1_name.zone1.internal", Expect::NoZone);
+        expect(
+            &store,
+            "gen2_name.zone2.internal",
+            Expect::Record(&dummy_record),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_in_progress() {
+        let tc = TestContext::new("test_update_in_progress");
+
+        // Begin an update.
+        let before = chrono::Utc::now();
+        let update1 = tc.store.begin_update("my req id", 3).await.unwrap();
+        let after = chrono::Utc::now();
+
+        // Concurrently attempt another update.
+        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let update2 = DnsConfigParams {
+            time_created: chrono::Utc::now(),
+            generation: 1,
+            zones: vec![DnsConfigZone {
+                zone_name: "zone1.internal".to_string(),
+                records: vec![DnsKV {
+                    key: DnsRecordKey { name: "gen1_name".to_string() },
+                    records: vec![dummy_record.clone()],
+                }],
+            }],
+        };
+
+        let result =
+            tc.store.dns_config_update(&update2, "my request id").await;
+
+        // "Finish" the first update now.  This just marks that we're no longer
+        // updating.  The database will not actually be updated to the
+        // generation in question
+        //
+        // We do this before checking the error we just got back to avoid a
+        // double-panic if we catch a problem here.
+        update1.finish().await;
+
+        let error = result
+            .expect_err("unexpected success from concurrent update attempt");
+        println!("found error: {:#}", error);
+        match &error {
+            UpdateError::UpdateInProgress {
+                start_time,
+                elapsed: _,
+                generation,
+                req_id,
+            } if *start_time >= before
+                && *start_time <= after
+                && *generation == 3
+                && *req_id == "my req id" =>
+            {
+                ()
+            }
+            e => panic!(
+                "unexpected error from concurrent update attempt: {:#}\n{:?}",
+                e, e
+            ),
+        };
+
+        // Now we should be able to apply that update.
+        tc.store
+            .dns_config_update(&update2, "my request id")
+            .await
+            .expect("unexpected failure");
+    }
 }
