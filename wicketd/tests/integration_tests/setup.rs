@@ -10,10 +10,12 @@ use dropshot::test_util::ClientTestContext;
 use gateway_test_utils::setup::GatewayTestContext;
 
 pub struct WicketdTestContext {
+    pub wicketd_addr: SocketAddrV6,
     pub wicketd_client: wicketd_client::Client,
     // This is not currently used but is kept here because it's easier to debug
     // this way.
     pub wicketd_raw_client: ClientTestContext,
+    pub artifact_addr: SocketAddrV6,
     pub artifact_client: installinator_artifact_client::Client,
     pub server: wicketd::Server,
     pub gateway: GatewayTestContext,
@@ -44,8 +46,8 @@ impl WicketdTestContext {
             .await
             .expect("error starting wicketd");
 
+        let wicketd_addr = assert_ipv6(server.wicketd_server.local_addr());
         let wicketd_client = {
-            let wicketd_addr = assert_ipv6(server.wicketd_server.local_addr());
             let endpoint = format!(
                 "http://[{}]:{}",
                 wicketd_addr.ip(),
@@ -57,9 +59,8 @@ impl WicketdTestContext {
             )
         };
 
+        let artifact_addr = assert_ipv6(server.artifact_server.local_addr());
         let artifact_client = {
-            let artifact_addr =
-                assert_ipv6(server.artifact_server.local_addr());
             let endpoint = format!(
                 "http://[{}]:{}",
                 artifact_addr.ip(),
@@ -77,8 +78,10 @@ impl WicketdTestContext {
         );
 
         Self {
+            wicketd_addr,
             wicketd_client,
             wicketd_raw_client,
+            artifact_addr,
             artifact_client,
             server,
             gateway,

@@ -101,9 +101,9 @@ impl IprArtifactServer {
 }
 
 /// The update tracker's interface to the progress store.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 #[must_use]
-pub(crate) struct IprUpdateTracker {
+pub struct IprUpdateTracker {
     log: slog::Logger,
     running_updates: Arc<Mutex<HashMap<Uuid, RunningUpdate>>>,
 }
@@ -113,7 +113,10 @@ impl IprUpdateTracker {
     ///
     /// Returns a oneshot receiver that resolves when the first message from the
     /// installinator has been received.
-    pub(crate) async fn register(&self, update_id: Uuid) -> IprStartReceiver {
+    ///
+    /// Exposed for testing.
+    #[doc(hidden)]
+    pub async fn register(&self, update_id: Uuid) -> IprStartReceiver {
         slog::debug!(self.log, "registering new update id"; "update_id" => %update_id);
         let (start_sender, start_receiver) = oneshot::channel();
 

@@ -17,3 +17,4 @@ mod test_helpers;
 mod write;
 
 pub use dispatch::*;
+pub use write::*;

@@ -44,6 +44,16 @@ impl ArtifactServer {
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: std::net::SocketAddr::V6(self.address),
+            // Even though the installinator sets an upper bound on the number
+            // of items in a progress report, they can get pretty large if they
+            // haven't gone through for a bit. Ensure that hitting the max
+            // request size won't cause a failure by setting a generous upper
+            // bound for ther request size.
+            //
+            // TODO: replace with an endpoint-specific option once
+            // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
+            // available in omicron.
+            request_body_max_bytes: 4 * 1024 * 1024,
             ..Default::default()
         };
 

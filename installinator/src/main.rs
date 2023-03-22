@@ -10,6 +10,7 @@ use installinator::InstallinatorApp;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let app = InstallinatorApp::parse();
-    app.exec().await?;
+    let log = InstallinatorApp::setup_log("/tmp/installinator.log")?;
+    app.exec(&log).await?;
     Ok(())
 }
