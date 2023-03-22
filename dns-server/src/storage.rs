@@ -381,8 +381,8 @@ impl Store {
         }
 
         // Prune any trees in the db that are newer than the current generation.
-        // These could exist if we were previously crashed while trying to move to
-        // this generation.
+        // These could exist if we were previously crashed while trying to move
+        // to this generation.
         self.prune_newer(&old_config);
 
         // For each zone in the config, create the corresponding tree.  Populate
@@ -576,6 +576,10 @@ impl Store {
         self.prune_trees(trees_to_prune, "too old");
     }
 
+    /// Returns a non-empty list of DNS records associated with the name in the
+    /// given DNS request.
+    ///
+    /// If the returned set would have been empty, returns `QueryError::NoName`.
     pub(crate) fn query(
         &self,
         mr: &trust_dns_server::authority::MessageRequest,
