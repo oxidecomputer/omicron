@@ -108,9 +108,6 @@ async fn test_updates() {
         }
     }
 
-    // TODO: This doesn't work yet since sp-sim can't understand update
-    // commands.
-
     wicketd_testctx.teardown().await;
 }
 
@@ -218,4 +215,6 @@ async fn test_installinator_fetch() {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }
+
+    wicketd_testctx.teardown().await;
 }
