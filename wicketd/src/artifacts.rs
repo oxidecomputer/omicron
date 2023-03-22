@@ -113,7 +113,7 @@ impl ArtifactGetter for WicketdArtifactServer {
 /// This can be cheaply cloned, and is intended to be shared across the parts of artifactd that
 /// upload artifacts and the parts that fetch them.
 #[derive(Clone, Debug)]
-pub(crate) struct WicketdArtifactStore {
+pub struct WicketdArtifactStore {
     log: Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
     // sections are extremely small.
@@ -145,7 +145,10 @@ impl WicketdArtifactStore {
         (system_version, artifact_ids)
     }
 
-    pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
+    /// Obtain the current plan.
+    ///
+    /// Exposed for testing.
+    pub fn current_plan(&self) -> Option<UpdatePlan> {
         // We expect this hashmap to be relatively small (order ~10), and
         // cloning both ArtifactIds and BufLists are cheap.
         self.artifacts_with_plan.lock().unwrap().plan.clone()
@@ -161,7 +164,7 @@ impl WicketdArtifactStore {
         self.artifacts_with_plan.lock().unwrap().get(id).map(BufList::from)
     }
 
-    fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
+    pub fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts_with_plan
@@ -464,8 +467,11 @@ pub(crate) struct ArtifactIdData {
     pub(crate) data: DebugIgnore<Bytes>,
 }
 
+/// The update plan currently in effect.
+///
+/// Exposed for testing.
 #[derive(Debug, Clone)]
-pub(crate) struct UpdatePlan {
+pub struct UpdatePlan {
     pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: ArtifactIdData,
     pub(crate) gimlet_rot: ArtifactIdData,
@@ -488,12 +494,16 @@ pub(crate) struct UpdatePlan {
 
     // We need to send installinator the hash of the host_phase_2 data it should
     // fetch from us; we compute it while generating the plan.
-    pub(crate) host_phase_2_hash: ArtifactHash,
+    //
+    // This is exposed for testing.
+    pub host_phase_2_hash: ArtifactHash,
 
     // We also need to send installinator the hash of the control_plane image it
     // should fetch from us. This is already present in the TUF repository, but
     // we record it here for use by the update process.
-    pub(crate) control_plane_hash: ArtifactHash,
+    //
+    // This is exposed for testing.
+    pub control_plane_hash: ArtifactHash,
 }
 
 impl UpdatePlan {

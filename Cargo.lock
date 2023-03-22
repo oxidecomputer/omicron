@@ -8043,6 +8043,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
+ "installinator",
  "installinator-artifact-client",
  "installinator-artifactd",
  "installinator-common",
