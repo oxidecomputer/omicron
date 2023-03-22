@@ -219,8 +219,8 @@ enum SwitchZone {
         // A background task which keeps looping until the zone is initialized
         worker: Option<Task>,
         // Filesystems for the switch zone to mount
-        // Since Softnpu is currently managed via a UNIX socket, we need to
-        // pass those files in to the SwitchZone so Dendrite can manage Softnpu
+        // Since SoftNPU is currently managed via a UNIX socket, we need to
+        // pass those files in to the SwitchZone so Dendrite can manage SoftNPU
         filesystems: Vec<zone::Fs>,
     },
     // The Zone is currently running.
@@ -845,7 +845,7 @@ impl ServiceManager {
                             "config/port_config",
                             "/opt/oxide/dendrite/misc/model_config.toml",
                         )?,
-                        DendriteAsic::Softnpu => {
+                        DendriteAsic::SoftNpu => {
                             smfh.setprop("config/mgmt", "uds")?;
                             smfh.setprop(
                                 "config/uds_path",
@@ -1020,7 +1020,7 @@ impl ServiceManager {
                         ServiceType::Wicketd,
                     ]
                 }
-                ScrimletMode::Softnpu => {
+                ScrimletMode::SoftNpu => {
                     let softnpu_filesystem = zone::Fs {
                         ty: "lofs".to_string(),
                         dir: "/opt/softnpu/stuff".to_string(),
@@ -1029,7 +1029,7 @@ impl ServiceManager {
                     };
                     filesystems.push(softnpu_filesystem);
                     vec![
-                        ServiceType::Dendrite { asic: DendriteAsic::Softnpu },
+                        ServiceType::Dendrite { asic: DendriteAsic::SoftNpu },
                         ServiceType::ManagementGatewayService,
                         ServiceType::Wicketd,
                     ]

@@ -222,7 +222,7 @@ pub struct Zpool {
 pub enum DendriteAsic {
     TofinoAsic,
     TofinoStub,
-    Softnpu,
+    SoftNpu,
 }
 
 impl std::fmt::Display for DendriteAsic {
@@ -233,7 +233,7 @@ impl std::fmt::Display for DendriteAsic {
             match self {
                 DendriteAsic::TofinoAsic => "tofino_asic",
                 DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::Softnpu => "softnpu",
+                DendriteAsic::SoftNpu => "soft_npu",
             }
         )
     }
@@ -244,7 +244,7 @@ impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
         match a {
             DendriteAsic::TofinoAsic => Self::TofinoAsic,
             DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::Softnpu => Self::Softnpu,
+            DendriteAsic::SoftNpu => Self::SoftNpu,
         }
     }
 }

@@ -42,7 +42,7 @@ pub enum HardwareUpdate {
 
 /// Configuration for forcing a sled to run as a Scrimlet
 #[derive(Clone, Debug, Deserialize, Copy)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum ScrimletMode {
     /// Force sled to run as a Gimlet
     /// this is to preserve the old behavior of `stub_scrimlet = false`,
@@ -50,8 +50,8 @@ pub enum ScrimletMode {
     Disabled,
     /// Force sled to run in Scrimlet mode with a stub switch
     Stub,
-    /// Force sled to run in Scrimlet mode with a Softnpu switch
-    Softnpu,
+    /// Force sled to run in Scrimlet mode with a SoftNPU switch
+    SoftNpu,
 }
 
 /// Describes properties that should uniquely identify a Gimlet.

@@ -520,7 +520,7 @@ impl HardwareManager {
     ///
     /// Arguments:
     /// - `scrimlet_override`: Identifies if we should ignore the attached Tofino
-    /// device (`Disabled`), use the `Softnpu` asic, or use the `Stub` asic.
+    /// device (`Disabled`), use the `SoftNpu` asic, or use the `Stub` asic.
     /// If this argument is not supplied, we assume the device is a gimlet until
     /// device scanning informs us otherwise (normal behavior).
     pub fn new(
@@ -547,7 +547,7 @@ impl HardwareManager {
                 // I'm not sure whether or not we should be treating softnpu
                 // as a stub or treating it as a different HardwareView variant,
                 // so this might change.
-                ScrimletMode::Softnpu => HardwareView::new_stub_tofino(true),
+                ScrimletMode::SoftNpu => HardwareView::new_stub_tofino(true),
             },
         }
         .map_err(|e| e.to_string())?;
