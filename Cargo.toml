@@ -49,6 +49,7 @@ members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -97,6 +98,7 @@ default-members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -106,9 +108,9 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.10"
+assert_cmd = "2.0.8"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.67"
+async-trait = "0.1.66"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -230,7 +232,7 @@ rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
-regress = "0.5.0"
+regress = "0.4.1"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
@@ -287,7 +289,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.7"
-toml = "0.7.3"
+toml = "0.7.2"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
@@ -301,6 +303,7 @@ usdt = "0.3"
 vsss-rs = { version = "2.7", default-features = false, features = ["std"] }
 walkdir = "2.3"
 wicketd-client = { path = "wicketd-client" }
+wicket = { path = "wicket" }
 zeroize = { version = "1.5.7", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }
