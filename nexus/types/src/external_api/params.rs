@@ -1108,23 +1108,6 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-/// TODO-v1: Delete this
-/// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
-/// attached or detached to an instance
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskIdentifier {
-    pub name: Name,
-}
-
-/// TODO-v1: Delete this
-/// Parameters for the
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
-/// attached or detached to an instance.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceIdentifier {
-    pub interface_name: Name,
-}
-
 // IMAGES
 
 /// The source of the underlying image.
