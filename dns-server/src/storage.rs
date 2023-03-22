@@ -380,8 +380,9 @@ impl Store {
             return Ok(());
         }
 
-        // Prune any trees in the db that are newer than the current
-        // generation.
+        // Prune any trees in the db that are newer than the current generation.
+        // These could exist if we were previously crashed while trying to move to
+        // this generation.
         self.prune_newer(&old_config);
 
         // For each zone in the config, create the corresponding tree.  Populate

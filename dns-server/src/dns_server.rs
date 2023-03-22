@@ -163,15 +163,16 @@ async fn handle_dns_packet(request: Request) {
     };
 
     // Handle the message.
-    let header = Header::response_from_request(mr.header());
-    let rb_nxdomain = MessageResponseBuilder::from_message_request(&mr);
-    let rb_servfail = MessageResponseBuilder::from_message_request(&mr);
     match handle_dns_message(&request, &mr).await {
         Ok(_) => (),
         Err(error) => {
+            let header = Header::response_from_request(mr.header());
+            let rb_servfail = MessageResponseBuilder::from_message_request(&mr);
             error!(log, "failed to handle incoming DNS message: {:#}", error);
             match error {
                 RequestError::NxDomain(_) => {
+                    let rb_nxdomain =
+                        MessageResponseBuilder::from_message_request(&mr);
                     respond_nxdomain(
                         &request,
                         rb_nxdomain,
@@ -181,6 +182,8 @@ async fn handle_dns_packet(request: Request) {
                     .await
                 }
                 RequestError::ServFail(_) => {
+                    let rb_servfail =
+                        MessageResponseBuilder::from_message_request(&mr);
                     respond_servfail(&request, rb_servfail, &header).await
                 }
             };
