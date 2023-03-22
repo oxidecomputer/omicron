@@ -573,6 +573,8 @@ impl Instance {
             Some(&inner.propolis_id().to_string()),
             // dataset=
             &[],
+            // filesystems=
+            &[],
             &[
                 zone::Device { name: "/dev/vmm/*".to_string() },
                 zone::Device { name: "/dev/vmmctl".to_string() },
@@ -874,7 +876,6 @@ mod test {
     use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
-    use illumos_utils::dladm::PhysicalLink;
     use illumos_utils::opte::PortManager;
     use macaddr::MacAddr6;
     use omicron_common::api::external::{
@@ -950,9 +951,8 @@ mod test {
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
         let mac = MacAddr6::from([0u8; 6]);
-        let data_link = PhysicalLink("myphylink".to_string());
         let port_manager =
-            PortManager::new(log.new(slog::o!()), data_link, underlay_ip, mac);
+            PortManager::new(log.new(slog::o!()), underlay_ip, mac);
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();

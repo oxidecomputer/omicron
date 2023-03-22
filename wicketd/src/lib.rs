@@ -16,6 +16,7 @@ use anyhow::{anyhow, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 pub use config::Config;
 pub(crate) use context::ServerContext;
+use installinator_progress::IprUpdateTracker;
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
@@ -47,6 +48,8 @@ pub struct Args {
 pub struct Server {
     pub wicketd_server: HttpServer<ServerContext>,
     pub artifact_server: HttpServer<installinator_artifactd::ServerContext>,
+    pub artifact_store: WicketdArtifactStore,
+    pub ipr_update_tracker: IprUpdateTracker,
 }
 
 impl Server {
@@ -81,8 +84,11 @@ impl Server {
             crate::installinator_progress::new(&log);
 
         let store = WicketdArtifactStore::new(&log);
-        let update_tracker =
-            UpdateTracker::new(args.mgs_address, &log, ipr_update_tracker);
+        let update_tracker = UpdateTracker::new(
+            args.mgs_address,
+            &log,
+            ipr_update_tracker.clone(),
+        );
 
         let wicketd_server = {
             let log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -102,7 +108,8 @@ impl Server {
             .start()
         };
 
-        let server = WicketdArtifactServer::new(&log, store, ipr_artifact);
+        let server =
+            WicketdArtifactServer::new(&log, store.clone(), ipr_artifact);
         let artifact_server = installinator_artifactd::ArtifactServer::new(
             server,
             args.artifact_address,
@@ -113,7 +120,12 @@ impl Server {
             format!("failed to start artifact server: {error:?}")
         })?;
 
-        Ok(Self { wicketd_server, artifact_server })
+        Ok(Self {
+            wicketd_server,
+            artifact_server,
+            artifact_store: store,
+            ipr_update_tracker,
+        })
     }
 
     /// Close all running dropshot servers.

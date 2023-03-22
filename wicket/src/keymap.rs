@@ -72,8 +72,11 @@ pub enum Cmd {
     /// animations.
     Tick,
 
-    /// Swap between the sidebar and primary pane
-    SwapPane,
+    /// Switch to the next pane.
+    NextPane,
+
+    /// Switch to the previous pane.
+    PrevPane,
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting
@@ -135,7 +138,8 @@ impl KeyHandler {
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::KnightRiderMode
             }
-            KeyCode::Char('s') => Cmd::SwapPane,
+            KeyCode::Tab => Cmd::NextPane,
+            KeyCode::BackTab => Cmd::PrevPane,
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,
