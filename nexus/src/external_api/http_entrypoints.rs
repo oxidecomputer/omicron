@@ -254,7 +254,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::console_page_orgs)?;
         api.register(console_api::console_page)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
