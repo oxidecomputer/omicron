@@ -33,9 +33,6 @@ struct Opt {
     #[clap(short, long, action)]
     address: Option<String>,
 
-    #[clap(short, long, action)]
-    port: Option<usize>,
-
     #[clap(subcommand)]
     subcommand: SubCommand,
 }
@@ -102,13 +99,9 @@ async fn main() -> Result<()> {
     let opt = Opt::parse();
     let log = init_logger();
 
-    let addr = match opt.address {
-        Some(a) => a,
-        None => "localhost".into(),
-    };
-    let port = opt.port.unwrap_or(5353);
+    let addr = opt.address.unwrap_or_else(|| "localhost".to_string());
 
-    let endpoint = format!("http://{}:{}", addr, port);
+    let endpoint = format!("http://{}", addr);
     let client = Client::new(&endpoint, log.clone());
 
     match opt.subcommand {
