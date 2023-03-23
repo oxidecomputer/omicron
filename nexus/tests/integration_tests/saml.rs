@@ -91,7 +91,7 @@ async fn test_create_a_saml_idp(cptestctx: &ControlPlaneTestContext) {
     let (.., _retrieved_silo_nexus) = nexus
         .silo_lookup(
             &nexus.opctx_external_authn(),
-            &omicron_common::api::external::Name::try_from(
+            omicron_common::api::external::Name::try_from(
                 SILO_NAME.to_string(),
             )
             .unwrap()

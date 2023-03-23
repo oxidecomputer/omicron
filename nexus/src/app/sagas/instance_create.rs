@@ -1680,7 +1680,7 @@ pub mod test {
             instance: INSTANCE_NAME.to_string().try_into().unwrap(),
         };
         let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector).unwrap();
+            nexus.instance_lookup(&opctx, instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();
     }
 

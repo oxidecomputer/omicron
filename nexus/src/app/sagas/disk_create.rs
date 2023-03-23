@@ -1025,14 +1025,12 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
         let disk_selector = params::DiskSelector {
-            project_selector: Some(params::ProjectSelector {
-                project: Name::try_from(PROJECT_NAME.to_string())
-                    .unwrap()
-                    .into(),
-            }),
+            project: Some(
+                Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
+            ),
             disk: Name::try_from(DISK_NAME.to_string()).unwrap().into(),
         };
-        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector).unwrap();
+        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector).unwrap();
 
         nexus
             .project_delete_disk(&opctx, &disk_lookup)

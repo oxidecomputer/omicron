@@ -253,7 +253,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
+            .silo_name(silo.identity.name.into())
             .fetch()
             .await
             .unwrap();
@@ -756,7 +756,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
 
         let (authz_silo, db_silo) =
             LookupPath::new(&authn_opctx, &nexus.datastore())
-                .silo_name(&silo.identity.name.into())
+                .silo_name(silo.identity.name.into())
                 .fetch()
                 .await
                 .unwrap();
@@ -810,7 +810,7 @@ async fn test_silo_user_fetch_by_external_id(
     );
 
     let (authz_silo, _) = LookupPath::new(&opctx, &nexus.datastore())
-        .silo_name(&Name::try_from("test-silo".to_string()).unwrap().into())
+        .silo_name(Name::try_from("test-silo".to_string()).unwrap().into())
         .fetch_for(authz::Action::Read)
         .await
         .unwrap();
@@ -993,7 +993,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 
     let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
+            .silo_name(silo.identity.name.into())
             .fetch()
             .await
             .unwrap();
@@ -1067,7 +1067,7 @@ async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
 
     let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
+            .silo_name(silo.identity.name.into())
             .fetch()
             .await
             .unwrap();
@@ -1123,7 +1123,7 @@ async fn test_silo_groups_remove_from_one_group(
 
     let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
+            .silo_name(silo.identity.name.into())
             .fetch()
             .await
             .unwrap();
@@ -1236,7 +1236,7 @@ async fn test_silo_groups_remove_from_both_groups(
 
     let (authz_silo, db_silo) =
         LookupPath::new(&authn_opctx, &nexus.datastore())
-            .silo_name(&silo.identity.name.into())
+            .silo_name(silo.identity.name.into())
             .fetch()
             .await
             .unwrap();
@@ -1348,7 +1348,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     );
 
     let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
-        .silo_name(&silo.identity.name.into())
+        .silo_name(silo.identity.name.into())
         .fetch()
         .await
         .unwrap();
@@ -1429,7 +1429,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     );
 
     let (authz_silo, db_silo) = LookupPath::new(&opctx, &nexus.datastore())
-        .silo_name(&silo.identity.name.into())
+        .silo_name(silo.identity.name.into())
         .fetch()
         .await
         .unwrap();

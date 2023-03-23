@@ -505,7 +505,7 @@ pub(crate) mod test {
             params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
-            .project_lookup(&opctx, &project_selector)
+            .project_lookup(&opctx, project_selector)
             .expect("Invalid parameters constructing project lookup")
             .lookup_for(action)
             .await
@@ -525,8 +525,8 @@ pub(crate) mod test {
         // Default Subnet
         let (.., authz_subnet, subnet) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_subnet_name(&default_name.clone().into())
+            .vpc_name(default_name.clone().into())
+            .vpc_subnet_name(default_name.clone().into())
             .fetch()
             .await
             .expect("Failed to fetch default Subnet");
@@ -538,9 +538,9 @@ pub(crate) mod test {
         // Default route
         let (.., authz_route, _route) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_router_name(&system_name.clone().into())
-            .router_route_name(&default_name.clone().into())
+            .vpc_name(default_name.clone().into())
+            .vpc_router_name(system_name.clone().into())
+            .router_route_name(default_name.clone().into())
             .fetch()
             .await
             .expect("Failed to fetch default route");
@@ -552,8 +552,8 @@ pub(crate) mod test {
         // System router
         let (.., authz_router, _router) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .vpc_router_name(&system_name.into())
+            .vpc_name(default_name.clone().into())
+            .vpc_router_name(system_name.into())
             .fetch()
             .await
             .expect("Failed to fetch system router");
@@ -565,7 +565,7 @@ pub(crate) mod test {
         // Default VPC & Firewall Rules
         let (.., authz_vpc, vpc) = LookupPath::new(&opctx, &datastore)
             .project_id(project_id)
-            .vpc_name(&default_name.into())
+            .vpc_name(default_name.into())
             .fetch()
             .await
             .expect("Failed to fetch default VPC");

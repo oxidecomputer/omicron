@@ -998,7 +998,7 @@ mod test {
         let (authz_silo, authz_silo_user, authz_ssh_key, found) =
             LookupPath::new(&opctx, &datastore)
                 .silo_user_id(silo_user_id)
-                .ssh_key_name(&key_name.into())
+                .ssh_key_name(key_name.into())
                 .fetch()
                 .await
                 .unwrap();

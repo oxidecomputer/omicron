@@ -730,17 +730,17 @@ mod test {
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
         let leaf = LookupPath::new(&opctx, &datastore)
-            .project_name(&project_name)
-            .instance_name(&instance_name);
+            .project_name(project_name.clone())
+            .instance_name(instance_name.clone());
         assert!(matches!(&leaf,
             Instance::Name(Project::Name(_, p), i)
-            if **p == project_name && **i == instance_name));
+            if *p == project_name && *i == instance_name));
 
-        let leaf =
-            LookupPath::new(&opctx, &datastore).project_name(&project_name);
+        let leaf = LookupPath::new(&opctx, &datastore)
+            .project_name(project_name.clone());
         assert!(matches!(&leaf,
             Project::Name(_, p)
-            if **p == project_name));
+            if *p == project_name.clone()));
 
         let project_id =
             "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
