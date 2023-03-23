@@ -131,7 +131,7 @@ fn run(s: &mut String, config_addr: SocketAddr, args: &[&str]) {
         .arg(config_addr.to_string());
 
     // Redact the TCP port number because it changes with each invocation.
-    let mut cmdstr_redacted = format!("{} --address REDACTED", path.display());
+    let mut cmdstr_redacted = "dnsadm --address REDACTED".to_string();
 
     for arg in args {
         exec = exec.arg(arg);
