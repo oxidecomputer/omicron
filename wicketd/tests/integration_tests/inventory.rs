@@ -11,7 +11,7 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
 use wicketd_client::GetInventoryResponse;
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn test_inventory() {
     let gateway =
         gateway_setup::test_setup("test_inventory", SpPort::One).await;
