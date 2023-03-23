@@ -5,7 +5,8 @@
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
-use serde::Deserialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
 use std::path::PathBuf;
@@ -40,18 +41,40 @@ pub enum HardwareUpdate {
     DiskRemoved(UnparsedDisk),
 }
 
-/// Configuration for forcing a sled to run as a Scrimlet
-#[derive(Clone, Debug, Deserialize, Copy)]
-#[serde(rename_all = "lowercase")]
-pub enum ScrimletMode {
-    /// Force sled to run as a Gimlet
-    /// this is to preserve the old behavior of `stub_scrimlet = false`,
-    /// but I haven't found where that logic has actually been leveraged...
-    Disabled,
-    /// Force sled to run in Scrimlet mode with a stub switch
-    Stub,
-    /// Force sled to run in Scrimlet mode with a SoftNPU switch
+// The type of networking 'ASIC' the Dendrite service is expected to manage
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DendriteAsic {
+    TofinoAsic,
+    TofinoStub,
     SoftNpu,
+}
+
+impl std::fmt::Display for DendriteAsic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DendriteAsic::TofinoAsic => "tofino_asic",
+                DendriteAsic::TofinoStub => "tofino_stub",
+                DendriteAsic::SoftNpu => "soft_npu",
+            }
+        )
+    }
+}
+
+/// Configuration for forcing a sled to run as a Scrimlet or Gimlet
+#[derive(Copy, Clone, Debug)]
+pub enum SledMode {
+    /// Automatically detect whether to run as a Gimlet or Scrimlet (w/ real Tofino ASIC)
+    Auto,
+    /// Force sled to run as a Gimlet
+    Gimlet,
+    /// Force sled to run as a Scrimlet
+    Scrimlet { asic: DendriteAsic },
 }
 
 /// Describes properties that should uniquely identify a Gimlet.

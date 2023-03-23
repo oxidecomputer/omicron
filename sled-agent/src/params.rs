@@ -20,6 +20,7 @@ pub use illumos_utils::opte::params::NetworkInterface;
 pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -214,41 +215,6 @@ pub struct Zpool {
     pub disk_type: DiskType,
 }
 
-// The type of networking 'ASIC' the Dendrite service is expected to manage
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DendriteAsic {
-    TofinoAsic,
-    TofinoStub,
-    SoftNpu,
-}
-
-impl std::fmt::Display for DendriteAsic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DendriteAsic::TofinoAsic => "tofino_asic",
-                DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::SoftNpu => "soft_npu",
-            }
-        )
-    }
-}
-
-impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
-    fn from(a: DendriteAsic) -> Self {
-        match a {
-            DendriteAsic::TofinoAsic => Self::TofinoAsic,
-            DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::SoftNpu => Self::SoftNpu,
-        }
-    }
-}
-
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -396,7 +362,15 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+            St::Dendrite { asic } => {
+                use sled_agent_client::types::DendriteAsic as AutoAsic;
+                let asic = match asic {
+                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
+                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
+                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
+                };
+                AutoSt::Dendrite { asic }
+            }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
         }

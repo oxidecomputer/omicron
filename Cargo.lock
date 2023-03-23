@@ -6374,6 +6374,7 @@ dependencies = [
  "libefi-illumos",
  "nexus-client",
  "omicron-test-utils",
+ "schemars",
  "serde",
  "serial_test",
  "slog",
