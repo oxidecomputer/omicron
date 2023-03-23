@@ -59,7 +59,7 @@ impl DataStore {
             Name(ExternalName::from_str("default").unwrap())
         });
         let (.., pool) = self
-            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, &name)
+            .ip_pools_fetch_for(opctx, authz::Action::CreateChild, name)
             .await?;
         let pool_id = pool.identity.id;
 

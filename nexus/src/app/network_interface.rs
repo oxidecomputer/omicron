@@ -1,6 +1,5 @@
 use crate::authz::ApiResource;
 use crate::db::queries::network_interface;
-use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
@@ -12,7 +11,6 @@ use omicron_common::api::external::NameOrId;
 
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 use crate::authz;
@@ -23,33 +21,36 @@ impl super::Nexus {
     pub fn network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        network_interface_selector: &'a params::NetworkInterfaceSelector,
+        network_interface_selector: params::NetworkInterfaceSelector,
     ) -> LookupResult<lookup::NetworkInterface<'a>> {
         match network_interface_selector {
             params::NetworkInterfaceSelector {
-                instance_selector: None,
+                project: None,
+                instance: None,
                 network_interface: NameOrId::Id(id),
             } => {
                 let network_interface =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .network_interface_id(*id);
+                        .network_interface_id(id);
                 Ok(network_interface)
             }
             params::NetworkInterfaceSelector {
-                instance_selector: Some(instance_selector),
+                project,
+                instance: Some(instance),
                 network_interface: NameOrId::Name(name),
             } => {
                 let network_interface = self
-                    .instance_lookup(opctx, instance_selector)?
-                    .network_interface_name(Name::ref_cast(name));
+                    .instance_lookup(opctx, params::InstanceSelector { project, instance })?
+                    .network_interface_name(name.into());
                 Ok(network_interface)
             }
             params::NetworkInterfaceSelector {
-              instance_selector: Some(_),
+              project: _,
+              instance: Some(_),
               network_interface: NameOrId::Id(_),
             } => {
               Err(Error::invalid_request(
-                "when providing network_interface as an id, instance_selector should not be specified"
+                "when providing network_interface as an id, instance should not be specified"
               ))
             }
             _ => {
@@ -88,8 +89,8 @@ impl super::Nexus {
         let (.., authz_vpc, authz_subnet, db_subnet) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
-                .vpc_name(&vpc_name)
-                .vpc_subnet_name(&subnet_name)
+                .vpc_name(vpc_name.into())
+                .vpc_subnet_name(subnet_name.into())
                 .fetch()
                 .await?;
         let interface_id = Uuid::new_v4();

@@ -10,7 +10,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -23,7 +22,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use ref_cast::RefCast;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -33,29 +31,26 @@ impl super::Nexus {
     pub fn disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: &'a params::DiskSelector,
+        disk_selector: params::DiskSelector,
     ) -> LookupResult<lookup::Disk<'a>> {
         match disk_selector {
-            params::DiskSelector {
-                disk: NameOrId::Id(id),
-                project_selector: None,
-            } => {
+            params::DiskSelector { disk: NameOrId::Id(id), project: None } => {
                 let disk =
-                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(id);
                 Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(name),
-                project_selector: Some(project_selector),
+                project: Some(project),
             } => {
                 let disk = self
-                    .project_lookup(opctx, project_selector)?
-                    .disk_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .disk_name(name.into());
                 Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Id(_),
-                project_selector: Some(_),
+                project: Some(_),
             } => Err(Error::invalid_request(
                 "when providing disk as an ID, project should not be specified",
             )),

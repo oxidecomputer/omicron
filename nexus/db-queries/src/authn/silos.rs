@@ -74,17 +74,17 @@ impl IdentityProviderType {
     pub async fn lookup(
         datastore: &DataStore,
         opctx: &OpContext,
-        silo_name: &model::Name,
-        provider_name: &model::Name,
+        silo_name: model::Name,
+        provider_name: model::Name,
     ) -> LookupResult<(authz::Silo, model::Silo, Self)> {
         let (authz_silo, db_silo) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
+            .silo_name(silo_name.clone())
             .fetch()
             .await?;
 
         let (.., identity_provider) = LookupPath::new(opctx, datastore)
-            .silo_name(silo_name)
-            .identity_provider_name(provider_name)
+            .silo_name(silo_name.clone())
+            .identity_provider_name(provider_name.clone())
             .fetch()
             .await?;
 

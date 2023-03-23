@@ -10,7 +10,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
@@ -24,22 +23,21 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use std::sync::Arc;
 
 impl super::Nexus {
     pub fn project_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        project_selector: &'a params::ProjectSelector,
+        project_selector: params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         Ok(match project_selector {
             params::ProjectSelector { project: NameOrId::Id(id) } => {
-                lookup_path.project_id(*id)
+                lookup_path.project_id(id)
             }
             params::ProjectSelector { project: NameOrId::Name(name) } => {
-                lookup_path.project_name(Name::ref_cast(name))
+                lookup_path.project_name(name.into())
             }
         })
     }

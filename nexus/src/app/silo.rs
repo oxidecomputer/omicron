@@ -7,7 +7,6 @@
 use crate::authz::ApiResource;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::db::model::SshKey;
 use crate::db::{self, lookup};
 use crate::external_api::params;
@@ -25,7 +24,6 @@ use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
 use omicron_common::bail_unless;
-use ref_cast::RefCast;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -34,17 +32,17 @@ impl super::Nexus {
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        silo: &'a NameOrId,
+        silo: NameOrId,
     ) -> LookupResult<lookup::Silo<'a>> {
         match silo {
             NameOrId::Id(id) => {
                 let silo =
-                    LookupPath::new(opctx, &self.db_datastore).silo_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).silo_id(id);
                 Ok(silo)
             }
             NameOrId::Name(name) => {
                 let silo = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_name(Name::ref_cast(name));
+                    .silo_name(name.into());
                 Ok(silo)
             }
         }
@@ -561,7 +559,7 @@ impl super::Nexus {
     pub fn ssh_key_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        ssh_key_selector: &'a params::SshKeySelector,
+        ssh_key_selector: params::SshKeySelector,
     ) -> LookupResult<lookup::SshKey<'a>> {
         match ssh_key_selector {
             params::SshKeySelector {
@@ -569,7 +567,7 @@ impl super::Nexus {
                 ssh_key: NameOrId::Id(id),
             } => {
                 let ssh_key =
-                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(id);
                 Ok(ssh_key)
             }
             params::SshKeySelector {
@@ -577,8 +575,8 @@ impl super::Nexus {
                 ssh_key: NameOrId::Name(name),
             } => {
                 let ssh_key = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_user_id(*silo_user_id)
-                    .ssh_key_name(Name::ref_cast(name));
+                    .silo_user_id(silo_user_id)
+                    .ssh_key_name(name.into());
                 Ok(ssh_key)
             }
         }
@@ -630,30 +628,30 @@ impl super::Nexus {
     pub fn saml_identity_provider_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
+        saml_identity_provider_selector: params::SamlIdentityProviderSelector,
     ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
         match saml_identity_provider_selector {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(id),
-                silo_selector: None,
+                silo: None,
             } => {
 
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
-                    .saml_identity_provider_id(*id);
+                    .saml_identity_provider_id(id);
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Name(name),
-                silo_selector: Some(silo_selector),
+                silo: Some(silo),
             } => {
                 let saml_provider = self
-                    .silo_lookup(opctx, &silo_selector.silo)?
-                    .saml_identity_provider_name(Name::ref_cast(name));
+                    .silo_lookup(opctx, silo)?
+                    .saml_identity_provider_name(name.into());
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
-                silo_selector: Some(_),
+                silo: Some(_),
             } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
             _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
         }

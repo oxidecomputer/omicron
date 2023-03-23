@@ -19,7 +19,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -160,15 +159,15 @@ impl super::Nexus {
     pub fn user_builtin_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        user_selector: &'a params::UserBuiltinSelector,
+        user_selector: params::UserBuiltinSelector,
     ) -> LookupResult<lookup::UserBuiltin<'a>> {
         let lookup_path = LookupPath::new(opctx, &self.db_datastore);
         let user = match user_selector {
             params::UserBuiltinSelector { user: NameOrId::Id(id) } => {
-                lookup_path.user_builtin_id(*id)
+                lookup_path.user_builtin_id(id)
             }
             params::UserBuiltinSelector { user: NameOrId::Name(name) } => {
-                lookup_path.user_builtin_name(Name::ref_cast(name))
+                lookup_path.user_builtin_name(name.into())
             }
         };
         Ok(user)

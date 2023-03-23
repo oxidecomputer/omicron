@@ -82,7 +82,7 @@ impl DataStore {
         self.ip_pools_fetch_for(
             opctx,
             action,
-            &Name(ExternalName::from_str("default").unwrap()),
+            Name(ExternalName::from_str("default").unwrap()),
         )
         .await
     }
@@ -92,10 +92,10 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         action: authz::Action,
-        name: &Name,
+        name: Name,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
-            .ip_pool_name(&name)
+            .ip_pool_name(name)
             .fetch_for(action)
             .await?;
         if pool.internal {

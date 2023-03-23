@@ -8,7 +8,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::db::model::RouterRoute;
 use crate::db::model::VpcRouter;
 use crate::db::model::VpcRouterKind;
@@ -23,7 +22,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -31,29 +29,32 @@ impl super::Nexus {
     pub fn vpc_router_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        router_selector: &'a params::RouterSelector,
+        router_selector: params::RouterSelector,
     ) -> LookupResult<lookup::VpcRouter<'a>> {
         match router_selector {
             params::RouterSelector {
                 router: NameOrId::Id(id),
-                vpc_selector: None,
+                vpc: None,
+                project: None,
             } => {
                 let router = LookupPath::new(opctx, &self.db_datastore)
-                    .vpc_router_id(*id);
+                    .vpc_router_id(id);
                 Ok(router)
             }
             params::RouterSelector {
                 router: NameOrId::Name(name),
-                vpc_selector: Some(vpc_selector),
+                vpc: Some(vpc),
+                project,
             } => {
                 let router = self
-                    .vpc_lookup(opctx, vpc_selector)?
-                    .vpc_router_name(Name::ref_cast(name));
+                    .vpc_lookup(opctx, params::VpcSelector { vpc, project })?
+                    .vpc_router_name(name.into());
                 Ok(router)
             }
             params::RouterSelector {
                 router: NameOrId::Id(_),
-                vpc_selector: Some(_),
+                vpc: Some(_),
+                project: _
             } => Err(Error::invalid_request(
                 "when providing vpc_router as an ID, vpc should not be specified",
             )),
@@ -141,29 +142,38 @@ impl super::Nexus {
     pub fn vpc_router_route_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        route_selector: &'a params::RouteSelector,
+        route_selector: params::RouteSelector,
     ) -> LookupResult<lookup::RouterRoute<'a>> {
         match route_selector {
             params::RouteSelector {
                 route: NameOrId::Id(id),
-                router_selector: None,
+                router: None,
+                vpc: None,
+                project: None,
             } => {
                 let route = LookupPath::new(opctx, &self.db_datastore)
-                    .router_route_id(*id);
+                    .router_route_id(id);
                 Ok(route)
             }
             params::RouteSelector {
                 route: NameOrId::Name(name),
-                router_selector: Some(selector),
+                router: Some(router),
+                vpc,
+                project,
             } => {
                 let route = self
-                    .vpc_router_lookup(opctx, selector)?
-                    .router_route_name(Name::ref_cast(name));
+                    .vpc_router_lookup(
+                        opctx,
+                        params::RouterSelector { project, vpc, router },
+                    )?
+                    .router_route_name(name.into());
                 Ok(route)
             }
             params::RouteSelector {
                 route: NameOrId::Id(_),
-                router_selector: Some(_),
+                router: Some(_),
+                vpc: _,
+                project: _,
             } => Err(Error::invalid_request(
                 "when providing subnet as an ID, vpc should not be specified",
             )),

@@ -113,7 +113,7 @@ impl<'a> LookupPath<'a> {
     // macro is not in a great position to do this.
 
     /// Select a resource of type Project, identified by its name
-    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+    pub fn project_name<'b, 'c>(self, name: Name) -> Project<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -147,7 +147,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type IpPool, identified by its name
-    pub fn ip_pool_name<'b, 'c>(self, name: &'b Name) -> IpPool<'c>
+    pub fn ip_pool_name<'b, 'c>(self, name: Name) -> IpPool<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -274,7 +274,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Silo, identified by its name
-    pub fn silo_name<'b, 'c>(self, name: &'b Name) -> Silo<'c>
+    pub fn silo_name<'b, 'c>(self, name: Name) -> Silo<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -342,7 +342,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
-    pub fn user_builtin_name<'b, 'c>(self, name: &'b Name) -> UserBuiltin<'c>
+    pub fn user_builtin_name<'b, 'c>(self, name: Name) -> UserBuiltin<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -351,7 +351,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type GlobalImage, identified by its name
-    pub fn global_image_name<'b, 'c>(self, name: &'b Name) -> GlobalImage<'c>
+    pub fn global_image_name<'b, 'c>(self, name: Name) -> GlobalImage<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -368,7 +368,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type Certificate, identified by its name
-    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
+    pub fn certificate_name<'b, 'c>(self, name: Name) -> Certificate<'c>
     where
         'a: 'c,
         'b: 'c,

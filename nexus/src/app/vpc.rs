@@ -31,7 +31,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::internal::nexus::HostIdentifier;
-use ref_cast::RefCast;
 use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
@@ -47,29 +46,26 @@ impl super::Nexus {
     pub fn vpc_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        vpc_selector: &'a params::VpcSelector,
+        vpc_selector: params::VpcSelector,
     ) -> LookupResult<lookup::Vpc<'a>> {
         match vpc_selector {
-            params::VpcSelector {
-                vpc: NameOrId::Id(id),
-                project_selector: None,
-            } => {
+            params::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
                 let vpc =
-                    LookupPath::new(opctx, &self.db_datastore).vpc_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
                 Ok(vpc)
             }
             params::VpcSelector {
                 vpc: NameOrId::Name(name),
-                project_selector: Some(selector),
+                project: Some(project)
             } => {
                 let vpc = self
-                    .project_lookup(opctx, selector)?
-                    .vpc_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .vpc_name(name.into());
                 Ok(vpc)
             }
             params::VpcSelector {
                 vpc: NameOrId::Id(_),
-                project_selector: Some(_),
+                project: Some(_),
             } => Err(Error::invalid_request(
                 "when providing vpc as an ID, project should not be specified",
             )),
@@ -375,11 +371,11 @@ impl super::Nexus {
         let no_interfaces: Vec<NetworkInterface> = Vec::new();
 
         let mut instance_interfaces: NicMap = HashMap::new();
-        for instance_name in &instances {
+        for instance_name in instances {
             if let Ok((.., authz_instance)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
-                    .instance_name(instance_name)
+                    .instance_name(instance_name.clone().into())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {
@@ -389,7 +385,7 @@ impl super::Nexus {
                     .await?
                 {
                     instance_interfaces
-                        .entry(instance_name.0.clone())
+                        .entry(instance_name.clone().into())
                         .or_insert_with(Vec::new)
                         .push(iface);
                 }
@@ -397,11 +393,11 @@ impl super::Nexus {
         }
 
         let mut vpc_interfaces: NicMap = HashMap::new();
-        for vpc_name in &vpcs {
+        for vpc_name in vpcs {
             if let Ok((.., authz_vpc)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
-                    .vpc_name(vpc_name)
+                    .vpc_name(vpc_name.clone().into())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {
@@ -411,7 +407,7 @@ impl super::Nexus {
                     .await?
                 {
                     vpc_interfaces
-                        .entry(vpc_name.0.clone())
+                        .entry(vpc_name.clone().into())
                         .or_insert_with(Vec::new)
                         .push(iface);
                 }
@@ -419,12 +415,12 @@ impl super::Nexus {
         }
 
         let mut subnet_interfaces: NicMap = HashMap::new();
-        for subnet_name in &subnets {
+        for subnet_name in subnets.clone() {
             if let Ok((.., authz_subnet)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
-                    .vpc_name(&Name::from(vpc.name().clone()))
-                    .vpc_subnet_name(subnet_name)
+                    .vpc_name(vpc.name().clone().into())
+                    .vpc_subnet_name(subnet_name.clone().into())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {

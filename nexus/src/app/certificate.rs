@@ -7,7 +7,6 @@
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
@@ -20,21 +19,20 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::NameOrId;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
     pub fn certificate_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        certificate: &'a NameOrId,
+        certificate: NameOrId,
     ) -> lookup::Certificate<'a> {
         match certificate {
             NameOrId::Id(id) => {
-                LookupPath::new(opctx, &self.db_datastore).certificate_id(*id)
+                LookupPath::new(opctx, &self.db_datastore).certificate_id(id)
             }
             NameOrId::Name(name) => LookupPath::new(opctx, &self.db_datastore)
-                .certificate_name(Name::ref_cast(name)),
+                .certificate_name(name.into()),
         }
     }
 

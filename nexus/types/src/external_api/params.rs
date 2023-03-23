@@ -44,6 +44,15 @@ path_param!(ProviderPath, provider);
 path_param!(IpPoolPath, pool);
 path_param!(SshKeyPath, ssh_key);
 
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
+#[derive(Deserialize, JsonSchema)]
+pub struct GroupPath {
+    pub group: Uuid,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
     pub silo: NameOrId,
@@ -57,18 +66,8 @@ impl From<Name> for SiloSelector {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SamlIdentityProviderSelector {
-    #[serde(flatten)]
-    pub silo_selector: Option<SiloSelector>,
+    pub silo: Option<NameOrId>,
     pub saml_identity_provider: NameOrId,
-}
-
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    pub group: Uuid,
 }
 
 // The shape of this selector is slightly different than the others given that
@@ -87,88 +86,84 @@ pub struct ProjectSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     pub disk: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     pub snapshot: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     pub image: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     pub instance: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
-    #[serde(flatten)]
-    pub instance_selector: Option<InstanceSelector>,
+    pub project: Option<NameOrId>,
+    pub instance: Option<NameOrId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct NetworkInterfaceSelector {
-    #[serde(flatten)]
-    pub instance_selector: Option<InstanceSelector>,
+    pub project: Option<NameOrId>,
+    pub instance: Option<NameOrId>,
     pub network_interface: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     pub vpc: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    pub project: Option<NameOrId>,
+    pub vpc: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    pub project: Option<NameOrId>,
+    pub vpc: Option<NameOrId>,
     pub subnet: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RouterSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    pub project: Option<NameOrId>,
+    pub vpc: Option<NameOrId>,
     pub router: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OptionalRouterSelector {
-    #[serde(flatten)]
-    pub router_selector: Option<RouterSelector>,
+    pub project: Option<NameOrId>,
+    pub vpc: Option<NameOrId>,
+    pub router: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RouteSelector {
-    #[serde(flatten)]
-    pub router_selector: Option<RouterSelector>,
+    pub project: Option<NameOrId>,
+    pub vpc: Option<NameOrId>,
+    pub router: Option<NameOrId>,
     pub route: NameOrId,
 }
 

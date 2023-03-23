@@ -9,7 +9,6 @@ use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::db::model::VpcSubnet;
 use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
@@ -24,36 +23,38 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::nexus_config::MIN_VPC_IPV4_SUBNET_PREFIX;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 impl super::Nexus {
     pub fn vpc_subnet_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        subnet_selector: &'a params::SubnetSelector,
+        subnet_selector: params::SubnetSelector,
     ) -> LookupResult<lookup::VpcSubnet<'a>> {
         match subnet_selector {
             params::SubnetSelector {
                 subnet: NameOrId::Id(id),
-                vpc_selector: None,
+                vpc: None,
+                project: None,
             } => {
                 let subnet = LookupPath::new(opctx, &self.db_datastore)
-                    .vpc_subnet_id(*id);
+                    .vpc_subnet_id(id);
                 Ok(subnet)
             }
             params::SubnetSelector {
                 subnet: NameOrId::Name(name),
-                vpc_selector: Some(selector),
+                vpc: Some(vpc),
+                project,
             } => {
                 let subnet = self
-                    .vpc_lookup(opctx, selector)?
-                    .vpc_subnet_name(Name::ref_cast(name));
+                    .vpc_lookup(opctx, params::VpcSelector { project, vpc })?
+                    .vpc_subnet_name(name.into());
                 Ok(subnet)
             }
             params::SubnetSelector {
                 subnet: NameOrId::Id(_),
-                vpc_selector: Some(_),
+                vpc: Some(_),
+                project: _,
             } => Err(Error::invalid_request(
                 "when providing subnet as an ID, vpc should not be specified",
             )),

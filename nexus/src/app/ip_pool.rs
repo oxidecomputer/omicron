@@ -8,7 +8,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
@@ -23,23 +22,22 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 
 impl super::Nexus {
     pub fn ip_pool_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        pool: &'a NameOrId,
+        pool: NameOrId,
     ) -> LookupResult<lookup::IpPool<'a>> {
         match pool {
-            NameOrId::Name(name) => {
-                let pool = LookupPath::new(opctx, &self.db_datastore)
-                    .ip_pool_name(Name::ref_cast(name));
-                Ok(pool)
-            }
             NameOrId::Id(id) => {
                 let pool =
-                    LookupPath::new(opctx, &self.db_datastore).ip_pool_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).ip_pool_id(id);
+                Ok(pool)
+            }
+            NameOrId::Name(name) => {
+                let pool = LookupPath::new(opctx, &self.db_datastore)
+                    .ip_pool_name(name.into());
                 Ok(pool)
             }
         }
