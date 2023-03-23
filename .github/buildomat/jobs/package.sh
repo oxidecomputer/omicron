@@ -29,7 +29,7 @@ cargo --version
 rustc --version
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m ./tools/install_softnpu_machinery.sh
+ptime -m ./tools/ci_download_softnpu_machinery
 
 # Build the test target
 ptime -m cargo run --locked --release --bin omicron-package -- \
