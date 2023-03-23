@@ -9,7 +9,7 @@ use crate::ui::defaults::style;
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
-use slog::{o, warn, Logger};
+use slog::{warn, Logger};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{
@@ -19,9 +19,6 @@ use wicketd_client::types::{
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
-    #[serde(skip)]
-    // Only an Option so we can skip sererializaton
-    log: Option<Logger>,
     pub items: BTreeMap<ComponentId, BTreeMap<KnownArtifactKind, UpdateState>>,
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
@@ -60,9 +57,8 @@ impl UpdateState {
 }
 
 impl RackUpdateState {
-    pub fn new(log: &Logger) -> Self {
+    pub fn new() -> Self {
         RackUpdateState {
-            log: Some(log.new(o!("component" => "RackUpdateState"))),
             system_version: None,
             items: ALL_COMPONENT_IDS
                 .iter()
@@ -107,14 +103,14 @@ impl RackUpdateState {
         }
     }
 
-    pub fn update_logs(&mut self, logs: UpdateLogAll) {
+    pub fn update_logs(&mut self, logger: &Logger, logs: UpdateLogAll) {
         for (sp_type, logs) in logs.sps {
             for (i, log) in logs {
                 let Ok(id) = ComponentId::try_from(ParsableComponentId {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(self.log.as_ref().unwrap(), "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
+                    warn!(logger, "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
                     continue;
                 };
                 self.update_items(&id, &log);

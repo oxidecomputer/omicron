@@ -77,7 +77,7 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let state = State::new(&log);
+        let state = State::new();
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend).unwrap();
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
@@ -162,7 +162,7 @@ impl Runner {
                 Event::UpdateLog(logs) => {
                     self.state.service_status.reset_wicketd(Duration::ZERO);
                     debug!(self.log, "{:#?}", logs);
-                    self.state.update_state.update_logs(logs);
+                    self.state.update_state.update_logs(&self.log, logs);
                     self.screen.draw(&self.state, &mut self.terminal)?;
                 }
                 Event::Shutdown => break,

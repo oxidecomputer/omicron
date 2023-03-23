@@ -18,7 +18,6 @@ pub use status::{Liveness, ServiceStatus};
 pub use update::{artifact_title, RackUpdateState, UpdateState};
 
 use serde::{Deserialize, Serialize};
-use slog::Logger;
 
 /// The global state of wicket
 ///
@@ -35,14 +34,14 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(log: &Logger) -> State {
+    pub fn new() -> State {
         State {
             screen_height: 0,
             screen_width: 0,
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
-            update_state: RackUpdateState::new(log),
+            update_state: RackUpdateState::new(),
         }
     }
 }

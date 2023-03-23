@@ -110,7 +110,7 @@ impl Snapshot {
         Snapshot {
             version: 1,
             start: 0,
-            state: State::new(&slog::Logger::root(slog::Discard, slog::o!())),
+            state: State::new(),
             history: Vec::with_capacity(max_events),
             max_events,
         }
