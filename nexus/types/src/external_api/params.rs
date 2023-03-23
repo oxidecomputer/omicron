@@ -857,8 +857,7 @@ pub struct InstanceMigrate {
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
     /// Character index in the serial buffer from which to read, counting the bytes output since
     /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
     /// provided, `most_recent` must *not* be provided.

@@ -1802,7 +1802,7 @@ async fn instance_serial_console(
     let path = path_params.into_inner();
     let query = query_params.into_inner();
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector.clone(),
+        project: query.project.clone(),
         instance: path.instance,
     };
     let handler = async {
@@ -1835,7 +1835,7 @@ async fn instance_serial_console_stream(
     let query = query_params.into_inner();
     let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
     let instance_selector = params::InstanceSelector {
-        project_selector: query.project_selector.clone(),
+        project: query.project.clone(),
         instance: path.instance,
     };
     let instance_lookup = nexus.instance_lookup(&opctx, instance_selector)?;
