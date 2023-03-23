@@ -1133,6 +1133,8 @@ mod test {
             "gen2_name.zone2.internal",
             Expect::Record(&dummy_record),
         );
+
+        tc.cleanup_successful();
     }
 
     #[tokio::test]
@@ -1196,5 +1198,7 @@ mod test {
             .dns_config_update(&update2, "my request id")
             .await
             .expect("unexpected failure");
+
+        tc.cleanup_successful();
     }
 }
