@@ -60,7 +60,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -99,7 +99,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
@@ -135,7 +135,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -148,22 +148,23 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-        .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(
-            header::LOCATION,
-            "/spoof_login?state=%2Forgs%2Firrelevant-path",
-        )
-        .execute()
-        .await
-        .expect("failed to redirect to IdP on auth failure");
+    let _ =
+        RequestBuilder::new(&testctx, Method::GET, "/projects/irrelevant-path")
+            .expect_status(Some(StatusCode::FOUND))
+            .expect_response_header(
+                header::LOCATION,
+                "/spoof_login?state=%2Fprojects%2Firrelevant-path",
+            )
+            .execute()
+            .await
+            .expect("failed to redirect to IdP on auth failure");
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
         "/",
-        "/orgs/irrelevant-path",
+        "/projects/irrelevant-path",
         "/settings/irrelevant-path",
         "/sys/irrelevant-path",
         "/device/success",

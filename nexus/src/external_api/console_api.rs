@@ -644,21 +644,7 @@ pub async fn console_index_or_login_redirect(
 // because it's a more specific match. So for now we simply give the console
 // catchall route a prefix to avoid overlap. Long-term, if a route prefix is
 // part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages. Conveniently, all the console page routes start
-// with /orgs already.
-// TODO: delete /orgs once orgs are removed from the console
-#[endpoint {
-   method = GET,
-   path = "/orgs/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_page_orgs(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
+// not on the console pages.
 #[endpoint {
    method = GET,
    path = "/projects/{path:.*}",
