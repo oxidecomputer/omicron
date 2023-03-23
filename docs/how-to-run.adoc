@@ -48,8 +48,10 @@ vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
 Set the `GATEWAY_IP` variable when running the `create_virtual_hardware` script
-to override the default logic used to automatically determine the gateway ip.
-This variable is used to configure `softnpu` with a default route for external /
+to override the default logic used to automatically determine the gateway IP.
+The gateway's MAC address is automatically determined by searching the ARP
+table for the given gateway IP. This can be overridden by setting `GATEWAY_MAC`.
+These variables are used to configure `softnpu` with a default route for external /
 internet connectivity. Set the `PHYSICAL_LINK` environment variable to override
 the default logic used to automatically determine the physical network connection
 used for external communication. For example:
@@ -64,7 +66,7 @@ device for those network paths.
 ----
 
 ----
-$ GATEWAY_IP=10.85.0.1 PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
+$ GATEWAY_IP=10.85.0.1 GATEWAY_MAC=68:d7:9a:1f:77:a1 PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
 ----
 
 You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
