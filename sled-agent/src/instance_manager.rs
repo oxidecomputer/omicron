@@ -8,9 +8,7 @@ use crate::nexus::LazyNexusClient;
 use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
 };
-use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -179,25 +177,6 @@ impl InstanceManager {
         }
 
         instance.transition(target).await.map_err(|e| e.into())
-    }
-
-    pub async fn instance_serial_console_buffer_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let (_, instance) = instances
-                .get(&instance_id)
-                .ok_or(Error::NoSuchInstance(instance_id))?;
-            instance.clone()
-        };
-        instance
-            .serial_console_buffer_data(byte_offset, max_bytes)
-            .await
-            .map_err(Error::from)
     }
 
     pub async fn instance_issue_disk_snapshot_request(

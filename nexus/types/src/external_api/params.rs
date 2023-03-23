@@ -854,9 +854,11 @@ pub struct InstanceMigrate {
     pub dst_sled_id: Uuid,
 }
 
-/// Forwarded to a sled agent to request the contents of an Instance's serial console.
+/// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
     /// Character index in the serial buffer from which to read, counting the bytes output since
     /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
     /// provided, `most_recent` must *not* be provided.
@@ -868,6 +870,8 @@ pub struct InstanceSerialConsoleRequest {
     /// Maximum number of bytes of buffered serial console contents to return. If the requested
     /// range runs to the end of the available buffer, the data returned will be shorter than
     /// `max_bytes`.
+    /// This parameter is only useful for the non-streaming GET request for serial console data,
+    /// and *ignored* by the streaming websocket endpoint.
     pub max_bytes: Option<u64>,
 }
 

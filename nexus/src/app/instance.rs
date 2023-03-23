@@ -853,29 +853,37 @@ impl super::Nexus {
     }
 
     /// Returns the requested range of serial console output bytes,
-    /// provided they are still in the sled-agent's cache.
+    /// provided they are still in the propolis-server's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let (.., db_instance) = instance_lookup.fetch().await?;
-
-        let sa = self.instance_sled(&db_instance).await?;
-        let data = sa
-            .instance_serial_get(
-                &db_instance.identity().id,
-                // these parameters are all the same type; OpenAPI puts them in alphabetical order.
-                params.from_start,
-                params.max_bytes,
-                params.most_recent,
-            )
+        let client = self
+            .propolis_client_for_instance(instance_lookup, authz::Action::Read)
             .await?;
-        let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
-            data.into_inner();
+        let mut request = client.instance_serial_history_get();
+        if let Some(max_bytes) = params.max_bytes {
+            request = request.max_bytes(max_bytes);
+        }
+        if let Some(from_start) = params.from_start {
+            request = request.from_start(from_start);
+        }
+        if let Some(most_recent) = params.most_recent {
+            request = request.most_recent(most_recent);
+        }
+        let data = request
+            .send()
+            .await
+            .map_err(|_| {
+                Error::internal_error(
+                    "failed to connect to instance's propolis server",
+                )
+            })?
+            .into_inner();
         Ok(params::InstanceSerialConsoleData {
-            data: sa_data.data,
-            last_byte_offset: sa_data.last_byte_offset,
+            data: data.data,
+            last_byte_offset: data.last_byte_offset,
         })
     }
 
@@ -883,23 +891,21 @@ impl super::Nexus {
         &self,
         conn: dropshot::WebsocketConnection,
         instance_lookup: &lookup::Instance<'_>,
+        params: &params::InstanceSerialConsoleRequest,
     ) -> Result<(), Error> {
-        // TODO: Technically the stream is two way so the user of this method can modify the instance in some way. Should we use different permissions?
-        let (.., instance) = instance_lookup.fetch().await?;
-        let ip_addr = instance
-            .runtime_state
-            .propolis_ip
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "instance's propolis server ip address not found",
-                )
-            })?
-            .ip();
-        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-        let client =
-            propolis_client::Client::new(&format!("http://{}", socket_addr));
-        let propolis_upgraded = client
-            .instance_serial()
+        let client = self
+            .propolis_client_for_instance(
+                instance_lookup,
+                authz::Action::Modify,
+            )
+            .await?;
+        let mut req = client.instance_serial();
+        if let Some(from_start) = params.from_start {
+            req = req.from_start(from_start);
+        } else if let Some(most_recent) = params.most_recent {
+            req = req.most_recent(most_recent);
+        }
+        let propolis_upgraded = req
             .send()
             .await
             .map_err(|_| {
@@ -912,6 +918,25 @@ impl super::Nexus {
         Self::proxy_instance_serial_ws(conn.into_inner(), propolis_upgraded)
             .await
             .map_err(|e| Error::internal_error(&format!("{}", e)))
+    }
+
+    async fn propolis_client_for_instance(
+        &self,
+        instance_lookup: &lookup::Instance<'_>,
+        action: authz::Action,
+    ) -> Result<propolis_client::Client, Error> {
+        let (.., instance) = instance_lookup.fetch_for(action).await?;
+        let ip_addr = instance
+            .runtime_state
+            .propolis_ip
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "instance's propolis server ip address not found",
+                )
+            })?
+            .ip();
+        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+        Ok(propolis_client::Client::new(&format!("http://{}", socket_addr)))
     }
 
     async fn proxy_instance_serial_ws(
