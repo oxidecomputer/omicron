@@ -512,7 +512,7 @@ impl Nexus {
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     project_name: &Name,
+    ///     project_name: Name,
     /// ) -> Result<(), Error>
     /// {
     ///     let (.., _authz_proj) = LookupPath::new(opctx, datastore)
