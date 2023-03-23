@@ -13,7 +13,7 @@ use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
-use sled_hardware::is_gimlet;
+use sled_hardware::{is_gimlet, ScrimletMode};
 use std::path::{Path, PathBuf};
 
 /// Configuration for a sled agent
@@ -22,8 +22,8 @@ pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
-    /// if set to false).
-    pub stub_scrimlet: Option<bool>,
+    /// if set to Disabled).
+    pub scrimlet_override: Option<ScrimletMode>,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.

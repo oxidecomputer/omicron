@@ -22,26 +22,19 @@ Here's a small demo that creates a project, creates an instance, and attaches a 
 
 [source,text]
 ----
-$ oxide org create myorg \
-    --description "My organization"
-✔ Created organization myorg
-
 $ oxide project create myproject \
     --description "My project" \
-    --organization myorg
-✔ Created project myorg/myproject
+✔ Created project myproject
 
 $ oxide instance create myinstance \
     --description "My instance" \
     --project myproject \
-    --organization myorg \
     --hostname "myinstance.maze-war.com" \
 	  --ncpus 1 \
 	  --memory 8
-✔ Created instance myinstance in myorg/myproject
+✔ Created instance myinstance in myproject
 
 $ oxide instance view myinstance \
-    --organization myorg \
     --project myproject \
     --format json
 {
@@ -60,14 +53,12 @@ $ oxide instance view myinstance \
 
 $ oxide disk create nginx \
 	-D "The nginx disk." \
-	-o myorg \
 	-p myproject \
 	--size 10
-✔ Created disk nginx in myorg/myproject
+✔ Created disk nginx in myproject
 
 
 $ oxide disk view nginx \
-    --organization myorg \
     --project myproject \
     --format json
 {
@@ -88,7 +79,7 @@ $ oxide disk view nginx \
 $ oxide disk attach nginx myinstance \
 	-o maze-war \
 	-p prod-online
-✔ Attached disk nginx to instance myinstance in myorg/myproject
+✔ Attached disk nginx to instance myinstance in myproject
 
 $ oxide instance disks myinstance \
 	-o maze-war \

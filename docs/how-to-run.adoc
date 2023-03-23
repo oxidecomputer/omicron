@@ -22,7 +22,7 @@ Any additional prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ ./tools/install_prerequisites.sh
+$ pfexec ./tools/install_prerequisites.sh
 ----
 
 This script expects that you are both attempting to compile code and execute
@@ -42,12 +42,32 @@ $ ./tools/install_runner_prerequisites.sh
 The sled agent expects to manage a real Gimlet. However, until those are built,
 developers generally make do with something else, usually a commodity machine.
 To make your machine "look" like a Gimlet, the
-`./tools/create_virtual_hardware.sh` script can be used. This creates a few
+`pfexec ./tools/create_virtual_hardware.sh` script can be used. This creates a few
 file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
 vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
-You can clean up these resources with `./tools/destroy_virtual_hardware.sh`.
+Set the `GATEWAY_IP` variable when running the `create_virtual_hardware` script
+to override the default logic used to automatically determine the gateway ip.
+This variable is used to configure `softnpu` with a default route for external /
+internet connectivity. Set the `PHYSICAL_LINK` environment variable to override
+the default logic used to automatically determine the physical network connection
+used for external communication. For example:
+
+=== Set up simulated scrimlet/sidecar dependencies.
+
+To access the outside world or other gimlets, we'll need to set up a virtual sidecar
+device for those network paths.
+
+----
+./tools/install_softnpu_machinery.sh
+----
+
+----
+$ GATEWAY_IP=10.85.0.1 PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
+----
+
+You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
 This script requires Omicron be uninstalled, e.g., with `pfexec
 ./target/release/omicron-package uninstall`, and a warning will be printed if
 that is not the case. The script will then remove the file-based vdevs and the
@@ -78,30 +98,6 @@ automatically be detected on discovered disks), but for now it remains
 hard-coded.
 
 === Getting into your guests
-
-Omicron currently implements a bit of a hack to allow external connectivity into
-guest instances. This overrides the default behavior of the Oxide Packet
-Transformation Engine (OPTE, the kernel module which provides the private
-virtual networking to guests). To make this work, OPTE needs to know about the
-local networking configuration, in this case the MAC address of the local
-internet gateway. To be able to get into your instances, you _must_ specify this
-in the `gateway.mac` field of the config file `smf/sled-agent/config-rss.toml`.
-
-The value there is correct for the lab environment, so if you're running there,
-no changes are needed. If you're running elsewhere, you find the value with:
-
-[source,text]
-----
-$ arp -an | grep $(netstat -rn | awk '{ if ($1 == "default") print $2 }')
-igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
-----
-
-That MAC address in the far right column should be provided in place of the
-current value. Note that it can be specified as a string or an array of hex
-values. If you have multiple gateways, e.g., different gateways for different
-data links, you must choose the value for the physical link over which
-`create_virtual_hardware.sh` will create the underlay VNICs. That is, this must
-be a value in the same L2 segment as OPTE.
 
 [source,text]
 ----
@@ -227,10 +223,9 @@ other services and allocating them with vNICs and IPv6 addresses.
 Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
 command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
 
-1. Create an organization and project that the resources will live under:
+1. Create a project that the resources will live under:
 
-    oxide org create myorg
-    oxide project create -o myorg myproj
+    oxide project create myproj
 
 2. Create an IP Pool, for providing external connectivity to the instance later.
 We need to create an IP Pool itself, and a range of IP addresses in that pool.
@@ -252,7 +247,7 @@ the exact addresses that are available depends on the environment.
 
  a. This can be the alpine.iso image that ships with propolis:
 
-    oxide api /v1/images?organization=<org>&project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "boot from propolis zone blob!",
@@ -269,7 +264,7 @@ the exact addresses that are available depends on the environment.
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /v1/images?organization=<org>&project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -287,7 +282,7 @@ the exact addresses that are available depends on the environment.
 
 4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
-    oxide api /v1/disks?organization=myorg&project=myproj --method POST --input - <<EOF
+    oxide api /v1/disks?project=myproj --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "alpine.iso blob",
@@ -302,7 +297,7 @@ the exact addresses that are available depends on the environment.
 
 5. Create an instance, attaching the alpine disk created above:
 
-    oxide api /v1/instances?organization=myorg&project=myproj --method POST --input - <<EOF
+    oxide api /v1/instances?project=myproj --method POST --input - <<EOF
     {
       "name": "myinst",
       "description": "my inst",

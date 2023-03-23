@@ -25,26 +25,23 @@ pub struct Project {
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
-    pub organization_id: Uuid,
+    pub silo_id: Uuid,
 }
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
+    pub fn new(silo_id: Uuid, params: params::ProjectCreate) -> Self {
         Self {
             identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
             rcgen: Generation::new(),
-            organization_id,
+            silo_id,
         }
     }
 }
 
 impl From<Project> for views::Project {
     fn from(project: Project) -> Self {
-        Self {
-            identity: project.identity(),
-            organization_id: project.organization_id,
-        }
+        Self { identity: project.identity() }
     }
 }
 

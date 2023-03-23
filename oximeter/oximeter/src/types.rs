@@ -435,6 +435,11 @@ where
         self.value
     }
 
+    /// Updates the current value of the counter to a specific value.
+    pub fn set(&mut self, value: T) {
+        self.value = value
+    }
+
     /// Return the start time of this cumulative counter.
     pub fn start_time(&self) -> DateTime<Utc> {
         self.start_time

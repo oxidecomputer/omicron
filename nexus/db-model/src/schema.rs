@@ -302,19 +302,6 @@ table! {
 }
 
 table! {
-    organization (id) {
-        id -> Uuid,
-        silo_id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-        rcgen -> Int8,
-    }
-}
-
-table! {
     oximeter (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -333,7 +320,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        organization_id -> Uuid,
+        silo_id -> Uuid,
     }
 }
 
@@ -394,6 +381,9 @@ table! {
         serial_number -> Text,
         part_number -> Text,
         revision -> Int8,
+
+        usable_hardware_threads -> Int8,
+        usable_physical_ram -> Int8,
 
         ip -> Inet,
         port -> Int4,
@@ -782,7 +772,6 @@ allow_tables_to_appear_in_same_query!(
     instance,
     metric_producer,
     network_interface,
-    organization,
     oximeter,
     project,
     rack,

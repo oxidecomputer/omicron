@@ -12,7 +12,6 @@ use uuid::Uuid;
 #[derive(Debug, Display)]
 pub enum CollectionTypeProvisioned {
     Project,
-    Organization,
     Silo,
     Fleet,
 }

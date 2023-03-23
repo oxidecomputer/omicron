@@ -33,6 +33,7 @@ use slog::warn;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -56,6 +57,13 @@ struct NetParams {
     which: usize,
     instance_id: Uuid,
     new_id: Uuid,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct NetworkConfigParams {
+    saga_params: Params,
+    instance_id: Uuid,
+    which: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -102,6 +110,10 @@ declare_saga_actions! {
     ATTACH_DISKS_TO_INSTANCE -> "attach_disk_output" {
         + sic_attach_disk_to_instance
         - sic_attach_disk_to_instance_undo
+    }
+    CONFIGURE_ASIC -> "configure_asic" {
+        + sic_add_network_config
+        - sic_remove_network_config
     }
     INSTANCE_ENSURE -> "instance_ensure" {
         + sic_instance_ensure
@@ -299,9 +311,259 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        // If a primary NIC exists, create a NAT entry for the default external IP,
+        // as well as additional NAT entries for each requested ephemeral IP
+        for i in 0..(params.create_params.external_ips.len() + 1) {
+            let subsaga_name =
+                SagaName::new(&format!("instance-configure-nat-{i}"));
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                "configure_asic",
+                format!("ConfigureAsic-{i}").as_str(),
+                CONFIGURE_ASIC.as_ref(),
+            ));
+            let net_params = NetworkConfigParams {
+                saga_params: params.clone(),
+                instance_id,
+                which: i,
+            };
+            subsaga_append(
+                "configure_asic",
+                subsaga_builder.build()?,
+                &mut builder,
+                net_params,
+                i,
+            )?;
+        }
         builder.append(instance_ensure_action());
         Ok(builder.build()?)
     }
+}
+
+async fn sic_add_network_config(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let net_params = sagactx.saga_params::<NetworkConfigParams>()?;
+    let which = net_params.which;
+    let instance_id = net_params.instance_id;
+    let params = net_params.saga_params;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let osagactx = sagactx.user_data();
+    let dpd_client: &dpd_client::Client = &osagactx.nexus().dpd_client;
+    let datastore = &osagactx.datastore();
+    let log = sagactx.user_data().log();
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let instance_id = db_instance.id();
+    let sled_uuid = db_instance.runtime_state.sled_id;
+
+    let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
+        .sled_id(sled_uuid)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let sled_ip_address = sled.address();
+
+    debug!(log, "fetching network interfaces");
+
+    let network_interface = match datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?
+        .into_iter()
+        .find(|interface| interface.primary)
+    {
+        Some(interface) => interface,
+        // Return early if instance does not have a primary network
+        // interface
+        None => return Ok(()),
+    };
+
+    let mac_address =
+        macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
+            .map_err(|e| {
+                ActionError::action_failed(Error::internal_error(&format!(
+                    "failed to convert mac address: {e}"
+                )))
+            })?;
+
+    let vni: u32 = network_interface.vni.into();
+
+    debug!(log, "fetching external ip addresses");
+
+    let target_ip = &datastore
+        .instance_lookup_external_ips(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?
+        .get(which)
+        .ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to find external ip address at index: {which}"
+            )))
+        })?
+        .to_owned();
+
+    debug!(log, "checking for existing nat mapping for {target_ip:#?}");
+
+    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
+    //
+    // currently if we have this environment variable set, we want to
+    // bypass all calls to DPD. This is mainly to facilitate some tests where
+    // we don't have dpd running. In the future we should probably have these
+    // testing environments running dpd-stub so that the full path can be tested.
+    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
+        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
+        return Ok(());
+    };
+
+    let existing_nat = match target_ip.ip {
+        ipnetwork::IpNetwork::V4(network) => {
+            dpd_client.nat_ipv4_get(&network.ip(), *target_ip.first_port).await
+        }
+        ipnetwork::IpNetwork::V6(network) => {
+            dpd_client.nat_ipv6_get(&network.ip(), *target_ip.first_port).await
+        }
+    };
+
+    match existing_nat {
+        Ok(_) => {
+            // nat entry already exists, do nothing
+            return Ok(());
+        }
+        Err(e) => {
+            if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                debug!(log, "no nat entry found for: {target_ip:#?}");
+            } else {
+                return Err(ActionError::action_failed(Error::internal_error(
+                    &format!("failed to query dpd: {e}"),
+                )));
+            }
+        }
+    }
+
+    debug!(log, "creating nat entry for: {target_ip:#?}");
+
+    let nat_target = dpd_client::types::NatTarget {
+        inner_mac: dpd_client::types::MacAddr {
+            a: mac_address.into_array().to_vec(),
+        },
+        internal_ip: *sled_ip_address.ip(),
+        vni: vni.into(),
+    };
+
+    match target_ip.ip {
+        ipnetwork::IpNetwork::V4(network) => {
+            dpd_client
+                .nat_ipv4_create(
+                    &network.ip(),
+                    *target_ip.first_port,
+                    *target_ip.last_port,
+                    &nat_target,
+                )
+                .await
+        }
+        ipnetwork::IpNetwork::V6(network) => {
+            dpd_client
+                .nat_ipv6_create(
+                    &network.ip(),
+                    *target_ip.first_port,
+                    *target_ip.last_port,
+                    &nat_target,
+                )
+                .await
+        }
+    }
+    .map_err(|e| {
+        ActionError::action_failed(Error::internal_error(&format!(
+            "failed to create nat entry via dpd: {e}"
+        )))
+    })?;
+
+    debug!(log, "creation of nat entry successful for: {target_ip:#?}");
+    Ok(())
+}
+
+async fn sic_remove_network_config(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let net_params = sagactx.saga_params::<NetworkConfigParams>()?;
+    let which = net_params.which;
+    let instance_id = net_params.instance_id;
+    let params = net_params.saga_params;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let osagactx = sagactx.user_data();
+    let dpd_client = &osagactx.nexus().dpd_client;
+    let datastore = &osagactx.datastore();
+    let log = sagactx.user_data().log();
+
+    debug!(log, "fetching external ip addresses");
+
+    let target_ip = &datastore
+        .instance_lookup_external_ips(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?
+        .get(which)
+        .ok_or_else(|| {
+            ActionError::action_failed(Error::internal_error(&format!(
+                "failed to find external ip address at index: {which}"
+            )))
+        })?
+        .to_owned();
+
+    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
+    //
+    // currently if we have this environment variable set, we want to
+    // bypass all calls to DPD. This is mainly to facilitate some tests where
+    // we don't have dpd running. In the future we should probably have these
+    // testing environments running dpd-stub so that the full path can be tested.
+    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
+        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
+        return Ok(());
+    };
+
+    debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
+
+    let result = match target_ip.ip {
+        ipnetwork::IpNetwork::V4(network) => {
+            dpd_client
+                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
+                .await
+        }
+        ipnetwork::IpNetwork::V6(network) => {
+            dpd_client
+                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
+                .await
+        }
+    };
+    match result {
+        Ok(_) => {
+            debug!(log, "deletion of nat entry successful for: {target_ip:#?}");
+            Ok(())
+        }
+        Err(e) => {
+            if e.status() == Some(http::StatusCode::NOT_FOUND) {
+                debug!(log, "no nat entry found for: {target_ip:#?}");
+                Ok(())
+            } else {
+                Err(ActionError::action_failed(Error::internal_error(
+                    &format!("failed to delete nat entry via dpd: {e}"),
+                )))
+            }
+        }
+    }?;
+    Ok(())
 }
 
 async fn sic_alloc_server(
@@ -1062,7 +1324,6 @@ pub mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
@@ -1078,15 +1339,13 @@ pub mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const INSTANCE_NAME: &str = "my-instance";
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         populate_ip_pool(&client, "default", None).await;
-        create_organization(&client, ORG_NAME).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
-        create_disk(&client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
     }
 
@@ -1418,11 +1677,13 @@ pub mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let instance_selector = params::InstanceSelector::new(
-            Some(ORG_NAME.to_string().try_into().unwrap()),
-            Some(PROJECT_NAME.to_string().try_into().unwrap()),
-            INSTANCE_NAME.to_string().try_into().unwrap(),
-        );
+        let project_selector = params::ProjectSelector {
+            project: PROJECT_NAME.to_string().try_into().unwrap(),
+        };
+        let instance_selector = params::InstanceSelector {
+            project_selector: Some(project_selector),
+            instance: INSTANCE_NAME.to_string().try_into().unwrap(),
+        };
         let instance_lookup =
             nexus.instance_lookup(&opctx, &instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();

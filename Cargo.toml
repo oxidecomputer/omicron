@@ -4,6 +4,7 @@ members = [
     "bootstore",
     "common",
     "ddm-admin-client",
+    "dpd-client",
     "deploy",
     "dns-server",
     "dns-service-client",
@@ -56,6 +57,7 @@ members = [
 default-members = [
     "common",
     "ddm-admin-client",
+    "dpd-client",
     "deploy",
     "dns-server",
     "dns-service-client",
@@ -106,9 +108,9 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.8"
+assert_cmd = "2.0.10"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
-async-trait = "0.1.66"
+async-trait = "0.1.67"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.0"
@@ -140,6 +142,7 @@ diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
+dpd-client = { path = "dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 expectorate = "1.0.6"
 fatfs = "0.3.6"
@@ -160,6 +163,7 @@ hyper-rustls = "0.23.2"
 hyper = "0.14"
 illumos-utils = { path = "illumos-utils" }
 indicatif = { version = "0.17.3", features = ["rayon"] }
+installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 installinator-common = { path = "installinator-common" }
@@ -221,7 +225,8 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224", features = [ "generated-migration" ] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "40e8d8e280c312e44047ff9d6b3b261e4537977a", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "40e8d8e280c312e44047ff9d6b3b261e4537977a", default-features = false, features = ["mock-only"] }
 proptest = "1.1.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -229,7 +234,7 @@ rayon = "1.7"
 rcgen = "0.10.0"
 ref-cast = "1.0"
 regex = "1.7.1"
-regress = "0.4.1"
+regress = "0.5.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
@@ -286,7 +291,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.7"
-toml = "0.7.2"
+toml = "0.7.3"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"

@@ -155,8 +155,8 @@ pub trait AuthorizedResource: oso::ToPolar + Send + Sync + 'static {
     /// You can imagine that this function would first find roles that are
     /// explicitly associated with this resource in the database.  Then it would
     /// also find roles associated with its parent, since, for example, an
-    /// Organization Administrator can access things within Projects in the
-    /// organization.  This process continues up the hierarchy.
+    /// Silo Administrator can access things within Projects in the
+    /// silo.  This process continues up the hierarchy.
     ///
     /// That's how this works for most resources.  There are other kinds of
     /// resources (like the Database itself) that aren't stored in the database

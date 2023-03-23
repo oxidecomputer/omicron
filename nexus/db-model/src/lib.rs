@@ -37,7 +37,6 @@ mod macaddr;
 mod name;
 mod network_interface;
 mod nexus_service;
-mod organization;
 mod oximeter_info;
 mod physical_disk;
 mod physical_disk_kind;
@@ -65,7 +64,7 @@ mod silo_user_password_hash;
 mod sled;
 mod snapshot;
 mod ssh_key;
-mod u16;
+mod unsigned;
 mod update_artifact;
 mod user_builtin;
 mod virtual_provisioning_collection;
@@ -88,7 +87,7 @@ mod db {
 }
 
 pub use self::macaddr::*;
-pub use self::u16::*;
+pub use self::unsigned::*;
 pub use block_size::*;
 pub use bytecount::*;
 pub use certificate::*;
@@ -116,7 +115,6 @@ pub use l4_port_range::*;
 pub use name::*;
 pub use network_interface::*;
 pub use nexus_service::*;
-pub use organization::*;
 pub use oximeter_info::*;
 pub use physical_disk::*;
 pub use physical_disk_kind::*;

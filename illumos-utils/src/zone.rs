@@ -236,6 +236,7 @@ impl Zones {
         zone_name: &str,
         zone_image: &std::path::Path,
         datasets: &[zone::Dataset],
+        filesystems: &[zone::Fs],
         devices: &[zone::Device],
         vnics: Vec<String>,
         limit_priv: Vec<String>,
@@ -281,6 +282,9 @@ impl Zones {
 
         for dataset in datasets {
             cfg.add_dataset(&dataset);
+        }
+        for filesystem in filesystems {
+            cfg.add_fs(&filesystem);
         }
         for device in devices {
             cfg.add_device(device);

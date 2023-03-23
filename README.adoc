@@ -43,6 +43,18 @@ This mode of operation will be used in production.
 
 To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run.adoc[].
 
+=== cargo test
+If you are running unit tests that involve ASIC configuration, such as testing
+instance creation sagas, you will need to either have a local instance of `dpd`
+running, or you will need to set `SKIP_ASIC_CONFIG=1` when running `cargo test`:
+
+----
+SKIP_ASIC_CONFIG=1 cargo test
+----
+
+This is a temporary workaround until we have a stub version of `dpd` integrated
+into the test suite.
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.

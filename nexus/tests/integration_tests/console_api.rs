@@ -20,7 +20,7 @@ use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
-use omicron_nexus::external_api::params::OrganizationCreate;
+use omicron_nexus::external_api::params::ProjectCreate;
 use omicron_nexus::external_api::{shared, views};
 
 type ControlPlaneTestContext =
@@ -44,23 +44,23 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // log in and pull the token out of the header so we can use it for authed requests
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    let org_params = OrganizationCreate {
+    let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
-            name: "my-org".parse().unwrap(),
-            description: "an org".to_string(),
+            name: "my-proj".parse().unwrap(),
+            description: "a project".to_string(),
         },
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
-        .body(Some(&org_params))
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -90,16 +90,16 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
@@ -127,15 +127,15 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/v1/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -148,22 +148,23 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-        .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(
-            header::LOCATION,
-            "/spoof_login?state=%2Forgs%2Firrelevant-path",
-        )
-        .execute()
-        .await
-        .expect("failed to redirect to IdP on auth failure");
+    let _ =
+        RequestBuilder::new(&testctx, Method::GET, "/projects/irrelevant-path")
+            .expect_status(Some(StatusCode::FOUND))
+            .expect_response_header(
+                header::LOCATION,
+                "/spoof_login?state=%2Fprojects%2Firrelevant-path",
+            )
+            .execute()
+            .await
+            .expect("failed to redirect to IdP on auth failure");
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
         "/",
-        "/orgs/irrelevant-path",
+        "/projects/irrelevant-path",
         "/settings/irrelevant-path",
         "/sys/irrelevant-path",
         "/device/success",

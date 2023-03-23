@@ -35,7 +35,6 @@ mod instance;
 mod ip_pool;
 mod metrics;
 mod network_interface;
-mod organization;
 mod oximeter;
 mod project;
 mod rack;
@@ -163,6 +162,9 @@ pub struct Nexus {
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
     resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+
+    /// Client for dataplane daemon / switch management API
+    dpd_client: Arc<dpd_client::Client>,
 }
 
 // TODO Is it possible to make some of these operations more generic?  A
@@ -200,6 +202,20 @@ impl Nexus {
                 "sec_id" => my_sec_id.to_string()
             )),
             sec_store,
+        ));
+
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+        let dpd_address = config.pkg.dendrite.address;
+        let dpd_host = dpd_address.ip().to_string();
+        let dpd_port = dpd_address.port();
+        let dpd_client = Arc::new(dpd_client::Client::new(
+            &format!("http://[{dpd_host}]:{dpd_port}"),
+            client_state,
         ));
 
         // Connect to clickhouse - but do so lazily.
@@ -262,6 +278,7 @@ impl Nexus {
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
+            dpd_client,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -491,15 +508,15 @@ impl Nexus {
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
-    /// async fn organization_list_my_thing(
+    /// async fn project_list_my_thing(
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
+    ///     project_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
-    ///         .organization_name(organization_name)
+    ///     let (.., _authz_proj) = LookupPath::new(opctx, datastore)
+    ///         .project_name(project_name)
     ///         .lookup_for(authz::Action::ListChildren)
     ///         .await?;
     ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
@@ -527,7 +544,6 @@ impl Nexus {
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {

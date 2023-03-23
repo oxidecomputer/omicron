@@ -118,7 +118,30 @@ where
 
     async fn on_tick(&mut self) {
         // Assemble a report out of pending completion and progress events.
-        let completion_events = self.completion.clone();
+        // For completion, include all success events and the last 20 failure
+        // events (with the goal being to keep the size of the report down,
+        // since a report that's too large will cause the max payload size to be
+        // exceeded.)
+        let mut failure_events_seen = 0;
+        let mut completion_events: Vec<_> = self
+            .completion
+            .iter()
+            .rev()
+            .filter(|event| {
+                if event.kind.is_success() {
+                    true
+                } else {
+                    failure_events_seen += 1;
+                    failure_events_seen <= 20
+                }
+            })
+            .cloned()
+            .collect();
+        // IMPORTANT: You might be tempted to replace this reverse call with
+        // another `.rev()` above. Don't do that! It will cause the *first* 20
+        // elements to be taken rather than the *last* 20 elements.
+        completion_events.reverse();
+
         let progress_events = self.last_progress.clone().into_iter().collect();
         let report = ProgressReport {
             total_elapsed: self.start.elapsed(),

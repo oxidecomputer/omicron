@@ -90,14 +90,10 @@ impl Server {
         .map_err(|err| format!("Failed to detect local SP: {err}"))?;
 
         info!(log, "setting up bootstrap agent server");
-        let (bootstrap_agent, trust_quorum) = Agent::new(
-            log.clone(),
-            sled_config,
-            config.link.clone(),
-            sp.clone(),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+        let (bootstrap_agent, trust_quorum) =
+            Agent::new(log.clone(), config.clone(), sled_config, sp.clone())
+                .await
+                .map_err(|e| e.to_string())?;
         let bootstrap_agent = Arc::new(bootstrap_agent);
 
         let mut dropshot_config = dropshot::ConfigDropshot::default();
@@ -130,17 +126,11 @@ impl Server {
             sprockets_server_handle,
             _http_server: http_server,
         };
-
-        // Initialize the bootstrap agent *after* the server has started.
-        // This ordering allows the bootstrap agent to communicate with
-        // other bootstrap agents on the rack during the initialization
-        // process.
-        if let Err(e) = server.bootstrap_agent.start_rss(&config).await {
-            server.sprockets_server_handle.abort();
-            return Err(e.to_string());
-        }
-
         Ok(server)
+    }
+
+    pub fn agent(&self) -> &Agent {
+        &self.bootstrap_agent
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {

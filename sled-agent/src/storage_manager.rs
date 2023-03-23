@@ -502,6 +502,7 @@ async fn ensure_running_zone(
                 Some(&dataset_name.pool_name),
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
+                &[],
                 vec![],
                 None,
                 None,
