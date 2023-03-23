@@ -827,8 +827,8 @@ async fn create_default_primary_network_interface(
     let (.., authz_vpc, authz_subnet, db_subnet) =
         LookupPath::new(&opctx, &datastore)
             .project_id(saga_params.project_id)
-            .vpc_name(internal_default_name.clone().into())
-            .vpc_subnet_name(internal_default_name.into())
+            .vpc_name(internal_default_name.clone())
+            .vpc_subnet_name(internal_default_name)
             .fetch()
             .await
             .map_err(ActionError::action_failed)?;
@@ -1010,7 +1010,7 @@ async fn ensure_instance_disk_attach_state(
     // disk name now.  See oxidecomputer/omicron#1536.
     let (.., authz_disk, _db_disk) = LookupPath::new(&opctx, &datastore)
         .project_id(project_id)
-        .disk_name(disk_name.into())
+        .disk_name(disk_name)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -1188,7 +1188,7 @@ async fn sic_delete_instance_record(
     // instance name now.  See oxidecomputer/omicron#1536.
     let result = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
-        .instance_name(instance_name.into())
+        .instance_name(instance_name)
         .fetch()
         .await;
     // Although, as mentioned in the comment above, we should not be doing the
@@ -1254,7 +1254,7 @@ async fn sic_instance_ensure(
 
     let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
         .project_id(params.project_id)
-        .instance_name(instance_name.into())
+        .instance_name(instance_name)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;

@@ -482,7 +482,7 @@ impl super::Nexus {
         image_name: Name,
     ) -> LookupResult<db::model::GlobalImage> {
         let (.., db_disk) = LookupPath::new(opctx, &self.db_datastore)
-            .global_image_name(image_name.into())
+            .global_image_name(image_name)
             .fetch()
             .await?;
         Ok(db_disk)

@@ -375,7 +375,7 @@ impl super::Nexus {
             if let Ok((.., authz_instance)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
-                    .instance_name(instance_name.clone().into())
+                    .instance_name(instance_name.clone())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {
@@ -397,7 +397,7 @@ impl super::Nexus {
             if let Ok((.., authz_vpc)) =
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
-                    .vpc_name(vpc_name.clone().into())
+                    .vpc_name(vpc_name.clone())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {
@@ -420,7 +420,7 @@ impl super::Nexus {
                 LookupPath::new(opctx, &self.db_datastore)
                     .project_id(vpc.project_id)
                     .vpc_name(vpc.name().clone().into())
-                    .vpc_subnet_name(subnet_name.clone().into())
+                    .vpc_subnet_name(subnet_name.clone())
                     .lookup_for(authz::Action::ListChildren)
                     .await
             {

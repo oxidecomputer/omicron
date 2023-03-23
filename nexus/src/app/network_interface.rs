@@ -89,8 +89,8 @@ impl super::Nexus {
         let (.., authz_vpc, authz_subnet, db_subnet) =
             LookupPath::new(opctx, &self.db_datastore)
                 .project_id(authz_project.id())
-                .vpc_name(vpc_name.into())
-                .vpc_subnet_name(subnet_name.into())
+                .vpc_name(vpc_name)
+                .vpc_subnet_name(subnet_name)
                 .fetch()
                 .await?;
         let interface_id = Uuid::new_v4();
