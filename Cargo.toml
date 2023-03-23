@@ -128,6 +128,7 @@ clap = { version = "4.1", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
+crossterm = { version = "0.26.1", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }

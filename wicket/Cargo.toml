@@ -11,7 +11,7 @@ anyhow.workspace = true
 camino.workspace = true
 ciborium.workspace = true
 clap.workspace = true
-crossterm = { version = "0.26.1", features = ["event-stream"] }
+crossterm.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
