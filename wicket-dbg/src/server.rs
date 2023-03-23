@@ -3,9 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{Cmd, Runner};
+use camino::Utf8PathBuf;
 use std::fs::File;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::path::PathBuf;
 
 /// The server used to handle wicket-dbg commands, run them, and return the
 /// response to the client.
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 ///   1. The client is a human trying to debug
 ///   2. There is only one screen to display the wicket UI on
 pub struct Server {
-    recording_path: Option<PathBuf>,
+    recording_path: Option<Utf8PathBuf>,
     runner: Runner,
 }
 
@@ -63,8 +63,7 @@ impl Server {
                     }
                 },
                 Err(e) => {
-                    let res: Result<(), String> =
-                        Err(format!("{e}: {}", path.display()));
+                    let res: Result<(), String> = Err(format!("{e}: {}", path));
                     ciborium::ser::into_writer(&res, stream)?;
                 }
             },

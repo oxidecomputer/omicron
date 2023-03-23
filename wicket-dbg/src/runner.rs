@@ -15,9 +15,7 @@ use std::io::stdout;
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
-use wicket::{
-    Event, Frame, RunnerCore, Screen, Snapshot, State, Term, TICK_INTERVAL,
-};
+use wicket::{Event, RunnerCore, Screen, Snapshot, State, TICK_INTERVAL};
 
 /// A parallel to [`wicket::Runner`] that allows stepping through individual
 /// events, and doesn't interact with any external services. The only goal
@@ -32,7 +30,7 @@ impl Runner {
         let backend = CrosstermBackend::new(stdout());
         let core = RunnerCore {
             screen: Screen::new(&log),
-            state: State::new(&log),
+            state: State::new(),
             terminal: Terminal::new(backend).unwrap(),
             log,
         };
@@ -61,7 +59,7 @@ impl Runner {
     /// Restart the debugger
     pub fn restart(&mut self) -> anyhow::Result<()> {
         self.core.screen = Screen::new(&self.core.log);
-        self.core.state = State::new(&self.core.log);
+        self.core.state = State::new();
         self.core.init_screen()?;
         Ok(())
     }

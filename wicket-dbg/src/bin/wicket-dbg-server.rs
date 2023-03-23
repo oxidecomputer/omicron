@@ -9,5 +9,6 @@ fn main() -> Result<()> {
     let drain = slog::Discard;
     let root = slog::Logger::root(drain, slog::o!());
     let runner = Runner::new(root);
+    // TODO: Allow port configuration
     wicket_dbg::Server::run("::1:9010", runner)
 }

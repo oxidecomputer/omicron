@@ -12,8 +12,8 @@ pub use client::Client;
 pub use runner::Runner;
 pub use server::Server;
 
+use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// All commands capable of operating the debugger
 ///
@@ -22,7 +22,7 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cmd {
     /// Load a recording in the wicket-dbg-server
-    Load(PathBuf),
+    Load(Utf8PathBuf),
 
     /// Restart at the beginning of the recording
     Reset,

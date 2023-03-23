@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Result;
+use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
 use reedline::{DefaultPrompt, Reedline, Signal};
 use std::iter;
-use std::path::PathBuf;
 use wicket_dbg::Client;
 
 fn main() -> anyhow::Result<()> {
@@ -74,7 +74,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Cmds {
     /// Load a wicket recording on the debug server
-    Load { path: PathBuf },
+    Load { path: Utf8PathBuf },
 
     /// Reset the debugger to the start of the recording
     Reset,

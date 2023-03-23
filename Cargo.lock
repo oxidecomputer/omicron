@@ -8116,6 +8116,7 @@ name = "wicket-dbg"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "ciborium",
  "clap 4.1.11",
  "crossterm 0.26.1",
