@@ -272,6 +272,8 @@ pub enum ServiceType {
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
     CruciblePantry,
+    Ntp { servers: Vec<String>, boundary: bool },
+    DnsClient { servers: Vec<String>, domain: Option<String> },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -285,6 +287,8 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
+            ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::DnsClient { .. } => write!(f, "dns_client"),
         }
     }
 }
@@ -318,6 +322,10 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
+            St::Ntp { servers, boundary } => AutoSt::Ntp { servers, boundary },
+            St::DnsClient { servers, domain } => {
+                AutoSt::DnsClient { servers, domain }
+            }
         }
     }
 }
@@ -337,6 +345,8 @@ pub enum ZoneType {
     Switch,
     #[serde(rename = "crucible_pantry")]
     CruciblePantry,
+    #[serde(rename = "ntp")]
+    NTP,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -347,6 +357,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
+            ZoneType::NTP => Self::Ntp,
         }
     }
 }
@@ -360,6 +371,7 @@ impl std::fmt::Display for ZoneType {
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
+            NTP => "ntp",
         };
         write!(f, "{name}")
     }

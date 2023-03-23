@@ -1522,6 +1522,56 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "boundary": {
+                "type": "boolean"
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ntp"
+                ]
+              }
+            },
+            "required": [
+              "boundary",
+              "servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dns_client"
+                ]
+              }
+            },
+            "required": [
+              "servers",
+              "type"
+            ]
           }
         ]
       },
@@ -1887,7 +1937,8 @@
           "nexus",
           "oximeter",
           "switch",
-          "crucible_pantry"
+          "crucible_pantry",
+          "ntp"
         ]
       },
       "Zpool": {

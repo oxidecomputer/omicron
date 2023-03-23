@@ -9,6 +9,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::Port;
 use crate::svc::wait_for_service;
+use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
 use slog::info;
@@ -121,6 +122,11 @@ pub struct RunningZone {
 impl RunningZone {
     pub fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    /// Returns the filesystem path to the zone's root
+    pub fn root(&self) -> String {
+        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
     }
 
     /// Runs a command within the Zone, return the output.

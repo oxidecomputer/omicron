@@ -321,7 +321,9 @@ impl SledAgent {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
 
-        if self.inner.hardware.is_scrimlet_driver_loaded() {
+        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
+
+        if scrimlet {
             let switch_zone_ip = Some(self.inner.switch_zone_ip());
             if let Err(e) =
                 self.inner.services.activate_switch(switch_zone_ip).await
@@ -419,8 +421,8 @@ impl SledAgent {
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped exponential
-            // backoff.
+            // until it succeeds. We retry with an randomized, capped
+            // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
             // return a permanent error from the `notify_nexus` closure.
