@@ -392,6 +392,15 @@ table! {
 }
 
 table! {
+    sled_resource (id) {
+        id -> Uuid,
+        kind -> crate::SledResourceKindEnum,
+        hardware_threads -> Int8,
+        physical_ram -> Int8,
+    }
+}
+
+table! {
     service (id) {
         id -> Uuid,
         time_created -> Timestamptz,

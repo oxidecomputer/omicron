@@ -91,6 +91,7 @@ declare_saga_actions! {
     ALLOC_PROPOLIS_IP -> "propolis_ip" {
         + sic_allocate_propolis_ip
     }
+    // XXX XXX XXX Seems like we could validate the target sled here
     CREATE_INSTANCE_RECORD -> "instance_name" {
         + sic_create_instance_record
         - sic_delete_instance_record
