@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! An executor for [`wicket::Event`]s in the [`wicket_dbg::Server`]
+//! An executor for [`wicket::Event`]s in the [`crate::Server`]
 
 use anyhow::bail;
 use crossterm::execute;
