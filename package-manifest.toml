@@ -44,6 +44,7 @@ source.paths = [
   { from = "smf/sled-agent/manifest.xml", to = "pkg/manifest.xml" },
   # Valid options for "machine" include:
   # - gimlet: Assumes control of real hardware, does not emulate hardware
+  # - gimlet-standalone: A real gimlet but running in isolation from the rack as a whole
   # - non-gimlet: Used for testing on development illumos machines
   { from = "smf/sled-agent/{{machine}}", to = "pkg" }
 ]
@@ -308,8 +309,9 @@ output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
-# $ cargo run --release -p omicron-package -- -t switch=asic package
-# $ pfexec ./target/release/omicron-package -t switch=asic install
+# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
+# $ cargo run --release --bin omicron-package -- package
+# $ pfexec ./target/release/omicron-package install
 [package.switch-asic]
 service_name = "switch"
 only_for_targets.switch = "asic"
@@ -320,10 +322,9 @@ output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
 #
-# - Set the sled agent's configuration option "scrimlet_override" to "stub"
-# - Run the following:
-# $ cargo run --release -p omicron-package -- -t switch=stub package
-# $ pfexec ./target/release/omicron-package -t switch=stub install
+# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s stub
+# $ cargo run --release --bin omicron-package -- package
+# $ pfexec ./target/release/omicron-package install
 [package.switch-stub]
 service_name = "switch"
 only_for_targets.switch = "stub"
@@ -334,10 +335,9 @@ output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
 #
-# - Set the sled agent's configuration option "scrimlet_override" to "softnpu"
-# - Run the following:
-# $ cargo run --release -p omicron-package -- -t switch_variant=softnpu package
-# $ pfexec ./target/release/omicron-package -t switch_variant=softnpu install
+# $ cargo run --release --bin omicron-package -- -t default target create -i standard -m <gimlet|gimlet-standalone|non-gimlet> -s softnpu
+# $ cargo run --release --bin omicron-package -- package
+# $ pfexec ./target/release/omicron-package install
 [package.switch-softnpu]
 service_name = "switch"
 only_for_targets.switch = "softnpu"
