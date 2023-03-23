@@ -30,7 +30,7 @@ async fn test_dnsadm() {
     assert!(store.is_new());
 
     let (_dns_server, dropshot_server) = dns_server::start_servers(
-        logctx.log,
+        logctx.log.clone(),
         store,
         &dns_server::dns_server::Config {
             bind_address: "[::1]:0".parse().unwrap(),
@@ -121,6 +121,7 @@ async fn test_dnsadm() {
     let _ = dropshot_server.close().await;
 
     expectorate::assert_contents("tests/output/test_dnsadm.txt", &output);
+    logctx.cleanup_successful();
 }
 
 fn run(s: &mut String, config_addr: SocketAddr, args: &[&str]) {

@@ -1086,10 +1086,12 @@ mod test {
             Expect::Record(&dummy_record),
         );
 
-        // Grab a reference to the database so we can muck with it and then
-        // create a new Store from it.  Then clean up the old Store.
-        let db = Arc::clone(&tc.db);
-        tc.cleanup_successful(); // drops "tc"
+        // At this point, we want to drop the Store, but we need to keep around
+        // the temporary directory.  The easiest thing is to grab the pieces we
+        // want out of the TestContext, drop it (without cleaning it up), then
+        // assemble a new one out of these pieces and the new Store.
+        let (tmpdir, db, logctx) = (tc.tmpdir, tc.db, tc.logctx);
+        drop(tc.store);
 
         // Undo the last step of the update to make this look like an
         // interrupted update.
@@ -1099,10 +1101,9 @@ mod test {
         )
         .unwrap();
 
-        let logctx = test_setup_log("test_update_interrupted_2");
         let store = Store::new_with_db(
-            logctx.log,
-            db,
+            logctx.log.clone(),
+            Arc::clone(&db),
             &Config {
                 storage_path: Utf8PathBuf::from_str("/nonexistent_unused")
                     .unwrap(),
@@ -1110,6 +1111,7 @@ mod test {
             },
         )
         .unwrap();
+
         let config = store.read_config().unwrap();
         assert_eq!(gen1_config, config);
         // We ought to have pruned the tree associated with generation 2.
@@ -1134,6 +1136,7 @@ mod test {
             Expect::Record(&dummy_record),
         );
 
+        let tc = TestContext { logctx, tmpdir, store, db };
         tc.cleanup_successful();
     }
 
