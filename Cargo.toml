@@ -18,7 +18,7 @@ members = [
     "installinator-artifact-client",
     "installinator-artifactd",
     "installinator-common",
-    "internal-dns-names",
+    "internal-dns",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -70,7 +70,7 @@ default-members = [
     "installinator-artifact-client",
     "installinator-artifactd",
     "installinator-common",
-    "internal-dns-names",
+    "internal-dns",
     "ipcc-key-value",
     "nexus",
     "nexus-client",
@@ -167,7 +167,7 @@ installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "installinator-artifact-client" }
 installinator-common = { path = "installinator-common" }
-internal-dns-names = { path = "internal-dns-names" }
+internal-dns = { path = "internal-dns" }
 ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
