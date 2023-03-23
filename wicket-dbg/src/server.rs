@@ -57,7 +57,7 @@ impl Server {
                     Err(e) => {
                         let res: Result<(), String> = Err(format!(
                             "Failed to deserialize recording: {}",
-                            e.to_string()
+                            e
                         ));
                         ciborium::ser::into_writer(&res, stream)?;
                     }
