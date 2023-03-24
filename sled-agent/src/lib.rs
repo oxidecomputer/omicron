@@ -39,3 +39,6 @@ mod mocks;
 
 #[macro_use]
 extern crate slog;
+
+#[cfg(feature = "image-trampoline")]
+compile_error!("Sled Agent should not be built with `-i trampoline`");
