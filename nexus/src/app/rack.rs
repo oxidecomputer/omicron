@@ -10,6 +10,8 @@ use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
+use nexus_db_model::DnsGroup;
+use nexus_db_model::InitialDnsZone;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -107,6 +109,33 @@ impl super::Nexus {
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
 
+        let dns_zone = request
+            .internal_dns_zone_config
+            .zones
+            .into_iter()
+            .find(|z| z.zone_name == internal_dns::DNS_ZONE)
+            .ok_or_else(|| {
+                Error::invalid_request(
+                    "expected initial DNS config to include control plane zone",
+                )
+            })?;
+
+        let internal_dns = InitialDnsZone::new(
+            DnsGroup::Internal,
+            &dns_zone.zone_name,
+            &self.id.to_string(),
+            "rack setup",
+            dns_zone.records,
+        );
+
+        let external_dns = InitialDnsZone::new(
+            DnsGroup::External,
+            "oxide.external", // XXX-dap,
+            &self.id.to_string(),
+            "rack setup",
+            vec![],
+        );
+
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -115,6 +144,8 @@ impl super::Nexus {
                 datasets,
                 service_ip_pool_ranges,
                 certificates,
+                internal_dns,
+                external_dns,
             )
             .await?;
 

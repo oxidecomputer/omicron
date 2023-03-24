@@ -232,7 +232,11 @@ pub struct RackInitializationRequest {
     pub internal_services_ip_pool_ranges: Vec<IpRange>,
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
+    /// initial internal DNS config
+    pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
 }
+
+pub type DnsKv = dns_service_client::types::DnsKv;
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

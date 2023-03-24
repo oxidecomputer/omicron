@@ -30,6 +30,7 @@ use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::InitialDnsZone;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -40,6 +41,16 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
+
+#[derive(Debug)]
+enum RackInitError {
+    AddingIp(Error),
+    ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    RackUpdate(PoolError),
+    DnsSerialization(serde_json::Error),
+}
+type TxnError = TransactionError<RackInitError>;
 
 impl DataStore {
     pub async fn rack_list(
@@ -95,19 +106,12 @@ impl DataStore {
         datasets: Vec<Dataset>,
         service_ip_pool_ranges: Vec<IpRange>,
         certificates: Vec<Certificate>,
+        internal_dns: InitialDnsZone,
+        external_dns: InitialDnsZone,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        #[derive(Debug)]
-        enum RackInitError {
-            AddingIp(Error),
-            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
-            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-            RackUpdate(PoolError),
-        }
-        type TxnError = TransactionError<RackInitError>;
 
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
@@ -257,6 +261,12 @@ impl DataStore {
                 }
                 info!(log, "Inserted certificates");
 
+                Self::load_dns_data(&conn, internal_dns).await?;
+                info!(log, "Populated DNS tables for internal DNS");
+
+                Self::load_dns_data(&conn, external_dns).await?;
+                info!(log, "Populated DNS tables for external DNS");
+
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
                     .set((
@@ -320,10 +330,64 @@ impl DataStore {
                         ),
                     )
                 }
+                TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to serialize initial DNS records: {:#}", err
+                    ))
+                },
                 TxnError::Pool(e) => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
             })
+    }
+
+    async fn load_dns_data<ConnErr>(
+        conn: &(impl async_bb8_diesel::AsyncConnection<
+            crate::db::pool::DbConnection,
+            ConnErr,
+        > + Sync),
+        dns: InitialDnsZone,
+    ) -> Result<(), TxnError>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        TxnError: From<ConnErr>,
+        // async_bb8_diesel::PoolError: From<ConnErr>,
+    {
+        {
+            use db::schema::dns_zone::dsl;
+            diesel::insert_into(dsl::dns_zone)
+                .values(dns.row_for_zone())
+                .on_conflict((dsl::dns_group, dsl::zone_name))
+                .do_nothing()
+                .execute_async(conn)
+                .await?;
+        }
+
+        {
+            use db::schema::dns_version::dsl;
+            diesel::insert_into(dsl::dns_version)
+                .values(dns.row_for_version())
+                .on_conflict((dsl::dns_zone_id, dsl::version))
+                .do_nothing()
+                .execute_async(conn)
+                .await?;
+        }
+
+        {
+            use db::schema::dns_name::dsl;
+            diesel::insert_into(dsl::dns_name)
+                .values(
+                    dns.rows_for_names()
+                        .map_err(RackInitError::DnsSerialization)
+                        .map_err(TxnError::CustomError)?,
+                )
+                .on_conflict((dsl::dns_zone_id, dsl::version_added, dsl::name))
+                .do_nothing()
+                .execute_async(conn)
+                .await?;
+        }
+
+        Ok(())
     }
 
     pub async fn load_builtin_rack_data(
@@ -381,6 +445,7 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::ServiceKind;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_db_model::{DnsGroup, InitialDnsZone};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
@@ -389,6 +454,26 @@ mod test {
 
     fn rack_id() -> Uuid {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
+    }
+
+    fn internal_dns_empty() -> InitialDnsZone {
+        InitialDnsZone::new(
+            DnsGroup::Internal,
+            internal_dns::DNS_ZONE,
+            "test suite",
+            "test suite",
+            vec![],
+        )
+    }
+
+    fn external_dns_empty() -> InitialDnsZone {
+        InitialDnsZone::new(
+            DnsGroup::External,
+            "testing.oxide.example",
+            "test suite",
+            "test suite",
+            vec![],
+        )
     }
 
     #[tokio::test]
@@ -411,6 +496,8 @@ mod test {
                 datasets.clone(),
                 service_ip_pool_ranges.clone(),
                 certificates.clone(),
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await
             .expect("Failed to initialize rack");
@@ -427,6 +514,8 @@ mod test {
                 datasets,
                 service_ip_pool_ranges,
                 certificates,
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await
             .expect("Failed to initialize rack");
@@ -518,6 +607,8 @@ mod test {
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await
             .expect("Failed to initialize rack");
@@ -621,6 +712,8 @@ mod test {
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await
             .expect("Failed to initialize rack");
@@ -731,6 +824,8 @@ mod test {
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await;
         assert!(result.is_err());
@@ -791,6 +886,8 @@ mod test {
                 datasets.clone(),
                 service_ip_pool_ranges,
                 certificates.clone(),
+                internal_dns_empty(),
+                external_dns_empty(),
             )
             .await;
         assert!(result.is_err());

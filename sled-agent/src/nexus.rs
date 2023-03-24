@@ -103,3 +103,49 @@ impl NexusRequestQueue {
         &self.tx
     }
 }
+
+pub fn d2n_params(
+    params: &dns_service_client::types::DnsConfigParams,
+) -> nexus_client::types::DnsConfigParams {
+    nexus_client::types::DnsConfigParams {
+        generation: params.generation,
+        time_created: params.time_created,
+        zones: params.zones.iter().map(d2n_zone).collect(),
+    }
+}
+
+fn d2n_zone(
+    zone: &dns_service_client::types::DnsConfigZone,
+) -> nexus_client::types::DnsConfigZone {
+    nexus_client::types::DnsConfigZone {
+        zone_name: zone.zone_name.clone(),
+        records: zone
+            .records
+            .iter()
+            .map(|r| nexus_client::types::DnsKv {
+                key: nexus_client::types::DnsRecordKey {
+                    name: r.key.name.clone(),
+                },
+                records: r.records.iter().map(d2n_record).collect(),
+            })
+            .collect(),
+    }
+}
+
+fn d2n_record(
+    record: &dns_service_client::types::DnsRecord,
+) -> nexus_client::types::DnsRecord {
+    match record {
+        dns_service_client::types::DnsRecord::Aaaa(addr) => {
+            nexus_client::types::DnsRecord::Aaaa(*addr)
+        }
+        dns_service_client::types::DnsRecord::Srv(srv) => {
+            nexus_client::types::DnsRecord::Srv(nexus_client::types::Srv {
+                port: srv.port,
+                prio: srv.prio,
+                target: srv.target.clone(),
+                weight: srv.weight,
+            })
+        }
+    }
+}

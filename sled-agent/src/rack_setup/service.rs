@@ -58,6 +58,7 @@ use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::nexus::d2n_params;
 use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
@@ -602,6 +603,7 @@ impl ServiceInner {
             // should be bootstrapped during the rack setup process to avoid
             // the need for unencrypted communication.
             certs: vec![],
+            internal_dns_zone_config: d2n_params(&service_plan.dns_config),
         };
 
         let notify_nexus = || async {

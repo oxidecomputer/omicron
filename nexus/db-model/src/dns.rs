@@ -5,6 +5,7 @@
 use super::{impl_enum_type, Generation};
 use crate::schema::{dns_name, dns_version, dns_zone};
 use chrono::{DateTime, Utc};
+use nexus_types::internal_api::params;
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -17,8 +18,8 @@ impl_enum_type!(
     pub enum DnsGroup;
 
     // Enum values
-    System => b"internal"
-    Custom => b"external"
+    Internal => b"internal"
+    External => b"external"
 );
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -48,4 +49,75 @@ pub struct DnsName {
     pub version_removed: Option<Generation>,
     pub name: String,
     pub dns_record_data: serde_json::Value,
+}
+
+/// Describes the initial configuration for a DNS zone
+///
+/// Provides helpers for constructing the database rows to describe that initial
+/// configuration
+#[derive(Debug, Clone)]
+pub struct InitialDnsZone {
+    dns_group: DnsGroup,
+    zone_name: String,
+    records: Vec<params::DnsKv>,
+    version: Generation,
+    dns_zone_id: Uuid,
+    time_created: DateTime<Utc>,
+    creator: String,
+    comment: String,
+}
+
+impl InitialDnsZone {
+    pub fn new(
+        dns_group: DnsGroup,
+        zone_name: &str,
+        creator: &str,
+        comment: &str,
+        records: Vec<params::DnsKv>,
+    ) -> InitialDnsZone {
+        InitialDnsZone {
+            dns_group,
+            zone_name: zone_name.to_owned(),
+            records,
+            dns_zone_id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            version: Generation::new(),
+            comment: comment.to_owned(),
+            creator: creator.to_owned(),
+        }
+    }
+
+    pub fn row_for_zone(&self) -> DnsZone {
+        DnsZone {
+            id: self.dns_zone_id,
+            time_created: self.time_created,
+            dns_group: self.dns_group,
+            zone_name: self.zone_name.clone(),
+        }
+    }
+
+    pub fn row_for_version(&self) -> DnsVersion {
+        DnsVersion {
+            dns_zone_id: self.dns_zone_id,
+            version: self.version,
+            time_created: self.time_created,
+            creator: self.creator.clone(),
+            comment: self.comment.clone(),
+        }
+    }
+
+    pub fn rows_for_names(&self) -> Result<Vec<DnsName>, serde_json::Error> {
+        self.records
+            .iter()
+            .map(|r| {
+                Ok(DnsName {
+                    dns_zone_id: self.dns_zone_id,
+                    version_added: self.version,
+                    version_removed: None,
+                    name: r.key.name.clone(),
+                    dns_record_data: serde_json::to_value(&r.records)?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
 }

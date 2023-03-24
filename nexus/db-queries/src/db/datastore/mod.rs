@@ -273,9 +273,10 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, ExternalIp, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, Sled, SledBaseboard, SledSystemHardware, SshKey,
-        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
+        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsZone, Project,
+        Rack, Region, Service, ServiceKind, SiloUser, Sled, SledBaseboard,
+        SledSystemHardware, SshKey, SystemUpdate, UpdateableComponentType,
+        VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -1068,6 +1069,22 @@ mod test {
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
+        let internal_dns = InitialDnsZone::new(
+            DnsGroup::Internal,
+            internal_dns::DNS_ZONE,
+            "test suite",
+            "test suite",
+            vec![],
+        );
+
+        let external_dns = InitialDnsZone::new(
+            DnsGroup::External,
+            "testing.oxide.example",
+            "test suite",
+            "test suite",
+            vec![],
+        );
+
         // Initialize the Rack.
         let result = datastore
             .rack_set_initialized(
@@ -1077,6 +1094,8 @@ mod test {
                 vec![],
                 vec![],
                 vec![],
+                internal_dns.clone(),
+                external_dns.clone(),
             )
             .await
             .unwrap();
@@ -1091,6 +1110,8 @@ mod test {
                 vec![],
                 vec![],
                 vec![],
+                internal_dns,
+                external_dns,
             )
             .await
             .unwrap();
