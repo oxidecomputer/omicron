@@ -8,12 +8,13 @@
 //! while decoupling keys from actions on [`crate::Control`]s
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde::{Deserialize, Serialize};
 
 /// All commands handled by [`crate::Control::on`].
 ///
 /// These are mostly user input commands from the keyboard,
 /// but also include certain events like `Tick`.,
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Cmd {
     /// Select the only available action for a current control
     /// This can trigger an operation, popup, etc...
@@ -34,7 +35,11 @@ pub enum Cmd {
     /// When a user `Select`s  a user input an [`crate::Action`]  will be
     /// returned that establishes Raw mode. When the context is exited, `Raw`
     /// mode will be disabled.
-    Raw(KeyEvent),
+    ///
+    /// TODO: This is currently commented out because we need to translate key
+    /// presses to something we can serialize/deserialize once we decide to use
+    /// it.
+    /// Raw(KeyEvent),
 
     /// Display details for the given selection
     /// This can be used to do things like open a scollable popup for a given

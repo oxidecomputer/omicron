@@ -8,129 +8,101 @@
 //! through wicketd.
 
 use crate::ui::defaults::style;
-use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tui::style::Style;
 use tui::text::Span;
 
+// This should be greater than the highest poll value for each service
+const LIVENESS_THRESHOLD: Duration = Duration::from_secs(30);
+
 /// A status bar shown at the bottom of the screen.
-#[derive(Debug)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ServiceStatus {
-    pub wicketd_liveness: LivenessState,
-    pub mgs_liveness: LivenessState,
-    last_redraw_at: Option<Instant>,
+    wicketd_last_seen: Option<Duration>,
+    mgs_last_seen: Option<Duration>,
 }
 
 impl ServiceStatus {
     pub fn new() -> Self {
-        Self {
-            // Wicketd is polled every 500ms by wicket. Setting a 1 second
-            // liveness threshold means that under normal operation it should
-            // never flip to delayed.
-            wicketd_liveness: LivenessState::new(Duration::from_secs(1)),
-            // MGS is polled every 10 seconds by wicketd. Set a 11 second
-            // threshold to account for wicket -> wicketd and wicketd -> MGS
-            // delay.
-            mgs_liveness: LivenessState::new(Duration::from_secs(11)),
-            last_redraw_at: None,
+        Self::default()
+    }
+
+    /// Increment all the status timers by `time` if they
+    /// have ever been heard from.
+    ///
+    /// Return true if a second has rolled over and we should trigger a redraw.
+    pub fn advance_all(&mut self, time: Duration) -> bool {
+        let mut redraw = false;
+        if let Some(d) = self.wicketd_last_seen.as_mut() {
+            let prev = d.as_secs();
+            *d += time;
+            redraw |= d.as_secs() > prev;
         }
+        if let Some(d) = self.mgs_last_seen.as_mut() {
+            let prev = d.as_secs();
+            *d += time;
+            redraw |= d.as_secs() > prev;
+        }
+
+        redraw
     }
 
     pub fn reset_wicketd(&mut self, elapsed: Duration) {
-        self.wicketd_liveness.reset(elapsed);
-        // Force a redraw.
-        self.last_redraw_at = None;
+        self.wicketd_last_seen = Some(elapsed);
     }
 
     pub fn reset_mgs(&mut self, elapsed: Duration) {
-        self.mgs_liveness.reset(elapsed);
-        // Force a redraw.
-        self.last_redraw_at = None;
+        self.mgs_last_seen = Some(elapsed);
     }
 
-    /// Returns true if a redraw needs to happen, resetting the internal timer.
-    pub fn should_redraw(&mut self) -> bool {
-        if let Some(instant) = &mut self.last_redraw_at {
-            let elapsed = instant.elapsed();
-            if elapsed >= Duration::from_secs(1) {
-                *instant = Instant::now();
-                true
+    pub fn mgs_liveness(&self) -> Liveness {
+        Self::liveness(self.mgs_last_seen)
+    }
+
+    pub fn wicketd_liveness(&self) -> Liveness {
+        Self::liveness(self.wicketd_last_seen)
+    }
+
+    fn liveness(elapsed: Option<Duration>) -> Liveness {
+        elapsed.map_or(Liveness::NoResponse, |d| {
+            if d > LIVENESS_THRESHOLD {
+                Liveness::Delayed(d)
             } else {
-                false
+                Liveness::Live(d)
             }
-        } else {
-            // Initialize the last-redraw timer.
-            self.last_redraw_at = Some(Instant::now());
-            true
-        }
-    }
-}
-
-/// Tracker used by a single instance of liveness.
-#[derive(Debug)]
-pub struct LivenessState {
-    // None means that the stopwatch hasn't yet been initialized.
-    stopwatch: Option<libsw::TokioSw>,
-
-    #[allow(unused)]
-    live_threshold: Duration,
-}
-
-impl LivenessState {
-    pub fn new(live_threshold: Duration) -> Self {
-        Self { stopwatch: None, live_threshold }
-    }
-
-    /// Resets or initializes the stopwatch state.
-    pub fn reset(&mut self, elapsed: Duration) {
-        self.stopwatch = Some(libsw::TokioSw::with_elapsed_started(elapsed));
-    }
-
-    /// Compute the liveness for this state.
-    pub fn compute(&self) -> ComputedLiveness {
-        if let Some(stopwatch) = &self.stopwatch {
-            let elapsed = stopwatch.elapsed();
-            if elapsed > self.live_threshold {
-                ComputedLiveness::Delayed(elapsed.as_secs())
-            } else {
-                ComputedLiveness::Live(elapsed.as_secs())
-            }
-        } else {
-            ComputedLiveness::NoResponse
-        }
+        })
     }
 }
 
 /// Liveness that's been computed so far.
+///
+/// `Duration`s map to time since last valid response
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ComputedLiveness {
-    /// The data is the number of seconds.
-    Live(u64),
-
-    /// The data is the number of seconds.
-    Delayed(u64),
-
+pub enum Liveness {
+    Live(Duration),
+    Delayed(Duration),
     NoResponse,
 }
 
-impl ComputedLiveness {
+impl Liveness {
     pub fn to_spans(&self) -> Vec<Span<'static>> {
         match self {
-            ComputedLiveness::Live(secs) => vec![
+            Liveness::Live(duration) => vec![
                 Span::styled("CONNECTED", style::connected()),
                 Span::raw(" "),
-                Self::secs_span(*secs, style::connected()),
+                Self::secs_span(duration.as_secs(), style::connected()),
             ],
-            ComputedLiveness::Delayed(secs) => vec![
+            Liveness::Delayed(duration) => vec![
                 Span::styled("DELAYED", style::delayed()),
                 Span::raw(" "),
-                Self::secs_span(*secs, style::delayed()),
+                Self::secs_span(duration.as_secs(), style::delayed()),
             ],
-            ComputedLiveness::NoResponse => {
+            Liveness::NoResponse => {
                 vec![Span::styled("NO RESPONSE", style::delayed())]
             }
         }
     }
-
     fn secs_span(secs: u64, time_style: Style) -> Span<'static> {
         if secs < 1 {
             Span::styled("(<1s)", time_style)
