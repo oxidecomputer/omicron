@@ -4,11 +4,16 @@ This document describes how to run an environment with boundary services.
 It's a quick rundown and assumes knowledge of the basic setup described in the
 Running Omicron (Non-Simulated) document.
 
-== 0. Install softnpu ASIC emulator machinery
+== 0. Download SoftNPU ASIC emulator machinery
+
+Grab the SoftNPU (ASIC simulator, scadm, P4 program, etc.) from CI:
 
 ----
-./tools/install_softnpu_machinery.sh
+./tools/ci_download_softnpu_machinery
 ----
+
+(By default `install_runner_prerequisites.sh` will take care of running
+`ci_download_softnpu_machinery` for you.)
 
 == 1. Setup virtual hardware
 
