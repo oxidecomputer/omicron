@@ -46,6 +46,7 @@ mod console_session;
 mod dataset;
 mod device_auth;
 mod disk;
+mod dns;
 mod external_ip;
 mod global_image;
 mod identity_provider;

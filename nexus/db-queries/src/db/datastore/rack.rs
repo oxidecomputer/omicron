@@ -351,7 +351,6 @@ impl DataStore {
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
         TxnError: From<ConnErr>,
-        // async_bb8_diesel::PoolError: From<ConnErr>,
     {
         {
             use db::schema::dns_zone::dsl;
