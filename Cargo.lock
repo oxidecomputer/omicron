@@ -127,7 +127,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -279,7 +279,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_tokenstream 0.1.7",
- "syn 1.0.109",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -1490,7 +1490,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_tokenstream 0.1.7",
- "syn 1.0.109",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -3817,7 +3817,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -4707,7 +4707,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.2",
 ]
 
 [[package]]
