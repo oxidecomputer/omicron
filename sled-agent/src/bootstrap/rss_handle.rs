@@ -323,7 +323,7 @@ impl BootstrapAgentHandleReceiver {
             }
         }
 
-        // All init requests succeeded; inform RSS of completion.
+        // All requests succeeded; inform RSS of completion.
         tx.send(Ok(())).unwrap();
     }
 }

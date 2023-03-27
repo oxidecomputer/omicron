@@ -288,16 +288,6 @@ impl Agent {
         let link = config.link.clone();
         let ip = bootstrap_ip(link.clone(), 1)?;
 
-        // The only zone with a bootstrap ip address besides the global zone,
-        // is the switch zone. We allocate this address here since we have
-        // access to the physical link. This also allows us to keep bootstrap
-        // address allocation in one place.
-        //
-        // If other zones end up needing bootstrap addresses, we'll have to
-        // rethink this strategy, and plumb bootstrap adresses similar to
-        // underlay addresses.
-        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
-
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
         info!(
@@ -353,11 +343,6 @@ impl Agent {
             true,
         )?;
 
-        // HardwareMonitor must be on the underlay network like all services
-        let underlay_etherstub = underlay_etherstub()?;
-        let underlay_etherstub_vnic =
-            underlay_etherstub_vnic(&underlay_etherstub)?;
-
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
         //
@@ -367,29 +352,22 @@ impl Agent {
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
-        let hardware_monitor = HardwareMonitor::new(
-            &ba_log,
-            &sled_config,
-            underlay_etherstub,
-            underlay_etherstub_vnic,
-            bootstrap_etherstub,
-            switch_zone_bootstrap_address,
-        )
-        .await?;
 
         let agent = Agent {
             log: ba_log,
             parent_log: log,
             ip,
             share: Mutex::new(None),
-            sled_state: Mutex::new(SledAgentState::Before(Some(
-                hardware_monitor,
-            ))),
+            sled_state: Mutex::new(SledAgentState::Before(None)),
             config: config.clone(),
             sled_config,
             sp,
             ddmd_client,
         };
+
+        let hardware_monitor = agent.start_hardware_monitor().await?;
+        *agent.sled_state.lock().await =
+            SledAgentState::Before(Some(hardware_monitor));
 
         let request_path = get_sled_agent_request_path();
         let trust_quorum = if request_path.exists() {
@@ -417,6 +395,27 @@ impl Agent {
         };
 
         Ok((agent, trust_quorum))
+    }
+
+    async fn start_hardware_monitor(
+        &self,
+    ) -> Result<HardwareMonitor, BootstrapError> {
+        let underlay_etherstub = underlay_etherstub()?;
+        let underlay_etherstub_vnic =
+            underlay_etherstub_vnic(&underlay_etherstub)?;
+        let bootstrap_etherstub = bootstrap_etherstub()?;
+        let link = self.config.link.clone();
+        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
+        let hardware_monitor = HardwareMonitor::new(
+            &self.log,
+            &self.sled_config,
+            underlay_etherstub,
+            underlay_etherstub_vnic,
+            bootstrap_etherstub,
+            switch_zone_bootstrap_address,
+        )
+        .await?;
+        Ok(hardware_monitor)
     }
 
     /// Initializes the Sled Agent on behalf of the RSS.
@@ -450,12 +449,17 @@ impl Agent {
                 // we should restart the hardware monitor, so we can react to
                 // changes in the switch regardless of the success or failure of
                 // this sled agent.
-                let (hardware, services) = hardware_monitor
-                    .take()
-                    .expect("Hardware Monitor does not exist")
-                    .stop()
-                    .await
-                    .expect("Failed to stop hardware monitor");
+                let (hardware, services) = match hardware_monitor.take() {
+                    // This is the normal case; transfer hardware monitoring responsibilities from
+                    // the bootstrap agent to the sled agent.
+                    Some(hardware_monitor) => hardware_monitor,
+                    // This is a less likely case, but if we previously failed to start (or
+                    // restart) the hardware monitor, for any reason, recreate it.
+                    None => self.start_hardware_monitor().await?,
+                }
+                .stop()
+                .await
+                .expect("Failed to stop hardware monitor");
 
                 // This acts like a "run-on-drop" closure, to restart the
                 // hardware monitor in the bootstrap agent if we fail to
@@ -858,11 +862,13 @@ impl Agent {
         match &mut *state {
             // Sled agent already disabled
             SledAgentState::Before(Some(_)) => {}
-            SledAgentState::Before(None) => {}
+            SledAgentState::Before(None) => {
+                self.start_hardware_monitor().await?;
+            }
             // Sled agent enabled -- let's disable it.
             SledAgentState::After(_) => {
                 // We'd like to stop the old sled agent before starting a new
-                // hardware monitor -- however, if we cannot run a new hardware
+                // hardware monitor -- however, if we cannot start a new hardware
                 // monitor, the bootstrap agent may be in a degraded state.
                 let server = match std::mem::replace(
                     &mut *state,
@@ -873,31 +879,29 @@ impl Agent {
                         "Unexpected state (we should have just matched on it)"
                     ),
                 };
-                server.close().await.map_err(BootstrapError::SledError)?;
 
-                self.uninstall_zones_locked(&state).await?;
-                self.uninstall_sled_local_config_locked(&state).await?;
-                self.uninstall_networking_locked(&state).await?;
-                self.uninstall_storage_locked(&state).await?;
+                // Try to reset the sled, but do not exit early on error.
+                let result = async {
+                    server.close().await.map_err(BootstrapError::SledError)?;
+                    self.uninstall_zones_locked(&state).await?;
+                    self.uninstall_sled_local_config_locked(&state).await?;
+                    self.uninstall_networking_locked(&state).await?;
+                    self.uninstall_storage_locked(&state).await?;
+                    Ok::<(), BootstrapError>(())
+                }
+                .await;
 
                 // Restart the sled agent state.
-                let underlay_etherstub = underlay_etherstub()?;
-                let underlay_etherstub_vnic =
-                    underlay_etherstub_vnic(&underlay_etherstub)?;
-                let bootstrap_etherstub = bootstrap_etherstub()?;
-                let link = self.config.link.clone();
-                let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
-                let hardware_monitor = HardwareMonitor::new(
-                    &self.log,
-                    &self.sled_config,
-                    underlay_etherstub,
-                    underlay_etherstub_vnic,
-                    bootstrap_etherstub,
-                    switch_zone_bootstrap_address,
-                )
-                .await?;
-
+                let hardware_monitor = self.start_hardware_monitor()
+                    .await
+                    .map_err(|err| {
+                        warn!(self.log, "Failed to restart bootstrap agent hardware monitor");
+                        err
+                    })?;
                 *state = SledAgentState::Before(Some(hardware_monitor));
+
+                // Return any error encountered from resetting the sled.
+                result?;
             }
         }
         Ok(())
