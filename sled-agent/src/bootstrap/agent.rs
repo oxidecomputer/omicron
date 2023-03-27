@@ -859,39 +859,37 @@ impl Agent {
     /// subsequently be initialized via RSS.
     pub async fn sled_reset(&self) -> Result<(), BootstrapError> {
         let mut state = self.sled_state.lock().await;
+
+        if let SledAgentState::After(_) = &mut *state {
+            // We'd like to stop the old sled agent before starting a new
+            // hardware monitor -- however, if we cannot start a new hardware
+            // monitor, the bootstrap agent may be in a degraded state.
+            let server = match std::mem::replace(
+                &mut *state,
+                SledAgentState::Before(None),
+            ) {
+                SledAgentState::After(server) => server,
+                _ => panic!(
+                    "Unexpected state (we should have just matched on it)"
+                ),
+            };
+            server.close().await.map_err(BootstrapError::SledError)?;
+        };
+
+        // Try to reset the sled, but do not exit early on error.
+        let result = async {
+            self.uninstall_zones_locked(&state).await?;
+            self.uninstall_sled_local_config_locked(&state).await?;
+            self.uninstall_networking_locked(&state).await?;
+            self.uninstall_storage_locked(&state).await?;
+            Ok::<(), BootstrapError>(())
+        }
+        .await;
+
+        // Try to restart the bootstrap agent hardware monitor before
+        // returning any errors from reset.
         match &mut *state {
-            // Sled agent already disabled
-            SledAgentState::Before(Some(_)) => {}
             SledAgentState::Before(None) => {
-                self.start_hardware_monitor().await?;
-            }
-            // Sled agent enabled -- let's disable it.
-            SledAgentState::After(_) => {
-                // We'd like to stop the old sled agent before starting a new
-                // hardware monitor -- however, if we cannot start a new hardware
-                // monitor, the bootstrap agent may be in a degraded state.
-                let server = match std::mem::replace(
-                    &mut *state,
-                    SledAgentState::Before(None),
-                ) {
-                    SledAgentState::After(server) => server,
-                    _ => panic!(
-                        "Unexpected state (we should have just matched on it)"
-                    ),
-                };
-
-                // Try to reset the sled, but do not exit early on error.
-                let result = async {
-                    server.close().await.map_err(BootstrapError::SledError)?;
-                    self.uninstall_zones_locked(&state).await?;
-                    self.uninstall_sled_local_config_locked(&state).await?;
-                    self.uninstall_networking_locked(&state).await?;
-                    self.uninstall_storage_locked(&state).await?;
-                    Ok::<(), BootstrapError>(())
-                }
-                .await;
-
-                // Restart the sled agent state.
                 let hardware_monitor = self.start_hardware_monitor()
                     .await
                     .map_err(|err| {
@@ -899,11 +897,13 @@ impl Agent {
                         err
                     })?;
                 *state = SledAgentState::Before(Some(hardware_monitor));
-
-                // Return any error encountered from resetting the sled.
-                result?;
             }
-        }
+            _ => {}
+        };
+
+        // Return any errors encountered resetting the sled.
+        result?;
+
         Ok(())
     }
 
