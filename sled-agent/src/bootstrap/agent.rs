@@ -88,6 +88,9 @@ pub enum BootstrapError {
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
 
+    #[error("RSS is already executing, and should not run concurrently")]
+    ConcurrentRSSAccess,
+
     #[error("Failed to initialize rack: {0}")]
     RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
 
@@ -739,7 +742,10 @@ impl Agent {
         request: RackInitializeRequest,
     ) -> Result<(), BootstrapError> {
         // Avoid concurrent initialization and teardown.
-        let _rss_access = self.rss_access.lock().await;
+        let _rss_access = self
+            .rss_access
+            .try_lock()
+            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
         RssHandle::run_rss(
             &self.parent_log,
@@ -761,7 +767,10 @@ impl Agent {
     /// Runs the rack setup service to completion
     pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
         // Avoid concurrent initialization and teardown.
-        let _rss_access = self.rss_access.lock().await;
+        let _rss_access = self
+            .rss_access
+            .try_lock()
+            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
         RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
         Ok(())
