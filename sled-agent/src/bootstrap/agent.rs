@@ -179,6 +179,10 @@ pub struct Agent {
     /// Bootstrap network address.
     ip: Ipv6Addr,
 
+    /// Ensures that RSS (initialization or teardown) is not executed
+    /// concurrently.
+    rss_access: Mutex<()>,
+
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
 
@@ -357,6 +361,7 @@ impl Agent {
             log: ba_log,
             parent_log: log,
             ip,
+            rss_access: Mutex::new(()),
             share: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(None)),
             config: config.clone(),
@@ -733,6 +738,9 @@ impl Agent {
         &self,
         request: RackInitializeRequest,
     ) -> Result<(), BootstrapError> {
+        // Avoid concurrent initialization and teardown.
+        let _rss_access = self.rss_access.lock().await;
+
         RssHandle::run_rss(
             &self.parent_log,
             request,
@@ -752,6 +760,9 @@ impl Agent {
 
     /// Runs the rack setup service to completion
     pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
+        // Avoid concurrent initialization and teardown.
+        let _rss_access = self.rss_access.lock().await;
+
         RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
         Ok(())
     }
