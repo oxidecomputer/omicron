@@ -478,3 +478,14 @@ async fn write_response(
 
     Ok(())
 }
+
+/// Runs the OpenAPI generator, emitting the spec to stdout.
+pub fn run_openapi() -> Result<(), String> {
+    http_api()
+        .openapi("Oxide Bootstrap Agent API", "0.0.1")
+        .description("API for interacting with individual sleds")
+        .contact_url("https://oxide.computer")
+        .contact_email("api@oxide.computer")
+        .write(&mut std::io::stdout())
+        .map_err(|e| e.to_string())
+}

@@ -25,9 +25,11 @@ use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use crate::updates::UpdateManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
+use illumos_utils::dladm::{
+    self, Dladm, Etherstub, EtherstubVnic, GetMacError, PhysicalLink,
+};
 use illumos_utils::zfs::{
-    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+    self, Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
@@ -71,7 +73,7 @@ pub enum BootstrapError {
     #[error("Error monitoring hardware: {0}")]
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
-    #[error("Error starting sled agent: {0}")]
+    #[error("Error managing sled agent: {0}")]
     SledError(String),
 
     #[error("Error deserializing toml from {path}: {err}")]
@@ -97,6 +99,12 @@ pub enum BootstrapError {
 
     #[error("Failed to delete VNIC on boot: {0}")]
     DeleteVnic(#[from] illumos_utils::dladm::DeleteVnicError),
+
+    #[error("Failed to get all datasets: {0}")]
+    ZfsDatasetsList(anyhow::Error),
+
+    #[error("Failed to destroy dataset: {0}")]
+    ZfsDestroy(#[from] zfs::DestroyDatasetError),
 
     #[error("Failed to ensure ZFS filesystem: {0}")]
     ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
@@ -127,6 +135,37 @@ enum SledAgentState {
     // case, the responsibility for monitoring hardware should be transferred to
     // the sled agent.
     After(SledServer),
+}
+
+fn underlay_etherstub() -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME)
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })
+}
+
+fn underlay_etherstub_vnic(
+    underlay_etherstub: &Etherstub,
+) -> Result<EtherstubVnic, BootstrapError> {
+    Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
+        BootstrapError::SledError(format!(
+            "Can't access etherstub VNIC device: {}",
+            e
+        ))
+    })
+}
+
+fn bootstrap_etherstub() -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME)
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })
 }
 
 /// The entity responsible for bootstrapping an Oxide rack.
@@ -275,15 +314,7 @@ impl Agent {
                 err,
             })?;
 
-        let bootstrap_etherstub = Dladm::ensure_etherstub(
-            illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
-        )
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })?;
+        let bootstrap_etherstub = bootstrap_etherstub()?;
 
         let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
             &bootstrap_etherstub,
@@ -323,23 +354,9 @@ impl Agent {
         )?;
 
         // HardwareMonitor must be on the underlay network like all services
-        let underlay_etherstub = Dladm::ensure_etherstub(
-            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
-        )
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })?;
-
+        let underlay_etherstub = underlay_etherstub()?;
         let underlay_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
-                BootstrapError::SledError(format!(
-                    "Can't access etherstub VNIC device: {}",
-                    e
-                ))
-            })?;
+            underlay_etherstub_vnic(&underlay_etherstub)?;
 
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
@@ -726,6 +743,163 @@ impl Agent {
                 .unwrap_or_default(),
         )
         .await?;
+        Ok(())
+    }
+
+    /// Runs the rack setup service to completion
+    pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
+        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
+        Ok(())
+    }
+
+    // The following "_locked" functions act on global state,
+    // and take a MutexGuard as an argument, which may be unused.
+    //
+    // The input of the MutexGuard is intended to signify: this
+    // method should only be called when the sled agent has been
+    // dismantled, and is not concurrently executing!
+
+    // Uninstall all oxide zones (except the switch zone)
+    async fn uninstall_zones_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        const CONCURRENCY_CAP: usize = 32;
+        futures::stream::iter(Zones::get().await?)
+            .map(Ok::<_, anyhow::Error>)
+            .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+                if zone.name() != "oxz_switch" {
+                    Zones::halt_and_remove(zone.name()).await?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        Ok(())
+    }
+
+    async fn uninstall_sled_local_config_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        tokio::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .or_else(|err| match err.kind() {
+                std::io::ErrorKind::NotFound => Ok(()),
+                _ => Err(err),
+            })
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Deleting {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Creating config directory {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+        Ok(())
+    }
+
+    async fn uninstall_networking_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        // NOTE: This is very similar to the invocations
+        // in "sled_hardware::cleanup::cleanup_networking_resources",
+        // with a few notable differences:
+        //
+        // - We can't remove bootstrap-related networking -- this operation
+        // is performed via a request on the bootstrap network.
+        // - We avoid deleting addresses using the chelsio link. Removing
+        // these addresses would delete "cxgbe0/ll", and could render
+        // the sled inaccessible via a local interface.
+
+        sled_hardware::cleanup::delete_underlay_addresses(&self.log)
+            .map_err(BootstrapError::Cleanup)?;
+        sled_hardware::cleanup::delete_omicron_vnics(&self.log)
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        illumos_utils::opte::delete_all_xde_devices(&self.log)?;
+        Ok(())
+    }
+
+    async fn uninstall_storage_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        let datasets = zfs::get_all_omicron_datasets()
+            .map_err(BootstrapError::ZfsDatasetsList)?;
+        for dataset in &datasets {
+            info!(self.log, "Removing dataset: {dataset}");
+            zfs::Zfs::destroy_dataset(dataset)?;
+        }
+
+        Ok(())
+    }
+
+    /// Resets this sled, removing:
+    ///
+    /// - All control plane zones (except the switch zone)
+    /// - All sled-local configuration
+    /// - All underlay networking
+    /// - All storage managed by the control plane
+    ///
+    /// This API is intended to put the sled into a state where it can
+    /// subsequently be initialized via RSS.
+    pub async fn sled_reset(&self) -> Result<(), BootstrapError> {
+        let mut state = self.sled_state.lock().await;
+        match &mut *state {
+            // Sled agent already disabled
+            SledAgentState::Before(Some(_)) => {}
+            SledAgentState::Before(None) => {}
+            // Sled agent enabled -- let's disable it.
+            SledAgentState::After(_) => {
+                // We'd like to stop the old sled agent before starting a new
+                // hardware monitor -- however, if we cannot run a new hardware
+                // monitor, the bootstrap agent may be in a degraded state.
+                let server = match std::mem::replace(
+                    &mut *state,
+                    SledAgentState::Before(None),
+                ) {
+                    SledAgentState::After(server) => server,
+                    _ => panic!(
+                        "Unexpected state (we should have just matched on it)"
+                    ),
+                };
+                server.close().await.map_err(BootstrapError::SledError)?;
+
+                self.uninstall_zones_locked(&state).await?;
+                self.uninstall_sled_local_config_locked(&state).await?;
+                self.uninstall_networking_locked(&state).await?;
+                self.uninstall_storage_locked(&state).await?;
+
+                // Restart the sled agent state.
+                let underlay_etherstub = underlay_etherstub()?;
+                let underlay_etherstub_vnic =
+                    underlay_etherstub_vnic(&underlay_etherstub)?;
+                let bootstrap_etherstub = bootstrap_etherstub()?;
+                let link = self.config.link.clone();
+                let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
+                let hardware_monitor = HardwareMonitor::new(
+                    &self.log,
+                    &self.sled_config,
+                    underlay_etherstub,
+                    underlay_etherstub_vnic,
+                    bootstrap_etherstub,
+                    switch_zone_bootstrap_address,
+                )
+                .await?;
+
+                *state = SledAgentState::Before(Some(hardware_monitor));
+            }
+        }
         Ok(())
     }
 
