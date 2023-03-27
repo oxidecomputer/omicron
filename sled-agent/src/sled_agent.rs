@@ -22,8 +22,8 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifactId,
+    external::ByteCount, internal::nexus::DiskRuntimeState,
+    internal::nexus::InstanceRuntimeState, internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -63,6 +63,12 @@ pub enum Error {
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
+
+    #[error("Failed to calculate RAM size")]
+    BadRamSize(omicron_common::api::external::ByteCountRangeError),
+
+    #[error("Failed to create reservoir: {0}")]
+    Reservoir(#[from] illumos_utils::rsrvrctl::Error),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -270,6 +276,19 @@ impl SledAgent {
 
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
+
+        // Set the reservoir to 80% of the physical RAM by default.
+        //
+        // TODO:
+        // - Make this configurable?
+        // - Report it to Nexus?
+        let usable_physical_ram = hardware.usable_physical_ram_bytes();
+        let reservoir_size = ((usable_physical_ram as f64) * 0.80) as i64;
+        #[allow(non_upper_case_globals)]
+        const MiB: i64 = 1024 * 1024;
+        let reservoir_size = ByteCount::try_from((reservoir_size / MiB) * MiB)
+            .map_err(Error::BadRamSize)?;
+        illumos_utils::rsrvrctl::ReservoirControl::set(reservoir_size)?;
 
         let update_config =
             ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };

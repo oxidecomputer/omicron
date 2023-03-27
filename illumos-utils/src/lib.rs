@@ -11,6 +11,7 @@ pub mod dladm;
 pub mod fstyp;
 pub mod link;
 pub mod opte;
+pub mod rsrvrctl;
 pub mod running_zone;
 pub mod svc;
 pub mod zfs;
