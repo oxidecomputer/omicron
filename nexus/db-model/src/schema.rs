@@ -641,8 +641,8 @@ table! {
 }
 
 table! {
-    dns_version (dns_zone_id, version) {
-        dns_zone_id -> Uuid,
+    dns_version (dns_group, version) {
+        dns_group -> crate::DnsGroupEnum,
         version -> Int8,
         time_created -> Timestamptz,
         creator -> Text,

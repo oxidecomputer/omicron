@@ -238,6 +238,8 @@ pub struct RackInitializationRequest {
 
 pub type DnsKv = dns_service_client::types::DnsKv;
 pub type DnsRecordKey = dns_service_client::types::DnsRecordKey;
+pub type DnsRecord = dns_service_client::types::DnsRecord;
+pub type Srv = dns_service_client::types::Srv;
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

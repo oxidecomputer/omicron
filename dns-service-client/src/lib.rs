@@ -5,7 +5,7 @@
 progenitor::generate_api!(
     spec = "../openapi/dns-server.json",
     inner_type = slog::Logger,
-    derives = [schemars::JsonSchema],
+    derives = [schemars::JsonSchema, Eq, PartialEq],
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
             "method" => %request.method(),

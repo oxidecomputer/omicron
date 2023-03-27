@@ -218,50 +218,9 @@ impl DataStore {
     }
 }
 
-/// Constructs a DataStore for use in test suites that has preloaded the
-/// built-in users, roles, and role assignments that are needed for basic
-/// operation
+// XXX-dap for compat
 #[cfg(test)]
-pub async fn datastore_test(
-    logctx: &dropshot::test_util::LogContext,
-    db: &omicron_test_utils::dev::db::CockroachInstance,
-) -> (OpContext, Arc<DataStore>) {
-    use crate::authn;
-
-    let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new(&cfg));
-    let datastore = Arc::new(DataStore::new(pool));
-
-    // Create an OpContext with the credentials of "db-init" just for the
-    // purpose of loading the built-in users, roles, and assignments.
-    let opctx = OpContext::for_background(
-        logctx.log.new(o!()),
-        Arc::new(authz::Authz::new(&logctx.log)),
-        authn::Context::internal_db_init(),
-        Arc::clone(&datastore),
-    );
-
-    // TODO: Can we just call "Populate" instead of doing this?
-    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
-    datastore.load_builtin_users(&opctx).await.unwrap();
-    datastore.load_builtin_roles(&opctx).await.unwrap();
-    datastore.load_builtin_role_asgns(&opctx).await.unwrap();
-    datastore.load_builtin_silos(&opctx).await.unwrap();
-    datastore.load_silo_users(&opctx).await.unwrap();
-    datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
-    datastore
-        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
-        .await
-        .unwrap();
-    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
-
-    // Create an OpContext with the credentials of "test-privileged" for general
-    // testing.
-    let opctx =
-        OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-
-    (opctx, datastore)
-}
+pub use nexus_test_utils::db::datastore_test;
 
 #[cfg(test)]
 mod test {
@@ -274,7 +233,7 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsZone, Project,
+        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup, Project,
         Rack, Region, Service, ServiceKind, SiloUser, Sled, SledBaseboard,
         SledSystemHardware, SshKey, SystemUpdate, UpdateableComponentType,
         VpcSubnet, Zpool,
@@ -1070,7 +1029,7 @@ mod test {
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
-        let internal_dns = InitialDnsZone::new(
+        let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             internal_dns::DNS_ZONE,
             "test suite",
@@ -1078,7 +1037,7 @@ mod test {
             vec![],
         );
 
-        let external_dns = InitialDnsZone::new(
+        let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
             "testing.oxide.example",
             "test suite",

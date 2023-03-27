@@ -1715,13 +1715,13 @@ CREATE UNIQUE INDEX ON omicron.public.dns_zone (
 );
 
 CREATE TABLE omicron.public.dns_version (
-    dns_zone_id UUID NOT NULL,
+    dns_group omicron.public.dns_group NOT NULL,
     version INT8 NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     creator TEXT NOT NULL,
     comment TEXT NOT NULL,
 
-    PRIMARY KEY(dns_zone_id, version)
+    PRIMARY KEY(dns_group, version)
 );
 
 CREATE TABLE omicron.public.dns_name (
@@ -1729,7 +1729,7 @@ CREATE TABLE omicron.public.dns_name (
     version_added INT8 NOT NULL,
     version_removed INT8,
     name TEXT NOT NULL,
-    dns_record_data TEXT NOT NULL, /* XXX-dap structured in the database? */
+    dns_record_data JSONB NOT NULL, /* XXX-dap structured in the database? */
 
     PRIMARY KEY (dns_zone_id, version_added, name)
 );

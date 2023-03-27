@@ -11,7 +11,7 @@ use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::InitialDnsZone;
+use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -120,7 +120,7 @@ impl super::Nexus {
                 )
             })?;
 
-        let internal_dns = InitialDnsZone::new(
+        let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
             &dns_zone.zone_name,
             &self.id.to_string(),
@@ -128,7 +128,7 @@ impl super::Nexus {
             dns_zone.records,
         );
 
-        let external_dns = InitialDnsZone::new(
+        let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
             "oxide.external", // XXX-dap,
             &self.id.to_string(),

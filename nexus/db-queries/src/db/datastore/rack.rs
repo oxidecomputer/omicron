@@ -30,7 +30,7 @@ use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use nexus_db_model::InitialDnsZone;
+use nexus_db_model::InitialDnsGroup;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -48,7 +48,7 @@ enum RackInitError {
     ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate(PoolError),
-    DnsSerialization(serde_json::Error),
+    DnsSerialization(Error),
 }
 type TxnError = TransactionError<RackInitError>;
 
@@ -106,8 +106,8 @@ impl DataStore {
         datasets: Vec<Dataset>,
         service_ip_pool_ranges: Vec<IpRange>,
         certificates: Vec<Certificate>,
-        internal_dns: InitialDnsZone,
-        external_dns: InitialDnsZone,
+        internal_dns: InitialDnsGroup,
+        external_dns: InitialDnsGroup,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
 
@@ -261,10 +261,16 @@ impl DataStore {
                 }
                 info!(log, "Inserted certificates");
 
-                Self::load_dns_data(&conn, internal_dns).await?;
+                Self::load_dns_data(&conn, internal_dns)
+                    .await
+                    .map_err(RackInitError::DnsSerialization)
+                    .map_err(TxnError::CustomError)?;
                 info!(log, "Populated DNS tables for internal DNS");
 
-                Self::load_dns_data(&conn, external_dns).await?;
+                Self::load_dns_data(&conn, external_dns)
+                    .await
+                    .map_err(RackInitError::DnsSerialization)
+                    .map_err(TxnError::CustomError)?;
                 info!(log, "Populated DNS tables for external DNS");
 
                 let rack = diesel::update(rack_dsl::rack)
@@ -341,54 +347,6 @@ impl DataStore {
             })
     }
 
-    async fn load_dns_data<ConnErr>(
-        conn: &(impl async_bb8_diesel::AsyncConnection<
-            crate::db::pool::DbConnection,
-            ConnErr,
-        > + Sync),
-        dns: InitialDnsZone,
-    ) -> Result<(), TxnError>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        TxnError: From<ConnErr>,
-    {
-        {
-            use db::schema::dns_zone::dsl;
-            diesel::insert_into(dsl::dns_zone)
-                .values(dns.row_for_zone())
-                .on_conflict((dsl::dns_group, dsl::zone_name))
-                .do_nothing()
-                .execute_async(conn)
-                .await?;
-        }
-
-        {
-            use db::schema::dns_version::dsl;
-            diesel::insert_into(dsl::dns_version)
-                .values(dns.row_for_version())
-                .on_conflict((dsl::dns_zone_id, dsl::version))
-                .do_nothing()
-                .execute_async(conn)
-                .await?;
-        }
-
-        {
-            use db::schema::dns_name::dsl;
-            diesel::insert_into(dsl::dns_name)
-                .values(
-                    dns.rows_for_names()
-                        .map_err(RackInitError::DnsSerialization)
-                        .map_err(TxnError::CustomError)?,
-                )
-                .on_conflict((dsl::dns_zone_id, dsl::version_added, dsl::name))
-                .do_nothing()
-                .execute_async(conn)
-                .await?;
-        }
-
-        Ok(())
-    }
-
     pub async fn load_builtin_rack_data(
         &self,
         opctx: &OpContext,
@@ -444,7 +402,7 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::ServiceKind;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use nexus_db_model::{DnsGroup, InitialDnsZone};
+    use nexus_db_model::{DnsGroup, InitialDnsGroup};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
@@ -455,8 +413,8 @@ mod test {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
     }
 
-    fn internal_dns_empty() -> InitialDnsZone {
-        InitialDnsZone::new(
+    fn internal_dns_empty() -> InitialDnsGroup {
+        InitialDnsGroup::new(
             DnsGroup::Internal,
             internal_dns::DNS_ZONE,
             "test suite",
@@ -465,8 +423,8 @@ mod test {
         )
     }
 
-    fn external_dns_empty() -> InitialDnsZone {
-        InitialDnsZone::new(
+    fn external_dns_empty() -> InitialDnsGroup {
+        InitialDnsGroup::new(
             DnsGroup::External,
             "testing.oxide.example",
             "test suite",
