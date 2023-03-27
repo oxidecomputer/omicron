@@ -902,9 +902,7 @@ impl Agent {
         };
 
         // Return any errors encountered resetting the sled.
-        result?;
-
-        Ok(())
+        result
     }
 
     pub async fn components_get(
