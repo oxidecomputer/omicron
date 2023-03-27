@@ -88,7 +88,7 @@ pub fn lookup_resource(
 fn get_nv_attr(attrs: &[syn::Attribute], name: &str) -> Option<NameValue> {
     attrs
         .iter()
-        .filter(|attr| attr.path.is_ident("diesel"))
+        .filter(|attr| attr.path().is_ident("diesel"))
         .filter_map(|attr| attr.parse_args::<NameValue>().ok())
         .find(|nv| nv.name.is_ident(name))
 }

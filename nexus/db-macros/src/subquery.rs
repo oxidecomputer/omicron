@@ -21,7 +21,7 @@ fn get_subquery_attr(
 ) -> Option<NameValue> {
     attrs
         .iter()
-        .filter(|attr| attr.path.is_ident("subquery"))
+        .filter(|attr| attr.path().is_ident("subquery"))
         .filter_map(|attr| attr.parse_args::<NameValue>().ok())
         .find(|nv| nv.name.is_ident(name))
 }
