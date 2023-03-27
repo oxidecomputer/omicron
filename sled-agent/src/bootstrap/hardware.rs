@@ -4,10 +4,10 @@
 
 //! The bootstrap agent's view into hardware
 
-use crate::config::Config as SledConfig;
+use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
-use sled_hardware::HardwareManager;
+use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use thiserror::Error;
@@ -130,7 +130,38 @@ impl HardwareMonitor {
         bootstrap_etherstub: Etherstub,
         switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
-        let hardware = HardwareManager::new(log, sled_config.scrimlet_override)
+        // Combine the `sled_mode` config with the build-time
+        // switch type to determine the actual sled mode.
+        let sled_mode = match sled_config.sled_mode {
+            SledModeConfig::Auto => {
+                if !cfg!(feature = "switch-asic") {
+                    return Err(Error::Hardware(
+                        "sled-agent was not packaged with `switch-asic`"
+                            .to_string(),
+                    ));
+                }
+                SledMode::Auto
+            }
+            SledModeConfig::Gimlet => SledMode::Gimlet,
+            SledModeConfig::Scrimlet => {
+                let asic = if cfg!(feature = "switch-asic") {
+                    DendriteAsic::TofinoAsic
+                } else if cfg!(feature = "switch-stub") {
+                    DendriteAsic::TofinoStub
+                } else if cfg!(feature = "switch-softnpu") {
+                    DendriteAsic::SoftNpu
+                } else {
+                    return Err(Error::Hardware(
+                        "sled-agent configured to run on scrimlet but wasn't \
+                        packaged with switch zone"
+                            .to_string(),
+                    ));
+                };
+                SledMode::Scrimlet { asic }
+            }
+        };
+        info!(log, "Starting hardware monitor"; "sled_mode" => ?sled_mode);
+        let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
         let service_manager = ServiceManager::new(
@@ -138,7 +169,7 @@ impl HardwareMonitor {
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,
-            sled_config.scrimlet_override,
+            sled_mode,
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
         )

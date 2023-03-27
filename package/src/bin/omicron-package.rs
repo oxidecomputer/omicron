@@ -85,6 +85,7 @@ async fn run_cargo_on_packages<I, S>(
     subcmd: &str,
     packages: I,
     release: bool,
+    features: &str,
 ) -> Result<()>
 where
     I: IntoIterator<Item = S>,
@@ -97,6 +98,7 @@ where
     for package in packages {
         cmd.arg("-p").arg(package);
     }
+    cmd.arg("--features").arg(features);
     if release {
         cmd.arg("--release");
     }
@@ -129,12 +131,20 @@ async fn do_for_all_rust_packages(
         })
         .partition(|(_, release)| *release);
 
+    let features = config
+        .target
+        .0
+        .iter()
+        .map(|(name, value)| format!("{}-{} ", name, value))
+        .collect::<String>();
+
     // Execute all the release / debug packages at the same time.
     if !release_pkgs.is_empty() {
         run_cargo_on_packages(
             command,
             release_pkgs.iter().map(|(name, _)| name),
             true,
+            &features,
         )
         .await?;
     }
@@ -143,6 +153,7 @@ async fn do_for_all_rust_packages(
             command,
             debug_pkgs.iter().map(|(name, _)| name),
             false,
+            &features,
         )
         .await?;
     }

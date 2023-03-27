@@ -51,7 +51,7 @@ use omicron_common::nexus_config::{
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::underlay;
-use sled_hardware::ScrimletMode;
+use sled_hardware::SledMode;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter::FromIterator;
@@ -219,8 +219,8 @@ enum SwitchZone {
         // A background task which keeps looping until the zone is initialized
         worker: Option<Task>,
         // Filesystems for the switch zone to mount
-        // Since Softnpu is currently managed via a UNIX socket, we need to
-        // pass those files in to the SwitchZone so Dendrite can manage Softnpu
+        // Since SoftNPU is currently managed via a UNIX socket, we need to
+        // pass those files in to the SwitchZone so Dendrite can manage SoftNPU
         filesystems: Vec<zone::Fs>,
     },
     // The Zone is currently running.
@@ -236,7 +236,7 @@ enum SwitchZone {
 pub struct ServiceManagerInner {
     log: Logger,
     switch_zone: Mutex<SwitchZone>,
-    scrimlet_override: Option<ScrimletMode>,
+    sled_mode: SledMode,
     sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
@@ -267,15 +267,18 @@ impl ServiceManager {
     ///
     /// Args:
     /// - `log`: The logger
-    /// - `etherstub`: An etherstub on which to allocate VNICs.
-    /// - `underlay_vnic`: The underlay's VNIC in the Global Zone.
-    /// - `stub_scrimlet`: Identifies how to launch the switch zone.
+    /// - `underlay_etherstub`: Etherstub used to allocate service vNICs.
+    /// - `underlay_vnic`: The underlay's vNIC in the Global Zone.
+    /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
+    /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
+    /// - `sidecar_revision`: Rev of attached sidecar, if present.
+    /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
     pub async fn new(
         log: Logger,
         underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
-        scrimlet_override: Option<ScrimletMode>,
+        sled_mode: SledMode,
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
@@ -287,7 +290,7 @@ impl ServiceManager {
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SwitchZone::Disabled),
-                scrimlet_override,
+                sled_mode,
                 sidecar_revision,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
@@ -362,6 +365,11 @@ impl ServiceManager {
         }
 
         Ok(())
+    }
+
+    /// Returns the sled's configured mode.
+    pub fn sled_mode(&self) -> SledMode {
+        self.inner.sled_mode
     }
 
     // Returns either the path to the explicitly provided config path, or
@@ -845,7 +853,7 @@ impl ServiceManager {
                             "config/port_config",
                             "/opt/oxide/dendrite/misc/model_config.toml",
                         )?,
-                        DendriteAsic::Softnpu => {
+                        DendriteAsic::SoftNpu => {
                             smfh.setprop("config/mgmt", "uds")?;
                             smfh.setprop(
                                 "config/uds_path",
@@ -1009,18 +1017,30 @@ impl ServiceManager {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
         let mut filesystems: Vec<zone::Fs> = vec![];
 
-        let services = match self.inner.scrimlet_override {
-            Some(mode) => match mode {
-                ScrimletMode::Stub => {
-                    vec![
-                        ServiceType::Dendrite {
-                            asic: DendriteAsic::TofinoStub,
-                        },
-                        ServiceType::ManagementGatewayService,
-                        ServiceType::Wicketd,
-                    ]
-                }
-                ScrimletMode::Softnpu => {
+        let services = match self.inner.sled_mode {
+            // A pure gimlet sled should not be trying to activate a switch zone.
+            SledMode::Gimlet => {
+                return Err(Error::SwitchZone(anyhow::anyhow!(
+                    "attempted to activate switch zone on non-scrimlet sled"
+                )))
+            }
+
+            // Sled is a scrimlet and the real tofino driver has been loaded.
+            SledMode::Auto
+            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                vec![
+                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    ServiceType::ManagementGatewayService,
+                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
+                    ServiceType::Wicketd,
+                ]
+            }
+
+            // Sled is a scrimlet but is not running the real tofino driver.
+            SledMode::Scrimlet {
+                asic: asic @ (DendriteAsic::TofinoStub | DendriteAsic::SoftNpu),
+            } => {
+                if let DendriteAsic::SoftNpu = asic {
                     let softnpu_filesystem = zone::Fs {
                         ty: "lofs".to_string(),
                         dir: "/opt/softnpu/stuff".to_string(),
@@ -1028,21 +1048,11 @@ impl ServiceManager {
                         ..Default::default()
                     };
                     filesystems.push(softnpu_filesystem);
-                    vec![
-                        ServiceType::Dendrite { asic: DendriteAsic::Softnpu },
-                        ServiceType::ManagementGatewayService,
-                        ServiceType::Wicketd,
-                    ]
                 }
-                _ => {
-                    vec![]
-                }
-            },
-            None => {
+
                 vec![
+                    ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
-                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Wicketd,
                 ]
             }
@@ -1412,7 +1422,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1449,7 +1459,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1488,7 +1498,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1516,7 +1526,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1552,7 +1562,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1582,7 +1592,7 @@ mod test {
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
-            None,
+            SledMode::Auto,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )

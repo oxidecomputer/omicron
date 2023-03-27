@@ -137,6 +137,7 @@ function enable_softnpu {
 function ensure_ext_ip_hack_disabled {
     grep "ext_ip_hack = 1;" /kernel/drv/xde.conf && {
        sed -i 's/ext_ip_hack = 1;/ext_ip_hack = 0;/g' /kernel/drv/xde.conf
+       update_drv xde
     }
 
     grep "ext_ip_hack = 0;" /kernel/drv/xde.conf || {

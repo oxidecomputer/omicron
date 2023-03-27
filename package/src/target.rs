@@ -45,7 +45,7 @@ pub enum Switch {
     /// Use a "stub" Dendrite that does not require any real hardware
     Stub,
     /// Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
-    Softnpu,
+    SoftNpu,
 }
 
 /// A strongly-typed variant of [Target].

@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, ScrimletMode,
-    UnparsedDisk,
+    Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
+    SledMode, UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::debug;
@@ -519,14 +519,8 @@ impl HardwareManager {
     /// a task which periodically updates that representation.
     ///
     /// Arguments:
-    /// - `scrimlet_override`: Identifies if we should ignore the attached Tofino
-    /// device (`Disabled`), use the `Softnpu` asic, or use the `Stub` asic.
-    /// If this argument is not supplied, we assume the device is a gimlet until
-    /// device scanning informs us otherwise (normal behavior).
-    pub fn new(
-        log: &Logger,
-        scrimlet_override: Option<ScrimletMode>,
-    ) -> Result<Self, String> {
+    /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    pub fn new(log: &Logger, sled_mode: SledMode) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
 
@@ -535,20 +529,32 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match scrimlet_override {
-            None => HardwareView::new(),
-            Some(mode) => match mode {
-                ScrimletMode::Disabled => HardwareView::new_stub_tofino(
-                    // active=
-                    false,
-                ),
-                ScrimletMode::Stub => HardwareView::new_stub_tofino(true),
-                // TODO: correctness
-                // I'm not sure whether or not we should be treating softnpu
-                // as a stub or treating it as a different HardwareView variant,
-                // so this might change.
-                ScrimletMode::Softnpu => HardwareView::new_stub_tofino(true),
-            },
+        let hw = match sled_mode {
+            // Treat as a possible scrimlet and setup to scan for real Tofino device.
+            SledMode::Auto
+            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                HardwareView::new()
+            }
+
+            // Treat sled as gimlet and ignore any attached Tofino device.
+            SledMode::Gimlet => HardwareView::new_stub_tofino(
+                // active=
+                false,
+            ),
+
+            // Treat as scrimlet and use the stub Tofino device.
+            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
+                HardwareView::new_stub_tofino(true)
+            }
+
+            // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
+            // TODO-correctness:
+            // I'm not sure whether or not we should be treating softnpu
+            // as a stub or treating it as a different HardwareView variant,
+            // so this might change.
+            SledMode::Scrimlet { asic: DendriteAsic::SoftNpu } => {
+                HardwareView::new_stub_tofino(true)
+            }
         }
         .map_err(|e| e.to_string())?;
         let inner = Arc::new(Mutex::new(hw));

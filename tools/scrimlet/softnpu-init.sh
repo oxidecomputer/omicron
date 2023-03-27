@@ -9,7 +9,9 @@ GATEWAY_IP=${GATEWAY_IP:=$(netstat -rn -f inet | grep default | awk -F ' ' '{pri
 echo "Using $GATEWAY_IP as gateway ip"
 
 # Gateway mac is determined automatically by inspecting the arp table on the development machine
-gateway_mac=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')
+# Can be overridden by setting GATEWAY_MAC
+GATEWAY_MAC=${GATEWAY_MAC:=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
+echo "Using $GATEWAY_MAC as gateway mac"
 
 # Sidecar Interface facing "sled"
 ./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port create 1:0 100G RS
@@ -28,7 +30,7 @@ gateway_mac=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')
 
 # Configure default route
 ./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route add 0.0.0.0/0 2:0 "$GATEWAY_IP"
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add "$GATEWAY_IP" "$gateway_mac"
+./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add "$GATEWAY_IP" "$GATEWAY_MAC"
 
 
 ./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port list
