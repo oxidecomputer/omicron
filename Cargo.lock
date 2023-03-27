@@ -278,7 +278,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
 ]
 
@@ -1505,7 +1505,7 @@ dependencies = [
  "quote",
  "rustfmt-wrapper",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
 ]
 
@@ -1735,10 +1735,13 @@ name = "dns-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
+ "chrono",
  "clap 4.1.11",
  "dns-service-client",
  "dropshot",
  "expectorate",
+ "http",
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
@@ -1753,35 +1756,28 @@ dependencies = [
  "slog-term",
  "subprocess",
  "tempdir",
+ "thiserror",
  "tokio",
  "toml 0.7.3",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
  "trust-dns-server",
+ "uuid",
 ]
 
 [[package]]
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
- "dns-server",
- "dropshot",
+ "chrono",
  "futures",
- "internal-dns-names",
- "omicron-common 0.1.0",
- "omicron-test-utils",
+ "http",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
- "sled",
  "slog",
- "tempfile",
- "thiserror",
- "tokio",
- "trust-dns-proto",
- "trust-dns-resolver",
  "uuid",
 ]
 
@@ -1828,7 +1824,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3bf0ee02e98b72c2196240977c8145c8aeb59697"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ccce2241b9a798819a3385f01b0b92f529c5fe8f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1871,13 +1867,13 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3bf0ee02e98b72c2196240977c8145c8aeb59697"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ccce2241b9a798819a3385f01b0b92f529c5fe8f"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
- "syn 1.0.109",
+ "serde_tokenstream 0.2.0",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -3100,9 +3096,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns-names"
+name = "internal-dns"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "assert_matches",
+ "chrono",
+ "dns-server",
+ "dns-service-client",
+ "dropshot",
+ "expectorate",
+ "futures",
+ "omicron-common 0.1.0",
+ "omicron-test-utils",
+ "serde_json",
+ "sled",
+ "slog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
  "uuid",
 ]
 
@@ -3642,7 +3656,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "hex",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "macaddr",
  "newtype_derive",
@@ -3690,7 +3704,6 @@ dependencies = [
  "http",
  "hyper",
  "hyper-rustls",
- "internal-dns-names",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -3774,8 +3787,8 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "dns-service-client",
  "dropshot",
+ "internal-dns",
  "omicron-common 0.1.0",
  "slog",
  "uuid",
@@ -3789,11 +3802,11 @@ dependencies = [
  "bytes",
  "chrono",
  "crucible-agent-client",
- "dns-service-client",
  "dropshot",
  "headers",
  "http",
  "hyper",
+ "internal-dns",
  "nexus-db-queries",
  "nexus-test-interface",
  "nexus-types",
@@ -4177,7 +4190,7 @@ dependencies = [
  "httptest",
  "hyper",
  "hyper-rustls",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "itertools",
  "lazy_static",
@@ -4309,7 +4322,7 @@ dependencies = [
  "futures",
  "http",
  "illumos-utils",
- "internal-dns-names",
+ "internal-dns",
  "ipnetwork",
  "macaddr",
  "mockall",
@@ -4447,9 +4460,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.47"
+version = "0.10.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b277f87dacc05a6b709965d1cbafac4649d6ce9f3ce9ceb88508b5666dfec9"
+checksum = "518915b97df115dd36109bfa429a48b8f737bd05508cf9588977b599648926d2"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if 1.0.0",
@@ -4479,9 +4492,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.82"
+version = "0.9.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95792af3c4e0153c3914df2261bedd30a98476f94dc892b67dfe1d89d433a04"
+checksum = "666416d899cf077260dac8698d60a60b435a46d57e82acb1be3d0dad87284e5b"
 dependencies = [
  "autocfg",
  "cc",
@@ -4642,11 +4655,10 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "clap 4.1.11",
- "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",
- "internal-dns-names",
+ "internal-dns",
  "nexus-client 0.1.0",
  "omicron-common 0.1.0",
  "omicron-test-utils",
@@ -5247,8 +5259,11 @@ checksum = "1ba7d6ead3e3966038f68caa9fc1f860185d95a793180bbcfe0d0da47b3961ed"
 dependencies = [
  "anstyle",
  "difflib",
+ "float-cmp",
  "itertools",
+ "normalize-line-endings",
  "predicates-core",
+ "regex",
 ]
 
 [[package]]
@@ -5388,7 +5403,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "serde_yaml",
  "syn 1.0.109",
 ]
@@ -5786,9 +5801,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.7.1"
+version = "1.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48aaa5748ba571fb95cd2c85c09f629215d3a6ece942baa100950af03a34f733"
+checksum = "8b1f693b24f6ac912f4893ef08244d70b6067480d2f1a46e950c9691e6749d1d"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -5803,9 +5818,9 @@ checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
 
 [[package]]
 name = "regex-syntax"
-version = "0.6.28"
+version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
+checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regress"
@@ -6462,6 +6477,18 @@ dependencies = [
  "proc-macro2",
  "serde",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "serde_tokenstream"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a00ffd23fd882d096f09fcaae2a9de8329a328628e86027e049ee051dc1621f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -7828,7 +7855,7 @@ dependencies = [
  "humantime",
  "omicron-common 0.1.0",
  "omicron-test-utils",
- "predicates 2.1.5",
+ "predicates 3.0.1",
  "slog",
  "slog-async",
  "slog-envlogger",
@@ -7971,7 +7998,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "typify-impl",
 ]
@@ -8110,7 +8137,7 @@ dependencies = [
  "dtrace-parser",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "usdt-impl",
 ]
@@ -8144,7 +8171,7 @@ dependencies = [
  "dtrace-parser",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "usdt-impl",
 ]
@@ -8379,10 +8406,12 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "camino",
+ "ciborium",
  "clap 4.1.11",
  "crossterm 0.26.1",
  "futures",
  "hex",
+ "humantime",
  "lazy_static",
  "libsw",
  "omicron-common 0.1.0",

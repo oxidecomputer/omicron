@@ -120,14 +120,17 @@ impl<'a> Rack<'a> {
         let inner = block.inner(power_shelf);
         block.render(power_shelf, buf);
 
-        let width = inner.right() - inner.left();
-        let step = width / 6;
-        let border = (width - step * 6) / 2;
+        if i == 0 {
+            // Shipping racks only have one power shelf -- only show that one.
+            let width = inner.right() - inner.left();
+            let step = width / 6;
+            let border = (width - step * 6) / 2;
 
-        for x in inner.left() + border..inner.right() - border {
-            for y in inner.top()..inner.bottom() {
-                if x % step != 0 {
-                    buf.get_mut(x, y).set_symbol("█");
+            for x in inner.left() + border..inner.right() - border {
+                for y in inner.top()..inner.bottom() {
+                    if x % step != 0 {
+                        buf.get_mut(x, y).set_symbol("█");
+                    }
                 }
             }
         }
@@ -170,27 +173,8 @@ impl<'a> Widget for Rack<'a> {
 
 // We need to size the rack for large and small terminals
 // Width is not the issue, but height is.
-// We have the following constraints:
 //
-//  * Sleds, switches, and power shelves must be at least 2 lines high
-//    so they have a top border with label and black margin and one line for
-//    content drawing.
-//  * The top borders give a bottom border automatically to each component
-//    above them, and the top of the rack. However we also need a bottom
-//    border, so that's one more line.
-//
-// Therefore the minimum height of the rack is 2*16 + 2*2 + 2*2 + 1 = 41 lines.
-//
-// With a 5 line margin at the top and a 2 line margin at the bottom, the
-// minimum size of the terminal is 48 lines.
-//
-// If the terminal is smaller than 46 lines, the artistic rendering will
-// get progressively worse. XXX: We may want to bail on this instead.
-//
-// As much as possible we would like to also have a bottom margin, but we
-// don't sweat it.
-//
-// The calculations below follow from this logic
+// See inline comments for calculations.
 fn resize(rect: Rect) -> ComponentRects {
     let max_height = rect.height;
 
@@ -198,27 +182,31 @@ fn resize(rect: Rect) -> ComponentRects {
     let (rack_height, sled_height, other_height): (u16, u16, u16) =
         if max_height < 20 {
             // The window is too short.
-            let text = Paragraph::new(Text::raw(format!(
-                "[window too short: resize to at least {} lines high]",
-                20
-            )))
-            .alignment(Alignment::Center);
+            let text = Paragraph::new(Text::raw("[window too short]"))
+                .alignment(Alignment::Center);
             // Center vertically.
             let text_rect =
                 Rect { y: rect.y + max_height / 2, height: 1, ..rect };
             return ComponentRects::WindowTooShort { text, text_rect };
         } else if max_height < 37 {
+            // 20 lines is just about enough to show a (very degraded)
+            // representation of the rack, since:
+            // 20 = 1*16 (sled bays) + 2*1 (power shelves) + 1*2 (switches)
             (20, 1, 1)
         } else if max_height < 41 {
+            // 37 = 2*16 + 1*2 + 1*2 + 1 line drawn below the bottom sled
             (37, 2, 1)
         } else if max_height < 56 {
+            // 41 = 2*16 + 2*2 + 2*2 + 1 line drawn below the bottom sled
             (41, 2, 2)
         } else if max_height < 60 {
+            // 56 = 3*16 + 2*2 + 2*2
             (56, 3, 2)
         } else if max_height < 80 {
-            // 80 = 4*16 (sled bays) + 4*2 (power shelves) + 4*2 (switches)
+            // 60 = 3*16 + 3*2 + 3*2
             (60, 3, 3)
         } else {
+            // 80 = 4*16 + 4*2 + 4*2
             // Just divide evenly by 20 (16 sleds + 2 power shelves + 2 switches)
             let component_height = max_height / 20;
             (component_height * 20, component_height, component_height)
