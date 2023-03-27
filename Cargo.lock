@@ -5242,8 +5242,11 @@ checksum = "1ba7d6ead3e3966038f68caa9fc1f860185d95a793180bbcfe0d0da47b3961ed"
 dependencies = [
  "anstyle",
  "difflib",
+ "float-cmp",
  "itertools",
+ "normalize-line-endings",
  "predicates-core",
+ "regex",
 ]
 
 [[package]]
@@ -7823,7 +7826,7 @@ dependencies = [
  "humantime",
  "omicron-common 0.1.0",
  "omicron-test-utils",
- "predicates 2.1.5",
+ "predicates 3.0.1",
  "slog",
  "slog-async",
  "slog-envlogger",
