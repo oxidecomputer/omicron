@@ -278,7 +278,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
 ]
 
@@ -1489,7 +1489,7 @@ dependencies = [
  "quote",
  "rustfmt-wrapper",
  "serde",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
 ]
 
@@ -1808,7 +1808,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3bf0ee02e98b72c2196240977c8145c8aeb59697"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ccce2241b9a798819a3385f01b0b92f529c5fe8f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1851,13 +1851,13 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#3bf0ee02e98b72c2196240977c8145c8aeb59697"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ccce2241b9a798819a3385f01b0b92f529c5fe8f"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde",
- "serde_tokenstream",
- "syn 1.0.109",
+ "serde_tokenstream 0.2.0",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -5383,7 +5383,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "serde_yaml",
  "syn 1.0.109",
 ]
@@ -6457,6 +6457,18 @@ dependencies = [
  "proc-macro2",
  "serde",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "serde_tokenstream"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a00ffd23fd882d096f09fcaae2a9de8329a328628e86027e049ee051dc1621f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 2.0.2",
 ]
 
 [[package]]
@@ -7966,7 +7978,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "typify-impl",
 ]
@@ -8105,7 +8117,7 @@ dependencies = [
  "dtrace-parser",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "usdt-impl",
 ]
@@ -8139,7 +8151,7 @@ dependencies = [
  "dtrace-parser",
  "proc-macro2",
  "quote",
- "serde_tokenstream",
+ "serde_tokenstream 0.1.7",
  "syn 1.0.109",
  "usdt-impl",
 ]
