@@ -7,7 +7,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::{zfs, zone, zpool};
+use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
@@ -565,30 +565,8 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
     Ok(())
 }
 
-fn get_all_omicron_datasets() -> Result<Vec<String>> {
-    let mut datasets = vec![];
-
-    // Collect all datasets within Oxide zpools.
-    //
-    // This includes cockroachdb, clickhouse, and crucible datasets.
-    let zpools = zpool::Zpool::list()?;
-    for pool in &zpools {
-        let pool = pool.to_string();
-        for dataset in &zfs::Zfs::list_datasets(&pool)? {
-            datasets.push(format!("{pool}/{dataset}"));
-        }
-    }
-
-    // Collect all datasets for Oxide zones.
-    for dataset in &zfs::Zfs::list_datasets(&zfs::ZONE_ZFS_DATASET)? {
-        datasets.push(format!("{}/{dataset}", zfs::ZONE_ZFS_DATASET));
-    }
-
-    Ok(datasets)
-}
-
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = match get_all_omicron_datasets() {
+    let datasets = match zfs::get_all_omicron_datasets() {
         Err(e) => {
             warn!(config.log, "Failed to get omicron datasets: {}", e);
             return Ok(());
