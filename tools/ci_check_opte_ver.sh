@@ -18,7 +18,16 @@ done
 API_VER=$(curl -s https://raw.githubusercontent.com/oxidecomputer/opte/$OPTE_REV/opte-api/src/lib.rs | sed -n 's/pub const API_VERSION: u64 = \([0-9]*\);/\1/p')
 
 # Grab the patch version which is based on the number of commits.
-# Essentially `git rev-list --count $OPTE_REV` but without cloning the repo
+# Essentially `git rev-list --count $OPTE_REV` but without cloning the repo.
+# We use the GitHub API endpoint for listing commits starting at `$OPTE_REV`.
+# That request returns a "Link" header that looks something like this:
+#
+# link: <https://api.github.com/repositories/394728713/commits?per_page=1&sha=$OPTE_REV&page=2>; rel="next", <https://api.github.com/repositories/394728713/commits?per_page=1&sha=$OPTE_REV&page=162>; rel="last"
+#
+# Since the API is paginated we can ask for just one commit per page and
+# use the total number of pages to get the total number of commits.
+# Thus the query parameter `page` in the "last" link (e.g. `&page=162`)
+# gives us the rev count we want.
 REV_COUNT=$(curl -I -s "https://api.github.com/repos/oxidecomputer/opte/commits?per_page=1&sha=$OPTE_REV" | sed -n '/^[Ll]ink:/ s/.*"next".*page=\([0-9]*\).*"last".*/\1/p')
 
 # Combine the API version and the revision count to get the full version
