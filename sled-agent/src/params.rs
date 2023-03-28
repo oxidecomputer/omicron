@@ -65,47 +65,59 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
-/// Sent to a sled agent to establish the runtime state of an Instance
+/// The body of a request to ensure that an instance is known to a sled agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
-    /// Last runtime state of the Instance known to Nexus (used if the agent
-    /// has never seen this Instance before).
+    /// A description of the instance's virtual hardware and the initial runtime
+    /// state this sled agent should store for this incarnation of the instance.
     pub initial: InstanceHardware,
-    /// requested runtime state of the Instance
-    pub target: InstanceStateRequested,
-    /// If we're migrating this instance, the details needed to drive the migration
-    pub migrate: Option<InstanceMigrationTargetParams>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+/// The body of a request to move a previously-ensured instance into a specific
+/// runtime state.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstancePutStateBody {
+    /// The state into which the instance should be driven.
+    pub state: InstanceStateRequested,
+}
+
+/// The response sent from a request to move an instance into a specific runtime
+/// state.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstancePutStateResponse {
+    /// The current runtime state of the instance after handling the request to
+    /// change its state. If the instance's state did not change, this field is
+    /// `None`.
+    pub updated_runtime: Option<InstanceRuntimeState>,
+}
+
+/// Parameters used when directing Propolis to initialize itself via live
+/// migration.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrationTargetParams {
+    /// The Propolis ID of the migration source.
     pub src_propolis_id: Uuid,
+
+    /// The address of the Propolis server that will serve as the migration
+    /// source.
     pub src_propolis_addr: SocketAddr,
 }
 
 /// Requestable running state of an Instance.
 ///
 /// A subset of [`omicron_common::api::external::InstanceState`].
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum InstanceStateRequested {
+    /// Run this instance by migrating in from a previous running incarnation of
+    /// the instance.
+    MigrationTarget(InstanceMigrationTargetParams),
     /// Start the instance if it is not already running.
     Running,
     /// Stop the instance.
     Stopped,
-    /// Issue a reset command to the instance, such that it should
-    /// stop and then immediately become running.
+    /// Immediately reset the instance, as though it had stopped and immediately
+    /// began to run again.
     Reboot,
     /// Stop the instance and delete it.
     Destroyed,
@@ -120,6 +132,7 @@ impl Display for InstanceStateRequested {
 impl InstanceStateRequested {
     fn label(&self) -> &str {
         match self {
+            InstanceStateRequested::MigrationTarget(_) => "migrating in",
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
@@ -130,6 +143,7 @@ impl InstanceStateRequested {
     /// Returns true if the state represents a stopped Instance.
     pub fn is_stopped(&self) -> bool {
         match self {
+            InstanceStateRequested::MigrationTarget(_) => false,
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,

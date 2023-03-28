@@ -89,6 +89,9 @@ pub enum Error {
 
     #[error("Instance {0} not running!")]
     InstanceNotRunning(Uuid),
+
+    #[error("Instance already registered with Propolis ID {0}")]
+    InstanceAlreadyRegistered(Uuid),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -159,14 +162,12 @@ enum Reaction {
 struct RunningState {
     // Connection to Propolis.
     client: Arc<PropolisClient>,
-    // Object representing membership in the "instance manager".
-    instance_ticket: InstanceTicket,
     // Objects representing the instance's OPTE ports in the port manager
     port_tickets: Option<Vec<PortTicket>>,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
-    _running_zone: RunningZone,
+    running_zone: RunningZone,
 }
 
 impl Drop for RunningState {
@@ -234,18 +235,40 @@ struct InstanceInner {
 
     // Connection to Nexus
     lazy_nexus_client: LazyNexusClient,
+
+    // Object representing membership in the "instance manager".
+    instance_ticket: InstanceTicket,
 }
 
 impl InstanceInner {
+    /// Yields this instance's ID.
     fn id(&self) -> &Uuid {
         &self.properties.id
     }
 
-    /// UUID of the underlying propolis-server process
+    /// Yields this instance's Propolis's ID.
     fn propolis_id(&self) -> &Uuid {
         &self.propolis_id
     }
 
+    async fn publish_state_to_nexus(&self) -> Result<(), Error> {
+        self.lazy_nexus_client
+            .get()
+            .await?
+            .cpapi_instances_put(
+                self.id(),
+                &nexus_client::types::InstanceRuntimeState::from(
+                    self.state.current().clone(),
+                ),
+            )
+            .await
+            .map_err(|e| Error::Notification(e))?;
+
+        Ok(())
+    }
+
+    /// Processes a Propolis state change observed by the Propolis monitoring
+    /// task.
     async fn observe_state(
         &mut self,
         state: propolis_client::api::InstanceState,
@@ -261,18 +284,10 @@ impl InstanceInner {
             action
         );
 
-        // Notify Nexus of the state change.
-        self.lazy_nexus_client
-            .get()
-            .await?
-            .cpapi_instances_put(
-                self.id(),
-                &nexus_client::types::InstanceRuntimeState::from(
-                    self.state.current().clone(),
-                ),
-            )
-            .await
-            .map_err(|e| Error::Notification(e))?;
+        // TODO(#2727): Any failure here (even a transient failure) causes the
+        // monitoring task to exit, marooning the instance. Decide where best
+        // to handle this.
+        self.publish_state_to_nexus().await?;
 
         // Take the next action, if any.
         if let Some(action) = action {
@@ -282,6 +297,7 @@ impl InstanceInner {
         }
     }
 
+    /// Sends an instance state PUT request to this instance's Propolis.
     async fn propolis_state_put(
         &self,
         request: propolis_client::api::InstanceStateRequested,
@@ -297,15 +313,13 @@ impl InstanceInner {
         Ok(())
     }
 
-    async fn ensure(
-        &mut self,
-        instance: Instance,
-        instance_ticket: InstanceTicket,
-        setup: PropolisSetup,
+    /// Sends an instance ensure request to this instance's Propolis.
+    async fn propolis_ensure(
+        &self,
+        client: &PropolisClient,
+        running_zone: &RunningZone,
         migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
-        let PropolisSetup { client, running_zone, port_tickets } = setup;
-
         let nics = running_zone
             .opte_ports()
             .iter()
@@ -349,6 +363,26 @@ impl InstanceInner {
         let result = client.instance_ensure().body(request).send().await;
         info!(self.log, "result of instance_ensure call is {:?}", result);
         result?;
+        Ok(())
+    }
+
+    /// Given a freshly-created Propolis process, sends an ensure request to
+    /// that Propolis and launches all of the tasks needed to monitor the
+    /// resulting Propolis VM.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this routine is called more than once for a given Instance.
+    async fn ensure_propolis_and_tasks(
+        &mut self,
+        instance: Instance,
+        setup: PropolisSetup,
+        migrate: Option<InstanceMigrationTargetParams>,
+    ) -> Result<(), Error> {
+        assert!(self.running_state.is_none());
+
+        let PropolisSetup { client, running_zone, port_tickets } = setup;
+        self.propolis_ensure(&client, &running_zone, migrate).await?;
 
         // Monitor propolis for state changes in the background.
         let monitor_client = client.clone();
@@ -363,10 +397,9 @@ impl InstanceInner {
 
         self.running_state = Some(RunningState {
             client,
-            instance_ticket,
             port_tickets,
             monitor_task,
-            _running_zone: running_zone,
+            running_zone,
         });
 
         Ok(())
@@ -412,22 +445,20 @@ pub struct Instance {
 #[cfg(test)]
 mockall::mock! {
     pub Instance {
+        #[allow(clippy::too_many_arguments)]
         pub fn new(
             log: Logger,
             id: Uuid,
+            ticket: InstanceTicket,
             initial: InstanceHardware,
             vnic_allocator: VnicAllocator<Etherstub>,
             port_manager: PortManager,
             lazy_nexus_client: LazyNexusClient,
         ) -> Result<Self, Error>;
-        pub async fn start(
+        pub async fn current_state(&self) -> InstanceRuntimeState;
+        pub async fn put_state(
             &self,
-            instance_ticket: InstanceTicket,
-            migrate: Option<InstanceMigrationTargetParams>,
-        ) -> Result<(), Error>;
-        pub async fn transition(
-            &self,
-            target: InstanceStateRequested,
+            state: InstanceStateRequested
         ) -> Result<InstanceRuntimeState, Error>;
         pub async fn issue_snapshot_request(
             &self,
@@ -455,9 +486,11 @@ impl Instance {
     /// ports.
     /// * `lazy_nexus_client`: Connection to Nexus, used for sending notifications.
     // TODO: This arg list is getting a little long; can we clean this up?
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
         id: Uuid,
+        ticket: InstanceTicket,
         initial: InstanceHardware,
         vnic_allocator: VnicAllocator<Etherstub>,
         port_manager: PortManager,
@@ -492,6 +525,7 @@ impl Instance {
             state: InstanceStates::new(initial.runtime),
             running_state: None,
             lazy_nexus_client,
+            instance_ticket: ticket,
         };
 
         let inner = Arc::new(Mutex::new(instance));
@@ -499,25 +533,142 @@ impl Instance {
         Ok(Instance { inner })
     }
 
+    pub async fn current_state(&self) -> InstanceRuntimeState {
+        let inner = self.inner.lock().await;
+        inner.state.current().clone()
+    }
+
+    /// Ensures that a Propolis process exists for this instance, then sends it
+    /// an instance ensure request.
+    async fn propolis_ensure(
+        &self,
+        inner: &mut MutexGuard<'_, InstanceInner>,
+        migration_params: Option<InstanceMigrationTargetParams>,
+    ) -> Result<(), Error> {
+        if let Some(running_state) = inner.running_state.as_ref() {
+            inner
+                .propolis_ensure(
+                    &running_state.client,
+                    &running_state.running_zone,
+                    migration_params,
+                )
+                .await?;
+        } else {
+            let setup_result: Result<(), Error> = 'setup: {
+                // If there's no Propolis yet, and this instance is not being
+                // initialized via migration, immediately send a state update to
+                // Nexus to reflect that the instance is starting (so that the
+                // external API will display this state while the zone is being
+                // started).
+                //
+                // Migration targets don't do this because the instance is still
+                // logically running (on the source) while the target Propolis
+                // is being launched.
+                if migration_params.is_none() {
+                    inner.state.transition(InstanceState::Starting);
+                    if let Err(e) = inner.publish_state_to_nexus().await {
+                        break 'setup Err(e);
+                    }
+                }
+
+                // Set up the Propolis zone and the objects associated with it.
+                let setup = match self.setup_propolis_locked(inner).await {
+                    Ok(setup) => setup,
+                    Err(e) => break 'setup Err(e),
+                };
+
+                // Direct the Propolis server to create its VM and the tasks
+                // associated with it. On success, the zone handle moves into
+                // this instance, preserving the zone.
+                inner
+                    .ensure_propolis_and_tasks(
+                        self.clone(),
+                        setup,
+                        migration_params,
+                    )
+                    .await
+            };
+
+            // If this instance started from scratch, and startup failed, move
+            // the instance to the Failed state instead of leaking the Starting
+            // state.
+            //
+            // Once again, migration targets don't do this, because a failure to
+            // start a migration target simply leaves the VM running untouched
+            // on the source.
+            if migration_params.is_none() && setup_result.is_err() {
+                inner.state.transition(InstanceState::Failed);
+                inner.publish_state_to_nexus().await?;
+            }
+            setup_result?;
+        }
+        Ok(())
+    }
+
+    /// Attempts to update the current state of the instance by launching a
+    /// Propolis process for the instance (if needed) and issuing an appropriate
+    /// request to Propolis to change state.
+    ///
+    /// Returns the instance's state after applying any changes required by this
+    /// call. Note that if the instance's Propolis is in the middle of its own
+    /// state transition, it may publish states that supersede the state
+    /// published by this routine in perhaps-surprising ways. For example, if an
+    /// instance begins to stop when Propolis has just begun to handle a prior
+    /// request to reboot, the instance's state may proceed from Stopping to
+    /// Rebooting to Running to Stopping to Stopped.
+    pub async fn put_state(
+        &self,
+        state: crate::params::InstanceStateRequested,
+    ) -> Result<InstanceRuntimeState, Error> {
+        use propolis_client::api::InstanceStateRequested as PropolisRequest;
+        let mut inner = self.inner.lock().await;
+        let (propolis_state, next_published) = match state {
+            InstanceStateRequested::MigrationTarget(migration_params) => {
+                self.propolis_ensure(&mut inner, Some(migration_params))
+                    .await?;
+                (None, None)
+            }
+            InstanceStateRequested::Running => {
+                self.propolis_ensure(&mut inner, None).await?;
+                (Some(PropolisRequest::Run), None)
+            }
+            InstanceStateRequested::Stopped => {
+                // If the instance has not started yet, unregister it
+                // immediately. Since there is no Propolis to push updates when
+                // this happens, generate an instance record bearing the
+                // "Destroyed" state and return it to the caller.
+                if inner.running_state.is_none() {
+                    inner.instance_ticket.terminate();
+                    (None, Some(InstanceState::Destroyed))
+                } else {
+                    (Some(PropolisRequest::Stop), Some(InstanceState::Stopping))
+                }
+            }
+            InstanceStateRequested::Reboot => {
+                if inner.running_state.is_none() {
+                    return Err(Error::InstanceNotRunning(*inner.id()));
+                }
+                (Some(PropolisRequest::Reboot), Some(InstanceState::Rebooting))
+            }
+            InstanceStateRequested::Destroyed => {
+                inner.instance_ticket.terminate();
+                (None, Some(InstanceState::Destroyed))
+            }
+        };
+
+        if let Some(p) = propolis_state {
+            inner.propolis_state_put(p).await?;
+        }
+        if let Some(s) = next_published {
+            inner.state.transition(s);
+        }
+        Ok(inner.state.current().clone())
+    }
+
     async fn setup_propolis_locked(
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
-        // Update nexus with an in-progress state while we set up the instance.
-        inner.state.transition(InstanceState::Starting);
-        inner
-            .lazy_nexus_client
-            .get()
-            .await?
-            .cpapi_instances_put(
-                inner.id(),
-                &nexus_client::types::InstanceRuntimeState::from(
-                    inner.state.current().clone(),
-                ),
-            )
-            .await
-            .map_err(|e| Error::Notification(e))?;
-
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
         let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
@@ -698,25 +849,7 @@ impl Instance {
         })
     }
 
-    /// Begins the execution of the instance's service (Propolis).
-    pub async fn start(
-        &self,
-        instance_ticket: InstanceTicket,
-        migrate: Option<InstanceMigrationTargetParams>,
-    ) -> Result<(), Error> {
-        let mut inner = self.inner.lock().await;
-
-        // Create the propolis zone and resources
-        let setup = self.setup_propolis_locked(&mut inner).await?;
-
-        // Ensure the instance exists in the Propolis Server before we start
-        // using it.
-        inner.ensure(self.clone(), instance_ticket, setup, migrate).await?;
-
-        Ok(())
-    }
-
-    // Terminate the Propolis service.
+    /// Terminates this instance's Propolis zone.
     async fn stop(&self) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
@@ -725,10 +858,10 @@ impl Instance {
         Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
 
         // Remove ourselves from the instance manager's map of instances.
-        let running_state = inner.running_state.as_mut().unwrap();
-        running_state.instance_ticket.terminate();
+        inner.instance_ticket.terminate();
 
         // And remove the OPTE ports from the port manager
+        let running_state = inner.running_state.as_mut().unwrap();
         let mut result = Ok(());
         if let Some(tickets) = running_state.port_tickets.as_mut() {
             for ticket in tickets.iter_mut() {
@@ -776,49 +909,6 @@ impl Instance {
         }
     }
 
-    /// Attempts to change the current state of the instance by issuing an
-    /// appropriate state change command to its Propolis.
-    ///
-    /// Returns the instance's state after applying any changes required by this
-    /// call. Note that if the instance's Propolis is in the middle of its own
-    /// state transition, it may publish states that supersede the state
-    /// published by this routine in perhaps-surprising ways. For example, if an
-    /// instance begins to stop when Propolis has just begun to handle a prior
-    /// request to reboot, the instance's state may proceed from Stopping to
-    /// Rebooting to Running to Stopping to Stopped.
-    ///
-    /// # Panics
-    ///
-    /// This method may panic if it has been invoked before [`Instance::start`].
-    pub async fn transition(
-        &self,
-        target: InstanceStateRequested,
-    ) -> Result<InstanceRuntimeState, Error> {
-        let mut inner = self.inner.lock().await;
-
-        let (propolis_state, next_published) = match target {
-            InstanceStateRequested::Running => {
-                (propolis_client::api::InstanceStateRequested::Run, None)
-            }
-            InstanceStateRequested::Stopped
-            | InstanceStateRequested::Destroyed => (
-                propolis_client::api::InstanceStateRequested::Stop,
-                Some(InstanceState::Stopping),
-            ),
-            InstanceStateRequested::Reboot => (
-                propolis_client::api::InstanceStateRequested::Reboot,
-                Some(InstanceState::Rebooting),
-            ),
-        };
-
-        inner.propolis_state_put(propolis_state).await?;
-        if let Some(s) = next_published {
-            inner.state.transition(s);
-        }
-
-        Ok(inner.state.current().clone())
-    }
-
     pub async fn issue_snapshot_request(
         &self,
         disk_id: Uuid,
@@ -845,6 +935,7 @@ impl Instance {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::instance_manager::InstanceManager;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
     use crate::params::SourceNatConfig;
@@ -913,9 +1004,6 @@ mod test {
 
     #[tokio::test]
     #[serial_test::serial]
-    #[should_panic(
-        expected = "Propolis client should be initialized before usage"
-    )]
     async fn transition_before_start() {
         let logctx = test_setup_log("transition_before_start");
         let log = &logctx.log;
@@ -930,10 +1018,19 @@ mod test {
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
+        let instance_manager = InstanceManager::new(
+            log.clone(),
+            lazy_nexus_client.clone(),
+            Etherstub("mylink".to_string()),
+            underlay_ip,
+            mac,
+        )
+        .unwrap();
 
         let inst = Instance::new(
             log.clone(),
             test_uuid(),
+            instance_manager.test_instance_ticket(test_uuid()),
             new_initial_instance(),
             vnic_allocator,
             port_manager,
@@ -941,12 +1038,9 @@ mod test {
         )
         .unwrap();
 
-        // Remove the logfile before we expect to panic, or it'll never be
-        // cleaned up.
-        logctx.cleanup_successful();
+        // Pick a state transition that requires the instance to have started.
+        assert!(inst.put_state(InstanceStateRequested::Reboot).await.is_err());
 
-        // Trying to transition before the instance has been initialized will
-        // result in a panic.
-        inst.transition(InstanceStateRequested::Running).await.unwrap();
+        logctx.cleanup_successful();
     }
 }

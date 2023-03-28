@@ -4,10 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
-    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
-    SledRole, TimeSync, Zpool,
+    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
+    InstancePutStateBody, InstancePutStateResponse, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -32,7 +32,8 @@ pub fn api() -> SledApiDescription {
         api.register(disk_put)?;
         api.register(filesystem_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
-        api.register(instance_put)?;
+        api.register(instance_put_state)?;
+        api.register(instance_register)?;
         api.register(services_put)?;
         api.register(sled_role_get)?;
         api.register(set_v2p)?;
@@ -118,7 +119,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn instance_put(
+async fn instance_register(
     rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
@@ -127,14 +128,28 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(
-            instance_id,
-            body_args.initial,
-            body_args.target,
-            body_args.migrate,
-        )
-        .await
-        .map_err(Error::from)?,
+        sa.instance_ensure_registered(instance_id, body_args.initial)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_put_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutStateBody>,
+) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_ensure_state(instance_id, body_args.state)
+            .await
+            .map_err(Error::from)?,
     ))
 }
 

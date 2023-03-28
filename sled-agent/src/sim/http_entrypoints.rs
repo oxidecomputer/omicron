@@ -4,8 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::params::VpcFirewallRulesEnsureBody;
-use crate::params::{DiskEnsureBody, InstanceEnsureBody};
+use crate::params::{
+    DiskEnsureBody, InstanceEnsureBody, InstancePutStateBody,
+    InstancePutStateResponse, VpcFirewallRulesEnsureBody,
+};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -31,6 +33,7 @@ type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(instance_put)?;
+        api.register(instance_put_state)?;
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
@@ -69,8 +72,24 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(instance_id, body_args.initial, body_args.target)
-            .await?,
+        sa.instance_ensure(instance_id, body_args.initial).await?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_put_state(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutStateBody>,
+) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_ensure_state(instance_id, body_args.state).await?,
     ))
 }
 

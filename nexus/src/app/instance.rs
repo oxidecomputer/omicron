@@ -35,6 +35,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
@@ -327,19 +328,8 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        // To implement reboot, we issue a call to the sled agent to set a
-        // runtime state of "reboot". We cannot simply stop the Instance and
-        // start it again here because if we crash in the meantime, we might
-        // leave it stopped.
-        //
-        // When an instance is rebooted, the "rebooting" flag remains set on
-        // the runtime state as it transitions to "Stopping" and "Stopped".
-        // This flag is cleared when the state goes to "Starting".  This way,
-        // even if the whole rack powered off while this was going on, we would
-        // never lose track of the fact that this Instance was supposed to be
-        // running.
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        self.instance_set_runtime(
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
@@ -355,8 +345,29 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        self.instance_set_runtime(
+        // TODO(#2824): This needs to be a saga for crash resiliency
+        // purposes (otherwise the instance can be leaked if Nexus crashes
+        // between registration and instance start).
+        let (.., authz_instance, mut db_instance) =
+            instance_lookup.fetch().await?;
+
+        // The instance is not really being "created" (it already exists from
+        // the caller's perspective), but if it does not exist on its sled, the
+        // target sled agent will populate its instance manager with the
+        // contents of this modified record, and that record needs to allow a
+        // transition to the Starting state.
+        //
+        // If the instance does exist on this sled, this initial runtime state
+        // is ignored.
+        let initial_runtime = nexus_db_model::InstanceRuntimeState {
+            state: nexus_db_model::InstanceState(InstanceState::Creating),
+            ..db_instance.runtime_state
+        };
+        db_instance.runtime_state = initial_runtime;
+        self.instance_ensure_registered(opctx, &authz_instance, &db_instance)
+            .await?;
+
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
@@ -373,7 +384,7 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        self.instance_set_runtime(
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
@@ -395,13 +406,20 @@ impl super::Nexus {
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
+        requested: &InstanceStateRequested,
     ) -> Result<(), Error> {
         // Users are allowed to request a start or stop even if the instance is
         // already in the desired state (or moving to it), and we will issue a
         // request to the SA to make the state change in these cases in case the
-        // runtime state we saw here was stale.  However, users are not allowed
-        // to change the state of an instance that's migrating, failed or
-        // destroyed.
+        // runtime state we saw here was stale.
+        //
+        // Users cannot change the state of a failed or destroyed instance.
+        // TODO(#2825): Failed instances should be allowed to stop.
+        //
+        // Migrating instances can't change state until they're done migrating,
+        // but for idempotency, a request to make an incarnation of an instance
+        // into a migration target is allowed if the incarnation is already a
+        // migration target.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
             InstanceState::Starting => true,
@@ -409,7 +427,9 @@ impl super::Nexus {
             InstanceState::Stopping => true,
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
-            InstanceState::Migrating => false,
+            InstanceState::Migrating => {
+                matches!(requested, InstanceStateRequested::MigrationTarget(_))
+            }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,
@@ -427,9 +447,7 @@ impl super::Nexus {
         }
     }
 
-    /// Modifies the runtime state of the Instance as requested.  This generally
-    /// means booting or halting the Instance.
-    pub(crate) async fn instance_set_runtime(
+    pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -437,10 +455,34 @@ impl super::Nexus {
         requested: InstanceStateRequested,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-
         self.check_runtime_change_allowed(
             &db_instance.runtime().clone().into(),
+            &requested,
         )?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let instance_put_result = sa
+            .instance_put_state(
+                &db_instance.id(),
+                &InstancePutStateBody { state: requested },
+            )
+            .await
+            .map(|res| res.into_inner().updated_runtime);
+
+        self.handle_instance_put_result(db_instance, instance_put_result)
+            .await
+            .map(|_| ())
+    }
+
+    /// Modifies the runtime state of the Instance as requested.  This generally
+    /// means booting or halting the Instance.
+    pub(crate) async fn instance_ensure_registered(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
@@ -587,31 +629,73 @@ impl super::Nexus {
 
         let sa = self.instance_sled(&db_instance).await?;
 
-        let instance_put_result = sa
-            .instance_put(
+        let instance_register_result = sa
+            .instance_register(
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested,
-                    migrate: None,
                 },
             )
-            .await;
+            .await
+            .map(|res| Some(res.into_inner()));
 
-        match instance_put_result {
-            Ok(new_runtime) => {
+        self.handle_instance_put_result(db_instance, instance_register_result)
+            .await
+            .map(|_| ())
+    }
+
+    /// Updates an instance's CRDB record based on the result of a call to sled
+    /// agent that tried to update the instance's state.
+    ///
+    /// # Parameters
+    ///
+    /// - `db_instance`: The CRDB instance record observed by the caller before
+    ///   it attempted to update the instance's state.
+    /// - `result`: The result of the relevant sled agent operation. If this is
+    ///   `Ok`, the payload is the updated instance runtime state returned from
+    ///   sled agent, if there was one.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok(true)` if the caller supplied an updated instance record and this
+    ///   routine successfully wrote it to CRDB.
+    /// - `Ok(false)` if the sled agent call succeeded, but this routine did not
+    ///   update CRDB.
+    ///   This can happen either because sled agent didn't return an updated
+    ///   record or because the updated record was superseded by a state update
+    ///   with a more advanced generation number.
+    /// - `Err` if the sled agent operation failed or this routine received an
+    ///   error while trying to update CRDB.
+    async fn handle_instance_put_result(
+        &self,
+        db_instance: &db::model::Instance,
+        result: Result<
+            Option<sled_agent_client::types::InstanceRuntimeState>,
+            sled_agent_client::Error<sled_agent_client::types::Error>,
+        >,
+    ) -> Result<bool, Error> {
+        slog::debug!(&self.log, "Handling sled agent instance PUT result";
+                     "result" => ?result);
+
+        match result {
+            Ok(Some(new_runtime)) => {
                 let new_runtime: nexus::InstanceRuntimeState =
-                    new_runtime.into_inner().into();
+                    new_runtime.into();
 
-                self.db_datastore
+                let update_result = self
+                    .db_datastore
                     .instance_update_runtime(
                         &db_instance.id(),
                         &new_runtime.into(),
                     )
-                    .await
-                    .map(|_| ())
-            }
+                    .await;
 
+                slog::debug!(&self.log,
+                             "Attempted DB update after instance PUT";
+                             "result" => ?update_result);
+                update_result
+            }
+            Ok(None) => Ok(false),
             Err(e) => {
                 // The sled-agent has told us that it can't do what we
                 // requested, but does that mean a failure? One example would be

@@ -6,11 +6,13 @@
 
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceStateRequested,
+    DiskStateRequested, InstanceHardware, InstancePutStateResponse,
+    InstanceStateRequested,
 };
+use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
-use omicron_common::api::external::{Error, ResourceType};
+use omicron_common::api::external::{DiskState, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
@@ -216,7 +218,6 @@ impl SledAgent {
         self: &Arc<Self>,
         instance_id: Uuid,
         mut initial_hardware: InstanceHardware,
-        target: InstanceStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -229,29 +230,24 @@ impl SledAgent {
 
         for disk in &initial_hardware.disks {
             let initial_state = DiskRuntimeState {
-                disk_state: omicron_common::api::external::DiskState::Attached(
-                    instance_id,
-                ),
+                disk_state: DiskState::Attached(instance_id),
                 gen: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
 
-            let target = match target {
-                InstanceStateRequested::Running
-                | InstanceStateRequested::Reboot => {
-                    DiskStateRequested::Attached(instance_id)
-                }
-                InstanceStateRequested::Stopped
-                | InstanceStateRequested::Destroyed => {
-                    DiskStateRequested::Detached
-                }
-            };
-
+            // Ensure that any disks that are in this request are attached to
+            // this instance.
             let id = match disk.volume_construction_request {
                 propolis_client::instance_spec::VolumeConstructionRequest::Volume { id, .. } => id,
                 _ => panic!("Unexpected construction type"),
             };
-            self.disks.sim_ensure(&id, initial_state, target).await?;
+            self.disks
+                .sim_ensure(
+                    &id,
+                    initial_state,
+                    Some(DiskStateRequested::Attached(instance_id)),
+                )
+                .await?;
             self.disks
                 .sim_ensure_producer(&id, (self.nexus_address, id))
                 .await?;
@@ -296,27 +292,11 @@ impl SledAgent {
                     },
                 )?;
             }
-
-            let body = match target {
-                InstanceStateRequested::Running => {
-                    propolis_client::types::InstanceStateRequested::Run
-                }
-                InstanceStateRequested::Destroyed
-                | InstanceStateRequested::Stopped => {
-                    propolis_client::types::InstanceStateRequested::Stop
-                }
-                InstanceStateRequested::Reboot => {
-                    propolis_client::types::InstanceStateRequested::Reboot
-                }
-            };
-            client.instance_state_put().body(body).send().await.map_err(
-                |e| Error::internal_error(&format!("propolis-client: {}", e)),
-            )?;
         }
 
         let instance_run_time_state = self
             .instances
-            .sim_ensure(&instance_id, initial_hardware.runtime, target)
+            .sim_ensure(&instance_id, initial_hardware.runtime, None)
             .await?;
 
         for disk_request in &initial_hardware.disks {
@@ -337,6 +317,84 @@ impl SledAgent {
         Ok(instance_run_time_state)
     }
 
+    /// Asks the supplied instance to transition to the requested state.
+    pub async fn instance_ensure_state(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+        state: InstanceStateRequested,
+    ) -> Result<InstancePutStateResponse, Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            match state {
+                InstanceStateRequested::Stopped
+                | InstanceStateRequested::Destroyed => {
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
+                }
+                _ => {
+                    return Err(Error::invalid_request(&format!(
+                        "instance {} not registered on sled",
+                        instance_id,
+                    )));
+                }
+            }
+        }
+
+        let mock_lock = self.mock_propolis.lock().await;
+        if let Some((_srv, client)) = mock_lock.as_ref() {
+            let body = match state {
+                InstanceStateRequested::MigrationTarget(_) => {
+                    return Err(Error::internal_error(
+                        "migration not implemented for mock Propolis",
+                    ));
+                }
+                InstanceStateRequested::Running => {
+                    propolis_client::types::InstanceStateRequested::Run
+                }
+                InstanceStateRequested::Destroyed
+                | InstanceStateRequested::Stopped => {
+                    propolis_client::types::InstanceStateRequested::Stop
+                }
+                InstanceStateRequested::Reboot => {
+                    propolis_client::types::InstanceStateRequested::Reboot
+                }
+            };
+            client.instance_state_put().body(body).send().await.map_err(
+                |e| Error::internal_error(&format!("propolis-client: {}", e)),
+            )?;
+        }
+
+        let new_state = self
+            .instances
+            .sim_ensure(
+                &instance_id,
+                self.instances.sim_get_current_state(&instance_id).await?,
+                Some(state),
+            )
+            .await?;
+
+        // If this request will shut down the simulated instance, look for any
+        // disks that are attached to it and drive them to the Detached state.
+        if matches!(
+            state,
+            InstanceStateRequested::Stopped | InstanceStateRequested::Destroyed
+        ) {
+            self.disks
+                .sim_ensure_for_each_where(
+                    |disk| match disk.current().disk_state {
+                        DiskState::Attached(id) | DiskState::Attaching(id) => {
+                            id == instance_id
+                        }
+                        _ => false,
+                    },
+                    &DiskStateRequested::Detached,
+                )
+                .await?;
+        }
+
+        Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
     /// is attached (or not) as specified.  This simulates disk attach and
     /// detach, similar to instance boot and halt.
@@ -346,7 +404,7 @@ impl SledAgent {
         initial_state: DiskRuntimeState,
         target: DiskStateRequested,
     ) -> Result<DiskRuntimeState, Error> {
-        self.disks.sim_ensure(&disk_id, initial_state, target).await
+        self.disks.sim_ensure(&disk_id, initial_state, Some(target)).await
     }
 
     pub fn updates(&self) -> &UpdateManager {
