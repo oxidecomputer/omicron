@@ -5947,9 +5947,9 @@ dependencies = [
 
 [[package]]
 name = "russh"
-version = "0.36.1"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6cdd0c99823d858b1cab6b77bd0cdf4069e30a5212bbf5d94c478f7c9887b28"
+checksum = "b7894d12dc117ca07eb565bcf75aac708b6ed5e2fd6a47e54a2ce42b64b5eea0"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -5992,9 +5992,9 @@ dependencies = [
 
 [[package]]
 name = "russh-keys"
-version = "0.24.1"
+version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "615654ffa6112500f8b1cde4085031ff3addb5664288817bcb585c829650ca20"
+checksum = "2efecb132e085e1e7a3afdae40e19eec0dfd4d6159eb189de02f243c369e18b7"
 dependencies = [
  "aes",
  "bcrypt-pbkdf",
@@ -6018,7 +6018,6 @@ dependencies = [
  "rand_core 0.5.1",
  "russh-cryptovec",
  "serde",
- "serde_derive",
  "sha2 0.10.6",
  "thiserror",
  "tokio",
