@@ -207,11 +207,6 @@ impl SledAgent {
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
-        // should be removed once the Sled Agent is initialized with a
-        // RSS-provided IP address. In the meantime, we use one from the
-        // configuration file.
         let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
