@@ -13,6 +13,7 @@ use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::RackInit;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -128,9 +129,11 @@ impl super::Nexus {
             dns_zone.records,
         );
 
+        // TODO the initial external DNS zone name and potentially record
+        // name(s) need to come in with the rack initialization request.
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
-            "oxide.external", // XXX-dap,
+            "oxide-dev.test",
             &self.id.to_string(),
             "rack setup",
             vec![],
@@ -139,13 +142,15 @@ impl super::Nexus {
         self.db_datastore
             .rack_set_initialized(
                 opctx,
-                rack_id,
-                request.services,
-                datasets,
-                service_ip_pool_ranges,
-                certificates,
-                internal_dns,
-                external_dns,
+                RackInit {
+                    rack_id,
+                    services: request.services,
+                    datasets,
+                    service_ip_pool_ranges,
+                    certificates,
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await?;
 

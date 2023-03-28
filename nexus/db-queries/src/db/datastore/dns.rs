@@ -36,6 +36,7 @@ use uuid::Uuid;
 const NMAX_DNS_ZONES: u32 = 10;
 
 impl DataStore {
+    /// List all DNS zones in a DNS group (paginated)
     async fn dns_zones_list(
         &self,
         opctx: &OpContext,
@@ -52,6 +53,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    /// Get the latest version for a given DNS group
     async fn dns_group_latest_version(
         &self,
         opctx: &OpContext,
@@ -80,6 +82,8 @@ impl DataStore {
         Ok(versions.into_iter().next().unwrap())
     }
 
+    /// List all DNS names in the given DNS zone at the given group version
+    /// (paginated)
     async fn dns_names_list(
         &self,
         opctx: &OpContext,
@@ -104,29 +108,26 @@ impl DataStore {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
             })?
             .into_iter()
-            .filter_map(|n: DnsName| {
-                match serde_json::from_value(n.dns_record_data) {
-                    Ok(records) => Some(DnsKv {
-                        key: DnsRecordKey { name: n.name },
-                        records,
-                    }),
-                    Err(error) => {
-                        warn!(
-                            opctx.log,
-                            "failed to deserialize dns_name records: {:#}",
-                            error;
-                            "dns_zone_id" => n.dns_zone_id.to_string(),
-                            "name" => n.name.to_string(),
-                            "version_added" => n.version_added.to_string(),
-                        );
-                        None
-                    }
+            .filter_map(|n: DnsName| match n.records() {
+                Ok(records) => {
+                    Some(DnsKv { key: DnsRecordKey { name: n.name }, records })
+                }
+                Err(error) => {
+                    warn!(
+                        opctx.log,
+                        "failed to deserialize dns_name records: {:#}",
+                        error;
+                        "dns_zone_id" => n.dns_zone_id.to_string(),
+                        "name" => n.name.to_string(),
+                        "version_added" => n.version_added.to_string(),
+                    );
+                    None
                 }
             })
             .collect())
     }
 
-    /// Read the latest complete DNS configuration for a particular DNS group
+    /// Read the latest complete DNS configuration for a DNS group
     pub async fn dns_config_read(
         &self,
         opctx: &OpContext,
@@ -150,6 +151,8 @@ impl DataStore {
         .await
     }
 
+    /// Test-only interface that allows configuring batch size and the version
+    /// number being read
     #[cfg(test)]
     pub async fn dns_config_read_version_test(
         &self,
@@ -161,6 +164,7 @@ impl DataStore {
         self.dns_config_read_version(opctx, log, batch_size, version).await
     }
 
+    /// Private helper for reading a specific version of a group's DNS config
     async fn dns_config_read_version(
         &self,
         opctx: &OpContext,
@@ -311,12 +315,7 @@ impl DataStore {
         {
             use db::schema::dns_name::dsl;
             diesel::insert_into(dsl::dns_name)
-                .values(dns.rows_for_names().map_err(|error| {
-                    Error::internal_error(&format!(
-                        "error serializing initial DNS data: {:#}",
-                        error
-                    ))
-                })?)
+                .values(dns.rows_for_names()?)
                 .on_conflict((dsl::dns_zone_id, dsl::version_added, dsl::name))
                 .do_nothing()
                 .execute_async(conn)
@@ -645,9 +644,6 @@ mod test {
         let records_r1 = vec![r1.clone()];
         let records_r2 = vec![r2.clone()];
         let records_r1r2 = vec![r1, r2];
-        let json_r1 = serde_json::to_value(&records_r1).unwrap();
-        let json_r2 = serde_json::to_value(&records_r2).unwrap();
-        let json_r1r2 = serde_json::to_value(&records_r1r2).unwrap();
 
         // Set up the database state exactly as we want it.
         // First, insert the DNS zones.
@@ -712,44 +708,49 @@ mod test {
                     // - name "n2" removed between generations
                     // - name "n3" added between generations
                     // - a zone is removed between generations
-                    DnsName {
-                        dns_zone_id: z1_id,
-                        name: "n1".to_string(),
-                        version_added: g1,
-                        version_removed: Some(g3),
-                        dns_record_data: json_r1.clone(),
-                    },
-                    DnsName {
-                        dns_zone_id: z1_id,
-                        name: "n2".to_string(),
-                        version_added: g1,
-                        version_removed: Some(g2),
-                        dns_record_data: json_r1.clone(),
-                    },
-                    DnsName {
-                        dns_zone_id: z1_id,
-                        name: "n3".to_string(),
-                        version_added: g2,
-                        version_removed: Some(g3),
-                        dns_record_data: json_r1.clone(),
-                    },
+                    DnsName::new(
+                        z1_id,
+                        "n1".to_string(),
+                        g1,
+                        Some(g3),
+                        records_r1.clone(),
+                    )
+                    .unwrap(),
+                    DnsName::new(
+                        z1_id,
+                        "n2".to_string(),
+                        g1,
+                        Some(g2),
+                        records_r1.clone(),
+                    )
+                    .unwrap(),
+                    DnsName::new(
+                        z1_id,
+                        "n3".to_string(),
+                        g2,
+                        Some(g3),
+                        records_r1.clone(),
+                    )
+                    .unwrap(),
                     // External zone "z2" records test that:
                     // - we add a zone between generation
                     // - a record ("n1") changes between gen 2 and gen 3
-                    DnsName {
-                        dns_zone_id: z2_id,
-                        name: "n1".to_string(),
-                        version_added: g2,
-                        version_removed: Some(g3),
-                        dns_record_data: json_r1.clone(),
-                    },
-                    DnsName {
-                        dns_zone_id: z2_id,
-                        name: "n1".to_string(),
-                        version_added: g3,
-                        version_removed: None,
-                        dns_record_data: json_r2.clone(),
-                    },
+                    DnsName::new(
+                        z2_id,
+                        "n1".to_string(),
+                        g2,
+                        Some(g3),
+                        records_r1.clone(),
+                    )
+                    .unwrap(),
+                    DnsName::new(
+                        z2_id,
+                        "n1".to_string(),
+                        g3,
+                        None,
+                        records_r2.clone(),
+                    )
+                    .unwrap(),
                     // External zone "z3" records test that:
                     // - a zone exists in all generations
                     // - a record ("n1") changes between generations
@@ -757,36 +758,40 @@ mod test {
                     // - a record ("n1") is removed between generations
                     // Using the same names in different zones ensures these are
                     // treated separately.
-                    DnsName {
-                        dns_zone_id: z3_id,
-                        name: "n1".to_string(),
-                        version_added: g1,
-                        version_removed: Some(g2),
-                        dns_record_data: json_r2.clone(),
-                    },
-                    DnsName {
-                        dns_zone_id: z3_id,
-                        name: "n1".to_string(),
-                        version_added: g2,
-                        version_removed: Some(g3),
-                        dns_record_data: json_r1r2.clone(),
-                    },
-                    DnsName {
-                        dns_zone_id: z3_id,
-                        name: "n2".to_string(),
-                        version_added: g2,
-                        version_removed: None,
-                        dns_record_data: json_r2.clone(),
-                    },
+                    DnsName::new(
+                        z3_id,
+                        "n1".to_string(),
+                        g1,
+                        Some(g2),
+                        records_r2.clone(),
+                    )
+                    .unwrap(),
+                    DnsName::new(
+                        z3_id,
+                        "n1".to_string(),
+                        g2,
+                        Some(g3),
+                        records_r1r2.clone(),
+                    )
+                    .unwrap(),
+                    DnsName::new(
+                        z3_id,
+                        "n2".to_string(),
+                        g2,
+                        None,
+                        records_r2.clone(),
+                    )
+                    .unwrap(),
                     // Internal zone records test that the namespaces are
                     // orthogonal across different DNS groups.
-                    DnsName {
-                        dns_zone_id: zinternal_id,
-                        name: "n1".to_string(),
-                        version_added: g2,
-                        version_removed: None,
-                        dns_record_data: json_r2.clone(),
-                    },
+                    DnsName::new(
+                        zinternal_id,
+                        "n1".to_string(),
+                        g2,
+                        None,
+                        records_r2.clone(),
+                    )
+                    .unwrap(),
                 ])
                 .execute_async(datastore.pool_for_tests().await.unwrap())
                 .await
@@ -941,14 +946,14 @@ mod test {
                 .values(vec![
                     DnsVersion {
                         dns_group: DnsGroup::Internal,
-                        version: Generation::new().into(),
+                        version: Generation::new(),
                         time_created: now,
                         creator: "test suite 1".to_string(),
                         comment: "test suite 2".to_string(),
                     },
                     DnsVersion {
                         dns_group: DnsGroup::Internal,
-                        version: Generation::new().into(),
+                        version: Generation::new(),
                         time_created: now,
                         creator: "test suite 3".to_string(),
                         comment: "test suite 4".to_string(),
@@ -972,25 +977,19 @@ mod test {
             let g2 = Generation(2.try_into().unwrap());
             let r1 = DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap());
             let r2 = DnsRecord::Aaaa("fe80::1:1:1:1".parse().unwrap());
-            let json_r1 = serde_json::to_value(&[r1]).unwrap();
-            let json_r2 = serde_json::to_value(&[r2]).unwrap();
 
             let error = diesel::insert_into(dsl::dns_name)
                 .values(vec![
-                    DnsName {
+                    DnsName::new(dns_zone_id, name.clone(), g1, None, vec![r1])
+                        .unwrap(),
+                    DnsName::new(
                         dns_zone_id,
-                        name: name.clone(),
-                        version_added: g1,
-                        version_removed: None,
-                        dns_record_data: json_r1,
-                    },
-                    DnsName {
-                        dns_zone_id,
-                        name: name.clone(),
-                        version_added: g1,
-                        version_removed: Some(g2),
-                        dns_record_data: json_r2,
-                    },
+                        name.clone(),
+                        g1,
+                        Some(g2),
+                        vec![r2],
+                    )
+                    .unwrap(),
                 ])
                 .execute_async(datastore.pool_for_tests().await.unwrap())
                 .await

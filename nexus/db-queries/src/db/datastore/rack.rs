@@ -52,6 +52,17 @@ enum RackInitError {
 }
 type TxnError = TransactionError<RackInitError>;
 
+/// Groups arguments related to rack initialization
+pub struct RackInit {
+    pub rack_id: Uuid,
+    pub services: Vec<internal_params::ServicePutRequest>,
+    pub datasets: Vec<Dataset>,
+    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub certificates: Vec<Certificate>,
+    pub internal_dns: InitialDnsGroup,
+    pub external_dns: InitialDnsGroup,
+}
+
 impl DataStore {
     pub async fn rack_list(
         &self,
@@ -101,15 +112,17 @@ impl DataStore {
     pub async fn rack_set_initialized(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        services: Vec<internal_params::ServicePutRequest>,
-        datasets: Vec<Dataset>,
-        service_ip_pool_ranges: Vec<IpRange>,
-        certificates: Vec<Certificate>,
-        internal_dns: InitialDnsGroup,
-        external_dns: InitialDnsGroup,
+        rack_init: RackInit,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
+
+        let rack_id = rack_init.rack_id;
+        let services = rack_init.services;
+        let datasets = rack_init.datasets;
+        let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
+        let certificates = rack_init.certificates;
+        let internal_dns = rack_init.internal_dns;
+        let external_dns = rack_init.external_dns;
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
@@ -450,13 +463,15 @@ mod test {
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services.clone(),
-                datasets.clone(),
-                service_ip_pool_ranges.clone(),
-                certificates.clone(),
-                internal_dns_empty(),
-                external_dns_empty(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges: service_ip_pool_ranges.clone(),
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -485,13 +500,15 @@ mod test {
         let rack2 = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services,
-                datasets,
-                service_ip_pool_ranges,
-                certificates,
-                internal_dns_empty(),
-                external_dns_empty(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services,
+                    datasets,
+                    service_ip_pool_ranges,
+                    certificates,
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -584,13 +601,15 @@ mod test {
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services.clone(),
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
-                internal_dns_empty(),
-                external_dns_empty(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -717,13 +736,15 @@ mod test {
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services.clone(),
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
-                internal_dns,
-                external_dns,
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -864,13 +885,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services.clone(),
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
-                internal_dns_empty(),
-                external_dns_empty(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await;
         assert!(result.is_err());
@@ -926,13 +949,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                services.clone(),
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
-                internal_dns_empty(),
-                external_dns_empty(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await;
         assert!(result.is_err());

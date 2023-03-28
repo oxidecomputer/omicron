@@ -38,7 +38,6 @@ mod network_interface;
 mod oximeter;
 mod project;
 mod rack;
-pub mod reconcilers;
 pub mod saga;
 mod session;
 mod silo;

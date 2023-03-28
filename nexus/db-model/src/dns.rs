@@ -6,7 +6,10 @@ use super::{impl_enum_type, Generation};
 use crate::schema::{dns_name, dns_version, dns_zone};
 use chrono::{DateTime, Utc};
 use nexus_types::internal_api::params;
-use std::fmt;
+use omicron_common::api::external::Error;
+use serde::Deserialize;
+use serde::Serialize;
+use std::{fmt, net::Ipv6Addr};
 use uuid::Uuid;
 
 impl_enum_type!(
@@ -32,7 +35,6 @@ impl fmt::Display for DnsGroup {
     }
 }
 
-// XXX-dap what? why?
 impl diesel::query_builder::QueryId for DnsGroupEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
@@ -44,7 +46,7 @@ pub struct DnsZone {
     pub id: Uuid,
     pub time_created: DateTime<Utc>,
     pub dns_group: DnsGroup,
-    pub zone_name: String, // XXX-dap some more specific type?
+    pub zone_name: String,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -64,7 +66,115 @@ pub struct DnsName {
     pub version_added: Generation,
     pub version_removed: Option<Generation>,
     pub name: String,
-    pub dns_record_data: serde_json::Value,
+
+    dns_record_data: serde_json::Value,
+}
+
+impl DnsName {
+    pub fn new(
+        dns_zone_id: Uuid,
+        name: String,
+        version_added: Generation,
+        version_removed: Option<Generation>,
+        records: Vec<params::DnsRecord>,
+    ) -> Result<DnsName, Error> {
+        let dns_record_data = serde_json::to_value(
+            records.into_iter().map(DnsRecord::from).collect::<Vec<_>>(),
+        )
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to serialize DNS records: {:#}",
+                e
+            ))
+        })?;
+
+        Ok(DnsName {
+            dns_zone_id,
+            version_added,
+            version_removed,
+            name,
+            dns_record_data,
+        })
+    }
+
+    pub fn records(&self) -> Result<Vec<params::DnsRecord>, Error> {
+        let serialized: Vec<DnsRecord> = serde_json::from_value(
+            self.dns_record_data.clone(),
+        )
+        .map_err(|e| {
+            Error::internal_error(&format!(
+                "failed to deserialize DNS record from database: {:#}",
+                e
+            ))
+        })?;
+        Ok(serialized.into_iter().map(params::DnsRecord::from).collect())
+    }
+}
+
+/// This type is identical to `dns_service_client::DnsRecord`.  It's defined
+/// separately here for stability: this type is serialized to JSON and stored
+/// into the database.  We don't want the serialized from to change accidentally
+/// because someone happens to change the DNS server API.
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum DnsRecord {
+    AAAA(Ipv6Addr),
+    SRV(SRV),
+}
+
+impl From<params::DnsRecord> for DnsRecord {
+    fn from(value: params::DnsRecord) -> Self {
+        match value {
+            params::DnsRecord::Aaaa(addr) => DnsRecord::AAAA(addr),
+            params::DnsRecord::Srv(srv) => DnsRecord::SRV(SRV::from(srv)),
+        }
+    }
+}
+
+impl From<DnsRecord> for params::DnsRecord {
+    fn from(value: DnsRecord) -> Self {
+        match value {
+            DnsRecord::AAAA(addr) => params::DnsRecord::Aaaa(addr),
+            DnsRecord::SRV(srv) => {
+                params::DnsRecord::Srv(params::Srv::from(srv))
+            }
+        }
+    }
+}
+
+/// This type is identical to `dns_service_client::SRV`.  It's defined
+/// separately here for stability: this type is serialized to JSON and stored
+/// into the database.  We don't want the serialized from to change accidentally
+/// because someone happens to change the DNS server API.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename = "Srv")]
+pub struct SRV {
+    pub prio: u16,
+    pub weight: u16,
+    pub port: u16,
+    pub target: String,
+}
+
+impl From<params::Srv> for SRV {
+    fn from(srv: params::Srv) -> Self {
+        SRV {
+            prio: srv.prio,
+            weight: srv.weight,
+            port: srv.port,
+            target: srv.target,
+        }
+    }
+}
+
+impl From<SRV> for params::Srv {
+    fn from(srv: SRV) -> Self {
+        params::Srv {
+            prio: srv.prio,
+            weight: srv.weight,
+            port: srv.port,
+            target: srv.target,
+        }
+    }
 }
 
 /// Describes the initial configuration for a DNS group
@@ -124,17 +234,17 @@ impl InitialDnsGroup {
         }
     }
 
-    pub fn rows_for_names(&self) -> Result<Vec<DnsName>, serde_json::Error> {
+    pub fn rows_for_names(&self) -> Result<Vec<DnsName>, Error> {
         self.records
             .iter()
             .map(|r| {
-                Ok(DnsName {
-                    dns_zone_id: self.dns_zone_id,
-                    version_added: self.version,
-                    version_removed: None,
-                    name: r.key.name.clone(),
-                    dns_record_data: serde_json::to_value(&r.records)?,
-                })
+                DnsName::new(
+                    self.dns_zone_id,
+                    r.key.name.clone(),
+                    self.version,
+                    None,
+                    r.records.clone(),
+                )
             })
             .collect::<Result<Vec<_>, _>>()
     }

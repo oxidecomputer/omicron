@@ -75,6 +75,7 @@ mod volume;
 mod vpc;
 mod zpool;
 
+pub use rack::RackInit;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
@@ -1090,13 +1091,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack.id(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                internal_dns.clone(),
-                external_dns.clone(),
+                RackInit {
+                    rack_id: rack.id(),
+                    services: vec![],
+                    datasets: vec![],
+                    service_ip_pool_ranges: vec![],
+                    certificates: vec![],
+                    internal_dns: internal_dns.clone(),
+                    external_dns: external_dns.clone(),
+                },
             )
             .await
             .unwrap();
@@ -1106,13 +1109,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack.id(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
-                internal_dns,
-                external_dns,
+                RackInit {
+                    rack_id: rack.id(),
+                    services: vec![],
+                    datasets: vec![],
+                    service_ip_pool_ranges: vec![],
+                    certificates: vec![],
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await
             .unwrap();
