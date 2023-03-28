@@ -908,7 +908,7 @@ mod test {
     #[tokio::test]
     async fn test_dns_uniqueness() {
         let logctx = dev::test_setup_log("test_dns_uniqueness");
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
         let now = Utc::now();
 
@@ -998,5 +998,8 @@ mod test {
                 .to_string()
                 .contains("duplicate key value violates unique constraint"));
         }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
