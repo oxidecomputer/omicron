@@ -4,11 +4,16 @@ This document describes how to run an environment with boundary services.
 It's a quick rundown and assumes knowledge of the basic setup described in the
 Running Omicron (Non-Simulated) document.
 
-== 0. Install softnpu ASIC emulator machinery
+== 0. Download SoftNPU ASIC emulator machinery
+
+Grab the SoftNPU (ASIC simulator, scadm, P4 program, etc.) from CI:
 
 ----
-./tools/install_softnpu_machinery.sh
+./tools/ci_download_softnpu_machinery
 ----
+
+(By default `install_runner_prerequisites.sh` will take care of running
+`ci_download_softnpu_machinery` for you.)
 
 == 1. Setup virtual hardware
 
@@ -47,7 +52,7 @@ but feel free to tweak it as needed.
 
 ----
 $ ./tools/scrimlet/softnpu-init.sh
-++ netstat -rn
+++ netstat -rn -f inet
 ++ grep default
 ++ awk -F ' ' '{print $2}'
 + GATEWAY_IP=10.85.0.1
@@ -55,7 +60,9 @@ $ ./tools/scrimlet/softnpu-init.sh
 Using 10.85.0.1 as gateway ip
 ++ arp 10.85.0.1
 ++ awk -F ' ' '{print $4}'
-+ gateway_mac=68:d7:9a:1f:77:a1
++ GATEWAY_MAC=68:d7:9a:1f:77:a1
++ echo 'Using 68:d7:9a:1f:77:a1 as gateway mac'
+Using 68:d7:9a:1f:77:a1 as gateway mac
 + ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 1:0 100G RS
 + ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 2:0 100G RS
 + ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 1:0 fe80::aae1:deff:fe01:701c

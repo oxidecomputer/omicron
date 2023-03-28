@@ -55,6 +55,7 @@
 //! thereafter.
 
 use super::config::SetupServiceConfig as Config;
+use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
@@ -114,6 +115,9 @@ pub enum SetupServiceError {
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
 
+    #[error("Error resetting sled: {0}")]
+    SledReset(String),
+
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
@@ -172,6 +176,23 @@ impl RackSetupService {
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        });
+
+        RackSetupService { handle }
+    }
+
+    pub(crate) fn new_reset_rack(
+        log: Logger,
+        local_bootstrap_agent: BootstrapAgentHandle,
+    ) -> Self {
+        let handle = tokio::task::spawn(async move {
+            let svc = ServiceInner::new(log.clone());
+            if let Err(e) = svc.reset(local_bootstrap_agent).await {
+                warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
                 Ok(())
@@ -624,6 +645,30 @@ impl ServiceInner {
         .await?;
 
         info!(self.log, "Handoff to Nexus is complete");
+        Ok(())
+    }
+
+    async fn reset(
+        &self,
+        local_bootstrap_agent: BootstrapAgentHandle,
+    ) -> Result<(), SetupServiceError> {
+        // Gather all peer addresses that we can currently see on the bootstrap
+        // network.
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let peer_addrs = ddm_admin_client.peer_addrs().await?;
+        let our_bootstrap_address = local_bootstrap_agent.our_address();
+        let all_addrs = peer_addrs
+            .chain(iter::once(our_bootstrap_address))
+            .map(|addr| {
+                SocketAddrV6::new(addr, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
+            })
+            .collect::<Vec<_>>();
+
+        local_bootstrap_agent
+            .reset_sleds(all_addrs)
+            .await
+            .map_err(SetupServiceError::SledReset)?;
+
         Ok(())
     }
 
