@@ -1980,7 +1980,7 @@ dependencies = [
  "rand 0.8.5",
  "reqwest",
  "russh",
- "russh-keys 0.24.1",
+ "russh-keys",
  "tokio",
 ]
 
@@ -5938,7 +5938,7 @@ dependencies = [
  "poly1305 0.8.0",
  "rand 0.8.5",
  "russh-cryptovec",
- "russh-keys 0.37.1",
+ "russh-keys",
  "sha1",
  "sha2 0.10.6",
  "subtle",
@@ -5955,42 +5955,6 @@ checksum = "c3fdf036c2216b554053d19d4af45c1722d13b00ac494ea19825daf4beac034e"
 dependencies = [
  "libc",
  "winapi",
-]
-
-[[package]]
-name = "russh-keys"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "615654ffa6112500f8b1cde4085031ff3addb5664288817bcb585c829650ca20"
-dependencies = [
- "aes",
- "bcrypt-pbkdf",
- "bit-vec",
- "block-padding",
- "byteorder",
- "cbc",
- "ctr",
- "data-encoding",
- "dirs",
- "ed25519-dalek",
- "futures",
- "hmac",
- "inout",
- "log",
- "md5",
- "num-bigint",
- "num-integer",
- "pbkdf2",
- "rand 0.7.3",
- "rand_core 0.5.1",
- "russh-cryptovec",
- "serde",
- "serde_derive",
- "sha2 0.10.6",
- "thiserror",
- "tokio",
- "tokio-stream",
- "yasna",
 ]
 
 [[package]]
