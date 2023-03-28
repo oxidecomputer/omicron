@@ -31,7 +31,7 @@ impl ReservoirControl {
         cmd.env("LC_ALL", "C.UTF-8");
 
         cmd.arg(RSRVRCTRL);
-        cmd.arg("-q");
+        cmd.arg("-s");
         cmd.arg(size.to_whole_mebibytes().to_string());
 
         execute(&mut cmd)?;
