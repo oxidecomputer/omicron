@@ -236,6 +236,8 @@ pub struct RackInitializationRequest {
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
 }
 
+pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
+pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsKv = dns_service_client::types::DnsKv;
 pub type DnsRecordKey = dns_service_client::types::DnsRecordKey;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
