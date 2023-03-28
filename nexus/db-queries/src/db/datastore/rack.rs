@@ -42,16 +42,6 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
-#[derive(Debug)]
-enum RackInitError {
-    AddingIp(Error),
-    ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
-    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-    RackUpdate(PoolError),
-    DnsSerialization(Error),
-}
-type TxnError = TransactionError<RackInitError>;
-
 /// Groups arguments related to rack initialization
 pub struct RackInit {
     pub rack_id: Uuid,
@@ -116,6 +106,8 @@ impl DataStore {
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
 
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
         let rack_id = rack_init.rack_id;
         let services = rack_init.services;
         let datasets = rack_init.datasets;
@@ -124,7 +116,15 @@ impl DataStore {
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        #[derive(Debug)]
+        enum RackInitError {
+            AddingIp(Error),
+            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+            RackUpdate(PoolError),
+            DnsSerialization(Error),
+        }
+        type TxnError = TransactionError<RackInitError>;
 
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;

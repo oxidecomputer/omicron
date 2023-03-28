@@ -67,6 +67,13 @@ pub struct DnsName {
     pub version_removed: Option<Generation>,
     pub name: String,
 
+    // The raw record data in each row is stored as a JSON-serialized
+    // `DnsRecord` (not to be confused with `params::DnsRecord, although the
+    // types are identical).  This is an implementation detail hidden behind
+    // this struct.  For writes, consumers provide a `Vec<params::DnsRecord>` in
+    // `DnsName::new()`.  For reads, consumers use `DnsName::records()` to get a
+    // `Vec<params::DnsRecord>`.  This struct takes care of converting to/from
+    // the stored representation (which happens to be identical).
     dns_record_data: serde_json::Value,
 }
 
@@ -115,6 +122,8 @@ impl DnsName {
 /// separately here for stability: this type is serialized to JSON and stored
 /// into the database.  We don't want the serialized from to change accidentally
 /// because someone happens to change the DNS server API.
+///
+/// BE CAREFUL MODIFYING THIS STRUCT.
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum DnsRecord {
@@ -146,6 +155,8 @@ impl From<DnsRecord> for params::DnsRecord {
 /// separately here for stability: this type is serialized to JSON and stored
 /// into the database.  We don't want the serialized from to change accidentally
 /// because someone happens to change the DNS server API.
+///
+/// BE CAREFUL MODIFYING THIS STRUCT.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename = "Srv")]
 pub struct SRV {
