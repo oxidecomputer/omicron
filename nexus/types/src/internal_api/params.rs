@@ -55,6 +55,11 @@ pub struct SledAgentStartupInfo {
 
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+
+    /// Amount of RAM dedicated to the VMM reservoir
+    ///
+    /// Must be smaller than "usable_physical_ram".
+    pub reservoir_size: ByteCount,
 }
 
 /// Describes the type of physical disk.

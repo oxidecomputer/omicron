@@ -22,8 +22,8 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::{
-    external::ByteCount, internal::nexus::DiskRuntimeState,
-    internal::nexus::InstanceRuntimeState, internal::nexus::UpdateArtifactId,
+    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
+    internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -63,12 +63,6 @@ pub enum Error {
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
-
-    #[error("Failed to calculate RAM size")]
-    BadRamSize(omicron_common::api::external::ByteCountRangeError),
-
-    #[error("Failed to create reservoir: {0}")]
-    Reservoir(#[from] illumos_utils::rsrvrctl::Error),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -261,6 +255,9 @@ impl SledAgent {
                 storage.upsert_zpool(pool.clone(), None).await;
             }
         }
+        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
+            .map_err(|e| Error::Hardware(e))?;
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             lazy_nexus_client.clone(),
@@ -268,32 +265,12 @@ impl SledAgent {
             *sled_address.ip(),
             request.gateway.mac.0,
         )?;
+        instances.set_reservoir_size(&hardware)?;
 
         let svc_config = services::Config::new(
             config.sidecar_revision.clone(),
             request.gateway.address,
         );
-
-        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
-            .map_err(|e| Error::Hardware(e))?;
-
-        // Set the reservoir to 80% of the physical RAM by default.
-        //
-        // TODO:
-        // - Make this configurable?
-        // - Report it to Nexus?
-        let usable_physical_ram = hardware.usable_physical_ram_bytes();
-        let reservoir_size = ((usable_physical_ram as f64) * 0.80) as i64;
-        #[allow(non_upper_case_globals)]
-        const MiB: i64 = 1024 * 1024;
-        let reservoir_size = ByteCount::try_from((reservoir_size / MiB) * MiB)
-            .map_err(Error::BadRamSize)?;
-        illumos_utils::rsrvrctl::ReservoirControl::set(reservoir_size)?;
-
-        let update_config =
-            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
-        let updates = UpdateManager::new(update_config);
-
         services
             .sled_agent_started(
                 svc_config,
@@ -302,6 +279,10 @@ impl SledAgent {
                 request.rack_id,
             )
             .await?;
+
+        let update_config =
+            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
+        let updates = UpdateManager::new(update_config);
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -439,6 +420,7 @@ impl SledAgent {
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
 
         let log = log.clone();
         let fut = async move {
@@ -475,6 +457,9 @@ impl SledAgent {
                             usable_hardware_threads,
                             usable_physical_ram: nexus_client::types::ByteCount(
                                 usable_physical_ram,
+                            ),
+                            reservoir_size: nexus_client::types::ByteCount(
+                                reservoir_size.to_bytes(),
                             ),
                         },
                     )

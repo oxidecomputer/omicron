@@ -52,6 +52,7 @@ impl super::Nexus {
                 is_scrimlet,
                 usable_hardware_threads: info.usable_hardware_threads,
                 usable_physical_ram: info.usable_physical_ram.into(),
+                reservoir_size: info.reservoir_size.into(),
             },
             self.rack_id,
         );

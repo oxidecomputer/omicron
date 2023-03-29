@@ -13,6 +13,7 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -27,6 +28,9 @@ use crate::instance::MockInstance as Instance;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Failed to calculate RAM size")]
+    BadRamSize(omicron_common::api::external::ByteCountRangeError),
+
     #[error("Instance error: {0}")]
     Instance(#[from] crate::instance::Error),
 
@@ -35,6 +39,9 @@ pub enum Error {
 
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Failed to create reservoir: {0}")]
+    Reservoir(#[from] illumos_utils::rsrvrctl::Error),
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
@@ -46,6 +53,8 @@ pub enum Error {
 struct InstanceManagerInternal {
     log: Logger,
     lazy_nexus_client: LazyNexusClient,
+
+    reservoir_size: Mutex<ByteCount>,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -75,6 +84,7 @@ impl InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
                 lazy_nexus_client,
+                reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager: PortManager::new(
@@ -84,6 +94,27 @@ impl InstanceManager {
                 ),
             }),
         })
+    }
+
+    /// Stores the reservoir size to 80% of the usable physical RAM
+    pub fn set_reservoir_size(
+        &self,
+        hardware: &sled_hardware::HardwareManager,
+    ) -> Result<(), Error> {
+        let usable_physical_ram = hardware.usable_physical_ram_bytes();
+        let reservoir_size = ((usable_physical_ram as f64) * 0.80) as i64;
+        #[allow(non_upper_case_globals)]
+        const MiB: i64 = 1024 * 1024;
+        let reservoir_size = ByteCount::try_from((reservoir_size / MiB) * MiB)
+            .map_err(Error::BadRamSize)?;
+        illumos_utils::rsrvrctl::ReservoirControl::set(reservoir_size)?;
+        *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
+        Ok(())
+    }
+
+    /// Returns the last-set value of the reservoir size
+    pub fn reservoir_size(&self) -> ByteCount {
+        *self.inner.reservoir_size.lock().unwrap()
     }
 
     /// Idempotently ensures that the given Instance (described by

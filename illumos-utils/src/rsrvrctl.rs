@@ -18,9 +18,13 @@ pub enum Error {
     ExecutionError(#[from] crate::ExecutionError),
 }
 
+/// Controls the size of the memory reservoir
 pub struct ReservoirControl {}
 
 impl ReservoirControl {
+    /// Sets the reservoir to a particular size.
+    ///
+    /// - "size" must be exactly divisible by a MiB
     pub fn set(size: ByteCount) -> Result<(), Error> {
         if size.to_bytes() % (1024 * 1024) != 0 {
             return Err(Error::InvalidSize(size));

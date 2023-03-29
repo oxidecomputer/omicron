@@ -2237,6 +2237,14 @@
               }
             ]
           },
+          "reservoir_size": {
+            "description": "Amount of RAM dedicated to the VMM reservoir\n\nMust be smaller than \"usable_physical_ram\".",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
           "role": {
             "description": "Describes the responsibilities of the sled",
             "allOf": [
@@ -2266,6 +2274,7 @@
         },
         "required": [
           "baseboard",
+          "reservoir_size",
           "role",
           "sa_address",
           "usable_hardware_threads",

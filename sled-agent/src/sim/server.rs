@@ -96,6 +96,7 @@ impl Server {
                         },
                         usable_hardware_threads: 4,
                         usable_physical_ram: NexusTypes::ByteCount(1 << 30),
+                        reservoir_size: NexusTypes::ByteCount(1 << 29),
                     },
                 )
                 .await)
