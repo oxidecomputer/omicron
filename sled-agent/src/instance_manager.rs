@@ -6,8 +6,8 @@
 
 use crate::nexus::LazyNexusClient;
 use crate::params::{
-    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -227,6 +227,26 @@ impl InstanceManager {
 
         let new_state = instance.put_state(target).await?;
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    /// Idempotently attempts to set the instance's migration IDs to the
+    /// supplied IDs.
+    pub async fn put_migration_ids(
+        &self,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let (_, instance) = self
+            .inner
+            .instances
+            .lock()
+            .unwrap()
+            .get(&instance_id)
+            .ok_or_else(|| Error::NoSuchInstance(instance_id))?
+            .clone();
+
+        Ok(instance.put_migration_ids(old_runtime, migration_ids).await?)
     }
 
     pub async fn instance_issue_disk_snapshot_request(
