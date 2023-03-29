@@ -158,9 +158,9 @@ impl Runner {
             current_event: self.current_event,
             breakpoints: self.breakpoints.clone(),
             is_playing: self.is_playing,
-            playback_speedup: self.playback_speedup.clone(),
-            playback_slowdown: self.playback_slowdown.clone(),
-            tick_interval: self.tick_interval.clone(),
+            playback_speedup: self.playback_speedup,
+            playback_slowdown: self.playback_slowdown,
+            tick_interval: self.tick_interval,
         })
     }
 
@@ -174,14 +174,14 @@ impl Runner {
         }
 
         if snapshot.history.len() == self.current_event {
-            Rpy::Event(self.current_event as usize)
+            Rpy::Event(self.current_event)
         } else {
             let event = snapshot.history[self.current_event].clone();
             if let Err(e) = self.core.handle_event(event, None, None) {
                 return Rpy::Err(format!("Runner error: {e}"));
             }
             self.current_event += 1;
-            Rpy::Event(self.current_event as usize)
+            Rpy::Event(self.current_event)
         }
     }
 
@@ -196,7 +196,7 @@ impl Runner {
 
         loop {
             if snapshot.history.len() == self.current_event {
-                return Rpy::Event(self.current_event as usize);
+                return Rpy::Event(self.current_event);
             } else {
                 let event = snapshot.history[self.current_event].clone();
                 let is_tick = event.is_tick();
@@ -205,7 +205,7 @@ impl Runner {
                 }
                 self.current_event += 1;
                 if !is_tick {
-                    return Rpy::Event(self.current_event as usize);
+                    return Rpy::Event(self.current_event);
                 }
             }
         }
