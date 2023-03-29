@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Developer tool for setting up a local database for use by Omicron
+//! Developer tool for easily running bits of Omicron
 
 use anyhow::anyhow;
 use anyhow::bail;
@@ -10,13 +10,13 @@ use anyhow::Context;
 use clap::Args;
 use clap::Parser;
 use futures::stream::StreamExt;
+use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_test_utils::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
 use std::path::PathBuf;
-use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -26,7 +26,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
-        OmicronDb::Run { ref args } => cmd_run_all(args).await,
+        OmicronDb::RunAll { ref args } => cmd_run_all(args).await,
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -64,7 +64,7 @@ enum OmicronDb {
     },
 
     /// Run a full simulated control plane
-    Run {
+    RunAll {
         #[clap(flatten)]
         args: RunAllArgs,
     },
@@ -296,94 +296,75 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct RunAllArgs {
-    #[clap(flatten)]
-    db_args: DbRunArgs,
-    #[clap(flatten)]
-    ch_args: ChRunArgs,
-
-    #[clap(name = "NEXUS_CONFIG_FILE_PATH", action)]
-    nexus_config_file_path: PathBuf,
-    #[clap(name = "OXIMETER_CONFIG_FILE_PATH", action)]
-    oximeter_config_file_path: PathBuf,
+    /// Nexus external API listen port.  Use `0` to request any available port.
+    #[clap(long, action)]
+    nexus_listen_port: Option<u16>,
 }
 
 async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
-    // XXX-dap
-    // XXX-dap should provide defaults for everything
-    // XXX-dap ideally this would show you the commands you run by hand
-    // XXX-dap ideally ^C would gracefully stop everything
-    let db_args = args.db_args.clone();
-    let h1 = tokio::spawn(async move { cmd_db_run(&db_args).await });
+    // Start a stream listening for SIGINT
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
 
-    // XXX-dap wait for populate
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-
-    let ch_args = args.ch_args.clone();
-    let h2 = tokio::spawn(async move { cmd_clickhouse_run(&ch_args).await });
-
-    // Start Nexus
-    let config = omicron_nexus::Config::from_file(&args.nexus_config_file_path)
-        .context("reading Nexus config")?;
-    let h3 = tokio::spawn(async move {
-        omicron_nexus::run_server(&config)
-            .await
-            .map_err(|error| anyhow!("running Nexus: {}", error))
-    });
-
-    // Start Oximeter
-    let config =
-        oximeter_collector::Config::from_file(&args.oximeter_config_file_path)
-            .context("reading Oximeter config")?;
-    let oximeter_id = Uuid::new_v4();
-    let oximeter_address = "[::1]:12223".parse().unwrap(); // XXX-dap
-    let h4 = tokio::spawn(async move {
-        oximeter_collector::Oximeter::new(
-            &config,
-            &oximeter_collector::OximeterArguments {
-                id: oximeter_id,
-                address: oximeter_address,
-            },
-        )
-        .await
-        .unwrap()
-        .serve_forever()
-        .await
-    });
-
-    // Start Sled Agent
-    // XXX-dap copied
-    let tmp = tempfile::tempdir().context("creating temporary directory")?;
-    let config = omicron_sled_agent::sim::Config {
-        id: Uuid::new_v4(),
-        sim_mode: omicron_sled_agent::sim::SimMode::Auto,
-        nexus_address: "127.0.0.1:12221".parse().unwrap(), // XXX-dap
-        dropshot: dropshot::ConfigDropshot {
-            bind_address: "[::1]:12345".parse().unwrap(),
-            request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
-        },
-        log: dropshot::ConfigLogging::StderrTerminal {
-            level: dropshot::ConfigLoggingLevel::Info,
-        },
-        storage: omicron_sled_agent::sim::ConfigStorage {
-            // Create 10 "virtual" U.2s, with 1 TB of storage.
-            zpools: vec![
-                omicron_sled_agent::sim::ConfigZpool { size: 1 << 40 };
-                10
-            ],
-            ip: "::1".parse().unwrap(), // XXX-dap
-        },
-        updates: omicron_sled_agent::sim::ConfigUpdates {
-            zone_artifact_path: tmp.path().to_path_buf(),
-        },
+    // Read configuration.
+    let config_str = include_str!("../../../nexus/examples/config.toml");
+    let mut config: omicron_common::nexus_config::Config =
+        toml::from_str(config_str).context("parsing example config")?;
+    config.pkg.log = dropshot::ConfigLogging::File {
+        // See LogContext::new(),
+        path: "UNUSED".to_string().into(),
+        level: dropshot::ConfigLoggingLevel::Trace,
+        if_exists: dropshot::ConfigLoggingIfExists::Fail,
     };
 
-    let h5 = tokio::spawn(async move {
-        omicron_sled_agent::sim::run_server(&config).await
-    });
+    if let Some(p) = args.nexus_listen_port {
+        config.deployment.dropshot_external.bind_address.set_port(p);
+    }
 
-    let _ = tokio::join!(h1, h2, h3, h4, h5);
+    // Start up a ControlPlaneTestContext, which tautologically sets up
+    // everything needed for a simulated control plane.
+    println!("omicron-dev: setting up all services ... ");
+    let cptestctx = nexus_test_utils::test_setup_with_config::<
+        omicron_nexus::Server,
+    >("omicron-dev", &mut config)
+    .await;
+    println!("omicron-dev: services are running.");
+
+    // Print out basic information about what was started.
+    // NOTE: The stdout strings here are not intended to be stable, but they are
+    // used by the test suite.
+    let addr =
+        cptestctx.server.get_http_server_external_address().await.ok_or_else(
+            || anyhow!("Nexus unexpectedly had no external HTTP address"),
+        )?;
+    println!("omicron-dev: nexus external API:    {:?}", addr);
+    println!(
+        "omicron-dev: nexus internal API:    {:?}",
+        cptestctx.server.get_http_server_internal_address().await,
+    );
+    println!(
+        "omicron-dev: cockroachdb pid:       {}",
+        cptestctx.database.pid(),
+    );
+    println!(
+        "omicron-dev: cockroachdb URL:       {}",
+        cptestctx.database.pg_config()
+    );
+    println!(
+        "omicron-dev: cockroachdb directory: {}",
+        cptestctx.database.temp_dir().display()
+    );
+
+    // Wait for a signal.
+    let caught_signal = signal_stream.next().await;
+    assert_eq!(caught_signal.unwrap(), SIGINT);
+    eprintln!(
+        "omicron-dev: caught signal, shutting down and removing \
+        temporary directory"
+    );
+
+    cptestctx.teardown().await;
     Ok(())
 }
