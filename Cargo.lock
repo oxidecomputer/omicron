@@ -8467,6 +8467,7 @@ dependencies = [
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
+ "petgraph",
  "reqwest",
  "schemars",
  "serde",

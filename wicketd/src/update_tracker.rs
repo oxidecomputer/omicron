@@ -13,7 +13,11 @@ use crate::update_events::UpdateEventKind;
 use crate::update_events::UpdateNormalEventKind;
 use crate::update_events::UpdateStateKind;
 use crate::update_events::UpdateTerminalEventKind;
-use anyhow::anyhow;
+use crate::update_executor::MajorComponent;
+use crate::update_executor::StepProgress;
+use crate::update_executor::StepRegistrar;
+use crate::update_executor::UpdateExecContext;
+use crate::update_executor::UpdateExecutor;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
@@ -41,6 +45,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
+use std::borrow::Cow;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
@@ -50,6 +55,7 @@ use std::time::Duration;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -213,20 +219,24 @@ impl UpdateTracker {
             let ipr_start_receiver =
                 self.ipr_update_tracker.register(update_id).await;
 
-            let update_driver = UpdateDriver {
+            let update_cx = UpdateContext {
                 update_id,
                 sp,
                 mgs_client: self.mgs_client.clone(),
                 upload_trampoline_phase_2_to_mgs,
-                update_log: Arc::clone(&update_log),
                 log: self.log.new(o!(
                     "sp" => format!("{sp:?}"),
                     "update_id" => update_id.to_string(),
                 )),
             };
+            let update_driver =
+                UpdateDriver { update_log: Arc::clone(&update_log) };
 
-            let task =
-                tokio::spawn(update_driver.run(plan, ipr_start_receiver));
+            let task = tokio::spawn(update_driver.run(
+                plan,
+                update_cx,
+                ipr_start_receiver,
+            ));
 
             SpUpdateData { task, update_log }
         };
@@ -321,30 +331,22 @@ impl StartUpdateError {
 
 #[derive(Debug)]
 struct UpdateDriver {
-    update_id: Uuid,
-    sp: SpIdentifier,
-    mgs_client: gateway_client::Client,
-    upload_trampoline_phase_2_to_mgs:
-        watch::Receiver<UploadTrampolinePhase2ToMgsStatus>,
     update_log: Arc<StdMutex<UpdateLog>>,
-    log: Logger,
 }
 
 impl UpdateDriver {
     async fn run(
         mut self,
         plan: UpdatePlan,
+        update_cx: UpdateContext,
         ipr_start_receiver: IprStartReceiver,
     ) {
-        if let Err(err) = self.run_impl(plan, ipr_start_receiver).await {
-            error!(self.log, "update failed"; "err" => ?err);
+        if let Err(err) =
+            self.run_impl(plan, &update_cx, ipr_start_receiver).await
+        {
+            error!(update_cx.log, "update failed"; "err" => ?err);
             self.push_update_terminal_failure(err);
         }
-    }
-
-    fn set_current_update_state(&self, kind: UpdateStateKind) {
-        let state = UpdateState { timestamp: Instant::now(), kind };
-        self.update_log.lock().unwrap().current = Some(state);
     }
 
     // While the update log is held:
@@ -377,14 +379,6 @@ impl UpdateDriver {
         self.push_update_events(events.into_iter(), new_current);
     }
 
-    fn push_update_normal_event_now(
-        &self,
-        kind: UpdateNormalEventKind,
-        new_current: Option<UpdateStateKind>,
-    ) {
-        self.push_update_event_now(UpdateEventKind::Normal(kind), new_current);
-    }
-
     fn push_update_terminal_failure(&self, kind: UpdateTerminalEventKind) {
         self.push_update_event_now(UpdateEventKind::Terminal(kind), None);
     }
@@ -392,6 +386,7 @@ impl UpdateDriver {
     async fn run_impl(
         &mut self,
         plan: UpdatePlan,
+        update_cx: &UpdateContext,
         ipr_start_receiver: IprStartReceiver,
     ) -> Result<(), UpdateTerminalEventKind> {
         // TODO: We currently do updates in the order RoT -> SP -> host. This is
@@ -410,115 +405,521 @@ impl UpdateDriver {
         //    let us ship two separate archives in case there's a bug: one with
         //    the newest components for the SP and RoT, and one without.
 
-        let (rot_artifact, sp_artifact) = match self.sp.type_ {
+        // Build the update executor.
+        let mut executor = UpdateExecutor::new(&update_cx.log);
+
+        let (rot_artifact, sp_artifact) = match update_cx.sp.type_ {
             SpType::Sled => (&plan.gimlet_rot, &plan.gimlet_sp),
             SpType::Power => (&plan.psc_rot, &plan.psc_sp),
             SpType::Switch => (&plan.sidecar_rot, &plan.sidecar_sp),
         };
 
-        info!(self.log, "starting RoT update"; "artifact" => ?rot_artifact.id);
-        self.update_sp_component(rot_artifact, SpComponent::ROT.const_as_str())
-            .await
-            .map_err(|err| UpdateTerminalEventKind::ArtifactUpdateFailed {
-                artifact: rot_artifact.id.clone(),
-                reason: format!("{err:#}"),
-            })?;
+        let mut rot_registrar = executor.new_component(MajorComponent::Rot);
+        // The SP only has one updateable firmware slot ("the inactive bank") -
+        // we always pass 0.
+        let firmware_slot = 0;
 
-        info!(self.log, "starting SP update"; "artifact" => ?sp_artifact.id);
-        self.update_sp_component(
+        self.register_sp_component_steps(
+            update_cx,
+            &mut rot_registrar,
+            rot_artifact,
+            SpComponent::ROT.const_as_str(),
+            firmware_slot,
+            Default::default(),
+        );
+
+        let mut sp_registrar = executor.new_component(MajorComponent::Sp);
+        self.register_sp_component_steps(
+            update_cx,
+            &mut sp_registrar,
             sp_artifact,
             SpComponent::SP_ITSELF.const_as_str(),
-        )
-        .await
-        .map_err(|err| {
-            UpdateTerminalEventKind::ArtifactUpdateFailed {
-                artifact: sp_artifact.id.clone(),
-                reason: format!("{err:#}"),
-            }
-        })?;
-        self.push_update_normal_event_now(
-            UpdateNormalEventKind::ArtifactUpdateComplete {
-                artifact: sp_artifact.id.clone(),
-            },
-            Some(UpdateStateKind::ResettingSp),
+            firmware_slot,
+            Default::default(),
         );
+        sp_registrar.register_step("Resetting SP", |_cx| async move {
+            update_cx.reset_sp().await.map_err(|err| {
+                UpdateTerminalEventKind::SpResetFailed {
+                    reason: format!("{err:#}"),
+                }
+            })
+        });
 
-        info!(self.log, "all updates complete; resetting SP");
-        self.reset_sp().await.map_err(|err| {
-            UpdateTerminalEventKind::SpResetFailed {
-                reason: format!("{err:#}"),
-            }
-        })?;
-        self.push_update_normal_event_now(
-            UpdateNormalEventKind::SpResetComplete,
-            None,
-        );
-
-        if self.sp.type_ == SpType::Sled {
-            self.run_sled(&plan, ipr_start_receiver).await?;
+        if update_cx.sp.type_ == SpType::Sled {
+            self.register_sled_steps(
+                update_cx,
+                &mut executor,
+                &plan,
+                ipr_start_receiver,
+            );
         }
+
+        // TODO: execute the update executor.
 
         Ok(())
     }
 
-    async fn run_sled(
-        &mut self,
-        plan: &UpdatePlan,
+    fn register_sp_component_steps<'exec, 'a: 'exec>(
+        &self,
+        update_cx: &'a UpdateContext,
+        registrar: &mut StepRegistrar<'exec, 'a>,
+        artifact: &'a ArtifactIdData,
+        component_name: &'static str,
+        firmware_slot: u16,
+        step_names: SpComponentUpdateStepNames,
+    ) {
+        let update_id = Uuid::new_v4();
+
+        registrar.register_step(
+            step_names.sending.clone(),
+            move |_cx| async move {
+                // TODO: we should be able to report some sort of progress here.
+                update_cx
+                    .mgs_client
+                    .sp_component_update(
+                        update_cx.sp.type_,
+                        update_cx.sp.slot,
+                        component_name,
+                        firmware_slot,
+                        &update_id,
+                        reqwest::Body::wrap_stream(buf_list_to_try_stream(
+                            BufList::from_iter([artifact.data.0.clone()]),
+                        )),
+                    )
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalEventKind::ArtifactUpdateFailed {
+                            artifact: artifact.id.clone(),
+                            // This is an HTTP error, which currently prints out the
+                            // entire cause chain. This doesn't obey the usual Rust
+                            // rules about printing out the chain in the Display
+                            // section, but just accept this for now.
+                            //
+                            // Other places where this is an HTTP error are marked
+                            // HTTP-ERROR-FULL-CAUSE-CHAIN for easy searchability.
+                            //
+                            // Ideally we'd be able to return a list of causes next
+                            // to the reason. TODO: do that.
+                            reason: format!("failed to send artifact: {error}"),
+                        }
+                    })?;
+                Ok(())
+            },
+        );
+
+        self.register_component_update_completion_steps(
+            update_cx,
+            registrar,
+            &artifact.id,
+            update_id,
+            component_name,
+            step_names,
+        );
+    }
+
+    fn register_component_update_completion_steps<'exec, 'a: 'exec>(
+        &self,
+        update_cx: &'a UpdateContext,
+        registrar: &mut StepRegistrar<'exec, 'a>,
+        artifact: &'a ArtifactId,
+        update_id: Uuid,
+        component: &'static str,
+        step_names: SpComponentUpdateStepNames,
+    ) {
+        // How often we poll MGS for the progress of an update once it starts.
+        const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
+
+        registrar.register_step(step_names.preparing, move |cx| async move {
+            update_cx
+                .poll_component_update(
+                    cx,
+                    ComponentUpdateStage::Preparing,
+                    update_id,
+                    component,
+                )
+                .await
+                .map_err(|error| {
+                    UpdateTerminalEventKind::ArtifactUpdateFailed {
+                        artifact: artifact.clone(),
+                        reason: format!("failed to prepare update: {error:?}"),
+                    }
+                })?;
+
+            Ok(())
+        });
+
+        registrar.register_step(step_names.writing, move |cx| async move {
+            update_cx
+                .poll_component_update(
+                    cx,
+                    ComponentUpdateStage::InProgress,
+                    update_id,
+                    component,
+                )
+                .await
+                .map_err(|error| {
+                    UpdateTerminalEventKind::ArtifactUpdateFailed {
+                        artifact: artifact.clone(),
+                        reason: format!("failed to write update: {error:?}"),
+                    }
+                })
+        });
+    }
+
+    fn register_sled_steps<'a>(
+        &self,
+        update_cx: &'a UpdateContext,
+        executor: &mut UpdateExecutor<'a>,
+        plan: &'a UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateTerminalEventKind> {
-        info!(self.log, "starting host recovery via trampoline image");
+    ) {
+        let mut host_registrar = executor.new_component(MajorComponent::Host);
+        let image_id_receiver = self.register_trampoline_phase1_steps(
+            update_cx,
+            &mut host_registrar,
+            plan,
+        );
 
-        let uploaded_trampoline_phase2_id =
-            self.install_trampoline_image(plan).await.map_err(|err| {
-                UpdateTerminalEventKind::ArtifactUpdateFailed {
-                    // `trampoline_phase_1` and `trampoline_phase_2` have the same
-                    // artifact ID, so the choice here is arbitrary.
-                    artifact: plan.trampoline_phase_1.id.clone(),
-                    reason: format!("{err:#}"),
-                }
-            })?;
+        let (sender_1, receiver_1) = oneshot::channel();
 
-        let mut ipr_receiver = self
-            .wait_for_first_installinator_progress(
-                plan,
-                ipr_start_receiver,
-                uploaded_trampoline_phase2_id,
+        host_registrar.register_step(
+            "Downloading installinator, waiting for it to start",
+            move |cx| async move {
+                // The previous step should send this value in.
+                let report_receiver = update_cx
+                    .wait_for_first_installinator_progress(
+                        &cx,
+                        ipr_start_receiver,
+                        image_id_receiver,
+                    )
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalEventKind::ArtifactUpdateFailed {
+                            artifact: plan.trampoline_phase_2.id.clone(),
+                            reason: format!("{error:?}"),
+                        }
+                    })?;
+
+                sender_1.send(report_receiver);
+
+                Ok(())
+            },
+        );
+
+        // TODO: break up into several steps.
+        host_registrar.register_step("Installinating", move |cx| async move {
+            update_cx.process_installinator_reports(receiver_1).await.map_err(
+                |error| {
+                    // TODO: get actual artifact that failed
+                    UpdateTerminalEventKind::ArtifactUpdateFailed {
+                        artifact: plan.host_phase_1.id.clone(),
+                        reason: format!("{error:?}"),
+                    }
+                },
             )
-            .await
-            .map_err(|err| {
-                UpdateTerminalEventKind::ArtifactUpdateFailed {
-                    // `trampoline_phase_1` and `trampoline_phase_2` have the
-                    // same artifact ID, so the choice here is arbitrary.
-                    artifact: plan.trampoline_phase_1.id.clone(),
-                    reason: format!("{err:#}"),
+        });
+
+        // Installinator is done: install the host phase 1 that matches the host
+        // phase 2 it installed, and boot our newly-recovered sled.
+    }
+
+    // Installs the trampoline phase 1 and configures the host to fetch phase
+    // 2 from MGS on boot, returning the image ID of that phase 2 image for use
+    // when querying MGS for progress on its delivery to the SP.
+    fn register_trampoline_phase1_steps<'exec, 'a: 'exec>(
+        &self,
+        update_cx: &'a UpdateContext,
+        registrar: &mut StepRegistrar<'exec, 'a>,
+        plan: &'a UpdatePlan,
+    ) -> oneshot::Receiver<HostPhase2RecoveryImageId> {
+        // We arbitrarily choose to store the trampoline phase 1 in host boot
+        // slot 0.
+        let trampoline_phase_1_boot_slot = 0;
+
+        self.register_deliver_host_phase1_steps(
+            update_cx,
+            registrar,
+            &plan.trampoline_phase_1,
+            "trampoline",
+            trampoline_phase_1_boot_slot,
+        );
+
+        // Wait (if necessary) for the trampoline phase 2 upload to MGS to
+        // complete. We started a task to do this the first time a sled update
+        // was started with this plan.
+        let (image_id_sender, image_id_receiver) = oneshot::channel();
+        registrar.register_step(
+            "Waiting for trampoline phase 2 upload to MGS",
+            move |_cx| async move {
+                // We expect this loop to run just once, but iterate just in
+                // case the image ID doesn't get populated the first time.
+                loop {
+                    update_cx.upload_trampoline_phase_2_to_mgs.changed().await.map_err(
+                        |_recv_err| UpdateTerminalEventKind::ArtifactUpdateFailed {
+                            artifact: plan.trampoline_phase_2.id.clone(),
+                            reason: "failed to upload trampoline phase 2 to MGS \
+                                    (was a new TUF repo uploaded?)"
+                                .to_owned(),
+                        },
+                    );
+
+                    if let Some(image_id) = update_cx.upload_trampoline_phase_2_to_mgs.borrow().uploaded_image_id.as_ref() {
+                        image_id_sender.send(image_id.clone());
+                        break;
+                    }
                 }
-            })?;
+
+                Ok(())
+            },
+        );
+
+        registrar.register_step(
+            "Setting installinator image ID",
+            move |_cx| async move {
+                let installinator_image_id = InstallinatorImageId {
+                    control_plane: plan.control_plane_hash.to_string(),
+                    host_phase_2: plan.host_phase_2_hash.to_string(),
+                    update_id: update_cx.update_id,
+                };
+                update_cx
+                    .mgs_client
+                    .sp_installinator_image_id_set(
+                        update_cx.sp.type_,
+                        update_cx.sp.slot,
+                        &installinator_image_id,
+                    )
+                    .await
+                    .map_err(|error| {
+                        // HTTP-ERROR-FULL-CAUSE-CHAIN
+                        UpdateTerminalEventKind::SetInstallinatorImageIdFailed {
+                            reason: format!(
+                                "failed to set installinator image ID: {error}"
+                            ),
+                        }
+                    })?;
+                Ok(())
+            },
+        );
+
+        registrar.register_step("Setting host startup options", move |_cx| async move {
+            update_cx.mgs_client
+                .sp_component_active_slot_set(
+                    update_cx.sp.type_,
+                    update_cx.sp.slot,
+                    SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                    &SpComponentFirmwareSlot {
+                        slot: trampoline_phase_1_boot_slot,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    // HTTP-ERROR-FULL-CAUSE-CHAIN
+                    UpdateTerminalEventKind::SetHostStartupOptionsFailed {
+                        reason: format!(
+                            "failed to set host boot flash slot: {error}"
+                        ),
+                    }
+                })?;
+
+                update_cx.mgs_client
+                .sp_startup_options_set(
+                    update_cx.sp.type_,
+                    update_cx.sp.slot,
+                    &HostStartupOptions {
+                        boot_net: false,
+                        boot_ramdisk: false,
+                        bootrd: false,
+                        kbm: false,
+                        kmdb: false,
+                        kmdb_boot: false,
+                        phase2_recovery_mode: true,
+                        prom: false,
+                        verbose: false,
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    UpdateTerminalEventKind::SetHostStartupOptionsFailed {
+                        reason: format!(
+                            "failed to set host startup options for recovery mode: {error}"
+                        ),
+                    }
+                })?;
+
+            Ok(())
+        });
+
+        // All set - boot the host and let installinator do its thing!
+        registrar.register_step(
+            "Setting host power state to A0",
+            move |_cx| async move {
+                update_cx.set_host_power_state(PowerState::A0).await
+            },
+        );
+
+        image_id_receiver
+    }
+
+    fn register_install_host_phase1_and_boot_steps<'exec, 'a: 'exec>(
+        &self,
+        update_cx: &'a UpdateContext,
+        registrar: &mut StepRegistrar<'exec, 'a>,
+        plan: &'a UpdatePlan,
+    ) {
+        // Installinator is done - set the stage for the real host to boot.
+
+        // Deliver the real host phase 1 image.
+        //
+        // TODO-correctness This choice of boot slot MUST match installinator.
+        // We could install it into both slots (and maybe we should!), but we
+        // still need to know which M.2 installinator copied the OS onto so we
+        // can set the correct boot device. Thinking out loud: Even if it
+        // doesn't do it today, installinator probably wants to _dynamically_
+        // choose an M.2 to account for missing or failed drives. Maybe its
+        // final completion message should tell us which slot (or both!) it
+        // wrote to, and then we echo that choice here?
+        let host_phase_1_boot_slot = 0;
+
+        self.register_deliver_host_phase1_steps(
+            update_cx,
+            registrar,
+            &plan.host_phase_1,
+            "host",
+            host_phase_1_boot_slot,
+        );
+
+        // Clear the installinator image ID; failing to do this is _not_ fatal,
+        // because any future update will set its own installinator ID anyway;
+        // this is for cleanliness more than anything.
+        registrar.register_step("Clearing installinator image ID", move |_cx| async move {
+            if let Err(err) = update_cx
+                .mgs_client
+                .sp_installinator_image_id_delete(update_cx.sp.type_, update_cx.sp.slot)
+                .await
+            {
+                warn!(
+                    update_cx.log,
+                    "failed to clear installinator image ID (proceeding anyway)";
+                    "err" => %err,
+                );
+            }
+
+            Ok(())
+        });
+
+        registrar.register_step(
+            "Setting startup options for standard boot",
+            move |_cx| async move {
+                update_cx
+                    .mgs_client
+                    .sp_startup_options_set(
+                        update_cx.sp.type_,
+                        update_cx.sp.slot,
+                        &HostStartupOptions {
+                            boot_net: false,
+                            boot_ramdisk: false,
+                            bootrd: false,
+                            kbm: false,
+                            kmdb: false,
+                            kmdb_boot: false,
+                            phase2_recovery_mode: false,
+                            prom: false,
+                            verbose: false,
+                        },
+                    )
+                    .await
+                    .map_err(|error| {
+                        // HTTP-ERROR-FULL-CAUSE-CHAIN
+                        UpdateTerminalEventKind::SetHostStartupOptionsFailed {
+                            reason: format!(
+                                "failed to set host startup options \
+                                 for recovery mode: {error}"
+                            ),
+                        }
+                    })?;
+
+                Ok(())
+            },
+        );
+
+        // Boot the host.
+        registrar.register_step("Booting the host", |_cx| async {
+            update_cx.set_host_power_state(PowerState::A0).await
+        });
+    }
+
+    fn register_deliver_host_phase1_steps<'exec, 'a: 'exec>(
+        &self,
+        update_cx: &'a UpdateContext,
+        registrar: &mut StepRegistrar<'exec, 'a>,
+        artifact: &'a ArtifactIdData,
+        kind: &str, // "host" or "trampoline"
+        boot_slot: u16,
+    ) {
+        const HOST_BOOT_FLASH: &str =
+            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
+
+        registrar.register_step(
+            "Setting host power state to A2",
+            move |_cx| async move {
+                update_cx.set_host_power_state(PowerState::A2).await
+            },
+        );
+
+        let step_names = SpComponentUpdateStepNames::for_host_phase_1(kind);
+
+        self.register_sp_component_steps(
+            update_cx,
+            registrar,
+            artifact,
+            HOST_BOOT_FLASH,
+            boot_slot,
+            step_names,
+        );
+    }
+}
+
+struct UpdateContext {
+    update_id: Uuid,
+    sp: SpIdentifier,
+    mgs_client: gateway_client::Client,
+    upload_trampoline_phase_2_to_mgs:
+        watch::Receiver<UploadTrampolinePhase2ToMgsStatus>,
+    log: slog::Logger,
+}
+
+impl UpdateContext {
+    async fn process_installinator_reports<'exec>(
+        &self,
+        receiver: IprStartReceiver,
+    ) -> anyhow::Result<()> {
+        // TODO: break up installinator into sections. For now we just
+        // group everything together.
+
+        // Wait until the host has finished downloading.
+        let mut ipr_receiver =
+            receiver.await.context("installinator sender died")?;
 
         while let Some(report) = ipr_receiver.recv().await {
+            // TODO: we don't use the installinator reports anywhere yet.
             self.process_installinator_report(report).await;
         }
 
         // The receiver being closed means that the installinator has completed.
-
-        // Installinator is done: install the host phase 1 that matches the host
-        // phase 2 it installed, and boot our newly-recovered sled.
-        self.install_host_phase_1_and_boot(plan).await.map_err(|err| {
-            UpdateTerminalEventKind::ArtifactUpdateFailed {
-                artifact: plan.host_phase_1.id.clone(),
-                reason: format!("{err:#}"),
-            }
-        })?;
 
         Ok(())
     }
 
     async fn wait_for_first_installinator_progress(
         &self,
-        plan: &UpdatePlan,
+        cx: &UpdateExecContext,
         mut ipr_start_receiver: IprStartReceiver,
-        uploaded_trampoline_phase2_id: HostPhase2RecoveryImageId,
+        image_id_receiver: oneshot::Receiver<HostPhase2RecoveryImageId>,
     ) -> anyhow::Result<mpsc::Receiver<ProgressReport>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+        let image_id =
+            image_id_receiver.await.context("image ID sender died")?;
 
         // Waiting for the installinator to start is a little strange. It can't
         // start until the host boots, which requires all the normal boot things
@@ -557,13 +958,6 @@ impl UpdateDriver {
             );
         }
 
-        self.set_current_update_state(
-            UpdateStateKind::WaitingForTrampolineImageDelivery {
-                artifact: plan.trampoline_phase_1.id.clone(),
-                progress: HostPhase2Progress::None,
-            },
-        );
-
         let mut interval = tokio::time::interval(MGS_PROGRESS_POLL_INTERVAL);
         interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -575,15 +969,21 @@ impl UpdateDriver {
                     break receiver.context("start sender died");
                 }
                 _ = interval.tick() => {
-                    self.poll_host_phase2_progress(plan, &uploaded_trampoline_phase2_id).await;
+                    self.poll_trampoline_phase2_progress(cx, &image_id).await;
                 }
             }
         }
     }
 
-    async fn poll_host_phase2_progress(
+    /// Polls MGS for the latest trampoline phase 2 progress.
+    ///
+    /// The naming is somewhat confusing here: the code to fetch the respective
+    /// phase 2 is present within all phase 1 ROMs, both host and trampoline.
+    /// This is why the API has the name "host phase 2" in it. However, for this
+    /// update flow it is only activated for trampoline images.
+    async fn poll_trampoline_phase2_progress(
         &self,
-        plan: &UpdatePlan,
+        cx: &UpdateExecContext,
         uploaded_trampoline_phase2_id: &HostPhase2RecoveryImageId,
     ) {
         match self
@@ -593,39 +993,28 @@ impl UpdateDriver {
             .map(|response| response.into_inner())
         {
             Ok(HostPhase2Progress::Available {
-                age,
                 image_id,
                 offset,
                 total_size,
+                ..
             }) => {
                 // Does this image ID match the one we uploaded? If so,
                 // record our current progress; if not, this is probably
                 // stale data from a past update, and we have no progress
                 // information.
-                let progress = if &image_id == uploaded_trampoline_phase2_id {
-                    HostPhase2Progress::Available {
-                        age,
-                        image_id,
-                        offset,
-                        total_size,
-                    }
-                } else {
-                    HostPhase2Progress::None
-                };
-                self.set_current_update_state(
-                    UpdateStateKind::WaitingForTrampolineImageDelivery {
-                        artifact: plan.trampoline_phase_1.id.clone(),
-                        progress,
-                    },
-                );
+                if &image_id == uploaded_trampoline_phase2_id {
+                    cx.sender
+                        .send(StepProgress::Progress {
+                            attempt: 1,
+                            current: offset,
+                            total: total_size,
+                        })
+                        .await;
+                }
             }
             Ok(HostPhase2Progress::None) => {
-                self.set_current_update_state(
-                    UpdateStateKind::WaitingForTrampolineImageDelivery {
-                        artifact: plan.trampoline_phase_1.id.clone(),
-                        progress: HostPhase2Progress::None,
-                    },
-                );
+                // No progress available -- don't send an update.
+                // XXX should we reset the StepProgress to running?
             }
             Err(err) => {
                 warn!(
@@ -636,16 +1025,13 @@ impl UpdateDriver {
         }
     }
 
-    async fn process_installinator_report(
-        &mut self,
-        mut report: ProgressReport,
-    ) {
+    async fn process_installinator_report(&self, mut report: ProgressReport) {
         let now = Instant::now();
 
         // Currently, progress reports have zero or one progress events. Don't
         // assert that here, in case this version of wicketd is updating a
         // future installinator which reports multiple progress events.
-        let new_state =
+        let _new_state =
             if let Some(event) = report.progress_events.drain(..).next() {
                 let timestamp = report
                     .total_elapsed
@@ -705,7 +1091,7 @@ impl UpdateDriver {
                 }
             };
 
-        let events = report.completion_events.into_iter().map(|event| {
+        let _events = report.completion_events.into_iter().map(|event| {
             let event_kind =
                 UpdateNormalEventKind::InstallinatorEvent(event.kind);
 
@@ -720,302 +1106,25 @@ impl UpdateDriver {
 
             (timestamp, UpdateEventKind::Normal(event_kind))
         });
-
-        self.push_update_events(events, Some(new_state));
-    }
-
-    // Installs the installinator phase 1 and configures the host to fetch phase
-    // 2 from MGS on boot, returning the image ID of that phase 2 image for use
-    // when querying MGS for progress on its delivery to the SP.
-    async fn install_trampoline_image(
-        &mut self,
-        plan: &UpdatePlan,
-    ) -> anyhow::Result<HostPhase2RecoveryImageId> {
-        // We arbitrarily choose to store the trampoline phase 1 in host boot
-        // slot 0.
-        let trampoline_phase_1_boot_slot = 0;
-        self.deliver_host_phase1(
-            &plan.trampoline_phase_1,
-            trampoline_phase_1_boot_slot,
-        )
-        .await?;
-
-        // Wait (if necessary) for the trampoline phase 2 upload to MGS to
-        // complete. We started a task to do this the first time a sled update
-        // was started with this plan.
-        let uploaded_trampoline_phase2_id =
-            self.wait_for_upload_tramponline_to_mgs(plan).await?;
-
-        // Set the installinator image ID.
-        self.set_current_update_state(
-            UpdateStateKind::SettingInstallinatorOptions,
-        );
-        let installinator_image_id = InstallinatorImageId {
-            control_plane: plan.control_plane_hash.to_string(),
-            host_phase_2: plan.host_phase_2_hash.to_string(),
-            update_id: self.update_id,
-        };
-        self.mgs_client
-            .sp_installinator_image_id_set(
-                self.sp.type_,
-                self.sp.slot,
-                &installinator_image_id,
-            )
-            .await
-            .context("failed to set installinator image ID")?;
-
-        // Ensure we've selected the correct slot from which to boot, and set
-        // the host startup option to fetch the trampoline phase 2 from MGS.
-        self.set_current_update_state(
-            UpdateStateKind::SettingHostStartupOptions,
-        );
-        self.mgs_client
-            .sp_component_active_slot_set(
-                self.sp.type_,
-                self.sp.slot,
-                SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                &SpComponentFirmwareSlot { slot: trampoline_phase_1_boot_slot },
-            )
-            .await
-            .context("failed to set host boot flash slot")?;
-        self.mgs_client
-            .sp_startup_options_set(
-                self.sp.type_,
-                self.sp.slot,
-                &HostStartupOptions {
-                    boot_net: false,
-                    boot_ramdisk: false,
-                    bootrd: false,
-                    kbm: false,
-                    kmdb: false,
-                    kmdb_boot: false,
-                    phase2_recovery_mode: true,
-                    prom: false,
-                    verbose: false,
-                },
-            )
-            .await
-            .context("failed to set host startup options for recovery mode")?;
-
-        // All set - boot the host and let installinator do its thing!
-        self.set_host_power_state(PowerState::A0).await?;
-
-        Ok(uploaded_trampoline_phase2_id)
-    }
-
-    async fn install_host_phase_1_and_boot(
-        &self,
-        plan: &UpdatePlan,
-    ) -> anyhow::Result<()> {
-        // Installinator is done - set the stage for the real host to boot.
-
-        // Deliver the real host phase 1 image.
-        //
-        // TODO-correctness This choice of boot slot MUST match installinator.
-        // We could install it into both slots (and maybe we should!), but we
-        // still need to know which M.2 installinator copied the OS onto so we
-        // can set the correct boot device. Thinking out loud: Even if it
-        // doesn't do it today, installinator probably wants to _dynamically_
-        // choose an M.2 to account for missing or failed drives. Maybe its
-        // final completion message should tell us which slot (or both!) it
-        // wrote to, and then we echo that choice here?
-        let host_phase_1_boot_slot = 0;
-        self.deliver_host_phase1(&plan.host_phase_1, host_phase_1_boot_slot)
-            .await?;
-
-        // Clear the installinator image ID; failing to do this is _not_ fatal,
-        // because any future update will set its own installinator ID anyway;
-        // this is for cleanliness more than anything.
-        if let Err(err) = self
-            .mgs_client
-            .sp_installinator_image_id_delete(self.sp.type_, self.sp.slot)
-            .await
-        {
-            warn!(
-                self.log,
-                "failed to clear installinator image ID (proceeding anyway)";
-                "err" => %err,
-            );
-        }
-
-        // Set the startup options for a standard boot (i.e., no options).
-        self.mgs_client
-            .sp_startup_options_set(
-                self.sp.type_,
-                self.sp.slot,
-                &HostStartupOptions {
-                    boot_net: false,
-                    boot_ramdisk: false,
-                    bootrd: false,
-                    kbm: false,
-                    kmdb: false,
-                    kmdb_boot: false,
-                    phase2_recovery_mode: false,
-                    prom: false,
-                    verbose: false,
-                },
-            )
-            .await
-            .context("failed to set host startup options for standard boot")?;
-
-        // Boot the host.
-        self.set_host_power_state(PowerState::A0).await?;
-
-        Ok(())
-    }
-
-    async fn wait_for_upload_tramponline_to_mgs(
-        &mut self,
-        plan: &UpdatePlan,
-    ) -> anyhow::Result<HostPhase2RecoveryImageId> {
-        loop {
-            if let Some(image_id) = self
-                .upload_trampoline_phase_2_to_mgs
-                .borrow()
-                .uploaded_image_id
-                .as_ref()
-            {
-                return Ok(image_id.clone());
-            }
-
-            // This looks like we might be setting our current state multiple
-            // times (since we're in a loop), but in practice we should only
-            // loop once: once `self.upload_trampoline_phase_2_to_mgs.changed()`
-            // fires, our check above should return the image ID.
-            self.set_current_update_state(
-                UpdateStateKind::SendingArtifactToMgs {
-                    artifact: plan.trampoline_phase_2.id.clone(),
-                },
-            );
-
-            // `upload_trampoline_phase_2_to_mgs` waits for all
-            // receivers, so if `changed()` fails that means the task
-            // has either panicked or been cancelled due to a new repo
-            // upload - either way, we can't continue.
-            self.upload_trampoline_phase_2_to_mgs.changed().await.map_err(
-                |_recv_err| {
-                    anyhow!(concat!(
-                        "failed to upload trampoline phase 2 to MGS ",
-                        "(was a new TUF repo uploaded?)"
-                    ))
-                },
-            )?;
-        }
-    }
-
-    async fn deliver_host_phase1(
-        &self,
-        artifact: &ArtifactIdData,
-        boot_slot: u16,
-    ) -> anyhow::Result<()> {
-        const HOST_BOOT_FLASH: &str =
-            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
-
-        let phase1_image =
-            buf_list_to_try_stream(BufList::from_iter([artifact
-                .data
-                .0
-                .clone()]));
-
-        // Ensure host is in A2.
-        self.set_host_power_state(PowerState::A2).await?;
-
-        // Start delivering image.
-        let update_id = Uuid::new_v4();
-        info!(
-            self.log, "sending phase 1 host image";
-            "artifact_id" => ?artifact.id,
-            "update_id" => %update_id,
-        );
-        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
-            artifact: artifact.id.clone(),
-        });
-        self.mgs_client
-            .sp_component_update(
-                self.sp.type_,
-                self.sp.slot,
-                HOST_BOOT_FLASH,
-                boot_slot,
-                &update_id,
-                reqwest::Body::wrap_stream(phase1_image),
-            )
-            .await
-            .with_context(|| {
-                format!("failed to write host boot flash slot {boot_slot}")
-            })?;
-
-        // Wait for image delivery to complete.
-        info!(
-            self.log, "waiting for phase 1 delivery to complete";
-            "artifact_id" => ?artifact.id,
-            "update_id" => %update_id,
-        );
-        self.set_current_update_state(UpdateStateKind::WaitingForStatus {
-            artifact: artifact.id.clone(),
-        });
-        self.poll_for_component_update_completion(
-            &artifact.id,
-            update_id,
-            HOST_BOOT_FLASH,
-        )
-        .await
     }
 
     async fn set_host_power_state(
         &self,
         power_state: PowerState,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), UpdateTerminalEventKind> {
         info!(self.log, "moving host to {power_state:?}");
-        self.set_current_update_state(UpdateStateKind::SettingHostPowerState {
-            power_state,
-        });
         self.mgs_client
             .sp_power_state_set(self.sp.type_, self.sp.slot, power_state)
             .await
-            .with_context(|| format!("failed to put sled into {power_state:?}"))
             .map(|response| response.into_inner())
-    }
-
-    async fn update_sp_component(
-        &self,
-        artifact: &ArtifactIdData,
-        component_name: &str,
-    ) -> anyhow::Result<()> {
-        let update_id = Uuid::new_v4();
-
-        // The SP only has one updateable firmware slot ("the inactive bank") -
-        // we always pass 0.
-        let firmware_slot = 0;
-
-        self.set_current_update_state(UpdateStateKind::SendingArtifactToMgs {
-            artifact: artifact.id.clone(),
-        });
-        self.mgs_client
-            .sp_component_update(
-                self.sp.type_,
-                self.sp.slot,
-                component_name,
-                firmware_slot,
-                &update_id,
-                reqwest::Body::wrap_stream(buf_list_to_try_stream(
-                    BufList::from_iter([artifact.data.0.clone()]),
-                )),
-            )
-            .await
-            .context("failed to start update")?;
-
-        info!(self.log, "waiting for SP update to complete");
-        self.set_current_update_state(UpdateStateKind::WaitingForStatus {
-            artifact: artifact.id.clone(),
-        });
-        self.poll_for_component_update_completion(
-            &artifact.id,
-            update_id,
-            component_name,
-        )
-        .await?;
-
-        Ok(())
+            .map_err(|error| {
+                // HTTP-ERROR-FULL-CAUSE-CHAIN
+                UpdateTerminalEventKind::UpdatePowerStateFailed {
+                    reason: format!(
+                        "failed to put sled into {power_state:?}: {error}"
+                    ),
+                }
+            })
     }
 
     async fn reset_sp(&self) -> anyhow::Result<()> {
@@ -1026,15 +1135,15 @@ impl UpdateDriver {
             .map(|res| res.into_inner())
     }
 
-    async fn poll_for_component_update_completion(
+    async fn poll_component_update(
         &self,
-        artifact: &ArtifactId,
+        cx: UpdateExecContext,
+        stage: ComponentUpdateStage,
         update_id: Uuid,
         component: &str,
     ) -> anyhow::Result<()> {
         // How often we poll MGS for the progress of an update once it starts.
         const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
-        let start = Instant::now();
 
         loop {
             let status = self
@@ -1049,16 +1158,29 @@ impl UpdateDriver {
 
             match status {
                 SpUpdateStatus::None => {
-                    bail!("SP no longer processing update (did it reset?")
+                    bail!("SP no longer processing update (did it reset?)")
                 }
                 SpUpdateStatus::Preparing { id, progress } => {
                     ensure!(id == update_id, "SP processing different update");
-                    self.set_current_update_state(
-                        UpdateStateKind::PreparingForArtifact {
-                            artifact: artifact.clone(),
-                            progress,
-                        },
-                    );
+                    if stage == ComponentUpdateStage::Preparing {
+                        if let Some(progress) = progress {
+                            _ = cx
+                                .sender
+                                .send(StepProgress::Progress {
+                                    // We don't retry this, so use attempt 1 here.
+                                    attempt: 1,
+                                    current: progress.current as u64,
+                                    total: progress.total as u64,
+                                })
+                                .await;
+                        }
+                    } else {
+                        warn!(
+                            self.log,
+                            "component update moved backwards \
+                             from {stage:?} to preparing"
+                        );
+                    }
                 }
                 SpUpdateStatus::InProgress {
                     bytes_received,
@@ -1066,17 +1188,24 @@ impl UpdateDriver {
                     total_bytes,
                 } => {
                     ensure!(id == update_id, "SP processing different update");
-                    self.set_current_update_state(
-                        UpdateStateKind::ArtifactWriteProgress {
-                            // We currently don't do any retries, so this is attempt 1.
-                            attempt: 1,
-                            kind: artifact.kind.clone(),
-                            destination: None,
-                            written_bytes: bytes_received.into(),
-                            total_bytes: total_bytes.into(),
-                            elapsed: start.elapsed(),
-                        },
-                    );
+                    match stage {
+                        ComponentUpdateStage::Preparing => {
+                            // The prepare step is done -- exit this loop and move
+                            // to the next stage.
+                            return Ok(());
+                        }
+                        ComponentUpdateStage::InProgress => {
+                            _ = cx
+                                .sender
+                                .send(StepProgress::Progress {
+                                    // No retries here.
+                                    attempt: 1,
+                                    current: bytes_received.into(),
+                                    total: total_bytes.into(),
+                                })
+                                .await;
+                        }
+                    }
                 }
                 SpUpdateStatus::Complete { id } => {
                     ensure!(id == update_id, "SP processing different update");
@@ -1095,6 +1224,39 @@ impl UpdateDriver {
             tokio::time::sleep(STATUS_POLL_FREQ).await;
         }
     }
+}
+
+struct SpComponentUpdateStepNames {
+    sending: Cow<'static, str>,
+    preparing: Cow<'static, str>,
+    writing: Cow<'static, str>,
+}
+
+impl SpComponentUpdateStepNames {
+    fn for_host_phase_1(kind: &str) -> Self {
+        Self {
+            sending: format!("Sending {kind} phase 1 image to MGS").into(),
+            preparing: format!("Preparing to receive {kind} phase 1 update")
+                .into(),
+            writing: format!("Writing {kind} phase 1 update").into(),
+        }
+    }
+}
+
+impl Default for SpComponentUpdateStepNames {
+    fn default() -> Self {
+        Self {
+            sending: "Sending artifact to MGS".into(),
+            preparing: "Preparing to receive update".into(),
+            writing: "Writing update".into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ComponentUpdateStage {
+    Preparing,
+    InProgress,
 }
 
 fn buf_list_to_try_stream(
