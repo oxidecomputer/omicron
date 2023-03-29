@@ -436,14 +436,7 @@ impl PortManager {
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
 
         hdl.set_v2p(&SetVirt2PhysReq {
-            vip: match mapping.virtual_ip {
-                std::net::IpAddr::V4(ipv4) => oxide_vpc::api::IpAddr::Ip4(
-                    oxide_vpc::api::Ipv4Addr::from(ipv4),
-                ),
-                std::net::IpAddr::V6(ipv6) => oxide_vpc::api::IpAddr::Ip6(
-                    oxide_vpc::api::Ipv6Addr::from(ipv6),
-                ),
-            },
+            vip: mapping.virtual_ip.into(),
             phys: PhysNet {
                 ether: oxide_vpc::api::MacAddr::from(
                     (*mapping.virtual_mac).into_array(),
@@ -455,9 +448,7 @@ impl PortManager {
                         )
                         .into());
                     }
-                    std::net::IpAddr::V6(ipv6) => {
-                        oxide_vpc::api::Ipv6Addr::from(ipv6)
-                    }
+                    std::net::IpAddr::V6(ipv6) => ipv6.into(),
                 },
                 vni: Vni::new(mapping.vni).unwrap(),
             },
