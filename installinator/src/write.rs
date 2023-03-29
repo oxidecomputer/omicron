@@ -64,6 +64,16 @@ pub(crate) struct WriteDestination {
     drives: BTreeMap<M2Slot, ArtifactDestination>,
 }
 
+/// The name of the host phase 2 image written to disk.
+///
+/// Exposed for testing.
+pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
+
+/// The name of the control plane image written to disk.
+///
+/// Exposed for testing.
+pub static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
+
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
         std::fs::create_dir_all(&dir)
@@ -76,8 +86,8 @@ impl WriteDestination {
             M2Slot::A,
             ArtifactDestination {
                 create_host_phase_2: true,
-                host_phase_2: dir.join("host_phase_2.bin"),
-                control_plane: Some(dir.join("control_plane.bin")),
+                host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
+                control_plane: Some(dir.join(CONTROL_PLANE_FILE_NAME)),
             },
         );
 

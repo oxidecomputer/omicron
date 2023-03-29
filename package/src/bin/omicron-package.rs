@@ -7,7 +7,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::{zfs, zone, zpool};
+use illumos_utils::{zfs, zone};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use omicron_package::target::KnownTarget;
 use omicron_package::{parse, BuildCommand, DeployCommand, TargetCommand};
@@ -85,6 +85,7 @@ async fn run_cargo_on_packages<I, S>(
     subcmd: &str,
     packages: I,
     release: bool,
+    features: &str,
 ) -> Result<()>
 where
     I: IntoIterator<Item = S>,
@@ -97,6 +98,7 @@ where
     for package in packages {
         cmd.arg("-p").arg(package);
     }
+    cmd.arg("--features").arg(features);
     if release {
         cmd.arg("--release");
     }
@@ -129,12 +131,20 @@ async fn do_for_all_rust_packages(
         })
         .partition(|(_, release)| *release);
 
+    let features = config
+        .target
+        .0
+        .iter()
+        .map(|(name, value)| format!("{}-{} ", name, value))
+        .collect::<String>();
+
     // Execute all the release / debug packages at the same time.
     if !release_pkgs.is_empty() {
         run_cargo_on_packages(
             command,
             release_pkgs.iter().map(|(name, _)| name),
             true,
+            &features,
         )
         .await?;
     }
@@ -143,6 +153,7 @@ async fn do_for_all_rust_packages(
             command,
             debug_pkgs.iter().map(|(name, _)| name),
             false,
+            &features,
         )
         .await?;
     }
@@ -554,30 +565,8 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
     Ok(())
 }
 
-fn get_all_omicron_datasets() -> Result<Vec<String>> {
-    let mut datasets = vec![];
-
-    // Collect all datasets within Oxide zpools.
-    //
-    // This includes cockroachdb, clickhouse, and crucible datasets.
-    let zpools = zpool::Zpool::list()?;
-    for pool in &zpools {
-        let pool = pool.to_string();
-        for dataset in &zfs::Zfs::list_datasets(&pool)? {
-            datasets.push(format!("{pool}/{dataset}"));
-        }
-    }
-
-    // Collect all datasets for Oxide zones.
-    for dataset in &zfs::Zfs::list_datasets(&zfs::ZONE_ZFS_DATASET)? {
-        datasets.push(format!("{}/{dataset}", zfs::ZONE_ZFS_DATASET));
-    }
-
-    Ok(datasets)
-}
-
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = match get_all_omicron_datasets() {
+    let datasets = match zfs::get_all_omicron_datasets() {
         Err(e) => {
             warn!(config.log, "Failed to get omicron datasets: {}", e);
             return Ok(());
@@ -700,8 +689,14 @@ async fn do_clean(
         "Removing artifacts from {}",
         artifact_dir.to_string_lossy()
     );
-    const ARTIFACTS_TO_KEEP: &[&str] =
-        &["clickhouse", "cockroachdb", "xde", "console-assets", "downloads"];
+    const ARTIFACTS_TO_KEEP: &[&str] = &[
+        "clickhouse",
+        "cockroachdb",
+        "xde",
+        "console-assets",
+        "downloads",
+        "softnpu",
+    ];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
     info!(
         config.log,

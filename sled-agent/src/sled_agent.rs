@@ -11,12 +11,11 @@ use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, Zpool,
+    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
-use crate::updates::UpdateManager;
+use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
@@ -33,10 +32,10 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::serial::ByteOffset;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -87,7 +86,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] dns_service_client::multiclient::ResolveError),
+    ResolveError(#[from] internal_dns::resolver::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -208,11 +207,6 @@ impl SledAgent {
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
-        // should be removed once the Sled Agent is initialized with a
-        // RSS-provided IP address. In the meantime, we use one from the
-        // configuration file.
         let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
@@ -261,7 +255,7 @@ impl SledAgent {
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
-            request.gateway.mac,
+            request.gateway.mac.0,
         )?;
 
         let svc_config = services::Config::new(
@@ -269,10 +263,12 @@ impl SledAgent {
             request.gateway.address,
         );
 
-        let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
+        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
-        let updates = UpdateManager::new(config.updates.clone());
+        let update_config =
+            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
+        let updates = UpdateManager::new(update_config);
 
         services
             .sled_agent_started(
@@ -415,6 +411,11 @@ impl SledAgent {
         let baseboard = nexus_client::types::Baseboard::from(
             self.inner.hardware.baseboard(),
         );
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
@@ -447,6 +448,10 @@ impl SledAgent {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
+                            usable_hardware_threads,
+                            usable_physical_ram: nexus_client::types::ByteCount(
+                                usable_physical_ram,
+                            ),
                         },
                     )
                     .await
@@ -543,23 +548,6 @@ impl SledAgent {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
         self.inner.updates.download_artifact(artifact, &nexus_client).await?;
         Ok(())
-    }
-
-    pub async fn instance_serial_console_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        self.inner
-            .instances
-            .instance_serial_console_buffer_data(
-                instance_id,
-                byte_offset,
-                max_bytes,
-            )
-            .await
-            .map_err(Error::from)
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance

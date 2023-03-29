@@ -11,7 +11,6 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -35,34 +34,26 @@ use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
 fn get_disks_url() -> String {
-    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
 fn get_disk_url(disk: &str) -> String {
-    format!(
-        "/v1/disks/{}?organization={}&project={}",
-        disk, ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/disks/{}?project={}", disk, PROJECT_NAME)
 }
 
 fn get_snapshots_url() -> String {
-    format!("/v1/snapshots?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/snapshots?project={}", PROJECT_NAME)
 }
 
 fn get_snapshot_url(snapshot: &str) -> String {
-    format!(
-        "/v1/snapshots/{}?organization={}&project={}",
-        snapshot, ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/snapshots/{}?project={}", snapshot, PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_organization(&client, ORG_NAME).await;
-    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
@@ -98,10 +89,7 @@ async fn create_image(client: &ClientTestContext) -> views::Image {
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let images_url = format!(
-        "/v1/images?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -998,10 +986,7 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
             .await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     let snapshot: views::Snapshot = object_create(
         client,
@@ -1067,10 +1052,7 @@ async fn test_create_image_from_snapshot_delete(
             .await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     let snapshot: views::Snapshot = object_create(
         client,

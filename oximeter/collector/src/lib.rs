@@ -6,13 +6,13 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::{ServiceName, SRV};
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
@@ -484,7 +484,10 @@ impl Oximeter {
         }
         info!(log, "starting oximeter server");
 
-        let resolver = Resolver::new_from_ip(*args.address.ip())?;
+        let resolver = Resolver::new_from_ip(
+            log.new(o!("component" => "DnsResolver")),
+            *args.address.ip(),
+        )?;
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");

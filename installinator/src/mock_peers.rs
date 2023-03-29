@@ -12,10 +12,9 @@ use std::{
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
-use installinator_artifact_client::ClientError;
+use installinator_artifact_client::{ClientError, ResponseValue};
 use installinator_common::ProgressReport;
 use omicron_common::update::ArtifactHashId;
-use progenitor_client::ResponseValue;
 use proptest::prelude::*;
 use reqwest::StatusCode;
 use test_strategy::Arbitrary;

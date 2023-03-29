@@ -12,7 +12,6 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -34,7 +33,6 @@ use uuid::Uuid;
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 const DISK_NAME: &str = "just-rainsticks";
 const INSTANCE_NAME: &str = "just-rainsticks";
@@ -42,27 +40,23 @@ const INSTANCE_NAME: &str = "just-rainsticks";
 // Helper functions
 
 fn get_disks_url() -> String {
-    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
 fn get_disk_url(disk_name: &str) -> String {
-    format!(
-        "/v1/disks/{disk_name}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/disks/{disk_name}?project={}", PROJECT_NAME)
 }
 
 fn get_disk_attach_url(instance_name: &str) -> String {
     format!(
-        "/v1/instances/{instance_name}/disks/attach?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
+        "/v1/instances/{instance_name}/disks/attach?project={}",
+        PROJECT_NAME
     )
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, ORG_NAME).await;
-    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
@@ -72,8 +66,8 @@ async fn set_instance_state(
     state: &str,
 ) -> Instance {
     let url = format!(
-        "/v1/instances/{instance_name}/{state}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
+        "/v1/instances/{instance_name}/{state}?project={}",
+        PROJECT_NAME
     );
 
     NexusRequest::new(
@@ -123,10 +117,7 @@ fn disks_eq(disk1: &Disk, disk2: &Disk) {
 }
 
 async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
-    let url = format!(
-        "/v1/disks?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME,
-    );
+    let url = format!("/v1/disks?project={}", PROJECT_NAME,);
 
     let _disk: Disk = object_create(
         client,
@@ -151,8 +142,7 @@ async fn create_instance_and_attach_disk(
     expected_status: StatusCode,
 ) {
     // Create an instance to attach the disk.
-    let instance =
-        create_instance(&client, ORG_NAME, PROJECT_NAME, INSTANCE_NAME).await;
+    let instance = create_instance(&client, PROJECT_NAME, INSTANCE_NAME).await;
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/811):
     //
@@ -199,8 +189,8 @@ async fn bulk_write_start(
     expected_status: StatusCode,
 ) {
     let bulk_write_start_url = format!(
-        "/v1/disks/{}/bulk-write-start?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
+        "/v1/disks/{}/bulk-write-start?project={}",
+        DISK_NAME, PROJECT_NAME,
     );
 
     NexusRequest::new(
@@ -214,10 +204,8 @@ async fn bulk_write_start(
 }
 
 async fn bulk_write_bytes(client: &ClientTestContext) {
-    let bulk_write_url = format!(
-        "/v1/disks/{}/bulk-write?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let bulk_write_url =
+        format!("/v1/disks/{}/bulk-write?project={}", DISK_NAME, PROJECT_NAME,);
 
     // Use 4 MiB chunk size so this test won't take a long time. Requires
     // setting request_body_max_bytes accordingly!
@@ -243,10 +231,8 @@ async fn bulk_write_bytes(client: &ClientTestContext) {
 }
 
 async fn bulk_write_bytes_expect_failure(client: &ClientTestContext) {
-    let bulk_write_url = format!(
-        "/v1/disks/{}/bulk-write?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let bulk_write_url =
+        format!("/v1/disks/{}/bulk-write?project={}", DISK_NAME, PROJECT_NAME,);
 
     const CHUNK_SIZE: u64 = 4096 * 1024;
 
@@ -273,10 +259,8 @@ async fn bulk_write_bytes_manual(
     data: Vec<u8>,
     expected_status: StatusCode,
 ) {
-    let bulk_write_url = format!(
-        "/v1/disks/{}/bulk-write?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let bulk_write_url =
+        format!("/v1/disks/{}/bulk-write?project={}", DISK_NAME, PROJECT_NAME,);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_url)
@@ -300,8 +284,8 @@ async fn bulk_write_stop(
     expected_status: StatusCode,
 ) {
     let bulk_write_stop_url = format!(
-        "/v1/disks/{}/bulk-write-stop?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
+        "/v1/disks/{}/bulk-write-stop?project={}",
+        DISK_NAME, PROJECT_NAME,
     );
 
     NexusRequest::new(
@@ -316,10 +300,8 @@ async fn bulk_write_stop(
 
 async fn import_blocks_from_url(client: &ClientTestContext) {
     // Import blocks from a URL
-    let import_blocks_from_url_url = format!(
-        "/v1/disks/{}/import?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let import_blocks_from_url_url =
+        format!("/v1/disks/{}/import?project={}", DISK_NAME, PROJECT_NAME,);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &import_blocks_from_url_url)
@@ -339,10 +321,8 @@ async fn finalize_import(
     client: &ClientTestContext,
     expected_status: StatusCode,
 ) {
-    let finalize_url = format!(
-        "/v1/disks/{}/finalize?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let finalize_url =
+        format!("/v1/disks/{}/finalize?project={}", DISK_NAME, PROJECT_NAME,);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &finalize_url)
@@ -359,8 +339,8 @@ async fn finalize_import_take_snapshot(
     expected_status: StatusCode,
 ) {
     let finalize_url = format!(
-        "/v1/disks/{}/finalize?project={}&organization={}&snapshot_name=a-snapshot",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
+        "/v1/disks/{}/finalize?project={}&snapshot_name=a-snapshot",
+        DISK_NAME, PROJECT_NAME,
     );
 
     NexusRequest::new(
@@ -583,10 +563,8 @@ async fn test_import_blocks_with_bulk_write_with_snapshot(
     validate_disk_state(client, DiskState::Detached).await;
 
     // Validate snapshot was created
-    let snapshot_url = format!(
-        "/v1/snapshots/a-snapshot?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshot_url =
+        format!("/v1/snapshots/a-snapshot?project={}", PROJECT_NAME);
     let _snapshot: Snapshot = NexusRequest::object_get(client, &snapshot_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -746,10 +724,8 @@ async fn test_cannot_bulk_write_data_non_base64(
     // Validate disk is in state ImportingFromBulkWrites
     validate_disk_state(client, DiskState::ImportingFromBulkWrites).await;
 
-    let bulk_write_url = format!(
-        "/v1/disks/{}/bulk-write?project={}&organization={}",
-        DISK_NAME, PROJECT_NAME, ORG_NAME,
-    );
+    let bulk_write_url =
+        format!("/v1/disks/{}/bulk-write?project={}", DISK_NAME, PROJECT_NAME,);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &bulk_write_url)

@@ -1,10 +1,8 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
-use oxide_client::types::{Name, OrganizationCreate, ProjectCreate};
-use oxide_client::{
-    Client, ClientOrganizationsExt, ClientProjectsExt, ClientVpcsExt,
-};
+use oxide_client::types::{Name, ProjectCreate};
+use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Url;
 use std::net::SocketAddr;
@@ -14,7 +12,6 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct Context {
     pub client: Client,
-    pub org_name: Name,
     pub project_name: Name,
 }
 
@@ -24,20 +21,8 @@ impl Context {
     }
 
     pub async fn from_client(client: Client) -> Result<Context> {
-        let org_name = client
-            .organization_create()
-            .body(OrganizationCreate {
-                name: generate_name("org")?,
-                description: String::new(),
-            })
-            .send()
-            .await?
-            .name
-            .clone();
-
         let project_name = client
             .project_create()
-            .organization_name(org_name.clone())
             .body(ProjectCreate {
                 name: generate_name("proj")?,
                 description: String::new(),
@@ -47,36 +32,24 @@ impl Context {
             .name
             .clone();
 
-        Ok(Context { client, org_name, project_name })
+        Ok(Context { client, project_name })
     }
 
     pub async fn cleanup(self) -> Result<()> {
         self.client
             .vpc_subnet_delete()
-            .organization_name(self.org_name.clone())
-            .project_name(self.project_name.clone())
-            .vpc_name("default")
-            .subnet_name("default")
+            .project(self.project_name.clone())
+            .vpc("default")
+            .subnet("default")
             .send()
             .await?;
         self.client
             .vpc_delete()
-            .organization_name(self.org_name.clone())
-            .project_name(self.project_name.clone())
-            .vpc_name("default")
+            .project(self.project_name.clone())
+            .vpc("default")
             .send()
             .await?;
-        self.client
-            .project_delete()
-            .organization_name(self.org_name.clone())
-            .project_name(self.project_name)
-            .send()
-            .await?;
-        self.client
-            .organization_delete()
-            .organization_name(self.org_name)
-            .send()
-            .await?;
+        self.client.project_delete().project(self.project_name).send().await?;
         Ok(())
     }
 }

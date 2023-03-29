@@ -32,13 +32,13 @@
 //! - for Projects, the "viewer" role is granted the "read" permission
 //! - for Projects, the "viewer" role is granted to anyone with the
 //!   "collaborator" role
-//! - Projects have a "parent" relationship with an Organization, such that
-//!   someone with the "admin" role on the parent Organization automatically
-//!   gets the "viewer" role on the Project
+//! - Projects have a "parent" relationship with a Silo, such that
+//!   someone with the "admin" role on the parent Silo automatically
+//!   gets the "admin" role on the Project
 //!
 //! These are just examples.  To make them more concrete, suppose we have:
 //!
-//! - an Organization "Sesame-Street"
+//! - a Silo "Sesame-Street"
 //! - a Project "monster-foodies"
 //! - three users:
 //!   - "cookie-monster", who has been explicitly granted the "viewer" role on
@@ -46,7 +46,7 @@
 //!   - "Gonger", who has been explicitly granted the "collaborator" role on
 //!     Project "monster-foodies"
 //!   - "big-bird", who has been explicitly granted the "admin" role on the
-//!     Organization "Sesame-Street"
+//!     Silo "Sesame-Street"
 //!
 //! All three users have the "read" permission on the Project by virtue of their
 //! "viewer" role on the Project.  But the path to determining that varies:
@@ -55,7 +55,7 @@
 //!   Project.
 //! - Gonger has the "collaborator" role on the Project, which the policy says
 //!   implicitly grants the "viewer" role.
-//! - Big Bird has the "admin" role on the parent Organization, which the policy
+//! - Big Bird has the "admin" role on the parent Silo, which the policy
 //!   says implicitly grants the "collaborator" role on the Project, which
 //!   (again) is granted the "viewer" role on the Project.
 //!
@@ -158,8 +158,8 @@
 //!       3. for every relationship between this resource and another
 //!          resource, whether the user has a role on the other resource
 //!          that grants the permission on this resource (e.g., does
-//!          the user have an "organization admin" role on the parent
-//!          organization that grants the "admin" role on the Project
+//!          the user have a "silo admin" role on the parent
+//!          silo that grants the "admin" role on the Project
 //!          that grants the "modify" permission)
 //!
 //! Each of these role lookups uses data that we provide to Oso.  (Again, more

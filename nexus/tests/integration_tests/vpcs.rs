@@ -12,7 +12,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc, create_vpc_with_error,
+    create_project, create_vpc, create_vpc_with_error,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -23,21 +23,17 @@ use omicron_nexus::external_api::{params, views::Vpc};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-static ORG_NAME: &str = "test-org";
 static PROJECT_NAME: &str = "springfield-squidport";
 static PROJECT_NAME_2: &str = "peeky-park";
 
 fn get_vpc_url(vpc_name: &str) -> String {
-    format!(
-        "/v1/vpcs/{vpc_name}?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    )
+    format!("/v1/vpcs/{vpc_name}?project={}", PROJECT_NAME)
 }
 
 fn get_subnet_url(vpc_name: &str, subnet_name: &str) -> String {
     format!(
-        "/v1/vpc-subnets/{subnet_name}?organization={}&project={}&vpc={}",
-        ORG_NAME, PROJECT_NAME, vpc_name
+        "/v1/vpc-subnets/{subnet_name}?project={}&vpc={}",
+        PROJECT_NAME, vpc_name
     )
 }
 
@@ -46,11 +42,9 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    create_organization(&client, &ORG_NAME).await;
-    let vpcs_url =
-        format!("/v1/vpcs?organization={}&project={}", ORG_NAME, PROJECT_NAME);
-    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME).await;
-    let _ = create_project(&client, &ORG_NAME, &PROJECT_NAME_2).await;
+    let vpcs_url = format!("/v1/vpcs?project={}", PROJECT_NAME);
+    let _ = create_project(&client, &PROJECT_NAME).await;
+    let _ = create_project(&client, &PROJECT_NAME_2).await;
 
     // List vpcs.  We see the default VPC, and nothing else.
     let mut vpcs = vpcs_list(&client, &vpcs_url).await;
@@ -102,7 +96,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
 
     // Create a VPC.
     let vpc_name = "just-rainsticks";
-    let vpc = create_vpc(&client, ORG_NAME, PROJECT_NAME, vpc_name).await;
+    let vpc = create_vpc(&client, PROJECT_NAME, vpc_name).await;
     assert_eq!(vpc.identity.name, "just-rainsticks");
     assert_eq!(vpc.identity.description, "vpc description");
     assert_eq!(vpc.dns_name, "abc");
@@ -119,7 +113,6 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     // Attempt to create a second VPC with a conflicting name.
     let error = create_vpc_with_error(
         &client,
-        ORG_NAME,
         PROJECT_NAME,
         vpc_name,
         StatusCode::BAD_REQUEST,
@@ -128,8 +121,7 @@ async fn test_vpcs(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "already exists: vpc \"just-rainsticks\"");
 
     // creating a VPC with the same name in another project works, though
-    let vpc2: Vpc =
-        create_vpc(&client, ORG_NAME, PROJECT_NAME_2, vpc_name).await;
+    let vpc2: Vpc = create_vpc(&client, PROJECT_NAME_2, vpc_name).await;
     assert_eq!(vpc2.identity.name, "just-rainsticks");
 
     // List VPCs again and expect to find the one we just created.

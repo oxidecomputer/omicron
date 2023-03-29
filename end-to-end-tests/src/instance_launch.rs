@@ -7,8 +7,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
     GlobalImageCreate, ImageSource, InstanceCpuCount, InstanceCreate,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, NameOrId,
-    SshKeyCreate,
+    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{
     ClientDisksExt, ClientInstancesExt, ClientSessionExt, ClientSystemExt,
@@ -30,7 +29,7 @@ async fn instance_launch() -> Result<()> {
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
     ctx.client
-        .session_sshkey_create()
+        .current_user_ssh_key_create()
         .body(SshKeyCreate {
             name: generate_name("key")?,
             description: String::new(),
@@ -66,8 +65,7 @@ async fn instance_launch() -> Result<()> {
     let disk_name = ctx
         .client
         .disk_create()
-        .organization(NameOrId::Name(ctx.org_name.clone()))
-        .project(NameOrId::Name(ctx.project_name.clone()))
+        .project(ctx.project_name.clone())
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
@@ -83,8 +81,7 @@ async fn instance_launch() -> Result<()> {
     let instance = ctx
         .client
         .instance_create()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
+        .project(ctx.project_name.clone())
         .body(InstanceCreate {
             name: generate_name("instance")?,
             description: String::new(),
@@ -105,9 +102,8 @@ async fn instance_launch() -> Result<()> {
     let ip_addr = ctx
         .client
         .instance_external_ip_list()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
-        .instance_name(instance.name.clone())
+        .project(ctx.project_name.clone())
+        .instance(instance.name.clone())
         .send()
         .await?
         .items
@@ -127,9 +123,8 @@ async fn instance_launch() -> Result<()> {
             let data = String::from_utf8_lossy(
                 &ctx.client
                     .instance_serial_console()
-                    .organization_name(ctx.org_name.clone())
-                    .project_name(ctx.project_name.clone())
-                    .instance_name(instance.name.clone())
+                    .project(ctx.project_name.clone())
+                    .instance(instance.name.clone())
                     .from_start(0)
                     .max_bytes(10 * 1024 * 1024)
                     .send()
@@ -211,9 +206,8 @@ async fn instance_launch() -> Result<()> {
     let data = String::from_utf8_lossy(
         &ctx.client
             .instance_serial_console()
-            .organization_name(ctx.org_name.clone())
-            .project_name(ctx.project_name.clone())
-            .instance_name(instance.name.clone())
+            .project(ctx.project_name.clone())
+            .instance(instance.name.clone())
             .most_recent(1024 * 1024)
             .max_bytes(1024 * 1024)
             .send()
@@ -231,9 +225,8 @@ async fn instance_launch() -> Result<()> {
     eprintln!("stopping instance");
     ctx.client
         .instance_stop()
-        .organization_name(ctx.org_name.clone())
-        .project_name(ctx.project_name.clone())
-        .instance_name(instance.name.clone())
+        .project(ctx.project_name.clone())
+        .instance(instance.name.clone())
         .send()
         .await?;
 
@@ -242,9 +235,8 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .instance_delete()
-                .organization_name(ctx.org_name.clone())
-                .project_name(ctx.project_name.clone())
-                .instance_name(instance.name.clone())
+                .project(ctx.project_name.clone())
+                .instance(instance.name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)
@@ -259,9 +251,8 @@ async fn instance_launch() -> Result<()> {
         || async {
             ctx.client
                 .disk_delete()
-                .organization(NameOrId::Name(ctx.org_name.clone()))
-                .project(NameOrId::Name(ctx.project_name.clone()))
-                .disk(NameOrId::Name(disk_name.clone()))
+                .project(ctx.project_name.clone())
+                .disk(disk_name.clone())
                 .send()
                 .await
                 .map_err(|_| CondCheckError::<oxide_client::Error>::NotYet)

@@ -8,15 +8,12 @@ use crate::nexus::LazyNexusClient;
 use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
 };
-use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use sled_hardware::underlay;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -74,10 +71,6 @@ impl InstanceManager {
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> Result<InstanceManager, Error> {
-        let data_link = underlay::find_chelsio_links()?
-            .into_iter()
-            .next()
-            .ok_or_else(|| Error::NoDatalinks)?;
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
@@ -86,7 +79,6 @@ impl InstanceManager {
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager: PortManager::new(
                     log.new(o!("component" => "PortManager")),
-                    data_link,
                     underlay_ip,
                     gateway_mac,
                 ),
@@ -185,25 +177,6 @@ impl InstanceManager {
         }
 
         instance.transition(target).await.map_err(|e| e.into())
-    }
-
-    pub async fn instance_serial_console_buffer_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let (_, instance) = instances
-                .get(&instance_id)
-                .ok_or(Error::NoSuchInstance(instance_id))?;
-            instance.clone()
-        };
-        instance
-            .serial_console_buffer_data(byte_offset, max_bytes)
-            .await
-            .map_err(Error::from)
     }
 
     pub async fn instance_issue_disk_snapshot_request(

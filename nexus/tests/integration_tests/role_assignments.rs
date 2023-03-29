@@ -12,7 +12,6 @@ use http::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -102,7 +101,7 @@ trait RoleAssignmentTest {
 async fn test_role_assignments_fleet(cptestctx: &ControlPlaneTestContext) {
     // There's no operation to read the Fleet directly, so we list Sleds as a
     // proxy for something that requires Fleet-level "read" permission.
-    const RESOURCE_URL: &'static str = "/system/hardware/sleds";
+    const RESOURCE_URL: &'static str = "/v1/system/hardware/sleds";
 
     struct FleetRoleAssignmentTest;
     impl RoleAssignmentTest for FleetRoleAssignmentTest {
@@ -274,75 +273,11 @@ async fn test_role_assignments_silo_implicit(
 }
 
 #[nexus_test]
-async fn test_role_assignments_organization(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let org_name = "test-org";
-    create_organization(client, org_name).await;
-    let org_url = format!("/v1/organizations/{}", org_name);
-
-    struct OrganizationRoleAssignmentTest {
-        org_name: String,
-        org_url: String,
-    }
-
-    let test_case = OrganizationRoleAssignmentTest {
-        org_name: String::from(org_name),
-        org_url: org_url.clone(),
-    };
-
-    impl RoleAssignmentTest for OrganizationRoleAssignmentTest {
-        type RoleType = authz::OrganizationRole;
-        const ROLE: Self::RoleType = authz::OrganizationRole::Admin;
-        const VISIBLE_TO_UNPRIVILEGED: bool = false;
-        fn policy_url(&self) -> String {
-            format!("{}/policy", self.org_url)
-        }
-
-        fn verify_initial<'a, 'b, 'c, 'd>(
-            &'a self,
-            client: &'b ClientTestContext,
-            current_policy: &'c shared::Policy<Self::RoleType>,
-        ) -> BoxFuture<'d, ()>
-        where
-            'a: 'd,
-            'b: 'd,
-            'c: 'd,
-        {
-            resource_initial_conditions(client, &self.org_url, current_policy)
-                .boxed()
-        }
-
-        fn verify_privileged<'a, 'b, 'c>(
-            &'a self,
-            client: &'b ClientTestContext,
-        ) -> BoxFuture<'c, ()>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
-            resource_privileged_conditions::<views::Organization>(
-                client,
-                &self.org_url,
-                &self.org_name,
-            )
-            .boxed()
-        }
-    }
-
-    run_test(client, test_case).await;
-}
-
-#[nexus_test]
 async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let org_name = "test-org";
     let project_name = "test-project";
-    create_organization(client, org_name).await;
-    create_project(client, org_name, project_name).await;
-    let project_url =
-        format!("/v1/projects/{}?organization={}", project_name, org_name);
+    create_project(client, project_name).await;
+    let project_url = format!("/v1/projects/{}", project_name);
 
     struct ProjectRoleAssignmentTest {
         project_name: String,
@@ -352,10 +287,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
     let test_case = ProjectRoleAssignmentTest {
         project_name: String::from(project_name),
         project_url: project_url.clone(),
-        policy_url: format!(
-            "/v1/projects/{}/policy?organization={}",
-            project_name, org_name
-        ),
+        policy_url: format!("/v1/projects/{}/policy", project_name),
     };
     impl RoleAssignmentTest for ProjectRoleAssignmentTest {
         type RoleType = authz::ProjectRole;
@@ -406,7 +338,7 @@ async fn test_role_assignments_project(cptestctx: &ControlPlaneTestContext) {
 /// Helper function for verifying the initial (unprivileged) conditions for most
 /// resources
 ///
-/// This is used for the Organization and Project tests today.  If we add
+/// This is used for the Project tests today.  If we add
 /// support for assigning roles on other kinds of resources, we'd likely use
 /// this for those, too.  (It's Fleet and Silo that are special cases.)
 fn resource_initial_conditions<'a, 'b, 'c, 'd, T>(
@@ -443,7 +375,7 @@ where
 
 /// Helper function for verifying the privileged conditions for most resources
 ///
-/// This is used for the Organization and Project tests today.  If we add
+/// This is used for the Project tests today.  If we add
 /// support for assigning roles on other kinds of resources, we'd likely use
 /// this for those, too.  (It's Fleet and Silo that are special cases.)
 fn resource_privileged_conditions<'a, 'b, 'c, 'd, V>(

@@ -143,6 +143,10 @@ fi
 # Download the OpenAPI spec for maghemite. This is required to build the
 # ddm-admin-api crate.
 ./tools/ci_download_maghemite_openapi
+#
+# Download the OpenAPI spec for dendrite. This is required to build the
+# dpd-client crate.
+./tools/ci_download_dendrite_openapi
 
 # Validate the PATH:
 expected_in_path=(

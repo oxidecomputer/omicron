@@ -122,7 +122,9 @@ impl MainScreen {
     /// system to take.
     pub fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         match cmd {
-            Cmd::SwapPane => {
+            // There's just two panes, so next and previous do the same thing
+            // for now.
+            Cmd::NextPane | Cmd::PrevPane => {
                 if self.sidebar.active {
                     self.sidebar.active = false;
                     Some(Action::Redraw)
@@ -189,9 +191,8 @@ impl MainScreen {
         frame: &mut Frame<'_>,
         rect: Rect,
     ) {
-        let wicketd_spans =
-            state.service_status.wicketd_liveness.compute().to_spans();
-        let mgs_spans = state.service_status.mgs_liveness.compute().to_spans();
+        let wicketd_spans = state.service_status.wicketd_liveness().to_spans();
+        let mgs_spans = state.service_status.mgs_liveness().to_spans();
         let mut spans = vec![Span::styled("WICKETD: ", style::service())];
         spans.extend_from_slice(&wicketd_spans);
         spans.push(Span::styled(" | ", style::divider()));

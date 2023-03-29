@@ -107,7 +107,7 @@ fn find_datum_field(fields: &FieldsNamed) -> Option<&syn::Field> {
         .iter()
         .filter(|field| {
             field.attrs.iter().any(|attr| {
-                attr.path
+                attr.path()
                     .get_ident()
                     .map(|ident| *ident == "datum")
                     .unwrap_or(false)

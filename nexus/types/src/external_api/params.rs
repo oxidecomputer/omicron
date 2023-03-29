@@ -20,80 +20,37 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
-// TODO-v1: Post migration rename `*Path` to `*Identifier`
+macro_rules! path_param {
+    ($struct:ident, $param:ident) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            pub $param: NameOrId,
+        }
+    };
+}
+
+path_param!(ProjectPath, project);
+path_param!(InstancePath, instance);
+path_param!(NetworkInterfacePath, interface);
+path_param!(VpcPath, vpc);
+path_param!(SubnetPath, subnet);
+path_param!(RouterPath, router);
+path_param!(RoutePath, route);
+path_param!(DiskPath, disk);
+path_param!(SnapshotPath, snapshot);
+path_param!(ImagePath, image);
+path_param!(SiloPath, silo);
+path_param!(ProviderPath, provider);
+path_param!(IpPoolPath, pool);
+path_param!(SshKeyPath, ssh_key);
+
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
 #[derive(Deserialize, JsonSchema)]
-pub struct OrganizationPath {
-    pub organization: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ProjectPath {
-    pub project: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstancePath {
-    pub instance: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct NetworkInterfacePath {
-    pub interface: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct VpcPath {
-    pub vpc: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SubnetPath {
-    pub subnet: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RouterPath {
-    pub router: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RoutePath {
-    pub route: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskPath {
-    pub disk: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SnapshotPath {
-    pub snapshot: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ImagePath {
-    pub image: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SiloPath {
-    pub silo: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProviderPath {
-    pub provider: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct IpPoolPath {
-    pub pool: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SshKeyPath {
-    pub ssh_key: NameOrId,
+pub struct GroupPath {
+    pub group: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -114,28 +71,6 @@ pub struct SamlIdentityProviderSelector {
     pub saml_identity_provider: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl SamlIdentityProviderSelector {
-    pub fn new(
-        silo: Option<NameOrId>,
-        saml_identity_provider: NameOrId,
-    ) -> Self {
-        SamlIdentityProviderSelector {
-            silo_selector: silo.map(|s| SiloSelector { silo: s }),
-            saml_identity_provider,
-        }
-    }
-}
-
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    pub group: Uuid,
-}
-
 // The shape of this selector is slightly different than the others given that
 // silos users can only be specified via ID and are automatically provided by
 // the environment the user is authetnicated in
@@ -145,39 +80,9 @@ pub struct SshKeySelector {
     pub ssh_key: NameOrId,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct OrganizationSelector {
-    pub organization: NameOrId,
-}
-
-impl From<Name> for OrganizationSelector {
-    fn from(name: Name) -> Self {
-        OrganizationSelector { organization: name.into() }
-    }
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct OptionalOrganizationSelector {
-    #[serde(flatten)]
-    pub organization_selector: Option<OrganizationSelector>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
-    #[serde(flatten)]
-    pub organization_selector: Option<OrganizationSelector>,
     pub project: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl ProjectSelector {
-    pub fn new(organization: Option<NameOrId>, project: NameOrId) -> Self {
-        ProjectSelector {
-            organization_selector: organization
-                .map(|o| OrganizationSelector { organization: o }),
-            project,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -193,41 +98,11 @@ pub struct DiskSelector {
     pub disk: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl DiskSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        disk: NameOrId,
-    ) -> Self {
-        DiskSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            disk,
-        }
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
     pub snapshot: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl SnapshotSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        snapshot: NameOrId,
-    ) -> Self {
-        SnapshotSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            snapshot,
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -237,41 +112,11 @@ pub struct ImageSelector {
     pub image: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl ImageSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        image: NameOrId,
-    ) -> Self {
-        ImageSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            image,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
     pub instance: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl InstanceSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        instance: NameOrId,
-    ) -> Self {
-        InstanceSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            instance,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
@@ -287,23 +132,6 @@ pub struct NetworkInterfaceSelector {
     pub network_interface: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl NetworkInterfaceSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        instance: Option<NameOrId>,
-        network_interface: NameOrId,
-    ) -> Self {
-        NetworkInterfaceSelector {
-            instance_selector: instance.map(|instance| {
-                InstanceSelector::new(organization, project, instance)
-            }),
-            network_interface,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
     #[serde(flatten)]
@@ -317,21 +145,6 @@ pub struct OptionalVpcSelector {
     pub vpc_selector: Option<VpcSelector>,
 }
 
-// TODO-v1: delete this post migration
-impl VpcSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: NameOrId,
-    ) -> Self {
-        VpcSelector {
-            project_selector: project
-                .map(|p| ProjectSelector::new(organization, p)),
-            vpc,
-        }
-    }
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     #[serde(flatten)]
@@ -339,43 +152,11 @@ pub struct SubnetSelector {
     pub subnet: NameOrId,
 }
 
-// TODO-v1: delete this post migration
-impl SubnetSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        subnet: NameOrId,
-    ) -> Self {
-        SubnetSelector {
-            vpc_selector: vpc
-                .map(|vpc| VpcSelector::new(organization, project, vpc)),
-            subnet,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RouterSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
     pub router: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl RouterSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        router: NameOrId,
-    ) -> Self {
-        RouterSelector {
-            vpc_selector: vpc
-                .map(|vpc| VpcSelector::new(organization, project, vpc)),
-            router,
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -389,24 +170,6 @@ pub struct RouteSelector {
     #[serde(flatten)]
     pub router_selector: Option<RouterSelector>,
     pub route: NameOrId,
-}
-
-// TODO-v1: delete this post migration
-impl RouteSelector {
-    pub fn new(
-        organization: Option<NameOrId>,
-        project: Option<NameOrId>,
-        vpc: Option<NameOrId>,
-        router: Option<NameOrId>,
-        route: NameOrId,
-    ) -> Self {
-        RouteSelector {
-            router_selector: router.map(|router| {
-                RouterSelector::new(organization, project, vpc, router)
-            }),
-            route,
-        }
-    }
 }
 
 // Silos
@@ -800,22 +563,6 @@ where
     Ok(v)
 }
 
-// ORGANIZATIONS
-
-/// Create-time parameters for an [`Organization`](crate::external_api::views::Organization)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct OrganizationCreate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-}
-
-/// Updateable properties of an [`Organization`](crate::external_api::views::Organization)
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct OrganizationUpdate {
-    #[serde(flatten)]
-    pub identity: IdentityMetadataUpdateParams,
-}
-
 // PROJECTS
 
 /// Create-time parameters for a [`Project`](crate::external_api::views::Project)
@@ -1112,9 +859,11 @@ pub struct InstanceMigrate {
     pub dst_sled_id: Uuid,
 }
 
-/// Forwarded to a sled agent to request the contents of an Instance's serial console.
+/// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
     /// Character index in the serial buffer from which to read, counting the bytes output since
     /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
     /// provided, `most_recent` must *not* be provided.
@@ -1126,6 +875,8 @@ pub struct InstanceSerialConsoleRequest {
     /// Maximum number of bytes of buffered serial console contents to return. If the requested
     /// range runs to the end of the available buffer, the data returned will be shorter than
     /// `max_bytes`.
+    /// This parameter is only useful for the non-streaming GET request for serial console data,
+    /// and *ignored* by the streaming websocket endpoint.
     pub max_bytes: Option<u64>,
 }
 
@@ -1316,23 +1067,6 @@ pub struct DiskCreate {
     pub disk_source: DiskSource,
     /// total size of the Disk in bytes
     pub size: ByteCount,
-}
-
-/// TODO-v1: Delete this
-/// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
-/// attached or detached to an instance
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskIdentifier {
-    pub name: Name,
-}
-
-/// TODO-v1: Delete this
-/// Parameters for the
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
-/// attached or detached to an instance.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceIdentifier {
-    pub interface_name: Name,
 }
 
 // equivalent to crucible_pantry_client::types::ExpectedDigest

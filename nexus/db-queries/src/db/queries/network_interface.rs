@@ -1731,21 +1731,11 @@ mod tests {
             let (opctx, db_datastore) =
                 crate::db::datastore::datastore_test(&logctx, &db).await;
 
-            // Create an organization
-            let organization = params::OrganizationCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: "org".parse().unwrap(),
-                    description: "desc".to_string(),
-                },
-            };
-            let organization = db_datastore
-                .organization_create(&opctx, &organization)
-                .await
-                .unwrap();
+            let authz_silo = opctx.authn.silo_required().unwrap();
 
             // Create a project
             let project = Project::new(
-                organization.id(),
+                authz_silo.id(),
                 params::ProjectCreate {
                     identity: IdentityMetadataCreateParams {
                         name: "project".parse().unwrap(),
@@ -1753,15 +1743,8 @@ mod tests {
                     },
                 },
             );
-            let (.., authz_org) = LookupPath::new(&opctx, &db_datastore)
-                .organization_id(organization.id())
-                .lookup_for(authz::Action::CreateChild)
-                .await
-                .unwrap();
-            let (.., project) = db_datastore
-                .project_create(&opctx, &authz_org, project)
-                .await
-                .unwrap();
+            let (.., project) =
+                db_datastore.project_create(&opctx, project).await.unwrap();
 
             use crate::db::schema::vpc_subnet::dsl::vpc_subnet;
             let p = db_datastore.pool_authorized(&opctx).await.unwrap();

@@ -1547,7 +1547,6 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
@@ -1762,15 +1761,13 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "disky-mcdiskface";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
-        create_project(client, ORG_NAME, PROJECT_NAME).await;
-        create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await.identity.id
+        create_project(client, PROJECT_NAME).await;
+        create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
 
     // Helper for creating snapshot create parameters
@@ -1820,7 +1817,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -1930,7 +1927,7 @@ mod test {
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -1993,12 +1990,10 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            delete_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+            delete_disk(client, PROJECT_NAME, DISK_NAME).await;
             verify_clean_slate(cptestctx, &test).await;
-            disk_id = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME)
-                .await
-                .identity
-                .id;
+            disk_id =
+                create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id;
 
             let params = new_test_params(
                 &opctx,
@@ -2029,7 +2024,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2138,7 +2133,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2207,10 +2202,7 @@ mod test {
         )
         .await;
 
-        let instances_url = format!(
-            "/v1/instances?organization={}&project={}",
-            ORG_NAME, PROJECT_NAME,
-        );
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
         let instance_name = "base-instance";
 
         let instance: Instance = object_create(

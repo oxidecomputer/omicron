@@ -17,8 +17,8 @@ use crucible_agent_client::{
     Client as CrucibleAgentClient,
 };
 use futures::StreamExt;
-use internal_dns_names::ServiceName;
-use internal_dns_names::SRV;
+use internal_dns::ServiceName;
+use internal_dns::SRV;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};

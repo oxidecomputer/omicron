@@ -12,7 +12,6 @@ use futures::channel::mpsc::Sender;
 use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ResourceType;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -323,20 +322,8 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         rv
     }
 
-    pub async fn sim_contains(self: &Arc<Self>, id: &Uuid) -> bool {
-        let objects = self.objects.lock().await;
-        objects.contains_key(id)
-    }
-
-    pub async fn sim_get_current_state(
-        self: &Arc<Self>,
-        id: &Uuid,
-    ) -> Result<S::CurrentState, Error> {
-        let objects = self.objects.lock().await;
-        let instance = objects.get(id).ok_or_else(|| {
-            Error::not_found_by_id(ResourceType::Instance, id)
-        })?;
-        Ok(instance.object.current().clone())
+    pub async fn contains_key(self: &Arc<Self>, id: &Uuid) -> bool {
+        self.objects.lock().await.contains_key(id)
     }
 }
 

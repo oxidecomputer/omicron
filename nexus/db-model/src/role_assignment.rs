@@ -154,7 +154,7 @@ mod tests {
         let ok_input = crate::RoleAssignment {
             identity_type: crate::IdentityType::SiloUser,
             identity_id,
-            resource_type: ResourceType::Organization.to_string(),
+            resource_type: ResourceType::Project.to_string(),
             resource_id,
             role_name: String::from("bogus"),
         };
