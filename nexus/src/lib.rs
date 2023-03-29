@@ -36,6 +36,7 @@ use uuid::Uuid;
 
 // These modules used to be within nexus, but have been moved to
 // nexus-db-queries. Keeping these around temporarily for migration reasons.
+use internal_dns::DnsConfigBuilder;
 pub use nexus_db_queries::{authn, authz, db};
 
 #[macro_use]
@@ -210,6 +211,7 @@ impl nexus_test_interface::NexusServer for Server {
                     datasets: vec![],
                     internal_services_ip_pool_ranges: vec![],
                     certs: vec![],
+                    internal_dns_zone_config: DnsConfigBuilder::new().build(),
                 },
             )
             .await
