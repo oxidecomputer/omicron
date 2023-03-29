@@ -151,19 +151,6 @@ impl DataStore {
         .await
     }
 
-    /// Test-only interface that allows configuring batch size and the version
-    /// number being read
-    #[cfg(test)]
-    pub async fn dns_config_read_version_test(
-        &self,
-        opctx: &OpContext,
-        log: &slog::Logger,
-        batch_size: NonZeroU32,
-        version: &DnsVersion,
-    ) -> Result<DnsConfigParams, Error> {
-        self.dns_config_read_version(opctx, log, batch_size, version).await
-    }
-
     /// Private helper for reading a specific version of a group's DNS config
     async fn dns_config_read_version(
         &self,
@@ -197,7 +184,6 @@ impl DataStore {
 
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
-            let mut total_found = 0;
             let mut zone_records = Vec::new();
             let mut marker = None;
 
@@ -206,7 +192,7 @@ impl DataStore {
                     "dns_zone_id" => zone.id.to_string(),
                     "dns_zone_name" => &zone.zone_name,
                     "version" => i64::from(&version.version.0),
-                    "found_so_far" => total_found,
+                    "found_so_far" => zone_records.len(),
                     "batch_size" => batch_size.get(),
                 );
                 let pagparams = DataPageParams {
@@ -217,18 +203,15 @@ impl DataStore {
                 let names_batch = self
                     .dns_names_list(opctx, zone.id, version.version, &pagparams)
                     .await?;
-                let nfound = names_batch.len();
-                if nfound == 0 {
-                    break;
+                let done = names_batch.len()
+                    < usize::try_from(batch_size.get()).unwrap();
+                if let Some(last) = names_batch.last() {
+                    marker = Some(last.key.name.clone());
+                } else {
+                    assert!(done);
                 }
-
-                total_found += nfound;
-                let last = &names_batch[nfound - 1];
-                marker = Some(last.key.name.clone());
-
                 zone_records.extend(names_batch.into_iter());
-
-                if nfound < usize::try_from(batch_size.get()).unwrap() {
+                if done {
                     break;
                 }
             }
@@ -237,7 +220,7 @@ impl DataStore {
                 "dns_zone_id" => zone.id.to_string(),
                 "dns_zone_name" => &zone.zone_name,
                 "version" => i64::from(&version.version.0),
-                "found_so_far" => total_found,
+                "found_so_far" => zone_records.len(),
             );
 
             if !zone_records.is_empty() {
@@ -529,7 +512,7 @@ mod test {
         // Do this again, but controlling the batch size to make sure pagination
         // works right.
         let dns_config_batch_1 = datastore
-            .dns_config_read_version_test(
+            .dns_config_read_version(
                 &opctx,
                 &opctx.log.clone(),
                 NonZeroU32::new(1).unwrap(),
@@ -803,7 +786,7 @@ mod test {
 
         // Verify external version 1.
         let dns_config_v1 = datastore
-            .dns_config_read_version_test(&opctx, log, batch_size, &v1)
+            .dns_config_read_version(&opctx, log, batch_size, &v1)
             .await
             .unwrap();
         println!("dns_config_v1: {:?}", dns_config_v1);
@@ -822,7 +805,7 @@ mod test {
 
         // Verify external version 2.
         let dns_config_v2 = datastore
-            .dns_config_read_version_test(&opctx, log, batch_size, &v2)
+            .dns_config_read_version(&opctx, log, batch_size, &v2)
             .await
             .unwrap();
         println!("dns_config_v2: {:?}", dns_config_v2);
@@ -849,7 +832,7 @@ mod test {
 
         // Verify external version 3
         let dns_config_v3 = datastore
-            .dns_config_read_version_test(&opctx, log, batch_size, &v3)
+            .dns_config_read_version(&opctx, log, batch_size, &v3)
             .await
             .unwrap();
         println!("dns_config_v3: {:?}", dns_config_v3);
@@ -877,7 +860,7 @@ mod test {
 
         // Verify internal version 1.
         let internal_dns_config_v1 = datastore
-            .dns_config_read_version_test(&opctx, log, batch_size, &vi1)
+            .dns_config_read_version(&opctx, log, batch_size, &vi1)
             .await
             .unwrap();
         println!("internal dns_config_v1: {:?}", internal_dns_config_v1);
@@ -886,7 +869,7 @@ mod test {
 
         // Verify internal version 2.
         let internal_dns_config_v2 = datastore
-            .dns_config_read_version_test(&opctx, log, batch_size, &vi2)
+            .dns_config_read_version(&opctx, log, batch_size, &vi2)
             .await
             .unwrap();
         println!("internal dns_config_v2: {:?}", internal_dns_config_v2);

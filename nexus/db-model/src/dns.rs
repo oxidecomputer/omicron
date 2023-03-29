@@ -120,7 +120,7 @@ impl DnsName {
 
 /// This type is identical to `dns_service_client::DnsRecord`.  It's defined
 /// separately here for stability: this type is serialized to JSON and stored
-/// into the database.  We don't want the serialized from to change accidentally
+/// into the database.  We don't want the serialized form to change accidentally
 /// because someone happens to change the DNS server API.
 ///
 /// BE CAREFUL MODIFYING THIS STRUCT.
@@ -153,7 +153,7 @@ impl From<DnsRecord> for params::DnsRecord {
 
 /// This type is identical to `dns_service_client::SRV`.  It's defined
 /// separately here for stability: this type is serialized to JSON and stored
-/// into the database.  We don't want the serialized from to change accidentally
+/// into the database.  We don't want the serialized form to change accidentally
 /// because someone happens to change the DNS server API.
 ///
 /// BE CAREFUL MODIFYING THIS STRUCT.
