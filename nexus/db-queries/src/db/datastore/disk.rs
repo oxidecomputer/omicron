@@ -21,6 +21,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Disk;
 use crate::db::model::DiskRuntimeState;
+use crate::db::model::DiskUpdate;
 use crate::db::model::Instance;
 use crate::db::model::Name;
 use crate::db::model::Project;
@@ -38,8 +39,10 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 impl DataStore {
@@ -438,6 +441,67 @@ impl DataStore {
             .set(new_runtime.clone())
             .check_if_exists::<Disk>(disk_id)
             .execute_and_check(self.pool())
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_disk),
+                )
+            })?;
+
+        Ok(updated)
+    }
+
+    pub async fn disk_set_pantry(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+        pantry_address: SocketAddrV6,
+    ) -> UpdateResult<bool> {
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let disk_id = authz_disk.id();
+        use db::schema::disk::dsl;
+        let updated = diesel::update(dsl::disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .set(dsl::pantry_address.eq(pantry_address.to_string()))
+            .check_if_exists::<Disk>(disk_id)
+            .execute_and_check(self.pool_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_disk),
+                )
+            })?;
+
+        Ok(updated)
+    }
+
+    pub async fn disk_clear_pantry(
+        &self,
+        opctx: &OpContext,
+        authz_disk: &authz::Disk,
+    ) -> UpdateResult<bool> {
+        opctx.authorize(authz::Action::Modify, authz_disk).await?;
+
+        let disk_id = authz_disk.id();
+        use db::schema::disk::dsl;
+        let updated = diesel::update(dsl::disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(disk_id))
+            .set(&DiskUpdate { pantry_address: None })
+            .check_if_exists::<Disk>(disk_id)
+            .execute_and_check(self.pool_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,

@@ -1073,6 +1073,9 @@ pub enum DiskSource {
     Image { image_id: Uuid },
     /// Create a disk from a global image
     GlobalImage { image_id: Uuid },
+    /// Create a blank disk that will accept bulk writes or pull blocks from an
+    /// external source.
+    ImportingBlocks { block_size: BlockSize },
 }
 
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
@@ -1085,6 +1088,40 @@ pub struct DiskCreate {
     pub disk_source: DiskSource,
     /// total size of the Disk in bytes
     pub size: ByteCount,
+}
+
+// equivalent to crucible_pantry_client::types::ExpectedDigest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpectedDigest {
+    Sha256(String),
+}
+
+/// Parameters for importing blocks from a URL to a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImportBlocksFromUrl {
+    /// the source to pull blocks from
+    pub url: String,
+    /// Expected digest of all blocks when importing from a URL
+    pub expected_digest: Option<ExpectedDigest>,
+}
+
+/// Parameters for importing blocks with a bulk write
+// equivalent to crucible_pantry_client::types::BulkWriteRequest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImportBlocksBulkWrite {
+    pub offset: u64,
+    pub base64_encoded_data: String,
+}
+
+/// Parameters for finalizing a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FinalizeDisk {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+
+    /// an optional snapshot name
+    pub snapshot_name: Option<String>,
 }
 
 // IMAGES
