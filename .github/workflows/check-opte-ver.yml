@@ -2,6 +2,7 @@ name: check-opte-ver
 on:
   pull_request:
     paths:
+      - '.github/workflows/check-opte-ver.yml'
       - 'Cargo.toml'
       - 'tools/opte_version'
 jobs:

@@ -2,6 +2,7 @@ name: check-workspace-deps
 on:
   pull_request:
     paths:
+      - '.github/workflows/check-workspace-deps.yml'
       - '**/Cargo.toml'
   workflow_dispatch:
     inputs:
