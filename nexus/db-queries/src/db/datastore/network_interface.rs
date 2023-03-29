@@ -243,6 +243,53 @@ impl DataStore {
             .collect())
     }
 
+    /// Return information about service network interfaces required for the
+    /// sled agent to instantiate or modify them via OPTE. This function takes
+    /// a partially constructed query over the service network interface table
+    /// so that we can use it for services and VPC.
+    // TODO-cleanup: Unify the service and guest network interface code paths.
+    async fn derive_network_interface_info_for_service(
+        &self,
+        opctx: &OpContext,
+        partial_query: BoxedQuery<db::schema::service_network_interface::table>,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        use db::schema::service_network_interface;
+        use db::schema::vpc;
+        use db::schema::vpc_subnet;
+
+        let rows =
+            partial_query
+                .filter(service_network_interface::time_deleted.is_null())
+                .inner_join(vpc_subnet::table.on(
+                    service_network_interface::subnet_id.eq(vpc_subnet::id),
+                ))
+                .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
+                .order_by(service_network_interface::slot)
+                // TODO-cleanup: Having to specify each column again is less than
+                // ideal, but we can't derive `Selectable` since this is the result
+                // of a JOIN and not from a single table. DRY this out if possible.
+                .select((
+                    service_network_interface::name,
+                    service_network_interface::ip,
+                    service_network_interface::mac,
+                    vpc_subnet::ipv4_block,
+                    vpc_subnet::ipv6_block,
+                    vpc::vni,
+                    service_network_interface::slot,
+                ))
+                .get_results_async::<NicInfo>(
+                    self.pool_authorized(opctx).await?,
+                )
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                })?;
+        Ok(rows
+            .into_iter()
+            .map(sled_client_types::NetworkInterface::from)
+            .collect())
+    }
+
     /// Return the information about an instance's network interfaces required
     /// for the sled agent to instantiate them via OPTE.
     pub async fn derive_guest_network_interface_info(
@@ -257,6 +304,28 @@ impl DataStore {
             opctx,
             network_interface::table
                 .filter(network_interface::instance_id.eq(authz_instance.id()))
+                .into_boxed(),
+        )
+        .await
+    }
+
+    /// Return the information about an service's network interfaces required
+    /// for the sled agent to instantiate them via OPTE.
+    pub async fn derive_service_network_interface_info(
+        &self,
+        opctx: &OpContext,
+        authz_service: &authz::Service,
+    ) -> ListResultVec<sled_client_types::NetworkInterface> {
+        opctx.authorize(authz::Action::ListChildren, authz_service).await?;
+
+        use db::schema::service_network_interface;
+        self.derive_network_interface_info_for_service(
+            opctx,
+            service_network_interface::table
+                .filter(
+                    service_network_interface::service_id
+                        .eq(authz_service.id()),
+                )
                 .into_boxed(),
         )
         .await
@@ -290,41 +359,13 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
 
         use db::schema::service_network_interface;
-        use db::schema::vpc;
-        use db::schema::vpc_subnet;
-
-        let rows =
+        self.derive_network_interface_info_for_service(
+            opctx,
             service_network_interface::table
                 .filter(service_network_interface::vpc_id.eq(authz_vpc.id()))
-                .filter(service_network_interface::time_deleted.is_null())
-                .inner_join(vpc_subnet::table.on(
-                    service_network_interface::subnet_id.eq(vpc_subnet::id),
-                ))
-                .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
-                .order_by(service_network_interface::slot)
-                // TODO-cleanup: Having to specify each column again is less than
-                // ideal, but we can't derive `Selectable` since this is the result
-                // of a JOIN and not from a single table. DRY this out if possible.
-                .select((
-                    service_network_interface::name,
-                    service_network_interface::ip,
-                    service_network_interface::mac,
-                    vpc_subnet::ipv4_block,
-                    vpc_subnet::ipv6_block,
-                    vpc::vni,
-                    service_network_interface::slot,
-                ))
-                .get_results_async::<NicInfo>(
-                    self.pool_authorized(opctx).await?,
-                )
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                })?;
-        Ok(rows
-            .into_iter()
-            .map(sled_client_types::NetworkInterface::from)
-            .collect())
+                .into_boxed(),
+        )
+        .await
     }
 
     /// Return information about all VNICs connected to a VpcSubnet required
