@@ -62,7 +62,7 @@ pub enum EnsureAddressError {
     MissingBootstrapVnic { address: String, zone: String },
 }
 
-/// Erros returned from [`RunningZone::get`].
+/// Errors returned from [`RunningZone::get`].
 #[derive(thiserror::Error, Debug)]
 pub enum GetZoneError {
     #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]

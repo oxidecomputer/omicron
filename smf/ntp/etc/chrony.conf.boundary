@@ -4,7 +4,7 @@
 # servers outside of the rack.
 #
 
-server @SERVER@ iburst maxdelay 0.1 maxsources 16
+pool @SERVER@ iburst maxdelay 0.1 maxsources 16
 
 local stratum 10
 allow fe80::/10

@@ -11,7 +11,7 @@ use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool,
+    InstanceRuntimeStateRequested, ServiceEnsureBody, TimeSync, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -580,5 +580,13 @@ impl SledAgent {
             .firewall_rules_ensure(rules)
             .await
             .map_err(Error::from)
+    }
+    //
+    /// Gets the sled's current time synchronization state
+    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        self.inner.services.timesync_get().await.map_err(Error::from)
+
+        //let timesync = TimeSync { sync: true, skew: 0.05, correction: 0.01 };
+        //Ok(timesync)
     }
 }

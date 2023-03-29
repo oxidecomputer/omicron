@@ -427,3 +427,10 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct TimeSync {
+    pub sync: bool,
+    pub skew: f64,
+    pub correction: f64,
+}

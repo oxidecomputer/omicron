@@ -27,7 +27,8 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
+    ZoneType,
 };
 use crate::smf_helper::SmfHelper;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -36,6 +37,7 @@ use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
+use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -57,6 +59,7 @@ use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -135,6 +138,9 @@ pub enum Error {
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
+
+    #[error("NTP zone not ready")]
+    NtpZoneNotReady,
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -469,7 +475,7 @@ impl ServiceManager {
     ) -> Result<Option<Link>, Error> {
         for svc in &req.services {
             match svc {
-                ServiceType::Nexus { .. } => {
+                ServiceType::Nexus { .. } | ServiceType::Ntp { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
                         .inner
@@ -1112,6 +1118,50 @@ impl ServiceManager {
             .map_err(|err| Error::Io { path: config_path.clone(), err })?;
 
         Ok(())
+    }
+
+    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        let existing_zones = self.inner.zones.lock().await;
+
+        let ntp_zone_name = format!("{}{}", ZONE_PREFIX, ZoneType::NTP);
+
+        let ntp_zone = existing_zones
+            .iter()
+            .find(|z| z.name() == ntp_zone_name)
+            .ok_or_else(|| Error::NtpZoneNotReady)?;
+
+        // XXXNTP - This could be replaced with a direct connection to the
+        // daemon using a patched version of the chrony_candm crate to allow
+        // a custom server socket path. From the GZ, it should be possible to
+        // connect to the UNIX socket at
+        // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
+
+        match ntp_zone.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"]) {
+            Ok(stdout) => {
+                let v: Vec<&str> = stdout.split(',').collect();
+
+                if v.len() > 9 {
+                    let correction = f64::from_str(v[4])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    let skew = f64::from_str(v[9])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+
+                    Ok(TimeSync {
+                        sync: skew != 0
+                            && correction != 0
+                            && correction.abs() <= 0.05,
+                        skew,
+                        correction,
+                    })
+                } else {
+                    Err(Error::NtpZoneNotReady)
+                }
+            }
+            Err(e) => {
+                info!(self.inner.log, "chronyc command failed: {}", e);
+                Err(Error::NtpZoneNotReady)
+            }
+        }
     }
 
     /// Ensures that a switch zone exists with the provided IP adddress.
