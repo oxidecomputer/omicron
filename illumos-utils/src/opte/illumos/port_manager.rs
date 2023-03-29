@@ -441,15 +441,7 @@ impl PortManager {
                 ether: oxide_vpc::api::MacAddr::from(
                     (*mapping.virtual_mac).into_array(),
                 ),
-                ip: match mapping.physical_host_ip {
-                    std::net::IpAddr::V4(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("sleds should only have v6 addresses"),
-                        )
-                        .into());
-                    }
-                    std::net::IpAddr::V6(ipv6) => ipv6.into(),
-                },
+                ip: mapping.physical_host_ip.into(),
                 vni: Vni::new(mapping.vni).unwrap(),
             },
         })?;

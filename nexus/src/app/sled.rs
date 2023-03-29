@@ -294,9 +294,8 @@ impl super::Nexus {
 
         // Lookup the physical host IP of the sled hosting this instance
         let instance_sled_id = db_instance.runtime().sled_id;
-        let physical_host_ip: std::net::IpAddr =
-            (*self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip)
-                .into();
+        let physical_host_ip =
+            *self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip;
 
         let mut last_sled_id: Option<Uuid> = None;
         loop {
@@ -390,9 +389,8 @@ impl super::Nexus {
 
         // Lookup the physical host IP of the sled hosting this instance
         let instance_sled_id = db_instance.runtime().sled_id;
-        let physical_host_ip: std::net::IpAddr =
-            (*self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip)
-                .into();
+        let physical_host_ip =
+            *self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip;
 
         let mut last_sled_id: Option<Uuid> = None;
 

@@ -1590,7 +1590,7 @@
         "properties": {
           "physical_host_ip": {
             "type": "string",
-            "format": "ip"
+            "format": "ipv6"
           },
           "virtual_ip": {
             "type": "string",
