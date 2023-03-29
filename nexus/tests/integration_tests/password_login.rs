@@ -99,7 +99,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
-    assert_eq!(created_user, found_user);
+    assert_eq!(created_user, found_user.user);
 
     // While we're still logged in, change the password.
     let test_password2 =
@@ -352,20 +352,17 @@ async fn test_local_user_with_no_initial_password(
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
-    assert_eq!(created_user, found_user);
+    assert_eq!(created_user, found_user.user);
 }
 
 async fn expect_session_valid(
     client: &ClientTestContext,
     session_token: &str,
-) -> views::User {
+) -> views::CurrentUser {
     NexusRequest::object_get(client, "/v1/me")
         .authn_as(AuthnMode::Session(session_token.to_string()))
-        .execute()
+        .execute_and_parse_unwrap::<views::CurrentUser>()
         .await
-        .expect("expected successful request, but it failed")
-        .parsed_body()
-        .expect("failed to parse /v1/me response body")
 }
 
 async fn expect_session_invalid(
