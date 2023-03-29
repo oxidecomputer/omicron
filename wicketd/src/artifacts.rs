@@ -244,7 +244,7 @@ impl ArtifactsWithPlan {
             let target_name = TargetName::try_from(artifact.target.as_str())
                 .map_err(|error| RepositoryError::LocateTarget {
                     target: artifact.target.clone(),
-                    error,
+                    error: Box::new(error),
                 })?;
 
             let target_hash = repository
@@ -277,7 +277,7 @@ impl ArtifactsWithPlan {
                 .read_target(&target_name)
                 .map_err(|error| RepositoryError::LocateTarget {
                     target: artifact.target.clone(),
-                    error,
+                    error: Box::new(error),
                 })?
                 .ok_or_else(|| {
                     RepositoryError::MissingTarget(artifact.target.clone())
@@ -382,7 +382,7 @@ enum RepositoryError {
     LocateTarget {
         target: String,
         #[source]
-        error: tough::error::Error,
+        error: Box<tough::error::Error>,
     },
 
     #[error(
