@@ -18,12 +18,12 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::types::DnsConfig;
 use dns_service_client::{
-    types::{
-        DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
-    },
+    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
 };
 use slog::{Drain, Logger};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::iter::once;
 use std::net::Ipv6Addr;
 
@@ -115,9 +115,12 @@ async fn main() -> Result<()> {
             for zone_config in &config.zones {
                 println!("\nzone {:?}", zone_config.zone_name);
 
-                for kv in &zone_config.records {
-                    println!("    key {:?}:", kv.key.name);
-                    for record in &kv.records {
+                // Sort the records so that we get consistent ordering.
+                let records: BTreeMap<_, _> =
+                    zone_config.records.iter().collect();
+                for (name, records) in records {
+                    println!("    key {:?}:", name);
+                    for record in records {
                         match record {
                             DnsRecord::Aaaa(addr) => {
                                 println!("        AAAA: {:?}", addr);
@@ -179,7 +182,7 @@ async fn main() -> Result<()> {
                             records: dns_zone
                                 .records
                                 .into_iter()
-                                .filter(|r| r.key.name != cmd.name)
+                                .filter(|(name, _)| *name != cmd.name)
                                 .collect(),
                         }
                     }
@@ -228,15 +231,18 @@ fn add_record(
     let generation = config.generation;
     let (our_zone, other_zones): (Vec<_>, Vec<_>) =
         config.zones.into_iter().partition(|z| z.zone_name == zone_name);
-    let our_records =
-        our_zone.into_iter().next().map(|z| z.records).unwrap_or_else(Vec::new);
+    let our_records = our_zone
+        .into_iter()
+        .next()
+        .map(|z| z.records)
+        .unwrap_or_else(HashMap::new);
     let (our_kv, other_kvs): (Vec<_>, Vec<_>) =
-        our_records.into_iter().partition(|kv| kv.key.name == name);
-    let mut our_kv = our_kv.into_iter().next().unwrap_or_else(|| DnsKv {
-        key: DnsRecordKey { name: name.to_owned() },
-        records: Vec::new(),
-    });
-    our_kv.records.push(record);
+        our_records.into_iter().partition(|(n, _)| n == name);
+    let mut our_kv = our_kv
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| (name.to_owned(), Vec::new()));
+    our_kv.1.push(record);
 
     Ok(DnsConfigParams {
         generation: generation + 1,

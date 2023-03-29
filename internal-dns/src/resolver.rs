@@ -176,6 +176,7 @@ mod test {
     use dns_service_client::types::DnsConfigParams;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
+    use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
@@ -440,7 +441,7 @@ mod test {
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
         dns_config.generation += 1;
-        dns_config.zones[0].records = Vec::new();
+        dns_config.zones[0].records = HashMap::new();
         dns_server.update(&dns_config).await.unwrap();
 
         // If we remove the records for all services, we won't find them any

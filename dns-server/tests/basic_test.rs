@@ -4,15 +4,13 @@
 
 use anyhow::{Context, Result};
 use dns_service_client::{
-    types::{
-        DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey, Srv,
-    },
+    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
     Client,
 };
 use dropshot::test_util::LogContext;
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
-use std::net::Ipv6Addr;
+use std::{collections::HashMap, net::Ipv6Addr};
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
@@ -33,34 +31,18 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // add an aaaa record
-    let name = DnsRecordKey { name: "devron".into() };
+    let name = "devron".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
-    dns_records_create(
-        client,
-        TEST_ZONE,
-        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
-    )
-    .await?;
+    let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
     // read back the aaaa record
     let records = dns_records_list(client, TEST_ZONE).await?;
-    assert_eq!(1, records.len());
-    assert_eq!(records[0].key.name, name.name);
-
-    assert_eq!(1, records[0].records.len());
-    match records[0].records[0] {
-        DnsRecord::Aaaa(ra) => {
-            assert_eq!(ra, addr);
-        }
-        _ => {
-            panic!("expected aaaa record")
-        }
-    }
+    assert_eq!(input_records, records);
 
     // resolve the name
-    let response =
-        resolver.lookup_ip(name.name + "." + TEST_ZONE + ".").await?;
+    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
     let address = response.iter().next().expect("no addresses returned!");
     assert_eq!(address, addr);
 
@@ -79,38 +61,19 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // add a srv record
-    let name = DnsRecordKey { name: "hromi".into() };
+    let name = "hromi".to_string();
     let srv =
         Srv { prio: 47, weight: 74, port: 99, target: "outpost47".into() };
     let rec = DnsRecord::Srv(srv.clone());
-    dns_records_create(
-        client,
-        TEST_ZONE,
-        vec![DnsKv { key: name.clone(), records: vec![rec.clone()] }],
-    )
-    .await?;
+    let input_records = HashMap::from([(name.clone(), vec![rec])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
     // read back the srv record
     let records = dns_records_list(client, TEST_ZONE).await?;
-    assert_eq!(1, records.len());
-    assert_eq!(records[0].key.name, name.name);
-
-    assert_eq!(1, records[0].records.len());
-    match records[0].records[0] {
-        DnsRecord::Srv(ref rs) => {
-            assert_eq!(rs.prio, srv.prio);
-            assert_eq!(rs.weight, srv.weight);
-            assert_eq!(rs.port, srv.port);
-            assert_eq!(rs.target, srv.target);
-        }
-        _ => {
-            panic!("expected srv record")
-        }
-    }
+    assert_eq!(records, input_records);
 
     // resolve the srv
-    let response =
-        resolver.srv_lookup(name.name + "." + TEST_ZONE + ".").await?;
+    let response = resolver.srv_lookup(name + "." + TEST_ZONE + ".").await?;
     let srvr = response.iter().next().expect("no addresses returned!");
     assert_eq!(srvr.priority(), srv.prio);
     assert_eq!(srvr.weight(), srv.weight);
@@ -132,44 +95,20 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // Add multiple AAAA records
-    let name = DnsRecordKey { name: "devron".into() };
+    let name = "devron".to_string();
     let addr1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
     let aaaa1 = DnsRecord::Aaaa(addr1);
     let aaaa2 = DnsRecord::Aaaa(addr2);
-    dns_records_create(
-        client,
-        TEST_ZONE,
-        vec![DnsKv { key: name.clone(), records: vec![aaaa1, aaaa2] }],
-    )
-    .await?;
+    let input_records = HashMap::from([(name.clone(), vec![aaaa1, aaaa2])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
     // read back the aaaa records
     let records = dns_records_list(client, TEST_ZONE).await?;
-    assert_eq!(1, records.len());
-    assert_eq!(records[0].key.name, name.name);
-
-    assert_eq!(2, records[0].records.len());
-    match &records[0].records[0] {
-        DnsRecord::Aaaa(ra) => {
-            assert_eq!(*ra, addr1);
-        }
-        _ => {
-            panic!("expected aaaa record")
-        }
-    }
-    match &records[0].records[1] {
-        DnsRecord::Aaaa(ra) => {
-            assert_eq!(*ra, addr2);
-        }
-        _ => {
-            panic!("expected aaaa record")
-        }
-    }
+    assert_eq!(records, input_records);
 
     // resolve the name
-    let response =
-        resolver.lookup_ip(name.name + "." + TEST_ZONE + ".").await?;
+    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
     let mut iter = response.iter();
     let address = iter.next().expect("no addresses returned!");
     assert_eq!(address, addr1);
@@ -223,30 +162,15 @@ pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
     let resolver = &test_ctx.resolver;
 
     // add a aaaa record
-    let name = DnsRecordKey { name: "epsilon3.oxide.test".into() };
+    let name = "epsilon3.oxide.test".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
-    dns_records_create(
-        client,
-        "oxide.test",
-        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
-    )
-    .await?;
+    let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
+    dns_records_create(client, "oxide.test", input_records.clone()).await?;
 
     // read back the aaaa record
     let records = dns_records_list(client, "oxide.test").await?;
-    assert_eq!(1, records.len());
-    assert_eq!(records[0].key.name, name.name);
-
-    assert_eq!(1, records[0].records.len());
-    match records[0].records[0] {
-        DnsRecord::Aaaa(ra) => {
-            assert_eq!(ra, addr);
-        }
-        _ => {
-            panic!("expected aaaa record")
-        }
-    }
+    assert_eq!(records, input_records);
 
     // resolve the name
     let response = resolver.lookup_ip("epsilon3.oxide.test.oxide.test").await?;
@@ -271,17 +195,14 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // Add an empty DNS record
-    let name = DnsRecordKey { name: "devron".into() };
-    dns_records_create(
-        client,
-        TEST_ZONE,
-        vec![DnsKv { key: name.clone(), records: vec![] }],
-    )
-    .await?;
+    let name = "devron".to_string();
+    let input_records = HashMap::from([(name.clone(), vec![])]);
+    dns_records_create(client, TEST_ZONE, input_records).await?;
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert!(records.is_empty());
 
     // resolve the name
-    lookup_ip_expect_nxdomain(&resolver, &(name.name + "." + TEST_ZONE + "."))
-        .await;
+    lookup_ip_expect_nxdomain(&resolver, &(name + "." + TEST_ZONE + ".")).await;
 
     test_ctx.cleanup().await;
     Ok(())
@@ -298,13 +219,13 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
     assert!(records.is_empty());
 
     // add a record, just to create a zone
-    let name = DnsRecordKey { name: "devron".into() };
+    let name = "devron".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let aaaa = DnsRecord::Aaaa(addr);
     dns_records_create(
         client,
         TEST_ZONE,
-        vec![DnsKv { key: name.clone(), records: vec![aaaa.clone()] }],
+        HashMap::from([(name.clone(), vec![aaaa.clone()])]),
     )
     .await?;
 
@@ -455,7 +376,7 @@ fn test_config(
 async fn dns_records_create(
     client: &Client,
     zone_name: &str,
-    records: Vec<DnsKv>,
+    records: HashMap<String, Vec<DnsRecord>>,
 ) -> anyhow::Result<()> {
     let before = client
         .dns_config_get()
@@ -494,7 +415,7 @@ async fn dns_records_create(
 async fn dns_records_list(
     client: &Client,
     zone_name: &str,
-) -> anyhow::Result<Vec<DnsKv>> {
+) -> anyhow::Result<HashMap<String, Vec<DnsRecord>>> {
     Ok(client
         .dns_config_get()
         .await
@@ -504,5 +425,5 @@ async fn dns_records_list(
         .into_iter()
         .find(|z| z.zone_name == zone_name)
         .map(|z| z.records)
-        .unwrap_or_else(Vec::new))
+        .unwrap_or_else(HashMap::new))
 }

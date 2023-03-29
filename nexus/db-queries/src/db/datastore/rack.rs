@@ -415,7 +415,7 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::ServiceKind;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use internal_params::{DnsKv, DnsRecord, DnsRecordKey};
+    use internal_params::DnsRecord;
     use nexus_db_model::{DnsGroup, InitialDnsGroup};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
@@ -433,7 +433,7 @@ mod test {
             internal_dns::DNS_ZONE,
             "test suite",
             "test suite",
-            vec![],
+            HashMap::new(),
         )
     }
 
@@ -443,7 +443,7 @@ mod test {
             "testing.oxide.example",
             "test suite",
             "test suite",
-            vec![],
+            HashMap::new(),
         )
     }
 
@@ -714,10 +714,7 @@ mod test {
             internal_dns::DNS_ZONE,
             "test suite",
             "initial test suite internal rev",
-            vec![DnsKv {
-                key: DnsRecordKey { name: "nexus".to_string() },
-                records: internal_records.clone(),
-            }],
+            HashMap::from([("nexus".to_string(), internal_records.clone())]),
         );
 
         let external_records =
@@ -727,10 +724,7 @@ mod test {
             "test-suite.oxide.test",
             "test suite",
             "initial test suite external rev",
-            vec![DnsKv {
-                key: DnsRecordKey { name: "api.sys".to_string() },
-                records: external_records.clone(),
-            }],
+            HashMap::from([("api.sys".to_string(), external_records.clone())]),
         );
 
         let rack = datastore
@@ -831,11 +825,9 @@ mod test {
             dns_config_internal.zones[0].zone_name,
             internal_dns::DNS_ZONE
         );
-        assert_eq!(dns_config_internal.zones[0].records.len(), 1);
-        assert_eq!(dns_config_internal.zones[0].records[0].key.name, "nexus");
         assert_eq!(
-            dns_config_internal.zones[0].records[0].records,
-            internal_records
+            dns_config_internal.zones[0].records,
+            HashMap::from([("nexus".to_string(), internal_records)]),
         );
 
         let dns_config_external = datastore
@@ -848,11 +840,9 @@ mod test {
             dns_config_external.zones[0].zone_name,
             "test-suite.oxide.test",
         );
-        assert_eq!(dns_config_external.zones[0].records.len(), 1);
-        assert_eq!(dns_config_external.zones[0].records[0].key.name, "api.sys");
         assert_eq!(
-            dns_config_external.zones[0].records[0].records,
-            external_records
+            dns_config_external.zones[0].records,
+            HashMap::from([("api.sys".to_string(), external_records)]),
         );
 
         db.cleanup().await.unwrap();

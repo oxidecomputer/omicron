@@ -1196,9 +1196,12 @@
         "type": "object",
         "properties": {
           "records": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DnsKv"
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DnsRecord"
+              }
             }
           },
           "zone_name": {
@@ -1208,24 +1211,6 @@
         "required": [
           "records",
           "zone_name"
-        ]
-      },
-      "DnsKv": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "$ref": "#/components/schemas/DnsRecordKey"
-          },
-          "records": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DnsRecord"
-            }
-          }
-        },
-        "required": [
-          "key",
-          "records"
         ]
       },
       "DnsRecord": {
@@ -1267,17 +1252,6 @@
               "type"
             ]
           }
-        ]
-      },
-      "DnsRecordKey": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
         ]
       },
       "Duration": {

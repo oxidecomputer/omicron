@@ -20,6 +20,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -136,7 +137,7 @@ impl super::Nexus {
             "oxide-dev.test",
             &self.id.to_string(),
             "rack setup",
-            vec![],
+            HashMap::new(),
         );
 
         self.db_datastore
