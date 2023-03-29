@@ -7,7 +7,7 @@ on: [ push, pull_request ]
 
 jobs:
   check-style:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     # actions/checkout@v2
     - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-20.04, macos-11 ]
+        os: [ ubuntu-22.04, macos-12 ]
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
@@ -44,7 +44,7 @@ jobs:
       run: cargo run --bin omicron-package -- -t default check
 
   clippy-lint:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
@@ -72,7 +72,7 @@ jobs:
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
