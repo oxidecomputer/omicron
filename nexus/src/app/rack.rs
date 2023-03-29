@@ -120,8 +120,8 @@ impl super::Nexus {
             )
             .await?;
 
-        // Propogate firewall rules for any services that were initialized
-        self.plumb_fw_rules_for_services(&opctx, &request.services).await?;
+        // Configure the OPTE ports for any services that were initialized
+        self.setup_service_opte_ports(&opctx, &request.services).await?;
 
         Ok(())
     }
@@ -156,36 +156,116 @@ impl super::Nexus {
         }
     }
 
-    async fn plumb_fw_rules_for_services(
+    async fn setup_service_opte_ports(
         &self,
         opctx: &OpContext,
         services: &[ServicePutRequest],
     ) -> Result<(), Error> {
         for service in services {
             // Nexus is currently the only service that makes use of OPTE
-            if !matches!(&service.kind, ServiceKind::Nexus { .. }) {
+            let ServiceKind::Nexus { external_address } = service.kind else {
                 continue;
+            };
+
+            let (authz_service, _) =
+                db::lookup::LookupPath::new(opctx, &self.db_datastore)
+                    .service_id(service.service_id)
+                    .fetch()
+                    .await?;
+            let service_nics = self
+                .db_datastore
+                .derive_service_network_interface_info(opctx, &authz_service)
+                .await?;
+
+            // For each NIC, we need to create a NAT entry on the switch
+            let dpd_client = &self.dpd_client;
+
+            // Grab the IP address of the sled this service is running on
+            let sled = self.sled_lookup(opctx, &service.sled_id).await?;
+            let sled_ip = sled.ip();
+
+            for service_nic in service_nics {
+                let mac = service_nic
+                    .mac
+                    .parse::<macaddr::MacAddr6>()
+                    .map_err(|e| {
+                        Error::internal_error(&format!(
+                            "invalid MAC for service NIC: {e}"
+                        ))
+                    })?;
+
+                let nat_target = dpd_client::types::NatTarget {
+                    inner_mac: dpd_client::types::MacAddr {
+                        a: mac.into_array().to_vec(),
+                    },
+                    internal_ip: sled_ip,
+                    vni: service_nic.vni.0.into(),
+                };
+
+                // TODO-cleanup: Currently nexus is the only service that uses
+                // OPTE and is just given a single Service External IP.
+                // We'll want to also support services that only need outbound
+                // access and thus can use SNAT External IPs.
+                let first_port = 0;
+                let last_port = u16::MAX;
+
+                match external_address {
+                    std::net::IpAddr::V4(ip4) => {
+                        dpd_client
+                            .nat_ipv4_create(
+                                &ip4,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
+                    std::net::IpAddr::V6(ip6) => {
+                        dpd_client
+                            .nat_ipv6_create(
+                                &ip6,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
+                }
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to create NAT entry for service NIC: {e}"
+                    ))
+                })?;
             }
 
-            // The VPC names are derived from the service kind & ID.
-            // See `DataStore::create_service_vpc`.
-            let name = format!("{}-{}", service.kind, service.service_id)
-                .parse::<Name>()
-                .unwrap()
-                .into();
-
-            // Lookup the VPC in the built-in services project
-            let vpc_lookup =
-                db::lookup::LookupPath::new(opctx, &self.db_datastore)
-                    .project_id(*db::fixed_data::project::SERVICE_PROJECT_ID)
-                    .vpc_name(&name);
-
-            let rules =
-                self.vpc_list_firewall_rules(opctx, &vpc_lookup).await?;
-            let (_, _, _, vpc) = vpc_lookup.fetch().await?;
-
-            self.send_sled_agents_firewall_rules(opctx, &vpc, &rules).await?;
+            // Propogate firewall rules
+            self.plumb_fw_rules_for_service(&opctx, service).await?;
         }
+
+        Ok(())
+    }
+
+    async fn plumb_fw_rules_for_service(
+        &self,
+        opctx: &OpContext,
+        service: &ServicePutRequest,
+    ) -> Result<(), Error> {
+        // The VPC names are derived from the service kind & ID.
+        // See `DataStore::create_service_vpc`.
+        let name = format!("{}-{}", service.kind, service.service_id)
+            .parse::<Name>()
+            .unwrap()
+            .into();
+
+        // Lookup the VPC in the built-in services project
+        let vpc_lookup = db::lookup::LookupPath::new(opctx, &self.db_datastore)
+            .project_id(*db::fixed_data::project::SERVICE_PROJECT_ID)
+            .vpc_name(&name);
+
+        let rules = self.vpc_list_firewall_rules(opctx, &vpc_lookup).await?;
+        let (_, _, _, vpc) = vpc_lookup.fetch().await?;
+
+        self.send_sled_agents_firewall_rules(opctx, &vpc, &rules).await?;
 
         Ok(())
     }
