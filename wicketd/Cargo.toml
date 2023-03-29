@@ -19,6 +19,7 @@ gateway-messages.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+petgraph.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true

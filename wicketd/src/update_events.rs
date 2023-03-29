@@ -27,6 +27,17 @@ pub struct UpdateState {
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "state", content = "data")]
+pub enum SpUpdateState {
+    SendingArtifactToMgs,
+    WaitingForStatus,
+    PreparingForArtifact { progress: Option<UpdatePreparationProgress> },
+    Writing { written_bytes: u64, total_bytes: u64 },
+    // This is only used by the SP.
+    ResettingSp,
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state", content = "data")]
 pub enum UpdateStateKind {
     // This is a hack to handle cases where a completion has just happened and
     // there's no progress from the next step yet: see
@@ -105,7 +116,10 @@ pub enum UpdateNormalEventKind {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
 pub enum UpdateTerminalEventKind {
+    UpdatePowerStateFailed { reason: String },
     SpResetFailed { reason: String },
+    SetInstallinatorImageIdFailed { reason: String },
+    SetHostStartupOptionsFailed { reason: String },
     ArtifactUpdateFailed { artifact: ArtifactId, reason: String },
 }
 
