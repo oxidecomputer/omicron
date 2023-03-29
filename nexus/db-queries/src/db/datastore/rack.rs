@@ -36,6 +36,7 @@ use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::InitialDnsGroup;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
@@ -50,6 +51,17 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
+/// Groups arguments related to rack initialization
+pub struct RackInit {
+    pub rack_id: Uuid,
+    pub services: Vec<internal_params::ServicePutRequest>,
+    pub datasets: Vec<Dataset>,
+    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub certificates: Vec<Certificate>,
+    pub internal_dns: InitialDnsGroup,
+    pub external_dns: InitialDnsGroup,
+}
+
 #[derive(Debug)]
 enum RackInitError {
     AddingIp(Error),
@@ -63,6 +75,7 @@ enum RackInitError {
     VpcFwRuleInsert { err: AsyncInsertError, vpc_id: Uuid },
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate { err: PoolError, rack_id: Uuid },
+    DnsSerialization(Error),
 }
 
 type TxnError = TransactionError<RackInitError>;
@@ -202,6 +215,12 @@ impl From<TxnError> for Error {
                     LookupType::ById(rack_id),
                 ),
             ),
+            TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
+                Error::internal_error(&format!(
+                    "failed to serialize initial DNS records: {:#}",
+                    err
+                ))
+            }
             TxnError::Pool(e) => {
                 Error::internal_error(&format!("Transaction error: {}", e))
             }
@@ -615,15 +634,19 @@ impl DataStore {
     pub async fn rack_set_initialized(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
-        services: &[internal_params::ServicePutRequest],
-        datasets: Vec<Dataset>,
-        service_ip_pool_ranges: Vec<IpRange>,
-        certificates: Vec<Certificate>,
+        rack_init: RackInit,
     ) -> UpdateResult<Rack> {
         use db::schema::rack::dsl as rack_dsl;
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        let rack_id = rack_init.rack_id;
+        let services = rack_init.services;
+        let datasets = rack_init.datasets;
+        let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
+        let certificates = rack_init.certificates;
+        let internal_dns = rack_init.internal_dns;
+        let external_dns = rack_init.external_dns;
 
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
@@ -750,6 +773,18 @@ impl DataStore {
                 }
                 info!(log, "Inserted certificates");
 
+                Self::load_dns_data(&conn, internal_dns)
+                    .await
+                    .map_err(RackInitError::DnsSerialization)
+                    .map_err(TxnError::CustomError)?;
+                info!(log, "Populated DNS tables for internal DNS");
+
+                Self::load_dns_data(&conn, external_dns)
+                    .await
+                    .map_err(RackInitError::DnsSerialization)
+                    .map_err(TxnError::CustomError)?;
+                info!(log, "Populated DNS tables for external DNS");
+
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
                     .set((
@@ -831,6 +866,8 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::ServiceKind;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use internal_params::DnsRecord;
+    use nexus_db_model::{DnsGroup, InitialDnsGroup};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
@@ -841,11 +878,32 @@ mod test {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
     }
 
+    fn internal_dns_empty() -> InitialDnsGroup {
+        InitialDnsGroup::new(
+            DnsGroup::Internal,
+            internal_dns::DNS_ZONE,
+            "test suite",
+            "test suite",
+            HashMap::new(),
+        )
+    }
+
+    fn external_dns_empty() -> InitialDnsGroup {
+        InitialDnsGroup::new(
+            DnsGroup::External,
+            "testing.oxide.example",
+            "test suite",
+            "test suite",
+            HashMap::new(),
+        )
+    }
+
     #[tokio::test]
     async fn rack_set_initialized_empty() {
         let logctx = dev::test_setup_log("rack_set_initialized_empty");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let before = Utc::now();
 
         let services = vec![];
         let datasets = vec![];
@@ -856,31 +914,62 @@ mod test {
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets.clone(),
-                service_ip_pool_ranges.clone(),
-                certificates.clone(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges: service_ip_pool_ranges.clone(),
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
 
+        let after = Utc::now();
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
+
+        let dns_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .unwrap();
+        assert_eq!(dns_internal.generation, 1);
+        assert!(dns_internal.time_created >= before);
+        assert!(dns_internal.time_created <= after);
+        assert_eq!(dns_internal.zones.len(), 0);
+
+        let dns_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_internal.generation, dns_external.generation);
+        assert_eq!(dns_internal.zones, dns_external.zones);
 
         // It should also be idempotent.
         let rack2 = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets,
-                service_ip_pool_ranges,
-                certificates,
+                RackInit {
+                    rack_id: rack_id(),
+                    services,
+                    datasets,
+                    service_ip_pool_ranges,
+                    certificates,
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
         assert_eq!(rack.time_modified(), rack2.time_modified());
+
+        let dns_internal2 = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .unwrap();
+        assert_eq!(dns_internal, dns_internal2);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -963,11 +1052,15 @@ mod test {
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -1063,14 +1156,40 @@ mod test {
                 .expect("Cannot create IP Range")];
         let certificates = vec![];
 
+        let internal_records = vec![
+            DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::1:2:3:5".parse().unwrap()),
+        ];
+        let internal_dns = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            internal_dns::DNS_ZONE,
+            "test suite",
+            "initial test suite internal rev",
+            HashMap::from([("nexus".to_string(), internal_records.clone())]),
+        );
+
+        let external_records =
+            vec![DnsRecord::Aaaa("fe80::5:6:7:8".parse().unwrap())];
+        let external_dns = InitialDnsGroup::new(
+            DnsGroup::External,
+            "test-suite.oxide.test",
+            "test suite",
+            "initial test suite external rev",
+            HashMap::from([("api.sys".to_string(), external_records.clone())]),
+        );
+
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await
             .expect("Failed to initialize rack");
@@ -1146,6 +1265,37 @@ mod test {
 
         assert!(observed_datasets.is_empty());
 
+        // Verify the internal and external DNS configurations.
+        let dns_config_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .unwrap();
+        assert_eq!(dns_config_internal.generation, 1);
+        assert_eq!(dns_config_internal.zones.len(), 1);
+        assert_eq!(
+            dns_config_internal.zones[0].zone_name,
+            internal_dns::DNS_ZONE
+        );
+        assert_eq!(
+            dns_config_internal.zones[0].records,
+            HashMap::from([("nexus".to_string(), internal_records)]),
+        );
+
+        let dns_config_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config_external.generation, 1);
+        assert_eq!(dns_config_external.zones.len(), 1);
+        assert_eq!(
+            dns_config_external.zones[0].zone_name,
+            "test-suite.oxide.test",
+        );
+        assert_eq!(
+            dns_config_external.zones[0].records,
+            HashMap::from([("api.sys".to_string(), external_records)]),
+        );
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1176,11 +1326,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await;
         assert!(result.is_err());
@@ -1236,11 +1390,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack_id(),
-                &services,
-                datasets.clone(),
-                service_ip_pool_ranges,
-                certificates.clone(),
+                RackInit {
+                    rack_id: rack_id(),
+                    services: services.clone(),
+                    datasets: datasets.clone(),
+                    service_ip_pool_ranges,
+                    certificates: certificates.clone(),
+                    internal_dns: internal_dns_empty(),
+                    external_dns: external_dns_empty(),
+                },
             )
             .await;
         assert!(result.is_err());

@@ -972,6 +972,14 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is ready to receive blocks from an external source
+    ImportReady,
+    /// Disk is importing blocks from a URL
+    ImportingFromUrl,
+    /// Disk is importing blocks from bulk writes
+    ImportingFromBulkWrites,
+    /// Disk is being finalized to state Detached
+    Finalizing,
     /// Disk is undergoing maintenance
     Maintenance,
     /// Disk is being attached to the given Instance
@@ -1001,6 +1009,12 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("import_ready", None) => Ok(DiskState::ImportReady),
+            ("importing_from_url", None) => Ok(DiskState::ImportingFromUrl),
+            ("importing_from_bulk_writes", None) => {
+                Ok(DiskState::ImportingFromBulkWrites)
+            }
+            ("finalizing", None) => Ok(DiskState::Finalizing),
             ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
@@ -1021,6 +1035,10 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::ImportReady => "import_ready",
+            DiskState::ImportingFromUrl => "importing_from_url",
+            DiskState::ImportingFromBulkWrites => "importing_from_bulk_writes",
+            DiskState::Finalizing => "finalizing",
             DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
@@ -1046,6 +1064,10 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::ImportReady => None,
+            DiskState::ImportingFromUrl => None,
+            DiskState::ImportingFromBulkWrites => None,
+            DiskState::Finalizing => None,
             DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,

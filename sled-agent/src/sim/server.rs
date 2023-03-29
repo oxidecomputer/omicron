@@ -8,6 +8,7 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
+use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
 use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
@@ -220,6 +221,7 @@ impl Server {
             datasets,
             internal_services_ip_pool_ranges: vec![],
             certs: vec![],
+            internal_dns_zone_config: d2n_params(&dns_config),
         };
 
         Ok((

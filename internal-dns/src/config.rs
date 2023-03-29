@@ -62,9 +62,7 @@
 
 use crate::names::{BackendName, ServiceName, DNS_ZONE};
 use anyhow::{anyhow, ensure};
-use dns_service_client::types::{
-    DnsConfigParams, DnsConfigZone, DnsKv, DnsRecord, DnsRecordKey,
-};
+use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
@@ -321,19 +319,13 @@ impl DnsConfigBuilder {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
             let name = AAAA::Sled(sled_id).dns_name();
-            DnsKv {
-                key: DnsRecordKey { name },
-                records: vec![DnsRecord::Aaaa(sled_ip)],
-            }
+            (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone_id, zone_ip)| {
             let name = AAAA::Zone(zone_id).dns_name();
-            DnsKv {
-                key: DnsRecordKey { name },
-                records: vec![DnsRecord::Aaaa(zone_ip)],
-            }
+            (name, vec![DnsRecord::Aaaa(zone_ip)])
         });
 
         // Assemble the set of SRV records, which implicitly point back at
@@ -357,7 +349,7 @@ impl DnsConfigBuilder {
                     })
                     .collect();
 
-                DnsKv { key: DnsRecordKey { name }, records }
+                (name, records)
             },
         );
 
@@ -380,7 +372,7 @@ impl DnsConfigBuilder {
                     })
                     .collect();
 
-                DnsKv { key: DnsRecordKey { name }, records }
+                (name, records)
             },
         );
 
@@ -405,7 +397,7 @@ impl DnsConfigBuilder {
 mod test {
     use super::{BackendName, DnsConfigBuilder, ServiceName, AAAA, SRV};
     use crate::DNS_ZONE;
-    use std::{io::Write, net::Ipv6Addr};
+    use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
     use uuid::Uuid;
 
     #[test]
@@ -570,8 +562,10 @@ mod test {
             assert_eq!(config.zones.len(), 1);
             assert_eq!(config.zones[0].zone_name, DNS_ZONE);
             write!(&mut output, "builder: {:?}\n", label).unwrap();
-            serde_json::to_writer_pretty(&mut output, &config.zones[0].records)
-                .unwrap();
+            // Sort the records for stability.
+            let records: BTreeMap<_, _> =
+                config.zones[0].records.iter().collect();
+            serde_json::to_writer_pretty(&mut output, &records).unwrap();
             write!(&mut output, "\n").unwrap();
         }
 

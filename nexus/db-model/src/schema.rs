@@ -25,6 +25,7 @@ table! {
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
+        pantry_address -> Nullable<Text>,
     }
 }
 
@@ -649,6 +650,35 @@ table! {
 }
 
 table! {
+    dns_zone (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        dns_group -> crate::DnsGroupEnum,
+        zone_name -> Text,
+    }
+}
+
+table! {
+    dns_version (dns_group, version) {
+        dns_group -> crate::DnsGroupEnum,
+        version -> Int8,
+        time_created -> Timestamptz,
+        creator -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    dns_name (dns_zone_id, version_added, name) {
+        dns_zone_id -> Uuid,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        name -> Text,
+        dns_record_data -> Jsonb,
+    }
+}
+
+table! {
     user_builtin (id) {
         id -> Uuid,
         name -> Text,
@@ -812,3 +842,5 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
 );
+
+allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);

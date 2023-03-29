@@ -807,7 +807,7 @@ CREATE TABLE omicron.public.disk (
      */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
-    disk_state STRING(15) NOT NULL,
+    disk_state STRING(32) NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
      * one Instance at a time.
@@ -820,7 +820,9 @@ CREATE TABLE omicron.public.disk (
     size_bytes INT NOT NULL,
     block_size omicron.public.block_size NOT NULL,
     origin_snapshot UUID,
-    origin_image UUID
+    origin_image UUID,
+
+    pantry_address TEXT
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (
@@ -1740,6 +1742,102 @@ CREATE TABLE omicron.public.update_deployment (
 
 CREATE INDEX on omicron.public.update_deployment (
     time_created
+);
+
+/*******************************************************************/
+
+/*
+ * DNS Propagation
+ *
+ * The tables here are the source of truth of DNS data for both internal and
+ * external DNS.
+ */
+
+/*
+ * A DNS group is a collection of DNS zones covered by a single version number.
+ * We have two DNS Groups in our system: "internal" (for internal service
+ * discovery) and "external" (which we expose on customer networks to provide
+ * DNS for our own customer-facing services, like the API and console).
+ *
+ * Each DNS server is associated with exactly one DNS group.  Nexus propagates
+ * the entire contents of a DNS group (i.e., all of its zones and all of those
+ * zones' DNS names and associated records) to every server in that group.
+ */
+CREATE TYPE omicron.public.dns_group AS ENUM (
+    'internal',
+    'external'
+);
+
+/*
+ * A DNS Zone is basically just a DNS name at the root of a subtree served by
+ * one of our DNS servers.  In a typical system, there would be two DNS zones:
+ *
+ * (1) in the "internal" DNS group, a zone called "control-plane.oxide.internal"
+ *     used by the control plane for internal service discovery
+ *
+ * (2) in the "external" DNS group, a zone whose name is owned by the customer
+ *     and specified when the rack is set up for the first time.  We will use
+ *     this zone to advertise addresses for the services we provide on the
+ *     customer network (i.e., the API and console).
+ */
+CREATE TABLE omicron.public.dns_zone (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    dns_group omicron.public.dns_group NOT NULL,
+    zone_name TEXT NOT NULL
+);
+
+/*
+ * It's allowed (although probably not correct) for the same DNS zone to appear
+ * in both the internal and external groups.  It is not allowed to specify the
+ * same DNS zone twice within the same group.
+ */
+CREATE UNIQUE INDEX ON omicron.public.dns_zone (
+    dns_group, zone_name
+);
+
+/*
+ * All the data associated with a DNS group is gathered together and assigned a
+ * single version number, sometimes called a generation number.  When changing
+ * the DNS data for a group (e.g., to add a new DNS name), clients first insert
+ * a new row into this table with the next available generation number.  (This
+ * table is not strictly necessary.  Instead, we could put the current version
+ * number for the group into a `dns_group` table, and clients could update that
+ * instead of inserting into this table.  But by using a table here, we have a
+ * debugging record of all past generation updates, including metadata about who
+ * created them and why.)
+ */
+CREATE TABLE omicron.public.dns_version (
+    dns_group omicron.public.dns_group NOT NULL,
+    version INT8 NOT NULL,
+
+    /* These fields are for debugging only. */
+    time_created TIMESTAMPTZ NOT NULL,
+    creator TEXT NOT NULL,
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY(dns_group, version)
+);
+
+/*
+ * The meat of the DNS data: a list of DNS names.  Each name has one or more
+ * records stored in JSON.
+ *
+ * To facilitate clients getting a consistent snapshot of the DNS data at a
+ * given version, each name is stored with the version in which it was added and
+ * (optionally) the version in which it was removed.  The name and record data
+ * are immutable, so changing the records for a given name should be expressed
+ * as removing the old name (setting "version_removed") and creating a new
+ * record for the same name at a new version.
+ */
+CREATE TABLE omicron.public.dns_name (
+    dns_zone_id UUID NOT NULL,
+    version_added INT8 NOT NULL,
+    version_removed INT8,
+    name TEXT NOT NULL,
+    dns_record_data JSONB NOT NULL,
+
+    PRIMARY KEY (dns_zone_id, version_added, name)
 );
 
 /*******************************************************************/
