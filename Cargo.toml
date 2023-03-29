@@ -7,6 +7,7 @@ members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "end-to-end-tests",
@@ -61,6 +62,7 @@ default-members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "gateway",
@@ -193,6 +195,7 @@ nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 omicron-common = { path = "common" }
+omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-package = { path = "package" }

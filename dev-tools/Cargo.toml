@@ -1,0 +1,28 @@
+[package]
+name = "omicron-dev-tools"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+futures.workspace = true
+omicron-common.workspace = true
+omicron-test-utils.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
+tokio = { workspace = true, features = [ "full" ] }
+tokio-postgres.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+libc.workspace = true
+omicron-test-utils.workspace = true
+subprocess.workspace = true
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "omicron-dev"
+doc = false
