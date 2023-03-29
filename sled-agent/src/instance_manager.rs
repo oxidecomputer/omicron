@@ -8,9 +8,7 @@ use crate::nexus::LazyNexusClient;
 use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
 };
-use crate::serial::ByteOffset;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -171,25 +169,6 @@ impl InstanceManager {
         instance.transition(target).await.map_err(|e| e.into())
     }
 
-    pub async fn instance_serial_console_buffer_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let (_, instance) = instances
-                .get(&instance_id)
-                .ok_or(Error::NoSuchInstance(instance_id))?;
-            instance.clone()
-        };
-        instance
-            .serial_console_buffer_data(byte_offset, max_bytes)
-            .await
-            .map_err(Error::from)
-    }
-
     pub async fn instance_issue_disk_snapshot_request(
         &self,
         instance_id: Uuid,
@@ -269,7 +248,6 @@ mod test {
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_hardware::underlay;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -325,11 +303,8 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let data_link =
-            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
-            data_link,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
             MacAddr6::from([0u8; 6]),
         );
@@ -418,11 +393,8 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
-        let data_link =
-            underlay::find_chelsio_links().unwrap().into_iter().next().unwrap();
         let port_manager = PortManager::new(
             log.new(o!("component" => "PortManager")),
-            data_link,
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
             MacAddr6::from([0u8; 6]),
         );

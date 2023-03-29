@@ -5,7 +5,6 @@
 
 <service name='system/illumos/installinator' type='service' version='1'>
   <create_default_instance enabled='true' />
-  <single_instance />
 
   <!-- File systems should all be mounted before we begin: -->
   <dependency name='fs-root' grouping='require_all' restart_on='none'

@@ -6,8 +6,8 @@ use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_local_user, create_organization, create_silo, grant_iam,
-    object_create, objects_list_page_authz,
+    create_local_user, create_project, create_silo, grant_iam, object_create,
+    objects_list_page_authz, projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::ObjectIdentity;
@@ -22,7 +22,7 @@ use omicron_nexus::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
 use omicron_nexus::db::identity::Asset;
 use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::views::{
-    self, IdentityProvider, Organization, SamlIdentityProvider, Silo,
+    self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use omicron_nexus::external_api::{params, shared};
 
@@ -55,9 +55,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     create_silo(&client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
         .await;
 
-    // Verify GET /system/silos/{silo} works for both discoverable and not
-    let discoverable_url = "/system/silos/discoverable";
-    let hidden_url = "/system/silos/hidden";
+    // Verify GET /v1/system/silos/{silo} works for both discoverable and not
+    let discoverable_url = "/v1/system/silos/discoverable";
+    let hidden_url = "/v1/system/silos/hidden";
 
     let silo: Silo = NexusRequest::object_get(&client, &discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -82,16 +82,16 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         &client,
         StatusCode::NOT_FOUND,
         Method::GET,
-        &"/system/silos/testpost",
+        &"/v1/system/silos/testpost",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to make request");
 
-    // Verify GET /system/silos only returns discoverable silos
+    // Verify GET /v1/system/silos only returns discoverable silos
     let silos =
-        objects_list_page_authz::<Silo>(client, "/system/silos").await.items;
+        objects_list_page_authz::<Silo>(client, "/v1/system/silos").await.items;
     assert_eq!(silos.len(), 1);
     assert_eq!(silos[0].identity.name, "discoverable");
 
@@ -108,7 +108,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     // Grant the user "admin" privileges on that Silo.
     grant_iam(
         client,
-        "/system/silos/discoverable",
+        discoverable_url,
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -120,20 +120,31 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 
     let authn_opctx = nexus.opctx_external_authn();
 
-    // Create organization with built-in user auth
+    // Create project with built-in user auth
     // Note: this currently goes to the built-in silo!
-    let org_name: Name = "someorg".parse().unwrap();
-    let new_org_in_default_silo =
-        create_organization(&client, org_name.as_str()).await;
+    let project_name = "someproj";
+    let new_proj_in_default_silo = create_project(&client, project_name).await;
 
-    // Create an Organization of the same name in a different Silo to verify
+    // default silo project shows up in default silo
+    let projects_in_default_silo =
+        projects_list(client, "/v1/projects", "", None).await;
+    assert_eq!(projects_in_default_silo.len(), 1);
+
+    // default silo project does not show up in our silo
+    let projects_in_our_silo = NexusRequest::object_get(client, "/v1/projects")
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute_and_parse_unwrap::<dropshot::ResultsPage<Project>>()
+        .await;
+    assert_eq!(projects_in_our_silo.items.len(), 0);
+
+    // Create a Project of the same name in a different Silo to verify
     // that's possible.
-    let new_org_in_our_silo = NexusRequest::objects_post(
+    let new_proj_in_our_silo = NexusRequest::objects_post(
         client,
-        "/organizations",
-        &params::OrganizationCreate {
+        "/v1/projects",
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
-                name: org_name.clone(),
+                name: project_name.parse().unwrap(),
                 description: String::new(),
             },
         },
@@ -141,73 +152,65 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
     .await
-    .expect("failed to create same-named Organization in a different Silo")
-    .parsed_body::<views::Organization>()
-    .expect("failed to parse new Organization");
+    .expect("failed to create same-named Project in a different Silo")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse new Project");
     assert_eq!(
-        new_org_in_default_silo.identity.name,
-        new_org_in_our_silo.identity.name
+        new_proj_in_default_silo.identity.name,
+        new_proj_in_our_silo.identity.name
     );
     assert_ne!(
-        new_org_in_default_silo.identity.id,
-        new_org_in_our_silo.identity.id
+        new_proj_in_default_silo.identity.id,
+        new_proj_in_our_silo.identity.id
     );
-    // Delete it so that we can delete the Silo later.
+    // delete default subnet from VPC so we can delete the VPC
     NexusRequest::object_delete(
         client,
-        &format!("/organizations/{}", org_name),
+        &format!(
+            "/v1/vpc-subnets/default?project={}&vpc=default",
+            project_name
+        ),
     )
     .authn_as(AuthnMode::SiloUser(new_silo_user_id))
     .execute()
     .await
-    .expect("failed to delete test Organization");
+    .expect("failed to delete test Vpc");
+    // delete VPC from project so we can delete the project later
+    NexusRequest::object_delete(
+        client,
+        &format!("/v1/vpcs/default?project={}", project_name),
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to delete test Vpc");
 
-    // Verify GET /organizations works with built-in user auth
-    let organizations =
-        objects_list_page_authz::<Organization>(client, "/organizations")
-            .await
-            .items
-            .into_iter()
-            .filter(|o| o.identity.id != *db::fixed_data::ORGANIZATION_ID)
-            .collect::<Vec<_>>();
-    assert_eq!(organizations.len(), 1);
-    assert_eq!(organizations[0].identity.name, "someorg");
+    // Verify GET /v1/projects works with built-in user auth
+    let projects = projects_list(client, "/v1/projects", "", None).await;
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].identity.name, "someproj");
 
-    // TODO: uncomment when silo users can have role assignments
-    /*
-    // Verify GET /organizations doesn't list anything if authing under
-    // different silo.
-    let organizations =
-        objects_list_page_authz_with_session::<Organization>(
-            client, "/organizations", &session,
-        )
-        .await
-        .items;
-    assert_eq!(organizations.len(), 0);
-    */
-
-    // Verify DELETE doesn't work if organizations exist
-    // TODO: put someorg in discoverable silo, not built-in
+    // Deleting discoverable silo fails because there's still a project in it
     NexusRequest::expect_failure(
         &client,
         StatusCode::BAD_REQUEST,
         Method::DELETE,
-        &"/system/silos/default-silo",
+        &discoverable_url,
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("failed to make request");
 
-    // Delete organization
-    NexusRequest::object_delete(&client, &"/organizations/someorg")
-        .authn_as(AuthnMode::PrivilegedUser)
+    // Delete project
+    NexusRequest::object_delete(&client, &"/v1/projects/someproj")
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
         .execute()
         .await
         .expect("failed to make request");
 
-    // Verify silo DELETE works
-    NexusRequest::object_delete(&client, &"/system/silos/discoverable")
+    // Verify silo DELETE now works
+    NexusRequest::object_delete(&client, &discoverable_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -229,7 +232,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     let silo: Silo = object_create(
         client,
-        "/system/silos",
+        "/v1/system/silos",
         &params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: "silo-name".parse().unwrap(),
@@ -289,23 +292,23 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(group_memberships.len(), 1);
 
-    // Create an organization
+    // Create a project
     let _org = NexusRequest::objects_post(
         client,
-        "/organizations",
-        &params::OrganizationCreate {
+        "/v1/projects",
+        &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
-                name: "myorg".parse().unwrap(),
-                description: "some org".into(),
+                name: "myproj".parse().unwrap(),
+                description: "some proj".into(),
             },
         },
     )
     .authn_as(AuthnMode::SiloUser(admin_group_user.id()))
     .execute()
     .await
-    .expect("failed to create Organization")
-    .parsed_body::<views::Organization>()
-    .expect("failed to parse as Organization");
+    .expect("failed to create Project")
+    .parsed_body::<views::Project>()
+    .expect("failed to parse as Project");
 }
 
 // Test listing providers
@@ -318,7 +321,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     // List providers - should be none
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/system/silos/test-silo/identity-providers",
+        "/v1/system/identity-providers?silo=test-silo",
     )
     .await
     .items;
@@ -337,7 +340,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_1: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/test-silo/identity-providers/saml",
+        &"/v1/system/identity-providers/saml?silo=test-silo",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -366,7 +369,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
 
     let silo_saml_idp_2: SamlIdentityProvider = object_create(
         client,
-        &"/system/silos/test-silo/identity-providers/saml",
+        &"/v1/system/identity-providers/saml?silo=test-silo",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "another-totally-real-saml-provider"
@@ -396,7 +399,7 @@ async fn test_listing_identity_providers(cptestctx: &ControlPlaneTestContext) {
     // List providers again - expect 2
     let providers = objects_list_page_authz::<IdentityProvider>(
         client,
-        "/system/silos/test-silo/identity-providers",
+        "/v1/system/identity-providers?silo=test-silo",
     )
     .await
     .items;
@@ -430,7 +433,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        &format!("/system/silos/{}/identity-providers/saml", SILO_NAME),
+        &format!("/v1/system/identity-providers/saml?silo={}", SILO_NAME),
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -460,7 +463,7 @@ async fn test_deleting_a_silo_deletes_the_idp(
     // Delete the silo
     NexusRequest::object_delete(
         &client,
-        &format!("/system/silos/{}", SILO_NAME),
+        &format!("/v1/system/silos/{}", SILO_NAME),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -530,7 +533,7 @@ async fn test_saml_idp_metadata_data_valid(
 
     let silo_saml_idp: SamlIdentityProvider = object_create(
         client,
-        "/system/silos/blahblah/identity-providers/saml",
+        "/v1/system/identity-providers/saml?silo=blahblah",
         &params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
                 name: "some-totally-real-saml-provider"
@@ -594,7 +597,7 @@ async fn test_saml_idp_metadata_data_truncated(
         RequestBuilder::new(
             client,
             Method::POST,
-            "/system/silos/blahblah/identity-providers/saml",
+            "/v1/system/identity-providers/saml?silo=blahblah",
         )
         .body(Some(&params::SamlIdentityProviderCreate {
             identity: IdentityMetadataCreateParams {
@@ -773,7 +776,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
             assert!(existing_silo_user.is_none());
         }
 
-        NexusRequest::object_delete(&client, &"/system/silos/test-silo")
+        NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
             .authn_as(AuthnMode::PrivilegedUser)
             .execute()
             .await
@@ -927,7 +930,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
     .id;
     grant_iam(
         client,
-        "/system/silos/silo2",
+        "/v1/system/silos/silo2",
         SiloRole::Admin,
         new_silo_user_id,
         AuthnMode::PrivilegedUser,
@@ -1362,7 +1365,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     // Delete the silo
-    NexusRequest::object_delete(&client, &"/system/silos/test-silo")
+    NexusRequest::object_delete(&client, &"/v1/system/silos/test-silo")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -1537,7 +1540,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     // - on failure, the "list" and "view" endpoints always return the right
     //   status code and message for the failure mode
     // - that users can always list and fetch all users in their own Silo via
-    //   /system/silos (/users is tested elsewhere)
+    //   /v1/system/silos (/users is tested elsewhere)
     // - that users without privileges cannot list or fetch users in other Silos
     // - that users with privileges on another Silo can list and fetch users in
     //   that Silo
@@ -1562,8 +1565,6 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let mut output = String::new();
     for test_silo in [test_silo1, test_silo2] {
         let silo_name = &test_silo.silo.identity().name;
-        let silo_users_url =
-            &format!("/system/silos/{}/users", test_silo.silo.identity().name);
 
         write!(&mut output, "SILO: {}\n", silo_name).unwrap();
 
@@ -1583,7 +1584,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
             let test_response = NexusRequest::new(RequestBuilder::new(
                 client,
                 Method::GET,
-                &format!("{}/all", silo_users_url),
+                &format!("/v1/system/users?silo={}", silo_name),
             ))
             .authn_as(calling_user.clone())
             .execute()
@@ -1617,7 +1618,7 @@ async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
                 let test_response = NexusRequest::new(RequestBuilder::new(
                     client,
                     Method::GET,
-                    &format!("{}/id/{}", silo_users_url, user_id),
+                    &format!("/v1/system/users/{}?silo={}", user_id, silo_name),
                 ))
                 .authn_as(calling_user.clone())
                 .execute()
@@ -1699,7 +1700,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     // Grant this user "admin" privileges on that Silo.
     grant_iam(
         client,
-        "/system/silos/jit",
+        "/v1/system/silos/jit",
         SiloRole::Admin,
         admin_user.id,
         AuthnMode::PrivilegedUser,
@@ -1717,7 +1718,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 client,
                 StatusCode::NOT_FOUND,
                 Method::POST,
-                "/system/silos/jit/identity-providers/local/users",
+                "/v1/system/identity-providers/local/users?silo=jit",
                 &params::UserCreate {
                     external_id: params::UserId::from_str("dummy").unwrap(),
                     password: params::UserPassword::InvalidPassword,
@@ -1732,11 +1733,11 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let other_user_id =
         create_jit_user(datastore, &silo, "other-user").await.id;
     let user_url_delete = format!(
-        "/system/silos/jit/identity-providers/local/users/{}",
+        "/v1/system/identity-providers/local/users/{}?silo=jit",
         other_user_id
     );
     let user_url_set_password = format!(
-        "/system/silos/jit/identity-providers/local/users/{}/set-password",
+        "/v1/system/identity-providers/local/users/{}/set-password?silo=jit",
         other_user_id
     );
 
@@ -1943,7 +1944,7 @@ async fn test_local_silo_users(cptestctx: &ControlPlaneTestContext) {
     .await;
     grant_iam(
         client,
-        "/system/silos/silo1",
+        "/v1/system/silos/silo1",
         SiloRole::Admin,
         admin_user.id,
         AuthnMode::PrivilegedUser,
@@ -1965,10 +1966,9 @@ async fn run_user_tests(
     authn_mode: &AuthnMode,
     existing_users: &[views::User],
 ) {
-    let url_all_users =
-        format!("/system/silos/{}/users/all", silo.identity.name);
+    let url_all_users = format!("/v1/system/users?silo={}", silo.identity.name);
     let url_local_idp_users = format!(
-        "/system/silos/{}/identity-providers/local/users",
+        "/v1/system/identity-providers/local/users?silo={}",
         silo.identity.name
     );
     let url_user_create = url_local_idp_users.to_string();
@@ -2006,8 +2006,8 @@ async fn run_user_tests(
 
     // Fetch the user we just created.
     let user_url_get = format!(
-        "/system/silos/{}/users/id/{}",
-        silo.identity.name, user_created.id
+        "/v1/system/users/{}?silo={}",
+        user_created.id, silo.identity.name,
     );
     let user_found = NexusRequest::object_get(client, &user_url_get)
         .authn_as(authn_mode.clone())
@@ -2036,8 +2036,8 @@ async fn run_user_tests(
 
     // Delete the user that we created.
     let user_url_delete = format!(
-        "/system/silos/{}/identity-providers/local/users/{}",
-        silo.identity.name, user_created.id
+        "/v1/system/identity-providers/local/users/{}?silo={}",
+        user_created.id, silo.identity.name,
     );
     NexusRequest::object_delete(client, &user_url_delete)
         .authn_as(authn_mode.clone())

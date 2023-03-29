@@ -7,10 +7,11 @@
 //! This is mostly visual selection state right now.
 
 use super::inventory::ComponentId;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 
 // Easter egg alert: Support for Knight Rider mode
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct KnightRiderMode {
     pub count: usize,
 }
@@ -22,8 +23,9 @@ impl KnightRiderMode {
 }
 
 // The visual state of the rack
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackState {
+    #[serde(skip)]
     pub log: Option<Logger>,
     pub selected: ComponentId,
     pub knight_rider_mode: Option<KnightRiderMode>,
@@ -71,8 +73,9 @@ impl RackState {
                     ComponentId::Sled(17)
                 }
             }
-            ComponentId::Psc(0) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Switch(1),
+            // Skip over Psc(1) because it is always empty in currently shipping
+            // racks.
+            ComponentId::Psc(0) => ComponentId::Switch(1),
             _ => unreachable!(),
         };
     }
@@ -81,7 +84,9 @@ impl RackState {
         self.selected = match self.selected {
             ComponentId::Sled(16 | 17) => ComponentId::Switch(1),
             ComponentId::Sled(i) => ComponentId::Sled((30 + i) % 32),
-            ComponentId::Switch(1) => ComponentId::Psc(1),
+            // Skip over Psc(1) because it is always empty in currently shipping
+            // racks.
+            ComponentId::Switch(1) => ComponentId::Psc(0),
             ComponentId::Switch(0) => {
                 if self.left_column {
                     ComponentId::Sled(14)
@@ -90,7 +95,6 @@ impl RackState {
                 }
             }
             ComponentId::Psc(0) => ComponentId::Switch(0),
-            ComponentId::Psc(1) => ComponentId::Psc(0),
             _ => unreachable!(),
         };
     }
@@ -115,8 +119,9 @@ impl RackState {
             ComponentId::Sled(15) => ComponentId::Switch(0),
             ComponentId::Sled(i) => ComponentId::Sled((i + 1) % 32),
             ComponentId::Switch(0) => ComponentId::Psc(0),
-            ComponentId::Psc(0) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Switch(1),
+            // Skip over Psc(1) because it is always empty in currently shipping
+            // racks.
+            ComponentId::Psc(0) => ComponentId::Switch(1),
             ComponentId::Switch(1) => ComponentId::Sled(16),
             _ => unreachable!(),
         };
@@ -128,8 +133,9 @@ impl RackState {
             ComponentId::Sled(16) => ComponentId::Switch(1),
             ComponentId::Sled(0) => ComponentId::Sled(31),
             ComponentId::Sled(i) => ComponentId::Sled(i - 1),
-            ComponentId::Switch(1) => ComponentId::Psc(1),
-            ComponentId::Psc(1) => ComponentId::Psc(0),
+            // Skip over Psc(1) because it is always empty in currently shipping
+            // racks.
+            ComponentId::Switch(1) => ComponentId::Psc(0),
             ComponentId::Psc(0) => ComponentId::Switch(0),
             ComponentId::Switch(0) => ComponentId::Sled(15),
             _ => unreachable!(),

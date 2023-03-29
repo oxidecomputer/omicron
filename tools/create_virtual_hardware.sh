@@ -24,11 +24,7 @@ if [[ -f "$MARKER" ]]; then
 fi
 
 # Select the physical link over which to simulate the Chelsio links
-if [[ $# -ge 1 ]]; then
-    PHYSICAL_LINK="$1"
-else
-    PHYSICAL_LINK="$(dladm show-phys -p -o LINK | head -1)"
-fi
+PHYSICAL_LINK=${PHYSICAL_LINK:=$(dladm show-phys -p -o LINK | head -1)}
 echo "Using $PHYSICAL_LINK as physical link"
 
 function success {
@@ -42,7 +38,7 @@ function ensure_zpools {
     # Find the list of zpools the sled agent expects, from its configuration
     # file.
     readarray -t ZPOOLS < <( \
-            grep '"oxp_' "$OMICRON_TOP/smf/sled-agent/config.toml" | \
+            grep '"oxp_' "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
             sed 's/[ ",]//g' \
         )
     for ZPOOL in "${ZPOOLS[@]}"; do
@@ -66,20 +62,39 @@ function get_vnic_name_if_exists {
     dladm show-vnic -p -o LINK "$1" 2> /dev/null || echo ""
 }
 
-# Create VNICs to represent the Chelsio physical links
+function get_simnet_name_if_exists {
+    dladm show-simnet -p -o LINK "$1" 2> /dev/null || echo ""
+}
+
+# Create virtual links to represent the Chelsio physical links
 #
 # Arguments:
 #   $1: Optional name of the physical link to use. If not provided, use the
 #   first physical link available on the machine.
 function ensure_simulated_chelsios {
     local PHYSICAL_LINK="$1"
-    VNIC_NAMES=("net0" "net1")
-    for VNIC in "${VNIC_NAMES[@]}"; do
-        if [[ -z "$(get_vnic_name_if_exists "$VNIC")" ]]; then
-            dladm create-vnic -t -l "$PHYSICAL_LINK" "$VNIC"
+    INDICES=("0" "1")
+    for I in "${INDICES[@]}"; do
+        if [[ -z "$(get_simnet_name_if_exists "net$I")" ]]; then
+            # sidecar ports
+            dladm create-simnet -t "net$I"
+            dladm create-simnet -t "sc${I}_0"
+            dladm modify-simnet -t -p "net$I" "sc${I}_0"
+            dladm set-linkprop -p mtu=1600 "net$I" # encap headroom
+            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
+
+            # corresponding scrimlet ports
+            dladm create-simnet -t "sr0_$I"
+            dladm create-simnet -t "scr0_$I"
+            dladm modify-simnet -t -p "sr0_$I" "scr0_$I"
         fi
-        success "VNIC $VNIC exists"
+        success "Simnet net$I/sc${I}_0/sr0_$I/scr0_$I exists"
     done
+
+    if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
+        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+    fi
+    success "Vnic sc0_1 exists"
 }
 
 function ensure_run_as_root {
@@ -89,6 +104,52 @@ function ensure_run_as_root {
     fi
 }
 
+function ensure_softnpu_zone {
+    zoneadm list | grep -q softnpu || {
+        mkdir -p /softnpu-zone
+        mkdir -p /opt/oxide/softnpu/stuff
+        cp tools/scrimlet/softnpu.toml /opt/oxide/softnpu/stuff/
+        cp tools/scrimlet/softnpu-init.sh /opt/oxide/softnpu/stuff/
+        cp out/softnpu/libsidecar_lite.so /opt/oxide/softnpu/stuff/
+        cp out/softnpu/softnpu /opt/oxide/softnpu/stuff/
+        cp out/softnpu/scadm /opt/oxide/softnpu/stuff/
+
+        zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
+
+        zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
+        zoneadm -z softnpu install
+        zoneadm -z softnpu boot
+    }
+    success "softnpu zone exists"
+}
+
+function enable_softnpu {
+    zlogin softnpu uname -a || {
+        echo "softnpu zone not ready"
+        exit 1
+    }
+    zlogin softnpu pgrep softnpu || {
+        zlogin softnpu /stuff/softnpu /stuff/softnpu.toml &
+    }
+    success "softnpu started"
+}
+
+function ensure_ext_ip_hack_disabled {
+    grep "ext_ip_hack = 1;" /kernel/drv/xde.conf && {
+       sed -i 's/ext_ip_hack = 1;/ext_ip_hack = 0;/g' /kernel/drv/xde.conf
+       update_drv xde
+    }
+
+    grep "ext_ip_hack = 0;" /kernel/drv/xde.conf || {
+        echo "failed to disable ext_ip_hack"
+        exit 1
+    }
+    success "ext_ip_hack disabled"
+}
+
 ensure_run_as_root
+ensure_ext_ip_hack_disabled
 ensure_zpools
 ensure_simulated_chelsios "$PHYSICAL_LINK"
+ensure_softnpu_zone
+enable_softnpu

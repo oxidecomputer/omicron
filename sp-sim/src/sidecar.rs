@@ -930,6 +930,18 @@ impl SpHandler for Handler {
         );
         Err(SpError::RequestUnsupportedForSp)
     }
+
+    fn get_caboose_value(
+        &mut self,
+        key: [u8; 4],
+    ) -> std::result::Result<&'static [u8], SpError> {
+        warn!(
+            &self.log,
+            "received request for caboose key; not supported by simulated sidecar";
+            "key" => ?key,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
 }
 
 struct FakeIgnition {

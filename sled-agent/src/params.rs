@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
-use omicron_common::address::{
-    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
-    OXIMETER_PORT,
-};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -20,6 +15,7 @@ pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 pub use omicron_common::api::internal::sled_agent::NetworkInterface;
+pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -164,34 +160,6 @@ pub struct InstanceRuntimeStateRequested {
     pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
-/// Request the contents of an Instance's serial console.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct InstanceSerialConsoleRequest {
-    /// Character index in the serial buffer from which to read, counting the bytes output since
-    /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
-    /// provided, `most_recent` must *not* be provided.
-    pub from_start: Option<u64>,
-    /// Character index in the serial buffer from which to read, counting *backward* from the most
-    /// recently buffered data retrieved from the instance. (See note on `from_start` about mutual
-    /// exclusivity)
-    pub most_recent: Option<u64>,
-    /// Maximum number of bytes of buffered serial console contents to return. If the requested
-    /// range runs to the end of the available buffer, the data returned will be shorter than
-    /// `max_bytes`.
-    pub max_bytes: Option<u64>,
-}
-
-/// Contents of an Instance's serial console buffer.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceSerialConsoleData {
-    /// The bytes starting from the requested offset up to either the end of the buffer or the
-    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
-    pub data: Vec<u8>,
-    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
-    /// of the last byte returned in `data`.
-    pub last_byte_offset: u64,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum DiskType {
     U2,
@@ -212,41 +180,6 @@ impl From<sled_hardware::DiskVariant> for DiskType {
 pub struct Zpool {
     pub id: Uuid,
     pub disk_type: DiskType,
-}
-
-// The type of networking 'ASIC' the Dendrite service is expected to manage
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DendriteAsic {
-    TofinoAsic,
-    TofinoStub,
-    Softnpu,
-}
-
-impl std::fmt::Display for DendriteAsic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DendriteAsic::TofinoAsic => "tofino_asic",
-                DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::Softnpu => "softnpu",
-            }
-        )
-    }
-}
-
-impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
-    fn from(a: DendriteAsic) -> Self {
-        match a {
-            DendriteAsic::TofinoAsic => Self::TofinoAsic,
-            DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::Softnpu => Self::Softnpu,
-        }
-    }
 }
 
 /// The type of a dataset, and an auxiliary information necessary
@@ -314,28 +247,6 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
-impl DatasetEnsureBody {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    pub fn srv(&self) -> SRV {
-        match self.dataset_kind {
-            DatasetKind::Crucible => {
-                SRV::Backend(BackendName::Crucible, self.id)
-            }
-            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
-            DatasetKind::CockroachDb { .. } => {
-                SRV::Service(ServiceName::Cockroach)
-            }
-        }
-    }
-
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
-    }
-}
-
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
@@ -396,7 +307,15 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+            St::Dendrite { asic } => {
+                use sled_agent_client::types::DendriteAsic as AutoAsic;
+                let asic = match asic {
+                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
+                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
+                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
+                };
+                AutoSt::Dendrite { asic }
+            }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
         }
@@ -468,61 +387,6 @@ pub struct ServiceZoneRequest {
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
     pub services: Vec<ServiceType>,
-}
-
-impl ServiceZoneRequest {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    // XXX: any reason this can't just be service.to_string()?
-    pub fn srv(&self, service: &ServiceType) -> SRV {
-        match service {
-            ServiceType::InternalDns { .. } => {
-                SRV::Service(ServiceName::InternalDNS)
-            }
-            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
-            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
-            ServiceType::ManagementGatewayService => {
-                SRV::Service(ServiceName::ManagementGatewayService)
-            }
-            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
-            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
-            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
-            ServiceType::CruciblePantry { .. } => {
-                SRV::Service(ServiceName::CruciblePantry)
-            }
-        }
-    }
-
-    pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
-        match service {
-            ServiceType::InternalDns { server_address, .. } => {
-                Some(*server_address)
-            }
-            ServiceType::Nexus { internal_ip, .. } => {
-                Some(SocketAddrV6::new(*internal_ip, NEXUS_INTERNAL_PORT, 0, 0))
-            }
-            ServiceType::Oximeter => {
-                Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
-            }
-            ServiceType::ManagementGatewayService => {
-                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
-            }
-            // TODO: Is this correct?
-            ServiceType::Wicketd => None,
-            ServiceType::Dendrite { .. } => {
-                Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
-            }
-            ServiceType::Tfport { .. } => None,
-            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
-                self.addresses[0],
-                CRUCIBLE_PANTRY_PORT,
-                0,
-                0,
-            )),
-        }
-    }
 }
 
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {

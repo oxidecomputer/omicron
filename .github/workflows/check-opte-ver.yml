@@ -1,0 +1,17 @@
+name: check-opte-ver
+on:
+  pull_request:
+    paths:
+      - 'Cargo.toml'
+      - 'tools/opte_version'
+jobs:
+  check-opte-ver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      - name: Install toml-cli
+        run: cargo install toml-cli
+      - name: Check OPTE version and rev match
+        run: ./tools/ci_check_opte_ver.sh

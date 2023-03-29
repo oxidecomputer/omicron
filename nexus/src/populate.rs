@@ -216,7 +216,24 @@ impl Populator for PopulateBuiltinSilos {
     where
         'a: 'b,
     {
-        async { datastore.load_builtin_silos(opctx).await.map(|_| ()) }.boxed()
+        async { datastore.load_builtin_silos(opctx).await }.boxed()
+    }
+}
+
+/// Populates the built-in projects
+#[derive(Debug)]
+struct PopulateBuiltinProjects;
+impl Populator for PopulateBuiltinProjects {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_projects(opctx).await }.boxed()
     }
 }
 
@@ -302,11 +319,12 @@ impl Populator for PopulateRack {
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 9] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
+        &PopulateBuiltinProjects,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
         &PopulateFleet,

@@ -167,23 +167,22 @@ impl super::Nexus {
                 continue;
             }
 
-            // The Project and VPC names are derived from the service kind & ID.
-            // See `create_service_project/create_service_vpc`.
+            // The VPC names are derived from the service kind & ID.
+            // See `DataStore::create_service_vpc`.
             let name = format!("{}-{}", service.kind, service.service_id)
                 .parse::<Name>()
                 .unwrap()
                 .into();
 
-            // Lookup the VPC in the built-in services org
+            // Lookup the VPC in the built-in services project
             let vpc_lookup =
                 db::lookup::LookupPath::new(opctx, &self.db_datastore)
-                    .organization_id(*db::fixed_data::ORGANIZATION_ID)
-                    .project_name(&name)
+                    .project_id(*db::fixed_data::project::SERVICE_PROJECT_ID)
                     .vpc_name(&name);
 
             let rules =
                 self.vpc_list_firewall_rules(opctx, &vpc_lookup).await?;
-            let (_, _, _, _, vpc) = vpc_lookup.fetch().await?;
+            let (_, _, _, vpc) = vpc_lookup.fetch().await?;
 
             self.send_sled_agents_firewall_rules(opctx, &vpc, &rules).await?;
         }

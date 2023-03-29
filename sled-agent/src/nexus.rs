@@ -7,8 +7,8 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 #[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
-use dns_service_client::multiclient::{ResolveError, Resolver};
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::{ServiceName, SRV};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
@@ -42,8 +42,11 @@ impl LazyNexusClient {
     pub fn new(log: Logger, addr: Ipv6Addr) -> Result<Self, ResolveError> {
         Ok(Self {
             inner: Arc::new(Inner {
-                log,
-                resolver: Resolver::new_from_ip(addr)?,
+                log: log.clone(),
+                resolver: Resolver::new_from_ip(
+                    log.new(o!("component" => "DnsResolver")),
+                    addr,
+                )?,
             }),
         })
     }

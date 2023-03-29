@@ -390,6 +390,7 @@ impl JsonSchema for NameOrId {
     FromStr,
 )]
 #[display("{0}")]
+#[serde(transparent)]
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {
@@ -691,7 +692,6 @@ pub enum ResourceType {
     DeviceAuthRequest,
     DeviceAccessToken,
     GlobalImage,
-    Organization,
     Project,
     Dataset,
     Disk,
@@ -1900,7 +1900,12 @@ impl FromStr for MacAddr {
     type Err = macaddr::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(MacAddr)
+        s.split(':')
+            .map(|b| format!("{:0>2}", b))
+            .collect::<Vec<String>>()
+            .join(":")
+            .parse()
+            .map(MacAddr)
     }
 }
 
@@ -1946,9 +1951,9 @@ impl JsonSchema for MacAddr {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(17), // 12 hex characters and 5 ":"-separators
-                min_length: Some(17),
+                min_length: Some(5),  // Just 5 ":" separators
                 pattern: Some(
-                    r#"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"#.to_string(),
+                    r#"^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$"#.to_string(),
                 ),
             })),
             ..Default::default()
@@ -2104,6 +2109,9 @@ impl std::fmt::Display for Digest {
 
 #[cfg(test)]
 mod test {
+    use serde::Deserialize;
+    use serde::Serialize;
+
     use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
@@ -2164,6 +2172,19 @@ mod test {
                 "invalid input {input} should not match validation regex"
             );
         }
+    }
+
+    #[test]
+    fn test_semver_serialize() {
+        #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+        struct MyStruct {
+            version: SemverVersion,
+        }
+
+        let v = MyStruct { version: SemverVersion::new(1, 2, 3) };
+        let expected = "{\"version\":\"1.2.3\"}";
+        assert_eq!(serde_json::to_string(&v).unwrap(), expected);
+        assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
     }
 
     #[test]
@@ -2759,5 +2780,24 @@ mod test {
             net.last_address(),
             IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
         );
+    }
+
+    #[test]
+    fn test_macaddr() {
+        use super::MacAddr;
+        let _ = MacAddr::from_str(":::::").unwrap();
+        let _ = MacAddr::from_str("f:f:f:f:f:f").unwrap();
+        let _ = MacAddr::from_str("ff:ff:ff:ff:ff:ff").unwrap();
+
+        // Empty
+        let _ = MacAddr::from_str("").unwrap_err();
+        // Too few
+        let _ = MacAddr::from_str("::::").unwrap_err();
+        // Too many
+        let _ = MacAddr::from_str("::::::").unwrap_err();
+        // Not hex
+        let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
+        // Too many characters
+        let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
     }
 }

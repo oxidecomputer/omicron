@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='switch_zone_setup'>
+
+<service name='system/illumos/switch_zone_setup' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+    <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <exec_method type='method' name='start' exec='/opt/oxide/wicket/bin/switch_zone_setup' timeout_seconds='300' />
+  <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='transient' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Switch Zone Setup</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Switch zone oneshot setup script</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

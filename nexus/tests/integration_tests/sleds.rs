@@ -38,7 +38,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Verify that there is one sled to begin with.
-    let sleds_url = "/system/hardware/sleds";
+    let sleds_url = "/v1/system/hardware/sleds";
     assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
 
     // Now start a few more sled agents.
@@ -81,11 +81,12 @@ async fn test_physical_disk_create_list_delete(
     let internal_client = &cptestctx.internal_client;
 
     // Verify that there is one sled to begin with.
-    let sleds_url = "/system/hardware/sleds";
+    let sleds_url = "/v1/system/hardware/sleds";
     assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
 
     // Verify that there are no disks.
-    let disks_url = format!("/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
+    let disks_url =
+        format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
     assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
 
     // Insert a new disk using the internal API, observe it in the external API

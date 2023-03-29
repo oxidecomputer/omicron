@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DiskIdentity, DiskVariant, HardwareUpdate, UnparsedDisk,
+    Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
+    SledMode, UnparsedDisk,
 };
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::debug;
@@ -21,6 +22,7 @@ use tokio::task::JoinHandle;
 
 mod disk;
 mod gpt;
+mod sysconf;
 
 pub use disk::ensure_partition_layout;
 
@@ -43,6 +45,9 @@ enum Error {
 
     #[error("Could not translate {0} to '/dev' path: no links")]
     NoDevLinks(PathBuf),
+
+    #[error("Failed to issue request to sysconf: {0}")]
+    SysconfError(#[from] sysconf::Error),
 }
 
 const GIMLET_ROOT_NODE_NAME: &str = "Oxide,Gimlet";
@@ -143,6 +148,8 @@ struct HardwareView {
     tofino: TofinoView,
     disks: HashSet<UnparsedDisk>,
     baseboard: Option<Baseboard>,
+    online_processor_count: u32,
+    usable_physical_ram_bytes: u64,
 }
 
 impl HardwareView {
@@ -151,20 +158,24 @@ impl HardwareView {
     //
     // Otherwise, values that we really expect to be static will need to be
     // nullable.
-    fn new() -> Self {
-        Self {
+    fn new() -> Result<Self, Error> {
+        Ok(Self {
             tofino: TofinoView::Real(TofinoSnapshot::new()),
             disks: HashSet::new(),
             baseboard: None,
-        }
+            online_processor_count: sysconf::online_processor_count()?,
+            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
+        })
     }
 
-    fn new_stub_tofino(active: bool) -> Self {
-        Self {
+    fn new_stub_tofino(active: bool) -> Result<Self, Error> {
+        Ok(Self {
             tofino: TofinoView::Stub { active },
             disks: HashSet::new(),
             baseboard: None,
-        }
+            online_processor_count: sysconf::online_processor_count()?,
+            usable_physical_ram_bytes: sysconf::usable_physical_ram_bytes()?,
+        })
     }
 
     // Updates our view of the Tofino switch against a snapshot.
@@ -508,14 +519,8 @@ impl HardwareManager {
     /// a task which periodically updates that representation.
     ///
     /// Arguments:
-    /// - `stub_scrimlet`: Identifies if we should ignore the attached Tofino
-    /// device, and assume the device is a scrimlet (true) or gimlet (false).
-    /// If this argument is not supplied, we assume the device is a gimlet until
-    /// device scanning informs us otherwise.
-    pub fn new(
-        log: &Logger,
-        stub_scrimlet: Option<bool>,
-    ) -> Result<Self, String> {
+    /// - `sled_mode`: The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    pub fn new(log: &Logger, sled_mode: SledMode) -> Result<Self, String> {
         let log = log.new(o!("component" => "HardwareManager"));
         info!(log, "Creating HardwareManager");
 
@@ -524,10 +529,34 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match stub_scrimlet {
-            None => HardwareView::new(),
-            Some(active) => HardwareView::new_stub_tofino(active),
-        };
+        let hw = match sled_mode {
+            // Treat as a possible scrimlet and setup to scan for real Tofino device.
+            SledMode::Auto
+            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                HardwareView::new()
+            }
+
+            // Treat sled as gimlet and ignore any attached Tofino device.
+            SledMode::Gimlet => HardwareView::new_stub_tofino(
+                // active=
+                false,
+            ),
+
+            // Treat as scrimlet and use the stub Tofino device.
+            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
+                HardwareView::new_stub_tofino(true)
+            }
+
+            // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
+            // TODO-correctness:
+            // I'm not sure whether or not we should be treating softnpu
+            // as a stub or treating it as a different HardwareView variant,
+            // so this might change.
+            SledMode::Scrimlet { asic: DendriteAsic::SoftNpu } => {
+                HardwareView::new_stub_tofino(true)
+            }
+        }
+        .map_err(|e| e.to_string())?;
         let inner = Arc::new(Mutex::new(hw));
 
         // Force the device tree to be polled at least once before returning.
@@ -564,6 +593,14 @@ impl HardwareManager {
             .as_ref()
             .cloned()
             .unwrap_or_else(|| Baseboard::unknown())
+    }
+
+    pub fn online_processor_count(&self) -> u32 {
+        self.inner.lock().unwrap().online_processor_count
+    }
+
+    pub fn usable_physical_ram_bytes(&self) -> u64 {
+        self.inner.lock().unwrap().usable_physical_ram_bytes
     }
 
     pub fn disks(&self) -> HashSet<UnparsedDisk> {

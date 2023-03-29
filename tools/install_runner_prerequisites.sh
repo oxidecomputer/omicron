@@ -106,13 +106,18 @@ else
   exit -1
 fi
 
-# Install OPTE
-#
-# OPTE is a Rust package that is consumed by a kernel module called xde. This
-# installs the `xde` driver and some kernel bits required to work with that
-# driver.
 if [[ "${HOST_OS}" == "SunOS" ]]; then
+    # Install OPTE
+    #
+    # OPTE is a Rust package that is consumed by a kernel module called xde. This
+    # installs the `xde` driver and some kernel bits required to work with that
+    # driver.
     ./tools/install_opte.sh
+
+    # Grab the SoftNPU machinery (ASIC simulator, scadm, P4 program, etc.)
+    #
+    # create_virtual_hardware.sh will use those to setup the softnpu zone
+    ./tools/ci_download_softnpu_machinery
 fi
 
 echo "All runner prerequisites installed successfully"

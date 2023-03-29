@@ -46,3 +46,7 @@ tempfile.workspace = true
 test-strategy.workspace = true
 tokio = { workspace = true, features = [ "test-util" ] }
 tokio-stream.workspace = true
+
+[features]
+image-standard = []
+image-trampoline = []

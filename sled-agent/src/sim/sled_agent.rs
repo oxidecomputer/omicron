@@ -7,16 +7,15 @@
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
-    InstanceSerialConsoleData,
+    InstanceStateRequested,
 };
-use crate::serial::ByteOffset;
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
-use omicron_common::api::external::{Error, InstanceState, ResourceType};
+use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -24,6 +23,10 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HttpServer;
+use omicron_common::address::PROPOLIS_PORT;
+use propolis_client::Client as PropolisClient;
+use propolis_server::mock_server::Context as PropolisContext;
 
 use super::collection::SimCollection;
 use super::config::Config;
@@ -50,6 +53,8 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
+    mock_propolis:
+        Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -136,6 +141,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
+            mock_propolis: Mutex::new(None),
         })
     }
 
@@ -203,7 +209,7 @@ impl SledAgent {
     pub async fn instance_ensure(
         self: &Arc<Self>,
         instance_id: Uuid,
-        initial_hardware: InstanceHardware,
+        mut initial_hardware: InstanceHardware,
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
@@ -233,6 +239,66 @@ impl SledAgent {
             self.disks
                 .sim_ensure_producer(&id, (self.nexus_address, id))
                 .await?;
+        }
+
+        // if we're making our first instance and a mock propolis-server
+        // is running, interact with it, and patch the instance's
+        // reported propolis-server IP for reports back to nexus.
+        let mock_lock = self.mock_propolis.lock().await;
+        if let Some((_srv, client)) = mock_lock.as_ref() {
+            if let Some(addr) = initial_hardware.runtime.propolis_addr.as_mut()
+            {
+                addr.set_ip(Ipv6Addr::LOCALHOST.into());
+            }
+            if !self.instances.contains_key(&instance_id).await {
+                let properties = propolis_client::types::InstanceProperties {
+                    id: initial_hardware.runtime.propolis_id,
+                    name: initial_hardware.runtime.hostname.clone(),
+                    description: "sled-agent-sim created instance".to_string(),
+                    image_id: Uuid::default(),
+                    bootrom_id: Uuid::default(),
+                    memory: initial_hardware
+                        .runtime
+                        .memory
+                        .to_whole_mebibytes(),
+                    vcpus: initial_hardware.runtime.ncpus.0 as u8,
+                };
+                let body = propolis_client::types::InstanceEnsureRequest {
+                    properties,
+                    nics: vec![],
+                    disks: vec![],
+                    migrate: None,
+                    cloud_init_bytes: None,
+                };
+                // Try to create the instance
+                client.instance_ensure().body(body).send().await.map_err(
+                    |e| {
+                        Error::internal_error(&format!(
+                            "propolis-client: {}",
+                            e
+                        ))
+                    },
+                )?;
+            }
+
+            let body = match target.run_state {
+                InstanceStateRequested::Running => {
+                    propolis_client::types::InstanceStateRequested::Run
+                }
+                InstanceStateRequested::Destroyed
+                | InstanceStateRequested::Stopped => {
+                    propolis_client::types::InstanceStateRequested::Stop
+                }
+                InstanceStateRequested::Reboot => {
+                    propolis_client::types::InstanceStateRequested::Reboot
+                }
+                InstanceStateRequested::Migrating => {
+                    propolis_client::types::InstanceStateRequested::MigrateStart
+                }
+            };
+            client.instance_state_put().body(body).send().await.map_err(
+                |e| Error::internal_error(&format!("propolis-client: {}", e)),
+            )?;
         }
 
         let instance_run_time_state = self
@@ -313,98 +379,6 @@ impl SledAgent {
         self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
     }
 
-    /// Get contents of an instance's serial console.
-    pub async fn instance_serial_console_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, String> {
-        if !self.instances.sim_contains(&instance_id).await {
-            return Err(format!("No such instance {}", instance_id));
-        }
-
-        let current = self
-            .instances
-            .sim_get_current_state(&instance_id)
-            .await
-            .map_err(|e| format!("{}", e))?;
-        if current.run_state != InstanceState::Running {
-            return Ok(InstanceSerialConsoleData {
-                data: vec![],
-                last_byte_offset: 0,
-            });
-        }
-
-        let gerunds = [
-            "Loading",
-            "Reloading",
-            "Advancing",
-            "Reticulating",
-            "Defeating",
-            "Spoiling",
-            "Cooking",
-            "Destroying",
-            "Resenting",
-            "Introducing",
-            "Reiterating",
-            "Blasting",
-            "Tolling",
-            "Delivering",
-            "Engendering",
-            "Establishing",
-        ];
-        let nouns = [
-            "canon",
-            "browsers",
-            "meta",
-            "splines",
-            "villains",
-            "plot",
-            "books",
-            "evidence",
-            "decisions",
-            "chaos",
-            "points",
-            "processors",
-            "bells",
-            "value",
-            "gender",
-            "shots",
-        ];
-        let mut entropy = instance_id.as_u128();
-        let mut buf = format!(
-            "This is simulated serial console output for {}.\n",
-            instance_id
-        );
-        while entropy != 0 {
-            let gerund = gerunds[entropy as usize % gerunds.len()];
-            entropy /= gerunds.len() as u128;
-            let noun = nouns[entropy as usize % nouns.len()];
-            entropy /= nouns.len() as u128;
-            buf += &format!(
-                "{} {}... {}[\x1b[92m 0K \x1b[m]\n",
-                gerund,
-                noun,
-                " ".repeat(40 - gerund.len() - noun.len())
-            );
-        }
-        buf += "\x1b[2J\x1b[HOS/478 (localhorse) (ttyl)\n\nlocalhorse login: ";
-
-        let start = match byte_offset {
-            ByteOffset::FromStart(offset) => offset,
-            ByteOffset::MostRecent(offset) => buf.len() - offset,
-        };
-
-        let start = start.min(buf.len());
-        let end = (start + max_bytes.unwrap_or(16 * 1024)).min(buf.len());
-        let data = buf[start..end].as_bytes().to_vec();
-
-        let last_byte_offset = (start + data.len()) as u64;
-
-        Ok(InstanceSerialConsoleData { data, last_byte_offset })
-    }
-
     /// Issue a snapshot request for a Crucible disk attached to an instance.
     ///
     /// The real sled agent simply sends this snapshot request to the
@@ -450,6 +424,59 @@ impl SledAgent {
             }
         }
 
+        Ok(())
+    }
+
+    /// Used for integration tests that require a component to talk to a
+    /// mocked propolis-server API.
+    // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
+    // such that we can run more than one of these.
+    // (this is only needed by test_instance_serial at present)
+    pub async fn start_local_mock_propolis_server(
+        &self,
+        log: &Logger,
+    ) -> Result<(), Error> {
+        let mut mock_lock = self.mock_propolis.lock().await;
+        if mock_lock.is_some() {
+            return Err(Error::ObjectAlreadyExists {
+                type_name: ResourceType::Service,
+                object_name: "mock propolis server".to_string(),
+            });
+        }
+        let propolis_bind_address =
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
+        let dropshot_config = dropshot::ConfigDropshot {
+            bind_address: propolis_bind_address,
+            ..Default::default()
+        };
+        let propolis_log = log.new(o!("component" => "propolis-server-mock"));
+        let config = propolis_server::config::Config {
+            bootrom: Default::default(),
+            pci_bridges: Default::default(),
+            chipset: Default::default(),
+            devices: Default::default(),
+            block_devs: Default::default(),
+        };
+        let private = Arc::new(PropolisContext::new(config, propolis_log));
+        info!(log, "Starting mock propolis-server...");
+        let dropshot_log = log.new(o!("component" => "dropshot"));
+        let mock_api = propolis_server::mock_server::api();
+
+        let srv = dropshot::HttpServerStarter::new(
+            &dropshot_config,
+            mock_api,
+            private,
+            &dropshot_log,
+        )
+        .map_err(|error| {
+            Error::unavail(&format!("initializing propolis-server: {}", error))
+        })?
+        .start();
+        let client = propolis_client::Client::new(&format!(
+            "http://{}",
+            srv.local_addr()
+        ));
+        *mock_lock = Some((srv, client));
         Ok(())
     }
 }

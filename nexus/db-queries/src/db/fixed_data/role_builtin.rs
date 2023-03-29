@@ -29,18 +29,6 @@ lazy_static! {
         role_name: "viewer",
         description: "Fleet Viewer",
     };
-    pub static ref ORGANIZATION_ADMINISTRATOR: RoleBuiltinConfig =
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Organization,
-            role_name: "admin",
-            description: "Organization Administrator",
-        };
-    pub static ref ORGANIZATION_COLLABORATOR: RoleBuiltinConfig =
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Organization,
-            role_name: "collaborator",
-            description: "Organization Collaborator",
-        };
     pub static ref SILO_ADMIN: RoleBuiltinConfig = RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Silo,
         role_name: "admin",
@@ -65,13 +53,6 @@ lazy_static! {
             resource_type: api::external::ResourceType::Silo,
             role_name: "viewer",
             description: "Silo Viewer",
-        },
-        ORGANIZATION_ADMINISTRATOR.clone(),
-        ORGANIZATION_COLLABORATOR.clone(),
-        RoleBuiltinConfig {
-            resource_type: api::external::ResourceType::Organization,
-            role_name: "viewer",
-            description: "Organization Viewer",
         },
         RoleBuiltinConfig {
             resource_type: api::external::ResourceType::Project,
@@ -107,9 +88,6 @@ mod test {
         // roles that are not exposed to end users.
         check_public_roles::<authz::FleetRole>(ResourceType::Fleet);
         check_public_roles::<authz::SiloRole>(ResourceType::Silo);
-        check_public_roles::<authz::OrganizationRole>(
-            ResourceType::Organization,
-        );
         check_public_roles::<authz::ProjectRole>(ResourceType::Project);
     }
 

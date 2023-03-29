@@ -6,7 +6,6 @@
 
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
-use super::SERVICE_ORG_NAME;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -21,7 +20,6 @@ use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::NexusService;
-use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::Rack;
 use crate::db::model::Service;
@@ -47,6 +45,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
@@ -55,7 +54,6 @@ use uuid::Uuid;
 enum RackInitError {
     AddingIp(Error),
     ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
-    ProjectInsert { err: AsyncInsertError, org_id: Uuid, proj_id: Uuid },
     VpcCreate(Error),
     VpcInsert { err: AsyncInsertError, proj_id: Uuid, vpc_id: Uuid },
     VpcRouterInsert { err: PoolError, router: String },
@@ -100,25 +98,6 @@ impl From<TxnError> for Error {
                         ErrorHandler::Conflict(
                             ResourceType::Service,
                             &svc_id.to_string(),
-                        ),
-                    )
-                }
-            },
-            TxnError::CustomError(RackInitError::ProjectInsert {
-                err,
-                org_id,
-                proj_id,
-            }) => match err {
-                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                    type_name: ResourceType::Organization,
-                    lookup_type: LookupType::ById(org_id),
-                },
-                AsyncInsertError::DatabaseError(e) => {
-                    public_error_from_diesel_pool(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::Project,
-                            &proj_id.to_string(),
                         ),
                     )
                 }
@@ -320,60 +299,11 @@ impl DataStore {
         Ok(())
     }
 
-    /// Create a project for the given service within the built-in services org.
-    async fn create_service_project<ConnErr>(
-        log: &slog::Logger,
-        conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
-        service: &internal_params::ServicePutRequest,
-    ) -> Result<Project, TxnError>
-    where
-        ConnErr: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnErr>,
-    {
-        use db::schema::project::dsl;
-
-        let org_id = *fixed_data::ORGANIZATION_ID;
-
-        let proj_name =
-            format!("{}-{}", service.kind, service.service_id).parse().unwrap();
-        let project_db = db::model::Project::new(
-            org_id,
-            external_params::ProjectCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: proj_name,
-                    description: format!(
-                        "Project for internal service ({}).",
-                        service.kind
-                    ),
-                },
-            },
-        );
-        let proj_id = project_db.id();
-        <Organization as DatastoreCollection<Project>>::insert_resource(
-            org_id,
-            diesel::insert_into(dsl::project)
-                .values(project_db)
-                .on_conflict(dsl::id)
-                .do_nothing(),
-        )
-        .insert_and_get_result_async(conn)
-        .await
-        .map_err(|err| {
-            warn!(log, "Initializing Rack: Failed to insert service Project");
-            TxnError::CustomError(RackInitError::ProjectInsert {
-                err,
-                org_id,
-                proj_id,
-            })
-        })
-    }
-
-    /// Create a VPC in the given project for the given service.
+    /// Create a VPC in the built-in services project for the given service.
     async fn create_service_vpc<ConnErr>(
         log: &slog::Logger,
         conn: &(impl AsyncConnection<DbConnection, ConnErr> + Sync),
         service: &internal_params::ServicePutRequest,
-        project: &Project,
     ) -> Result<Vpc, TxnError>
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
@@ -382,23 +312,26 @@ impl DataStore {
         use db::schema::vpc::dsl;
         use queries::vpc::InsertVpcQuery;
 
+        let proj_id = *fixed_data::project::SERVICE_PROJECT_ID;
         let vpc_id = Uuid::new_v4();
         let system_router_id = Uuid::new_v4();
 
+        let vpc_name: Name =
+            format!("{}-{}", service.kind, service.service_id).parse().unwrap();
         let vpc_db = db::model::IncompleteVpc::new(
             vpc_id,
-            project.id(),
+            proj_id,
             system_router_id,
             external_params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
-                    name: project.name().clone(),
+                    name: vpc_name.clone(),
                     description: format!(
                         "VPC for internal service ({}).",
                         service.kind
                     ),
                 },
                 ipv6_prefix: None,
-                dns_name: project.name().clone(), // TODO: should this tie in with internal-dns?
+                dns_name: vpc_name, // TODO: should this tie in with internal-dns?
             },
         )
         .map_err(|err| {
@@ -418,7 +351,7 @@ impl DataStore {
         };
 
         let vpc = <Project as DatastoreCollection<Vpc>>::insert_resource(
-            project.id(),
+            proj_id,
             diesel::insert_into(dsl::vpc)
                 .values(InsertVpcQuery::new_system(vpc_db, vni)),
         )
@@ -428,7 +361,7 @@ impl DataStore {
             warn!(log, "Initializing Rack: Failed to insert service VPC");
             TxnError::CustomError(RackInitError::VpcInsert {
                 err,
-                proj_id: project.id(),
+                proj_id,
                 vpc_id,
             })
         })?;
@@ -739,9 +672,8 @@ impl DataStore {
                     // Create "Service" record in database.
                     Self::create_service_record(&service, &conn, &log).await?;
 
-                    // Create project/vpc for this service within the built-in services org.
-                    let project = Self::create_service_project(&log, &conn, &service).await?;
-                    let vpc = Self::create_service_vpc(&log, &conn, &service, &project).await?;
+                    // Create vpc for this service within the built-in services project.
+                    let vpc = Self::create_service_vpc(&log, &conn, &service).await?;
 
                     if let internal_params::ServiceKind::Nexus { external_address } = service.kind {
                         // Allocate the explicit IP address that is currently
@@ -839,38 +771,6 @@ impl DataStore {
         Ok(rack)
     }
 
-    async fn load_builtin_service_org(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        use omicron_common::api::external::InternalContext;
-
-        let params = external_params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: SERVICE_ORG_NAME.parse().unwrap(),
-                description: String::from("Organization for Oxide Services"),
-            },
-        };
-
-        // Create the service org within the built-in silo.
-        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
-            .silo_id(*fixed_data::silo::SILO_ID)
-            .lookup_for(authz::Action::CreateChild)
-            .await
-            .internal_context("lookup built-in silo")?;
-
-        let org_id = Some(*fixed_data::ORGANIZATION_ID);
-        self.organization_create_in_silo(opctx, org_id, &params, authz_silo)
-            .await
-            .map(|_| ())
-            .or_else(|e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            })?;
-
-        Ok(())
-    }
-
     async fn load_builtin_ip_pool(
         &self,
         opctx: &OpContext,
@@ -913,7 +813,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        self.load_builtin_service_org(opctx).await?;
         self.load_builtin_ip_pool(opctx).await?;
 
         Ok(())
@@ -924,6 +823,9 @@ impl DataStore {
 mod test {
     use super::*;
     use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test::{
+        sled_baseboard_for_test, sled_system_hardware_for_test,
+    };
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -986,18 +888,12 @@ mod test {
 
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
-        let is_scrimlet = false;
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let identifier = String::from("identifier");
-        let model = String::from("model");
-        let revision = 0;
         let sled = Sled::new(
             sled_id,
             addr,
-            is_scrimlet,
-            identifier,
-            model,
-            revision,
+            sled_baseboard_for_test(),
+            sled_system_hardware_for_test(),
             rack_id(),
         );
         db.sled_upsert(sled)

@@ -10,6 +10,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bincode.workspace = true
+bootstrap-agent-client.workspace = true
 bytes.workspace = true
 cfg-if.workspace = true
 chrono.workspace = true
@@ -21,11 +22,11 @@ ddm-admin-client.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
+flate2.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
-internal-dns-names.workspace = true
+internal-dns.workspace = true
 ipnetwork.workspace = true
-libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true
 nexus-defaults.workspace = true
@@ -37,10 +38,12 @@ oximeter-producer.workspace = true
 p256.workspace = true
 percent-encoding.workspace = true
 progenitor.workspace = true
-propolis-client.workspace = true
+propolis-client = { workspace = true, features = [ "generated-migration" ] }
+propolis-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
@@ -52,6 +55,7 @@ smf.workspace = true
 sp-sim.workspace = true
 sprockets-common.workspace = true
 sprockets-host.workspace = true
+tar.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
@@ -91,3 +95,13 @@ doc = false
 [[bin]]
 name = "sled-agent"
 doc = false
+
+[features]
+image-standard = []
+image-trampoline = []
+machine-gimlet = []
+machine-gimlet-standalone = []
+machine-non-gimlet = []
+switch-asic = []
+switch-stub = []
+switch-softnpu = []

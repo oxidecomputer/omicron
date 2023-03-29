@@ -6,6 +6,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -14,12 +15,14 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::project::SERVICE_PROJECT;
+use crate::db::fixed_data::silo::SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
 use crate::db::model::Name;
-use crate::db::model::Organization;
 use crate::db::model::Project;
 use crate::db::model::ProjectUpdate;
+use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, PoolError};
@@ -29,6 +32,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -91,35 +95,77 @@ macro_rules! generate_fn_to_ensure_none_in_project {
 }
 
 impl DataStore {
+    /// Load built-in silos into the database
+    pub async fn load_builtin_projects(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
+        debug!(opctx.log, "attempting to create built-in service project");
+
+        // Lookup the built-in silo, instead of grabbing it off the `opctx`
+        // because built-in users (i.e. our caller) have no silo.
+        let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
+            .silo_id(*SILO_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .internal_context("lookup built-in silo")?;
+
+        self.project_create_in_silo(opctx, SERVICE_PROJECT.clone(), authz_silo)
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            })?;
+
+        info!(opctx.log, "created built-in service project");
+
+        Ok(())
+    }
+
     /// Create a project
     pub async fn project_create(
         &self,
         opctx: &OpContext,
-        org: &authz::Organization,
         project: Project,
     ) -> CreateResult<(authz::Project, Project)> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Project")?;
+        self.project_create_in_silo(opctx, project, authz_silo).await
+    }
+
+    /// Create a project in the given silo
+    async fn project_create_in_silo(
+        &self,
+        opctx: &OpContext,
+        project: Project,
+        authz_silo: authz::Silo,
+    ) -> CreateResult<(authz::Project, Project)> {
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
+
+        let silo_id = authz_silo.id();
+        let authz_silo_inner = authz_silo.clone();
+
         use db::schema::project::dsl;
 
-        opctx.authorize(authz::Action::CreateChild, org).await?;
-
         let name = project.name().as_str().to_string();
-        let organization_id = project.organization_id;
         let db_project = self
             .pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                let project = Organization::insert_resource(
-                    organization_id,
+                let project: Project = Silo::insert_resource(
+                    silo_id,
                     diesel::insert_into(dsl::project).values(project),
                 )
                 .insert_and_get_result_async(&conn)
                 .await
                 .map_err(|e| match e {
                     AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Organization,
-                            lookup_type: LookupType::ById(organization_id),
-                        }
+                        authz_silo_inner.not_found()
                     }
                     AsyncInsertError::DatabaseError(e) => {
                         public_error_from_diesel_pool(
@@ -153,7 +199,7 @@ impl DataStore {
 
         Ok((
             authz::Project::new(
-                org.clone(),
+                authz_silo.clone(),
                 db_project.id(),
                 LookupType::ByName(db_project.name().to_string()),
             ),
@@ -233,10 +279,11 @@ impl DataStore {
     pub async fn projects_list(
         &self,
         opctx: &OpContext,
-        authz_org: &authz::Organization,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Project> {
-        opctx.authorize(authz::Action::ListChildren, authz_org).await?;
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing Projects")?;
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
 
         use db::schema::project::dsl;
         match pagparams {
@@ -249,7 +296,7 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::organization_id.eq(authz_org.id()))
+        .filter(dsl::silo_id.eq(authz_silo.id()))
         .filter(dsl::time_deleted.is_null())
         .select(Project::as_select())
         .load_async(self.pool_authorized(opctx).await?)

@@ -16,7 +16,14 @@ use uuid::Uuid;
 
 /// Describes a project within the database.
 #[derive(
-    Selectable, Queryable, Insertable, Debug, Resource, Serialize, Deserialize,
+    Clone,
+    Selectable,
+    Queryable,
+    Insertable,
+    Debug,
+    Resource,
+    Serialize,
+    Deserialize,
 )]
 #[diesel(table_name = project)]
 pub struct Project {
@@ -25,26 +32,32 @@ pub struct Project {
 
     /// child resource generation number, per RFD 192
     pub rcgen: Generation,
-    pub organization_id: Uuid,
+    pub silo_id: Uuid,
 }
 
 impl Project {
     /// Creates a new database Project object.
-    pub fn new(organization_id: Uuid, params: params::ProjectCreate) -> Self {
+    pub fn new(silo_id: Uuid, params: params::ProjectCreate) -> Self {
+        Self::new_with_id(Uuid::new_v4(), silo_id, params)
+    }
+
+    /// Creates a new database Project object, with a specific ID.
+    pub fn new_with_id(
+        id: Uuid,
+        silo_id: Uuid,
+        params: params::ProjectCreate,
+    ) -> Self {
         Self {
-            identity: ProjectIdentity::new(Uuid::new_v4(), params.identity),
+            identity: ProjectIdentity::new(id, params.identity),
             rcgen: Generation::new(),
-            organization_id,
+            silo_id,
         }
     }
 }
 
 impl From<Project> for views::Project {
     fn from(project: Project) -> Self {
-        Self {
-            identity: project.identity(),
-            organization_id: project.organization_id,
-        }
+        Self { identity: project.identity() }
     }
 }
 

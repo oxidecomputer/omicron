@@ -22,7 +22,7 @@ Any additional prerequisite software may be installed with the following script:
 
 [source,text]
 ----
-$ ./tools/install_prerequisites.sh
+$ pfexec ./tools/install_prerequisites.sh
 ----
 
 This script expects that you are both attempting to compile code and execute
@@ -42,12 +42,23 @@ $ ./tools/install_runner_prerequisites.sh
 The sled agent expects to manage a real Gimlet. However, until those are built,
 developers generally make do with something else, usually a commodity machine.
 To make your machine "look" like a Gimlet, the
-`./tools/create_virtual_hardware.sh` script can be used. This creates a few
+`pfexec ./tools/create_virtual_hardware.sh` script can be used. This creates a few
 file-based ZFS vdevs and ZFS zpools on top of those, and a couple of VNICs. The
 vdevs model the actual U.2s that will be in a Gimlet, and the VNICs model the
 two Chelsio NIC ports.
 
-You can clean up these resources with `./tools/destroy_virtual_hardware.sh`.
+To access the outside world or other gimlets, we also set up a virtual sidecar
+device for those network paths.
+
+Optionally, the `PHYSICAL_LINK` environment variable can be set to override the
+default logic used to automatically determine the physical network connection
+used for external communication. For example:
+
+----
+$ PHYSICAL_LINK=ixgbe0 pfexec ./tools/create_virtual_hardware.sh
+----
+
+You can clean up these resources with `pfexec ./tools/destroy_virtual_hardware.sh`.
 This script requires Omicron be uninstalled, e.g., with `pfexec
 ./target/release/omicron-package uninstall`, and a warning will be printed if
 that is not the case. The script will then remove the file-based vdevs and the
@@ -77,51 +88,68 @@ your hardware. Much of this configuration will be automated in the future
 automatically be detected on discovered disks), but for now it remains
 hard-coded.
 
-=== Getting into your guests
+Packages also have a notion of "build targets", which are used to select
+between different variants of certain components. A build target is composed
+of an image type, a machine type, and a switch type:
 
-Omicron currently implements a bit of a hack to allow external connectivity into
-guest instances. This overrides the default behavior of the Oxide Packet
-Transformation Engine (OPTE, the kernel module which provides the private
-virtual networking to guests). To make this work, OPTE needs to know about the
-local networking configuration, in this case the MAC address of the local
-internet gateway. To be able to get into your instances, you _must_ specify this
-in the `gateway.mac` field of the config file `smf/sled-agent/config-rss.toml`.
-
-The value there is correct for the lab environment, so if you're running there,
-no changes are needed. If you're running elsewhere, you find the value with:
-
-[source,text]
+[source,console]
 ----
-$ arp -an | grep $(netstat -rn | awk '{ if ($1 == "default") print $2 }')
-igb0   192.168.1.1          255.255.255.255          74:ac:b9:a4:dc:02
+$ cargo run --release --bin omicron-package -- target create -h
+    Finished release [optimized] target(s) in 0.70s
+     Running `target/release/omicron-package target create -h`
+Error: Creates a new build target, and sets it as "active"
+
+Usage: omicron-package target create [OPTIONS]
+
+Options:
+  -i, --image <IMAGE>      [default: standard] [possible values: standard, trampoline]
+  -m, --machine <MACHINE>  [possible values: gimlet, gimlet-standalone, non-gimlet]
+  -s, --switch <SWITCH>    [possible values: asic, stub, softnpu]
+  -h, --help               Print help (see more with '--help')
+
 ----
 
-That MAC address in the far right column should be provided in place of the
-current value. Note that it can be specified as a string or an array of hex
-values. If you have multiple gateways, e.g., different gateways for different
-data links, you must choose the value for the physical link over which
-`create_virtual_hardware.sh` will create the underlay VNICs. That is, this must
-be a value in the same L2 segment as OPTE.
+To setup a build target for a non-Gimlet machine with external networking, you
+would run:
 
-[source,text]
+[source,console]
 ----
-$ cargo run --release --bin omicron-package -- package
+$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu
+    Finished release [optimized] target(s) in 0.66s
+     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu`
+Created new build target 'default' and set it as active
 ----
+
+NOTE: The `target create` command will set the new target as active and thus let you
+omit the `-t` flag in subsequent commands.
+
+=== Building
+
+To actually kick off the build and package everything, you can run:
+
+[source,console]
+----
+cargo run --release --bin omicron-package -- package
+----
+
+This will take all the packages defined in the manifest and further selected
+by the active build target and either build them (if local) or download them
+before packaging them into tarballs. The final artifacts will be placed in
+a target directory of your choice (by default, `out/`) ready to be unpacked
+as services.
 
 NOTE: Running in `release` mode isn't strictly required, but improves
 the performance of the packaging tools significantly.
 
-NOTE: To build packages for the trampoline recovery image, pass omicron-package
-`--target image_type=trampoline`.
+NOTE: Instead of `package` you can also use the `check` subcommand to just
+essentially run `cargo check` without building or creating packages.
 
-The aforementioned package command fills a target directory of choice
-(by default, `out/` within the omicron repository) with tarballs ready
-to be unpacked as services.
+=== Installing
 
 To install the services on a target machine, the following command
 may be executed:
 
-[source,text]
+[source,console]
 ----
 $ cargo build --release --bin omicron-package
 $ pfexec ./target/release/omicron-package install
@@ -134,28 +162,101 @@ $ pfexec ./target/release/omicron-package install
 If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
 ====
 
-This service installs a bootstrap service, which itself loads other
-requested services. The bootstrap service is currently the only
-service which is "persistent" across reboots - although it will
-initialize other service as part of its setup sequence anyway.
+This command installs a bootstrap service called
+`svc:/system/illumos/sled-agent:default`, which itself loads other requested
+services. The bootstrap service is currently the only service which is
+"persistent" across reboots - although it will initialize other services as part
+of its setup sequence anyway.
 
-[source,text]
+The first time the bootstrap service runs, it will take a while to initialize
+the Omicron zones:
+
+[source,console]
 ----
 # List all services:
 $ svcs
+
+# View logs for sled-agent:
+$ tail -F $(svcs -L sled-agent)
+----
+
+Once the zones are initialized, they'll show up in `zoneadm`:
+
+[source,console]
+----
 # View zones managed by Omicron (prefixed with "oxz_"):
-$ zoneadm list -cv
+$ zoneadm list -cnv
+
 # View logs for a service:
 $ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
 ----
 
+=== Uninstalling
+
 To uninstall all Omicron services from a machine, the following may be
 executed:
 
-[source,text]
+[source,console]
 ----
 $ cargo build --release --bin omicron-package
 $ pfexec ./target/release/omicron-package uninstall
+----
+
+Once all the omicron services are uninstalled, you can also remove the
+previously created virtual hardware as mentioned above:
+
+[source,console]
+----
+$ pfexec ./tools/destroy_virtual_hardware.sh
+----
+
+==== Switch Zone
+
+In a real rack, two of the Gimlets (referred to as Scrimlets) will be connected
+directly to the switch (Sidecar). Those sleds will thus be configured with a switch
+zone (`oxz_switch`) used to manage the switch. The `sled_mode` option in Sled Agent's
+config will indicate whether the sled its running on is potentially a Scrimlet or Gimlet.
+
+The relevant config will be in `smf/sled-agent/$MACHINE/config.toml`, where `$MACHINE`
+is the machine type (e.g. `gimlet`, `gimlet-standalone`, `non-gimlet`) as specified
+in the build target.
+
+[source,text]
+----
+# Identifies whether sled agent treats itself as a scrimlet or a gimlet.
+#
+# If this is set to "scrimlet", the sled agent treats itself as a scrimlet.
+# If this is set to "gimlet", the sled agent treats itself as a gimlet.
+# If this is set to "auto":
+# - On illumos, the sled automatically detects whether or not it is a scrimlet.
+# - On all other platforms, the sled assumes it is a gimlet.
+sled_mode = "scrimlet"
+----
+
+Once Sled Agent has been configured to run as a Scrimlet (whether explicitly or
+implicitly), it will attempt to create and start the switch zone. This will
+depend on the switch type that was specified in the build target:
+
+1. `asic` implies we're running on a real Gimlet and are directly attached to the
+Tofino ASIC.
+2. `stub` provides a stubbed out switch implementation that doesn't
+require any hardware.
+3. `softnpu` provides a simulated switch implementation that
+runs the same P4 program as the ASIC, but in software.
+
+For the purposes of local development, the `softnpu` switch provides is used.
+Unfortunately, Omicron does not currently automatically configure the switch
+with respect to external networking, so you'll need to manually do so.
+
+After installing omicron with `omicron-package install`, you can run the
+`softnpu-init.sh` script to configure SoftNPU. By default, it'll attempt to
+automatically detect your local network's gateway IP and MAC but those can
+be overridden by setting the `GATEWAY_IP` and `GATEWAY_MAC` environment
+variables, respectively.
+
+[source,console]
+----
+$ ./tools/scrimlet/softnpu-init.sh
 ----
 
 === Test Environment
@@ -203,10 +304,9 @@ other services and allocating them with vNICs and IPv6 addresses.
 Here are the current steps to provision an instance using the https://github.com/oxidecomputer/cli[oxide]
 command line interface.  Note that the `jq` command is required. In addition, the examples build on each other, so a previous name (or org, or project) are used in later steps.
 
-1. Create an organization and project that the resources will live under:
+1. Create a project that the resources will live under:
 
-    oxide org create myorg
-    oxide project create -o myorg myproj
+    oxide project create myproj
 
 2. Create an IP Pool, for providing external connectivity to the instance later.
 We need to create an IP Pool itself, and a range of IP addresses in that pool.
@@ -216,19 +316,40 @@ currently be something that matches the physical network that the host is
 running in, at least if you'd like to be able to SSH into the guest. This is
 most often a private address range, like `10.0.0.0/8` or `192.168.0.0/16`, but
 the exact addresses that are available depends on the environment.
++
+[source,console]
+----
+$ oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
+{
+  "first": "172.20.15.227",
+  "last": "172.20.15.239"
+}
+EOF
+----
++
+Additionally, if you're using SoftNPU and your chosen IP range is on the same
+L2 network as the router or other non-oxide hosts, you'll need to configure
+Proxy ARP:
++
+[source,console]
+----
+# dladm won't return leading zeroes but `scadm` expects them
+$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
+$ pfexec /opt/oxide/softnpu/stuff/scadm \
+  --server /opt/oxide/softnpu/stuff/server \
+  --client /opt/oxide/softnpu/stuff/client \
+  standalone \
+  add-proxy-arp \
+  $IP_POOL_START \
+  $IP_POOL_END \
+  $SOFTNPU_MAC
+----
 
-    oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
-    {
-      "first": "172.20.15.227",
-      "last": "172.20.15.239"
-    }
-    EOF
-
-3. Define a global image that will be used as initial disk contents.
+3. Define a project image that will be used as initial disk contents.
 
  a. This can be the alpine.iso image that ships with propolis:
 
-    oxide api /system/images --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "boot from propolis zone blob!",
@@ -245,7 +366,7 @@ the exact addresses that are available depends on the environment.
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /system/images --method POST --input - <<EOF
+    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -263,7 +384,7 @@ the exact addresses that are available depends on the environment.
 
 4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
-    oxide api /organizations/myorg/projects/myproj/disks/ --method POST --input - <<EOF
+    oxide api /v1/disks?project=myproj --method POST --input - <<EOF
     {
       "name": "alpine",
       "description": "alpine.iso blob",
@@ -278,7 +399,7 @@ the exact addresses that are available depends on the environment.
 
 5. Create an instance, attaching the alpine disk created above:
 
-    oxide api /organizations/myorg/projects/myproj/instances --method POST --input - <<EOF
+    oxide api /v1/instances?project=myproj --method POST --input - <<EOF
     {
       "name": "myinst",
       "description": "my inst",
@@ -298,3 +419,36 @@ the exact addresses that are available depends on the environment.
 6. Optionally, attach to the proxied propolis server serial console (this requires https://github.com/oxidecomputer/cli/commit/adab246142270778db7208126fb03724f5d35858[this commit] or newer of the CLI.)
 
     oxide instance serial --interactive -p myproj -o myorg myinst
+
+== Building host images
+
+Host images for both the standard omicron install and the trampoline/recovery
+install are built as a part of CI. To build them locally, first run the CI
+script:
+
+[source,console]
+----
+$ ./.github/buildomat/jobs/package.sh
+----
+
+This will create a `/work` directory with a few tarballs in it. Building a host
+image requires a checkout of
+https://github.com/oxidecomputer/helios-engvm[helios]; the instructions below
+use `$HELIOS_PATH` for the path to this repository. To match CI builds, you
+should check out the commit specified in `./tools/helios_version`. (The script
+will check your current commit hash and will refuse to run if it doesn't match
+unless you pass `-f`.)
+
+To build a standard host image:
+
+[source,console]
+----
+$ ./tools/build-host-image.sh -B $HELIOS_PATH /work/global-zone-packages.tar.gz
+----
+
+To build a recovery host image:
+
+[source,console]
+----
+$ ./tools/build-host-image.sh -R $HELIOS_PATH /work/trampoline-global-zone-packages.tar.gz
+----

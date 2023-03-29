@@ -178,73 +178,6 @@
         }
       }
     },
-    "/instances/{instance_id}/serial": {
-      "get": {
-        "operationId": "instance_serial_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
-            "name": "from_start",
-            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "most_recent",
-            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/services": {
       "put": {
         "operationId": "services_put",
@@ -521,7 +454,7 @@
         "enum": [
           "tofino_asic",
           "tofino_stub",
-          "softnpu"
+          "soft_npu"
         ]
       },
       "DiskEnsureBody": {
@@ -1141,31 +1074,6 @@
           "run_state"
         ]
       },
-      "InstanceSerialConsoleData": {
-        "description": "Contents of an Instance's serial console buffer.",
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The bytes starting from the requested offset up to either the end of the buffer or the request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "last_byte_offset": {
-            "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "data",
-          "last_byte_offset"
-        ]
-      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "oneOf": [
@@ -1344,8 +1252,8 @@
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
-        "pattern": "^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
-        "minLength": 17,
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
         "maxLength": 17
       },
       "Name": {

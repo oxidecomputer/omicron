@@ -7,15 +7,8 @@
 //! Refer to <nexus/src/db/queries/virtual_provisioning_collection_update.rs>
 //! for the construction of this query.
 
-use crate::schema::organization;
 use crate::schema::silo;
 use crate::schema::virtual_provisioning_collection;
-
-table! {
-    parent_org {
-        id -> Uuid,
-    }
-}
 
 table! {
     parent_silo {
@@ -35,12 +28,10 @@ table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(organization, parent_org,);
 diesel::allow_tables_to_appear_in_same_query!(silo, parent_silo,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     virtual_provisioning_collection,
-    parent_org,
     parent_silo,
     all_collections,
     do_update,

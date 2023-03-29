@@ -58,8 +58,6 @@ struct PortInner {
     // can be changed back to a real VNIC when that is resolved, and the Drop
     // impl below can simplify to just call `drop(self.vnic)`.
     vnic: String,
-    // TODO-remove: This is part of the external IP hack.
-    externally_visible: bool,
 }
 
 #[cfg(target_os = "illumos")]
@@ -120,7 +118,6 @@ impl Port {
         vni: Vni,
         gateway: Gateway,
         vnic: String,
-        externally_visible: bool,
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
@@ -132,7 +129,6 @@ impl Port {
                 vni,
                 gateway,
                 vnic,
-                externally_visible,
             }),
         }
     }
@@ -167,9 +163,5 @@ impl Port {
 
     pub fn slot(&self) -> u8 {
         self.inner.slot
-    }
-
-    pub fn externally_visible(&self) -> bool {
-        self.inner.externally_visible
     }
 }

@@ -7,7 +7,6 @@
 #: output_rules = [
 #:	"=/work/*.gz",
 #: ]
-#:
 
 set -o errexit
 set -o pipefail

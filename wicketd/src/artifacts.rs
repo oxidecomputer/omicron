@@ -113,7 +113,7 @@ impl ArtifactGetter for WicketdArtifactServer {
 /// This can be cheaply cloned, and is intended to be shared across the parts of artifactd that
 /// upload artifacts and the parts that fetch them.
 #[derive(Clone, Debug)]
-pub(crate) struct WicketdArtifactStore {
+pub struct WicketdArtifactStore {
     log: Logger,
     // NOTE: this is a `std::sync::Mutex` rather than a `tokio::sync::Mutex` because the critical
     // sections are extremely small.
@@ -145,7 +145,10 @@ impl WicketdArtifactStore {
         (system_version, artifact_ids)
     }
 
-    pub(crate) fn current_plan(&self) -> Option<UpdatePlan> {
+    /// Obtain the current plan.
+    ///
+    /// Exposed for testing.
+    pub fn current_plan(&self) -> Option<UpdatePlan> {
         // We expect this hashmap to be relatively small (order ~10), and
         // cloning both ArtifactIds and BufLists are cheap.
         self.artifacts_with_plan.lock().unwrap().plan.clone()
@@ -161,7 +164,7 @@ impl WicketdArtifactStore {
         self.artifacts_with_plan.lock().unwrap().get(id).map(BufList::from)
     }
 
-    fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
+    pub fn get_by_hash(&self, id: &ArtifactHashId) -> Option<BufList> {
         // NOTE: cloning a `BufList` is cheap since it's just a bunch of reference count bumps.
         // Cloning it here also means we can release the lock quickly.
         self.artifacts_with_plan
@@ -464,12 +467,18 @@ pub(crate) struct ArtifactIdData {
     pub(crate) data: DebugIgnore<Bytes>,
 }
 
+/// The update plan currently in effect.
+///
+/// Exposed for testing.
 #[derive(Debug, Clone)]
-pub(crate) struct UpdatePlan {
+pub struct UpdatePlan {
     pub(crate) system_version: SemverVersion,
     pub(crate) gimlet_sp: ArtifactIdData,
+    pub(crate) gimlet_rot: ArtifactIdData,
     pub(crate) psc_sp: ArtifactIdData,
+    pub(crate) psc_rot: ArtifactIdData,
     pub(crate) sidecar_sp: ArtifactIdData,
+    pub(crate) sidecar_rot: ArtifactIdData,
 
     // Note: The Trampoline image is broken into phase1/phase2 as part of our
     // update plan (because they go to different destinations), but the two
@@ -485,12 +494,16 @@ pub(crate) struct UpdatePlan {
 
     // We need to send installinator the hash of the host_phase_2 data it should
     // fetch from us; we compute it while generating the plan.
-    pub(crate) host_phase_2_hash: ArtifactHash,
+    //
+    // This is exposed for testing.
+    pub host_phase_2_hash: ArtifactHash,
 
     // We also need to send installinator the hash of the control_plane image it
     // should fetch from us. This is already present in the TUF repository, but
     // we record it here for use by the update process.
-    pub(crate) control_plane_hash: ArtifactHash,
+    //
+    // This is exposed for testing.
+    pub control_plane_hash: ArtifactHash,
 }
 
 impl UpdatePlan {
@@ -504,8 +517,11 @@ impl UpdatePlan {
         // snapshot. Scan the snapshot and record the first of each we find,
         // failing if we find a second.
         let mut gimlet_sp = None;
+        let mut gimlet_rot = None;
         let mut psc_sp = None;
+        let mut psc_rot = None;
         let mut sidecar_sp = None;
+        let mut sidecar_rot = None;
         let mut host_phase_1 = None;
         let mut host_phase_2 = None;
         let mut trampoline_phase_1 = None;
@@ -535,11 +551,20 @@ impl UpdatePlan {
                 KnownArtifactKind::GimletSp => {
                     artifact_found(&mut gimlet_sp, artifact_id, data)?
                 }
+                KnownArtifactKind::GimletRot => {
+                    artifact_found(&mut gimlet_rot, artifact_id, data)?
+                }
                 KnownArtifactKind::PscSp => {
                     artifact_found(&mut psc_sp, artifact_id, data)?
                 }
+                KnownArtifactKind::PscRot => {
+                    artifact_found(&mut psc_rot, artifact_id, data)?
+                }
                 KnownArtifactKind::SwitchSp => {
                     artifact_found(&mut sidecar_sp, artifact_id, data)?
+                }
+                KnownArtifactKind::SwitchRot => {
+                    artifact_found(&mut sidecar_rot, artifact_id, data)?
                 }
                 KnownArtifactKind::Host => {
                     slog::debug!(log, "extracting host tarball");
@@ -569,7 +594,9 @@ impl UpdatePlan {
                         &images.phase_1,
                     )?;
                 }
-                _ => continue,
+                KnownArtifactKind::ControlPlane => {
+                    // Only the installinator needs this artifact.
+                }
             }
         }
 
@@ -626,12 +653,25 @@ impl UpdatePlan {
                     KnownArtifactKind::GimletSp,
                 ),
             )?,
+            gimlet_rot: gimlet_rot.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::GimletRot,
+                ),
+            )?,
             psc_sp: psc_sp.ok_or(RepositoryError::MissingArtifactKind(
                 KnownArtifactKind::PscSp,
+            ))?,
+            psc_rot: psc_rot.ok_or(RepositoryError::MissingArtifactKind(
+                KnownArtifactKind::PscRot,
             ))?,
             sidecar_sp: sidecar_sp.ok_or(
                 RepositoryError::MissingArtifactKind(
                     KnownArtifactKind::SwitchSp,
+                ),
+            )?,
+            sidecar_rot: sidecar_rot.ok_or(
+                RepositoryError::MissingArtifactKind(
+                    KnownArtifactKind::SwitchRot,
                 ),
             )?,
             host_phase_1: host_phase_1.ok_or(

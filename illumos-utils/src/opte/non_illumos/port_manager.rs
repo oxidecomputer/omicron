@@ -4,7 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::dladm::PhysicalLink;
 use crate::opte::params::NetworkInterface;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
@@ -40,14 +39,6 @@ struct PortManagerInner {
 
     // Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
-
-    // TODO-remove: This is part of the external IP address workaround
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1335
-    //
-    // We only need to know this while we're setting the secondary MACs of the
-    // link to support OPTE's proxy ARP for the guest's IP.
-    data_link: PhysicalLink,
 
     // TODO-remove: This is part of the external IP address workaround.
     //
@@ -85,14 +76,12 @@ impl PortManager {
     /// interfaces
     pub fn new(
         log: Logger,
-        data_link: PhysicalLink,
         underlay_ip: Ipv6Addr,
         gateway_mac: MacAddr6,
     ) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),
-            data_link,
             gateway_mac,
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
@@ -119,7 +108,6 @@ impl PortManager {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
         let gateway = Gateway::from_subnet(&subnet);
-        let externally_visible = !external_ips.is_empty();
 
         // Describe the external IP addresses for this instance/service.
         //
@@ -175,7 +163,6 @@ impl PortManager {
                 vni,
                 gateway,
                 vnic,
-                externally_visible,
             );
             let ticket = PortTicket::new(port.key(), self.inner.clone());
             let old = ports.insert(port.key(), port.clone());
