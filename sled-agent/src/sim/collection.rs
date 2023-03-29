@@ -393,6 +393,19 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     }
 }
 
+impl<S: Simulatable + Clone + 'static> SimCollection<S> {
+    pub async fn sim_get_cloned_object(
+        self: &Arc<Self>,
+        id: &Uuid,
+    ) -> Result<S, Error> {
+        let objects = self.objects.lock().await;
+        let instance = objects
+            .get(id)
+            .ok_or_else(|| Error::not_found_by_id(S::resource_type(), id))?;
+        Ok(instance.object.clone())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::params::{DiskStateRequested, InstanceStateRequested};

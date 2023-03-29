@@ -357,21 +357,23 @@ impl SledAgent {
         instance_id: Uuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
-        if !self.instances.contains_key(&instance_id).await {
-            match state {
-                InstanceStateRequested::Stopped => {
-                    return Ok(InstancePutStateResponse {
-                        updated_runtime: None,
-                    });
-                }
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "instance {} not registered on sled",
-                        instance_id,
-                    )));
-                }
-            }
-        }
+        let current =
+            match self.instances.sim_get_cloned_object(&instance_id).await {
+                Ok(i) => i.current().clone(),
+                Err(_) => match state {
+                    InstanceStateRequested::Stopped => {
+                        return Ok(InstancePutStateResponse {
+                            updated_runtime: None,
+                        });
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "instance {} not registered on sled",
+                            instance_id,
+                        )));
+                    }
+                },
+            };
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -398,11 +400,7 @@ impl SledAgent {
 
         let new_state = self
             .instances
-            .sim_ensure(
-                &instance_id,
-                self.instances.sim_get_current_state(&instance_id).await?,
-                Some(state),
-            )
+            .sim_ensure(&instance_id, current, Some(state))
             .await?;
 
         // If this request will shut down the simulated instance, look for any
