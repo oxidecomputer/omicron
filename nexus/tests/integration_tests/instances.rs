@@ -36,8 +36,8 @@ use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
-use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -2939,9 +2939,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance.
     let instance_name = "test-instance";
-    let instance =
-        create_instance(client, PROJECT_NAME, instance_name)
-            .await;
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
 
     let nics_url =
         format!("/v1/network-interfaces?instance={}", instance.identity.id,);

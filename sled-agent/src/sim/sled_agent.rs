@@ -25,8 +25,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crucible_client_types::VolumeConstructionRequest;
-use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use dropshot::HttpServer;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
 use propolis_server::mock_server::Context as PropolisContext;
