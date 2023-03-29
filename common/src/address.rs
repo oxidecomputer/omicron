@@ -58,7 +58,7 @@ const DNS_ADDRESS_INDEX: usize = 1;
 const GZ_ADDRESS_INDEX: usize = 2;
 
 /// The maximum number of addresses per sled reserved for RSS.
-pub const RSS_RESERVED_ADDRESSES: u16 = 16;
+pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(

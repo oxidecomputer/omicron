@@ -62,12 +62,6 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "organizations": {
-      "description": "Organizations represent a subset of users and projects in an Oxide deployment.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "policy": {
       "description": "System-wide IAM policy",
       "external_docs": {
@@ -75,7 +69,7 @@
       }
     },
     "projects": {
-      "description": "Projects are a grouping of associated resources such as instances and disks within an organization for purposes of billing and access control.",
+      "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

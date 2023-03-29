@@ -9,13 +9,15 @@ use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Span, Spans, Text},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap},
 };
 
 use crate::ui::defaults::dimensions::RectExt;
 use crate::ui::defaults::{colors::*, style};
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Fade};
 use std::iter;
+
+const BUTTON_HEIGHT: u16 = 3;
 
 pub struct ButtonText<'a> {
     pub instruction: &'a str,
@@ -31,7 +33,8 @@ pub struct Popup<'a> {
 
 impl Popup<'_> {
     pub fn height(&self) -> u16 {
-        let button_height: u16 = if self.buttons.is_empty() { 0 } else { 3 };
+        let button_height: u16 =
+            if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };
         let bottom_margin: u16 = 1;
         let borders: u16 = 3;
         u16::try_from(self.header.height()).unwrap()
@@ -44,7 +47,27 @@ impl Popup<'_> {
     pub fn width(&self) -> u16 {
         let borders: u16 = 2;
         let right_margin: u16 = 3;
-        u16::try_from(self.body.width()).unwrap() + borders + right_margin
+        let body_width =
+            u16::try_from(self.body.width()).unwrap() + borders + right_margin;
+        let header_width = u16::try_from(self.header.width()).unwrap()
+            + borders
+            + right_margin;
+        let width = u16::max(body_width, header_width);
+        u16::max(width, self.button_width())
+    }
+
+    pub fn button_width(&self) -> u16 {
+        let space_between_buttons = 1;
+        let margins = 4;
+        // Margin + space + angle brackets
+        let button_extras = 6;
+        let width = self.buttons.iter().fold(margins, |acc, text| {
+            acc + text.instruction.len()
+                + text.key.len()
+                + button_extras
+                + space_between_buttons
+        });
+        u16::try_from(width).unwrap()
     }
 }
 
@@ -58,9 +81,13 @@ impl Widget for Popup<'_> {
             .border_type(BorderType::Rounded)
             .style(style::selected_line());
 
-        let rect = full_screen
-            .center_horizontally(self.width())
-            .center_vertically(self.height());
+        // Constrain width and height to 80% of screen width. Width and height
+        // are u16s and less than 128 so the computation shouldn't overflow.
+        let width = u16::min(self.width(), full_screen.width * 4 / 5);
+        let height = u16::min(self.height(), full_screen.height * 4 / 5);
+
+        let rect =
+            full_screen.center_horizontally(width).center_vertically(height);
 
         // Clear the popup
         Clear.render(rect, buf);
@@ -70,18 +97,43 @@ impl Widget for Popup<'_> {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .constraints(
+                [
+                    // Top titlebar
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                    // Buttons at the bottom will be accounted for while
+                    // rendering the body
+                ]
+                .as_ref(),
+            )
             .split(rect);
 
         let header = Paragraph::new(self.header).block(block.clone());
         header.render(chunks[0], buf);
 
-        let body = Paragraph::new(self.body).block(
-            block.borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT),
-        );
-        body.render(chunks[1], buf);
+        block
+            .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
+            .render(chunks[1], buf);
+
+        let body = Paragraph::new(self.body).wrap(Wrap { trim: false });
+
+        let mut body_rect = chunks[1];
+        // Ensure we're inside the outer border.
+        body_rect.x += 1;
+        body_rect.width = body_rect.width.saturating_sub(2);
+        body_rect.height = body_rect.height.saturating_sub(1);
+
+        if !self.buttons.is_empty() {
+            // Reduce the height so that the body text doesn't overflow into the
+            // button area.
+            body_rect.height = body_rect.height.saturating_sub(BUTTON_HEIGHT);
+        }
+
+        body.render(body_rect, buf);
 
         let connector = BoxConnector::new(BoxConnectorKind::Top);
+
         connector.render(chunks[1], buf);
 
         draw_buttons(self.buttons, chunks[1], buf);

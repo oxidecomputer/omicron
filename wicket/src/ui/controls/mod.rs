@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{Action, Event, Frame, State};
+use crate::{Action, Cmd, Frame, State};
 use tui::layout::Rect;
 
 /// A [`Control`] is the an item on a screen that can be selected and interacted with.
@@ -17,7 +17,7 @@ use tui::layout::Rect;
 /// To allow for distinctive styling on active/selected widgets we allow the
 /// caller to indicate this via the `active` parameter.
 pub trait Control {
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action>;
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action>;
     fn draw(
         &mut self,
         state: &State,

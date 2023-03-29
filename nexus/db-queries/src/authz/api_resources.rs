@@ -617,68 +617,11 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
-// Main resource hierarchy: Organizations, Projects, and their resources
-
-authz_resource! {
-    name = "Organization",
-    parent = "Silo",
-    primary_key = Uuid,
-    roles_allowed = true,
-    polar_snippet = Custom,
-}
-
-impl ApiResourceWithRolesType for Organization {
-    type AllowedRoles = OrganizationRole;
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Display,
-    Eq,
-    FromStr,
-    PartialEq,
-    Serialize,
-    JsonSchema,
-)]
-#[cfg_attr(test, derive(EnumIter))]
-#[display(style = "kebab-case")]
-#[serde(rename_all = "snake_case")]
-pub enum OrganizationRole {
-    Admin,
-    Collaborator,
-    Viewer,
-}
-
-impl db::model::DatabaseString for OrganizationRole {
-    type Error = anyhow::Error;
-
-    fn to_database_string(&self) -> &str {
-        match self {
-            OrganizationRole::Admin => "admin",
-            OrganizationRole::Collaborator => "collaborator",
-            OrganizationRole::Viewer => "viewer",
-        }
-    }
-
-    fn from_database_string(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "admin" => Ok(OrganizationRole::Admin),
-            "collaborator" => Ok(OrganizationRole::Collaborator),
-            "viewer" => Ok(OrganizationRole::Viewer),
-            _ => Err(anyhow!(
-                "unsupported Organization role from database: {:?}",
-                s
-            )),
-        }
-    }
-}
+// Main resource hierarchy: Projects and their resources
 
 authz_resource! {
     name = "Project",
-    parent = "Organization",
+    parent = "Silo",
     primary_key = Uuid,
     roles_allowed = true,
     polar_snippet = Custom,
@@ -1015,7 +958,6 @@ authz_resource! {
 #[cfg(test)]
 mod test {
     use super::FleetRole;
-    use super::OrganizationRole;
     use super::ProjectRole;
     use super::SiloRole;
     use crate::db::test_database_string_impl;
@@ -1027,9 +969,6 @@ mod test {
         );
         test_database_string_impl::<SiloRole, _>(
             "tests/output/authz-roles-silo.txt",
-        );
-        test_database_string_impl::<OrganizationRole, _>(
-            "tests/output/authz-roles-organization.txt",
         );
         test_database_string_impl::<ProjectRole, _>(
             "tests/output/authz-roles-project.txt",

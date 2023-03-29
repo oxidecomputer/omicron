@@ -4,6 +4,7 @@
 
 //! Interfaces for working with sled agent configuration
 
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -15,14 +16,21 @@ use serde::Deserialize;
 use sled_hardware::is_gimlet;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SledMode {
+    Auto,
+    Gimlet,
+    Scrimlet,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
-    /// if set to false).
-    pub stub_scrimlet: Option<bool>,
+    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
@@ -40,6 +48,9 @@ pub struct Config {
     /// This allows continued support for development and testing on emulated
     /// systems.
     pub data_link: Option<PhysicalLink>,
+
+    #[serde(default)]
+    pub updates: ConfigUpdates,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,5 +101,37 @@ impl Config {
                 Dladm::find_physical().map_err(ConfigError::FindLinks)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_smf_configs() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let smf = PathBuf::from(manifest).join("../smf/sled-agent");
+
+        let mut configs_seen = 0;
+        for variant in std::fs::read_dir(smf).unwrap() {
+            let variant = variant.unwrap();
+            if variant.file_type().unwrap().is_dir() {
+                for entry in std::fs::read_dir(variant.path()).unwrap() {
+                    let entry = entry.unwrap();
+                    if entry.file_name() == "config.toml" {
+                        Config::from_file(entry.path()).unwrap_or_else(|_| {
+                            panic!(
+                                "Failed to parse config {}",
+                                entry.path().display()
+                            )
+                        });
+                        configs_seen += 1;
+                    }
+                }
+            }
+        }
+        assert!(configs_seen > 0, "No sled-agent configs found");
     }
 }

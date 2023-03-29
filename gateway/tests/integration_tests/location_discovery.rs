@@ -4,9 +4,9 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use super::setup;
 use dropshot::test_util;
 use gateway_messages::SpPort;
+use gateway_test_utils::setup;
 use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
 

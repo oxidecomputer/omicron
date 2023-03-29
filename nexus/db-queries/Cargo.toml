@@ -23,7 +23,6 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
-internal-dns-names.workspace = true
 ipnetwork.workspace = true
 lazy_static.workspace = true
 macaddr.workspace = true

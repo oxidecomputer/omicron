@@ -1,0 +1,187 @@
+builder: "empty"
+[]
+builder: "hosts_only"
+[
+  {
+    "key": {
+      "name": "001de000-51ed-4000-8000-000000000001.sled"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::1"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-51ed-4000-8000-000000000002.sled"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.0.0.2"
+      }
+    ]
+  }
+]
+builder: "zones_only"
+[
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000001.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.1"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000002.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.2"
+      }
+    ]
+  }
+]
+builder: "non_trivial"
+[
+  {
+    "key": {
+      "name": "001de000-51ed-4000-8000-000000000001.sled"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::1"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-51ed-4000-8000-000000000002.sled"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.0.0.2"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000001.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.1"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000002.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.2"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000003.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.3"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "001de000-c04e-4000-8000-000000000004.host"
+    },
+    "records": [
+      {
+        "type": "AAAA",
+        "data": "::0.1.0.4"
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "_sledagent._tcp.001de000-51ed-4000-8000-000000000001"
+    },
+    "records": [
+      {
+        "type": "SRV",
+        "data": {
+          "port": 123,
+          "prio": 0,
+          "target": "001de000-51ed-4000-8000-000000000001.sled.control-plane.oxide.internal",
+          "weight": 0
+        }
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "_nexus._tcp"
+    },
+    "records": [
+      {
+        "type": "SRV",
+        "data": {
+          "port": 123,
+          "prio": 0,
+          "target": "001de000-c04e-4000-8000-000000000001.host.control-plane.oxide.internal",
+          "weight": 0
+        }
+      },
+      {
+        "type": "SRV",
+        "data": {
+          "port": 124,
+          "prio": 0,
+          "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
+          "weight": 0
+        }
+      }
+    ]
+  },
+  {
+    "key": {
+      "name": "_oximeter._tcp"
+    },
+    "records": [
+      {
+        "type": "SRV",
+        "data": {
+          "port": 125,
+          "prio": 0,
+          "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
+          "weight": 0
+        }
+      },
+      {
+        "type": "SRV",
+        "data": {
+          "port": 126,
+          "prio": 0,
+          "target": "001de000-c04e-4000-8000-000000000003.host.control-plane.oxide.internal",
+          "weight": 0
+        }
+      }
+    ]
+  }
+]

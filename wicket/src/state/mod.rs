@@ -10,17 +10,20 @@ mod status;
 mod update;
 
 pub use inventory::{
-    Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
+    Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
+    ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
-pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
+pub use status::{Liveness, ServiceStatus};
 pub use update::{artifact_title, RackUpdateState, UpdateState};
+
+use serde::{Deserialize, Serialize};
 
 /// The global state of wicket
 ///
 /// [`State`] is not tied to any specific screen and is updated upon event
 /// receipt.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
     pub screen_width: u16,
     pub screen_height: u16,
@@ -28,12 +31,6 @@ pub struct State {
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
     pub update_state: RackUpdateState,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl State {

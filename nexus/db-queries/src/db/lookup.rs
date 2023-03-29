@@ -37,78 +37,14 @@ use uuid::Uuid;
 /// * `lookup_for(authz::Action)`: fetch just the `authz` objects for a resource
 ///   and its parents.  This function checks that the caller has permissions to
 ///   perform the specified action.
-///
-/// # Examples
-///
-/// ```
-/// # use nexus_db_queries::authz;
-/// # use nexus_db_queries::context::OpContext;
-/// # use nexus_db_queries::db;
-/// # use nexus_db_queries::db::DataStore;
-/// # use nexus_db_queries::db::lookup::LookupPath;
-/// # use uuid::Uuid;
-/// # async fn foo(opctx: &OpContext, datastore: &DataStore)
-/// # -> Result<(), omicron_common::api::external::Error> {
-///
-/// // Fetch an organization by name
-/// let organization_name = db::model::Name("engineering".parse().unwrap());
-/// let (authz_silo, authz_org, db_org):
-///     (authz::Silo, authz::Organization, db::model::Organization) =
-///     LookupPath::new(opctx, datastore)
-///         .organization_name(&organization_name)
-///         .fetch()
-///         .await?;
-///
-/// // Fetch an organization by id
-/// let id: Uuid = todo!();
-/// let (authz_silo, authz_org, db_org):
-///     (authz::Silo, authz::Organization, db::model::Organization) =
-///     LookupPath::new(opctx, datastore)
-///         .organization_id(id)
-///         .fetch()
-///         .await?;
-///
-/// // Lookup a Project with the intent of creating an Instance inside it.  For
-/// // this purpose, we don't need the database row for the Project, so we use
-/// // `lookup_for()`.
-/// let project_name = db::model::Name("omicron".parse().unwrap());
-/// let (authz_silo, authz_org, authz_project) =
-///     LookupPath::new(opctx, datastore)
-///         .organization_name(&organization_name)
-///         .project_name(&project_name)
-///         .lookup_for(authz::Action::CreateChild)
-///         .await?;
-///
-/// // Fetch an Instance by a path of names (Organization name, Project name,
-/// // Instance name)
-/// let instance_name = db::model::Name("test-server".parse().unwrap());
-/// let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
-///     LookupPath::new(opctx, datastore)
-///         .organization_name(&organization_name)
-///         .project_name(&project_name)
-///         .instance_name(&instance_name)
-///         .fetch()
-///         .await?;
-///
-/// // Having looked up the Instance, you have the `authz::Project`.  Use this
-/// // to look up a Disk that you expect is in the same Project.
-/// let disk_name = db::model::Name("my-disk".parse().unwrap());
-/// let (.., authz_disk, db_disk) =
-///     LookupPath::new(opctx, datastore)
-///         .project_id(authz_project.id())
-///         .disk_name(&disk_name)
-///         .fetch()
-///         .await?;
-/// # }
-/// ```
 // Implementation notes
 //
 // We say that a caller using `LookupPath` is building a _selection path_ for a
 // resource.  They use this builder interface to _select_ a specific resource.
 // Example selection paths:
 //
-// - From the root, select Organization with name "org1", then Project with name
-//   "proj1", then Instance with name "instance1".
+// - From the root, select Project with name "proj1", then Instance with name
+//   "instance1".
 //
 // - From the root, select Project with id 123, then Instance "instance1".
 //
@@ -128,16 +64,11 @@ use uuid::Uuid;
 //                  +-----+
 //                  |
 //                  v
-//              Organization::Name(r, "org1")
-//                                 |
-//                      +----------+
-//                      |
-//                      v
-//                  Silo::PrimaryKey(r, id)
-//                                   |
-//                      +------------+
-//                      |
-//                      v
+//               Silo::PrimaryKey(r, id)
+//                                |
+//                   +------------+
+//                   |
+//                   v
 //                  Root
 //                      lookup_root: LookupPath (references OpContext and
 //                                               DataStore)
@@ -148,9 +79,7 @@ use uuid::Uuid;
 //
 //     let (authz_silo, authz_org, authz_project, authz_instance, db_instance) =
 //         LookupPath::new(opctx, datastore)   // returns LookupPath
-//             .organization_name("org1")      // consumes LookupPath,
-//                                             //   returns Organization
-//             .project_name("proj1")          // consumes Organization,
+//             .project_name("proj1")          // consumes LookupPath,
 //                                                  returns Project
 //             .instance_name("instance1")     // consumes Project,
 //                                                  returns Instance
@@ -183,8 +112,8 @@ impl<'a> LookupPath<'a> {
     // The top-level selection functions are implemented by hand because the
     // macro is not in a great position to do this.
 
-    /// Select a resource of type Organization, identified by its name
-    pub fn organization_name<'b, 'c>(self, name: &'b Name) -> Organization<'c>
+    /// Select a resource of type Project, identified by its name
+    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
     where
         'a: 'c,
         'b: 'c,
@@ -198,18 +127,13 @@ impl<'a> LookupPath<'a> {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
                 let silo_key = Silo::PrimaryKey(root, authz_silo.id());
-                Organization::Name(silo_key, name)
+                Project::Name(silo_key, name)
             }
             Err(error) => {
                 let root = Root { lookup_root: self };
-                Organization::Error(root, error)
+                Project::Error(root, error)
             }
         }
-    }
-
-    /// Select a resource of type Organization, identified by its id
-    pub fn organization_id(self, id: Uuid) -> Organization<'a> {
-        Organization::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Project, identified by its id
@@ -368,6 +292,11 @@ impl<'a> LookupPath<'a> {
         SiloGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type SshKey, identified by its id
+    pub fn ssh_key_id(self, id: Uuid) -> SshKey<'a> {
+        SshKey::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type Rack, identified by its id
     pub fn rack_id(self, id: Uuid) -> Rack<'a> {
         Rack::PrimaryKey(Root { lookup_root: self }, id)
@@ -402,6 +331,14 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type UpdateDeployment, identified by its id
     pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
         UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type UserBuiltin, identified by its `name`
+    pub fn user_builtin_id<'b>(self, id: Uuid) -> UserBuiltin<'b>
+    where
+        'a: 'b,
+    {
+        UserBuiltin::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -480,7 +417,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "Organization", "IdentityProvider", "SamlIdentityProvider"],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -548,17 +485,8 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Organization",
-    ancestors = [ "Silo" ],
-    children = [ "Project" ],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Project",
-    ancestors = [ "Silo", "Organization" ],
+    ancestors = [ "Silo" ],
     children = [ "Disk", "Instance", "Vpc", "Snapshot", "Image" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -567,7 +495,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Disk",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -576,7 +504,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Image",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -585,7 +513,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Snapshot",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -594,7 +522,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Instance",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [ "NetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -603,7 +531,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "NetworkInterface",
-    ancestors = [ "Silo", "Organization", "Project", "Instance" ],
+    ancestors = [ "Silo", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -612,7 +540,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Vpc",
-    ancestors = [ "Silo", "Organization", "Project" ],
+    ancestors = [ "Silo", "Project" ],
     children = [ "VpcRouter", "VpcSubnet" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -621,7 +549,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcRouter",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Project", "Vpc" ],
     children = [ "RouterRoute" ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -630,7 +558,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "RouterRoute",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc", "VpcRouter" ],
+    ancestors = [ "Silo", "Project", "Vpc", "VpcRouter" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,
@@ -639,7 +567,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "VpcSubnet",
-    ancestors = [ "Silo", "Organization", "Project", "Vpc" ],
+    ancestors = [ "Silo", "Project", "Vpc" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,
@@ -782,7 +710,6 @@ lookup_resource! {
 mod test {
     use super::Instance;
     use super::LookupPath;
-    use super::Organization;
     use super::Project;
     use crate::context::OpContext;
     use crate::db::model::Name;
@@ -799,25 +726,28 @@ mod test {
             crate::db::datastore::datastore_test(&logctx, &db).await;
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-        let org_name: Name = Name("my-org".parse().unwrap());
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
         let leaf = LookupPath::new(&opctx, &datastore)
-            .organization_name(&org_name)
             .project_name(&project_name)
             .instance_name(&instance_name);
         assert!(matches!(&leaf,
-            Instance::Name(Project::Name(Organization::Name(_, o) , p) , i)
-            if **o == org_name && **p == project_name && **i == instance_name));
+            Instance::Name(Project::Name(_, p), i)
+            if **p == project_name && **i == instance_name));
 
-        let org_id = "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
-        let leaf = LookupPath::new(&opctx, &datastore)
-            .organization_id(org_id)
-            .project_name(&project_name);
+        let leaf =
+            LookupPath::new(&opctx, &datastore).project_name(&project_name);
         assert!(matches!(&leaf,
-            Project::Name(Organization::PrimaryKey(_, o), p)
-            if *o == org_id && **p == project_name));
+            Project::Name(_, p)
+            if **p == project_name));
+
+        let project_id =
+            "006f29d9-0ff0-e2d2-a022-87e152440122".parse().unwrap();
+        let leaf = LookupPath::new(&opctx, &datastore).project_id(project_id);
+        assert!(matches!(&leaf,
+            Project::PrimaryKey(_, p)
+            if *p == project_id));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

@@ -45,10 +45,16 @@ impl super::Nexus {
         let sled = db::model::Sled::new(
             id,
             info.sa_address,
-            is_scrimlet,
-            info.baseboard.identifier,
-            info.baseboard.model,
-            info.baseboard.revision,
+            db::model::SledBaseboard {
+                serial_number: info.baseboard.identifier,
+                part_number: info.baseboard.model,
+                revision: info.baseboard.revision,
+            },
+            db::model::SledSystemHardware {
+                is_scrimlet,
+                usable_hardware_threads: info.usable_hardware_threads,
+                usable_physical_ram: info.usable_physical_ram.into(),
+            },
             self.rack_id,
         );
         self.db_datastore.sled_upsert(sled).await?;

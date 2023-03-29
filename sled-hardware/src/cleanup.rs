@@ -20,16 +20,17 @@ use slog::warn;
 use slog::Logger;
 use std::process::Command;
 
-// Delete all underlay addresses created directly over the etherstub VNICs used
-// for inter-zone communications.
-fn delete_etherstub_addresses(log: &Logger) -> Result<(), Error> {
+pub fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
     let underlay_prefix = format!("{}/", UNDERLAY_ETHERSTUB_VNIC_NAME);
+    delete_addresses_matching_prefixes(log, &[underlay_prefix])
+}
+
+pub fn delete_bootstrap_addresses(log: &Logger) -> Result<(), Error> {
     let bootstrap_prefix = format!("{}/", BOOTSTRAP_ETHERSTUB_VNIC_NAME);
-    delete_addresses_matching_prefixes(log, &[underlay_prefix])?;
     delete_addresses_matching_prefixes(log, &[bootstrap_prefix])
 }
 
-fn delete_underlay_addresses(log: &Logger) -> Result<(), Error> {
+fn delete_chelsio_addresses(log: &Logger) -> Result<(), Error> {
     let prefixes = crate::underlay::find_chelsio_links()?
         .into_iter()
         .map(|link| format!("{}/", link.name()))
@@ -109,8 +110,9 @@ pub async fn delete_omicron_vnics(log: &Logger) -> Result<(), Error> {
 }
 
 pub async fn cleanup_networking_resources(log: &Logger) -> Result<(), Error> {
-    delete_etherstub_addresses(log)?;
     delete_underlay_addresses(log)?;
+    delete_bootstrap_addresses(log)?;
+    delete_chelsio_addresses(log)?;
     delete_omicron_vnics(log).await?;
     delete_etherstub(log)?;
     opte::delete_all_xde_devices(log)?;

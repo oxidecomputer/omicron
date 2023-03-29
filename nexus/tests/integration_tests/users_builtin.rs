@@ -15,17 +15,18 @@ type ControlPlaneTestContext =
 async fn test_users_builtin(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let mut users = NexusRequest::object_get(testctx, "/system/user")
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body::<ResultsPage<UserBuiltin>>()
-        .unwrap()
-        .items
-        .into_iter()
-        .map(|u| (u.identity.name.to_string(), u))
-        .collect::<BTreeMap<String, UserBuiltin>>();
+    let mut users =
+        NexusRequest::object_get(testctx, "/v1/system/users-builtin")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body::<ResultsPage<UserBuiltin>>()
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|u| (u.identity.name.to_string(), u))
+            .collect::<BTreeMap<String, UserBuiltin>>();
 
     let u = users.remove(&authn::USER_DB_INIT.name.to_string()).unwrap();
     assert_eq!(u.identity.id, authn::USER_DB_INIT.id);

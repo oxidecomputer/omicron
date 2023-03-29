@@ -9,6 +9,7 @@
 use std::net::SocketAddrV6;
 
 use anyhow::{anyhow, Result};
+use dropshot::HttpServer;
 
 use crate::{
     context::ServerContext,
@@ -37,12 +38,22 @@ impl ArtifactServer {
 
     /// Starts the artifact server.
     ///
-    /// The future returned by this method runs forever.
-    pub async fn start(self) -> Result<()> {
+    /// This returns an `HttpServer`, which can be awaited to completion.
+    pub fn start(self) -> Result<HttpServer<ServerContext>> {
         let context = ServerContext { artifact_store: self.store };
 
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: std::net::SocketAddr::V6(self.address),
+            // Even though the installinator sets an upper bound on the number
+            // of items in a progress report, they can get pretty large if they
+            // haven't gone through for a bit. Ensure that hitting the max
+            // request size won't cause a failure by setting a generous upper
+            // bound for the request size.
+            //
+            // TODO: replace with an endpoint-specific option once
+            // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
+            // available in omicron.
+            request_body_max_bytes: 4 * 1024 * 1024,
             ..Default::default()
         };
 
@@ -58,9 +69,6 @@ impl ArtifactServer {
                 .context("failed to create installinator artifact server")
         })?;
 
-        server
-            .start()
-            .await
-            .map_err(|error| anyhow!(error).context("failed to run server"))
+        Ok(server.start())
     }
 }

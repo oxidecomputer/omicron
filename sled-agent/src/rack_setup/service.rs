@@ -55,6 +55,7 @@
 //! thereafter.
 
 use super::config::SetupServiceConfig as Config;
+use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
@@ -67,10 +68,8 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
-use dns_service_client::multiclient::{
-    DnsError, Resolver as DnsResolver, Updater as DnsUpdater,
-};
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
+use internal_dns::{ServiceName, SRV};
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -89,7 +88,6 @@ use std::iter;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::OnceCell;
 
 // The minimum number of sleds to initialize the rack.
 const MINIMUM_SLED_COUNT: usize = 1;
@@ -115,6 +113,9 @@ pub enum SetupServiceError {
 
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
+
+    #[error("Error resetting sled: {0}")]
+    SledReset(String),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
@@ -170,14 +171,27 @@ impl RackSetupService {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .inject_rack_setup_requests(
-                    &config,
-                    local_bootstrap_agent,
-                    &member_device_id_certs,
-                )
+                .run(&config, local_bootstrap_agent, &member_device_id_certs)
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        });
+
+        RackSetupService { handle }
+    }
+
+    pub(crate) fn new_reset_rack(
+        log: Logger,
+        local_bootstrap_agent: BootstrapAgentHandle,
+    ) -> Self {
+        let handle = tokio::task::spawn(async move {
+            let svc = ServiceInner::new(log.clone());
+            if let Err(e) = svc.reset(local_bootstrap_agent).await {
+                warn!(log, "RSS rack reset failed: {}", e);
                 Err(e)
             } else {
                 Ok(())
@@ -219,12 +233,11 @@ enum PeerExpectation {
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
-    dns_servers: OnceCell<DnsUpdater>,
 }
 
 impl ServiceInner {
     fn new(log: Logger) -> Self {
-        ServiceInner { log, dns_servers: OnceCell::new() }
+        ServiceInner { log }
     }
 
     async fn initialize_datasets(
@@ -265,32 +278,6 @@ impl ServiceInner {
             )
             .await?;
         }
-
-        let mut records: HashMap<_, Vec<_>> = HashMap::new();
-        for dataset in datasets {
-            records
-                .entry(dataset.srv())
-                .or_default()
-                .push((dataset.aaaa(), dataset.address()));
-        }
-        let records_put = || async {
-            self.dns_servers
-                .get()
-                .expect("DNS servers must be initialized first")
-                .insert_dns_records(&records)
-                .await
-                .map_err(BackoffError::transient)?;
-            Ok::<(), BackoffError<DnsError>>(())
-        };
-        let log_failure = |error, _| {
-            warn!(self.log, "failed to set DNS records"; "error" => ?error);
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            records_put,
-            log_failure,
-        )
-        .await?;
 
         Ok(())
     }
@@ -336,37 +323,109 @@ impl ServiceInner {
         )
         .await?;
 
-        // Insert DNS records, if the DNS servers have been initialized
-        if let Some(dns_servers) = self.dns_servers.get() {
-            let mut records = HashMap::new();
-            for zone in services {
-                for service in &zone.services {
-                    if let Some(addr) = zone.address(&service) {
-                        records
-                            .entry(zone.srv(&service))
-                            .or_insert_with(Vec::new)
-                            .push((zone.aaaa(), addr));
+        Ok(())
+    }
+
+    // Configure the internal DNS servers with the initial DNS data
+    async fn initialize_dns(
+        &self,
+        service_plan: &ServicePlan,
+    ) -> Result<(), SetupServiceError> {
+        let log = &self.log;
+
+        // Determine the list of DNS servers that are supposed to exist based on
+        // the service plan that has already been deployed.
+        let dns_server_ips =
+            // iterate sleds
+            service_plan.services.iter().filter_map(
+                |(_, services_request)| {
+                    // iterate services for this sled
+                    let dns_addrs: Vec<_> = services_request
+                        .services
+                        .iter()
+                        .filter_map(|svc| {
+                            if !matches!(svc.zone_type, ZoneType::InternalDNS) {
+                                // This is not an internal DNS zone.
+                                None
+                            } else {
+                                // This is an internal DNS zone.  Find the IP
+                                // and port that have been assigned to it.
+                                // There should be exactly one.
+                                let addrs = svc.services.iter().filter_map(|s| {
+                                    if let ServiceType::InternalDns { server_address, .. } = s {
+                                        Some(*server_address)
+                                    } else {
+                                        None
+                                    }
+                                }).collect::<Vec<_>>();
+
+                                if addrs.len() == 1 {
+                                    Some(addrs[0])
+                                } else {
+                                    warn!(
+                                        log,
+                                        "DNS configuration: expected one \
+                                        InternalDns service for zone with \
+                                        type ZoneType::InternalDNS, but \
+                                        found {} (zone {})",
+                                        svc.id,
+                                        addrs.len()
+                                    );
+                                    None
+                                }
+                            }
+                        })
+                        .collect();
+                    if dns_addrs.len() > 0 {
+                        Some(dns_addrs)
+                    } else {
+                        None
                     }
                 }
-            }
-            let records_put = || async {
-                dns_servers
-                    .insert_dns_records(&records)
-                    .await
-                    .map_err(BackoffError::transient)?;
-                Ok::<(), BackoffError<DnsError>>(())
+            )
+            .flatten()
+            .collect::<Vec<_>>();
+
+        let dns_config = &service_plan.dns_config;
+        for ip_addr in dns_server_ips {
+            let log = log.new(o!("dns_config_addr" => ip_addr.to_string()));
+            info!(log, "Configuring DNS server");
+            let dns_config_client = dns_service_client::Client::new(
+                &format!("http://{}", ip_addr),
+                log.clone(),
+            );
+
+            let do_update = || async {
+                let result = dns_config_client.dns_config_put(dns_config).await;
+                match result {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        if dns_service_client::is_retryable(&e) {
+                            Err(BackoffError::transient(e))
+                        } else {
+                            Err(BackoffError::permanent(e))
+                        }
+                    }
+                }
             };
-            let log_failure = |error, _| {
-                warn!(self.log, "failed to set DNS records"; "error" => ?error);
+            let log_failure = move |error, duration| {
+                warn!(
+                    log,
+                    "failed to write DNS configuration (will retry in {:?})",
+                    duration;
+                    "error_message" => #%error
+                );
             };
+
             retry_notify(
                 retry_policy_internal_service_aggressive(),
-                records_put,
+                do_update,
                 log_failure,
             )
             .await?;
         }
 
+        info!(log, "Configured all DNS servers");
         Ok(())
     }
 
@@ -443,8 +502,11 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        let resolver = DnsResolver::new(&config.az_subnet())
-            .expect("Failed to create DNS resolver");
+        let resolver = DnsResolver::new_from_subnet(
+            self.log.new(o!("component" => "DnsResolver")),
+            config.az_subnet(),
+        )
+        .expect("Failed to create DNS resolver");
         let ip = resolver
             .lookup_ip(SRV::Service(ServiceName::Nexus))
             .await
@@ -584,10 +646,30 @@ impl ServiceInner {
         Ok(())
     }
 
-    // In lieu of having an operator send requests to all sleds via an
-    // initialization service, the sled-agent configuration may allow for the
-    // automated injection of setup requests from a sled.
-    //
+    async fn reset(
+        &self,
+        local_bootstrap_agent: BootstrapAgentHandle,
+    ) -> Result<(), SetupServiceError> {
+        // Gather all peer addresses that we can currently see on the bootstrap
+        // network.
+        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let peer_addrs = ddm_admin_client.peer_addrs().await?;
+        let our_bootstrap_address = local_bootstrap_agent.our_address();
+        let all_addrs = peer_addrs
+            .chain(iter::once(our_bootstrap_address))
+            .map(|addr| {
+                SocketAddrV6::new(addr, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
+            })
+            .collect::<Vec<_>>();
+
+        local_bootstrap_agent
+            .reset_sleds(all_addrs)
+            .await
+            .map_err(SetupServiceError::SledReset)?;
+
+        Ok(())
+    }
+
     // This method has a few distinct phases, identified by files in durable
     // storage:
     //
@@ -599,7 +681,7 @@ impl ServiceInner {
     //    requests to the sleds enumerated within the "allocation plan".
     //
     // 3. SERVICE ALLOCATION PLAN CREATION. Now that Sled Agents are executing
-    //    on their respsective subnets, they can be queried to create an
+    //    on their respective subnets, they can be queried to create an
     //    allocation plan for services.
     //
     // 4. SERVICE ALLOCATION PLAN EXECUTION. RSS requests that the services
@@ -608,7 +690,7 @@ impl ServiceInner {
     // 5. MARKING SETUP COMPLETE. Once the RSS has successfully initialized the
     //    rack, a marker file is created at "rss_completed_marker_path()". This
     //    indicates that the plan executed successfully, and no work remains.
-    async fn inject_rack_setup_requests(
+    async fn run(
         &self,
         config: &Config,
         local_bootstrap_agent: BootstrapAgentHandle,
@@ -762,14 +844,8 @@ impl ServiceInner {
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
 
-        let dns_servers = DnsUpdater::new(
-            &config.az_subnet(),
-            self.log.new(o!("client" => "DNS")),
-        );
-        self.dns_servers
-            .set(dns_servers)
-            .map_err(|_| ())
-            .expect("DNS servers should only be set once");
+        // Write the initial DNS configuration to the internal DNS servers.
+        self.initialize_dns(&service_plan).await?;
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(service_plan.services.iter().map(

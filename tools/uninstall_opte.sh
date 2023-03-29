@@ -51,8 +51,8 @@ function remove_publisher {
         exit 1
     fi
     if [[ "${ORIGIN:0:7}" != "file://" ]]; then
-        echo "Expected a file origin URI for publisher \"$PUBLISHER\""
-        exit 1
+        echo "Ignorning non-file origin publisher ($PUBLISHER: \"$ORIGIN\")"
+        return 0
     fi
 
     # Unset the publisher, but do not do anything with the file.

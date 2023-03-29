@@ -10,11 +10,6 @@
 /*
  * Important CockroachDB notes:
  *
- *    The syntax STRING(63) means a Unicode string with at most 63 code points,
- *    not 63 bytes.  In many cases, Nexus itself will validate a string's
- *    byte count or code points, so it's still reasonable to limit ourselves to
- *    powers of two (or powers-of-two-minus-one) to improve storage utilization.
- *
  *    For timestamps, CockroachDB's docs recommend TIMESTAMPTZ rather than
  *    TIMESTAMP.  This does not change what is stored with each datum, but
  *    rather how it's interpreted when clients use it.  It should make no
@@ -85,6 +80,10 @@ CREATE TABLE omicron.public.sled (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
+
+    /* CPU & RAM summary for the sled */
+    usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
@@ -223,7 +222,6 @@ CREATE UNIQUE INDEX ON omicron.public.certificate (
 -- A table describing virtual resource provisioning which may be associated
 -- with a collection of objects, including:
 -- - Projects
--- - Organizations
 -- - Silos
 -- - Fleet
 CREATE TABLE omicron.public.virtual_provisioning_collection (
@@ -646,34 +644,6 @@ CREATE UNIQUE INDEX ON omicron.public.ssh_key (
     time_deleted IS NULL;
 
 /*
- * Organizations
- */
-
-CREATE TABLE omicron.public.organization (
-    /* Identity metadata */
-    id UUID PRIMARY KEY,
-
-    /* FK into Silo table */
-    silo_id UUID NOT NULL,
-
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-
-    /* child resource generation number, per RFD 192 */
-    rcgen INT NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.organization (
-    silo_id,
-    name
-) WHERE
-    time_deleted IS NULL;
-
-/*
  * Projects
  */
 
@@ -690,12 +660,12 @@ CREATE TABLE omicron.public.project (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    /* Which organization this project belongs to */
-    organization_id UUID NOT NULL /* foreign key into "Organization" table */
+    /* Which silo this project belongs to */
+    silo_id UUID NOT NULL /* foreign key into "silo" table */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.project (
-    organization_id,
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;

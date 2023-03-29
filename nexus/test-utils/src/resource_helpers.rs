@@ -7,31 +7,29 @@ use crate::ControlPlaneTestContext;
 
 use super::http_testing::AuthnMode;
 use super::http_testing::NexusRequest;
+use crucible_agent_client::types::State as RegionState;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params;
+use nexus_types::external_api::params::UserId;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IdentityType;
+use nexus_types::external_api::shared::IpRange;
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::IpPool;
+use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::User;
+use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
+use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
-use omicron_nexus::crucible_agent_client::types::State as RegionState;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::params::UserId;
-use omicron_nexus::external_api::shared;
-use omicron_nexus::external_api::shared::IdentityType;
-use omicron_nexus::external_api::shared::IpRange;
-use omicron_nexus::external_api::views;
-use omicron_nexus::external_api::views::Certificate;
-use omicron_nexus::external_api::views::IpPool;
-use omicron_nexus::external_api::views::IpPoolRange;
-use omicron_nexus::external_api::views::User;
-use omicron_nexus::external_api::views::{
-    Organization, Project, Silo, Vpc, VpcRouter,
-};
-use omicron_nexus::internal_api::params as internal_params;
 use omicron_sled_agent::sim::SledAgent;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -153,7 +151,7 @@ pub async fn create_certificate(
     cert: Vec<u8>,
     key: Vec<u8>,
 ) -> Certificate {
-    let url = "/system/certificates".to_string();
+    let url = "/v1/system/certificates".to_string();
     object_create(
         client,
         &url,
@@ -171,7 +169,7 @@ pub async fn create_certificate(
 }
 
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
-    let url = format!("/system/certificates/{}", cert_name);
+    let url = format!("/v1/system/certificates/{}", cert_name);
     object_delete(client, &url).await
 }
 
@@ -254,7 +252,7 @@ pub async fn create_local_user(
 ) -> User {
     let silo_name = &silo.identity.name;
     let url =
-        format!("/system/silos/{}/identity-providers/local/users", silo_name);
+        format!("/v1/system/identity-providers/local/users?silo={}", silo_name);
     object_create(
         client,
         &url,
@@ -263,32 +261,13 @@ pub async fn create_local_user(
     .await
 }
 
-pub async fn create_organization(
-    client: &ClientTestContext,
-    organization_name: &str,
-) -> Organization {
-    object_create(
-        client,
-        "/v1/organizations",
-        &params::OrganizationCreate {
-            identity: IdentityMetadataCreateParams {
-                name: organization_name.parse().unwrap(),
-                description: "an org".to_string(),
-            },
-        },
-    )
-    .await
-}
-
 pub async fn create_project(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
 ) -> Project {
-    let url = format!("/v1/projects?organization={}", &organization_name);
     object_create(
         client,
-        &url,
+        "/v1/projects",
         &params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
                 name: project_name.parse().unwrap(),
@@ -301,14 +280,10 @@ pub async fn create_project(
 
 pub async fn create_disk(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     disk_name: &str,
 ) -> Disk {
-    let url = format!(
-        "/organizations/{}/projects/{}/disks",
-        organization_name, project_name
-    );
+    let url = format!("/v1/disks?project={}", project_name);
     object_create(
         client,
         &url,
@@ -328,14 +303,10 @@ pub async fn create_disk(
 
 pub async fn delete_disk(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     disk_name: &str,
 ) {
-    let url = format!(
-        "/organizations/{}/projects/{}/disks/{}",
-        organization_name, project_name, disk_name
-    );
+    let url = format!("/v1/disks/{}?project={}", disk_name, project_name,);
     object_delete(client, &url).await
 }
 
@@ -344,13 +315,11 @@ pub async fn delete_disk(
 /// Wrapper around [`create_instance_with`].
 pub async fn create_instance(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     instance_name: &str,
 ) -> Instance {
     create_instance_with(
         client,
-        organization_name,
         project_name,
         instance_name,
         &params::InstanceNetworkInterfaceAttachment::Default,
@@ -363,16 +332,12 @@ pub async fn create_instance(
 /// Creates an instance with attached resources.
 pub async fn create_instance_with(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     instance_name: &str,
     nics: &params::InstanceNetworkInterfaceAttachment,
     disks: Vec<params::InstanceDiskAttachment>,
 ) -> Instance {
-    let url = format!(
-        "/v1/instances?organization={}&project={}",
-        organization_name, project_name
-    );
+    let url = format!("/v1/instances?project={}", project_name);
     object_create(
         client,
         &url,
@@ -398,17 +363,12 @@ pub async fn create_instance_with(
 
 pub async fn create_vpc(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     vpc_name: &str,
 ) -> Vpc {
     object_create(
         &client,
-        format!(
-            "/organizations/{}/projects/{}/vpcs",
-            &organization_name, &project_name
-        )
-        .as_str(),
+        format!("/v1/vpcs?project={}", &project_name).as_str(),
         &params::VpcCreate {
             identity: IdentityMetadataCreateParams {
                 name: vpc_name.parse().unwrap(),
@@ -425,7 +385,6 @@ pub async fn create_vpc(
 // just generates the create params since that's the noisiest part
 pub async fn create_vpc_with_error(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     vpc_name: &str,
     status: StatusCode,
@@ -434,11 +393,7 @@ pub async fn create_vpc_with_error(
         RequestBuilder::new(
             client,
             Method::POST,
-            format!(
-                "/organizations/{}/projects/{}/vpcs",
-                &organization_name, &project_name
-            )
-            .as_str(),
+            format!("/v1/vpcs?project={}", &project_name).as_str(),
         )
         .body(Some(&params::VpcCreate {
             identity: IdentityMetadataCreateParams {
@@ -460,18 +415,14 @@ pub async fn create_vpc_with_error(
 
 pub async fn create_router(
     client: &ClientTestContext,
-    organization_name: &str,
     project_name: &str,
     vpc_name: &str,
     router_name: &str,
 ) -> VpcRouter {
     NexusRequest::objects_post(
         &client,
-        format!(
-            "/organizations/{}/projects/{}/vpcs/{}/routers",
-            &organization_name, &project_name, &vpc_name
-        )
-        .as_str(),
+        format!("/v1/vpc-routers?project={}&vpc={}", &project_name, &vpc_name)
+            .as_str(),
         &params::VpcRouterCreate {
             identity: IdentityMetadataCreateParams {
                 name: router_name.parse().unwrap(),
