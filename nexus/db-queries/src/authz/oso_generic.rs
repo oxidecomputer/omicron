@@ -143,6 +143,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),
+        Service::init(),
         UpdateAvailableArtifact::init(),
         UserBuiltin::init(),
         GlobalImage::init(),

@@ -900,6 +900,14 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "Service",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
     name = "PhysicalDisk",
     parent = "Fleet",
     primary_key = Uuid,

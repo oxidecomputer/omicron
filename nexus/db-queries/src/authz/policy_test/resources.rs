@@ -88,6 +88,8 @@ pub async fn make_resources(
         LookupType::ById(sled_id),
     ));
 
+    make_services(&mut builder).await;
+
     let global_image_id =
         "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
     builder.new_resource(authz::GlobalImage::new(
@@ -135,6 +137,33 @@ pub async fn make_resources(
     ));
 
     builder.build()
+}
+
+/// Helper for `make_resources()` that constructs some Services
+async fn make_services(builder: &mut ResourceBuilder<'_>) {
+    let nexus_service_id =
+        "6b1f15ee-d6b3-424c-8436-94413a0b682d".parse().unwrap();
+    builder.new_resource(authz::Service::new(
+        authz::FLEET,
+        nexus_service_id,
+        LookupType::ById(nexus_service_id),
+    ));
+
+    let oximeter_service_id =
+        "7f7bb301-5dc9-41f1-ab29-d369f4835079".parse().unwrap();
+    builder.new_resource(authz::Service::new(
+        authz::FLEET,
+        oximeter_service_id,
+        LookupType::ById(oximeter_service_id),
+    ));
+
+    let dendrite_service_id =
+        "b1947575-3790-4af1-a4e3-f69c458b76c7".parse().unwrap();
+    builder.new_resource(authz::Service::new(
+        authz::FLEET,
+        dendrite_service_id,
+        LookupType::ById(dendrite_service_id),
+    ));
 }
 
 /// Helper for `make_resources()` that constructs a small Silo hierarchy

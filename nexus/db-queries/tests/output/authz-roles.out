@@ -670,6 +670,48 @@ resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: Service id "6b1f15ee-d6b3-424c-8436-94413a0b682d"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Service id "7f7bb301-5dc9-41f1-ab29-d369f4835079"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Service id "b1947575-3790-4af1-a4e3-f69c458b76c7"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: GlobalImage id "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc"
 
   USER                             Q  R LC RP  M MP CC  D
