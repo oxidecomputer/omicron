@@ -356,13 +356,13 @@ impl PortManager {
         // VPC subnet.
         let route = AddRouterEntryReq {
             port_name: port_name.clone(),
-            dest: vpc_subnet.into(),
-            target: RouterTarget::VpcSubnet(vpc_subnet.into()),
+            dest: vpc_subnet,
+            target: RouterTarget::VpcSubnet(vpc_subnet),
         };
         hdl.add_router_entry(&route)?;
         debug!(
             self.inner.log,
-            "Added IPv4 VPC Subnet router entry for OPTE port";
+            "Added VPC Subnet router entry for OPTE port";
             "port_name" => &port_name,
             "entry" => ?route,
         );
