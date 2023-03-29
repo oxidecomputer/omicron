@@ -229,7 +229,18 @@ impl SledAgent {
                 gen: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
-            let target = DiskStateRequested::Attached(instance_id);
+
+            let target = match target.run_state {
+                InstanceStateRequested::Running
+                | InstanceStateRequested::Reboot => {
+                    DiskStateRequested::Attached(instance_id)
+                }
+                InstanceStateRequested::Stopped
+                | InstanceStateRequested::Destroyed => {
+                    DiskStateRequested::Detached
+                }
+                _ => panic!("state {} not covered!", target.run_state),
+            };
 
             let id = match disk.volume_construction_request {
                 propolis_client::instance_spec::VolumeConstructionRequest::Volume { id, .. } => id,
