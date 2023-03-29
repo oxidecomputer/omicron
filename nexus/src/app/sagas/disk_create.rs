@@ -153,7 +153,11 @@ async fn sdc_create_disk_record(
                         .snapshot_id(*snapshot_id)
                         .fetch()
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
 
                 db_snapshot.block_size
             }
@@ -163,7 +167,11 @@ async fn sdc_create_disk_record(
                         .image_id(*image_id)
                         .fetch()
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
 
                 image.block_size
             }
@@ -173,7 +181,11 @@ async fn sdc_create_disk_record(
                         .global_image_id(*image_id)
                         .fetch()
                         .await
-                        .map_err(ActionError::action_failed)?;
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
 
                 global_image.block_size
             }

@@ -410,7 +410,7 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         let authz_disk: authz::Disk;
 
-        (_, _, authz_disk) = self
+        (.., authz_disk) = self
             .disk_lookup(&opctx, &disk_selector)?
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -439,7 +439,7 @@ impl super::Nexus {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (_, _, authz_disk, db_disk) = self
+        (.., authz_disk, db_disk) = self
             .disk_lookup(&opctx, &disk_selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
@@ -478,7 +478,7 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         let db_disk: db::model::Disk;
 
-        (_, _, _, db_disk) = self
+        (.., db_disk) = self
             .disk_lookup(&opctx, &disk_selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
@@ -604,7 +604,7 @@ impl super::Nexus {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (_, _, authz_disk, db_disk) = self
+        (.., authz_disk, db_disk) = self
             .disk_lookup(&opctx, &disk_selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
