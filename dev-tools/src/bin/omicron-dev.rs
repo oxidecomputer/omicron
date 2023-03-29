@@ -4,6 +4,7 @@
 
 //! Developer tool for setting up a local database for use by Omicron
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use clap::Args;
@@ -15,6 +16,7 @@ use omicron_test_utils::dev;
 use signal_hook::consts::signal::SIGINT;
 use signal_hook_tokio::Signals;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
@@ -24,6 +26,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
+        OmicronDb::Run { ref args } => cmd_run_all(args).await,
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -59,9 +62,15 @@ enum OmicronDb {
         #[clap(flatten)]
         args: ChRunArgs,
     },
+
+    /// Run a full simulated control plane
+    Run {
+        #[clap(flatten)]
+        args: RunAllArgs,
+    },
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct DbRunArgs {
     /// Path to store database data (default: temp dir cleaned up on exit)
     #[clap(long, action)]
@@ -227,7 +236,7 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
     #[clap(short, long, default_value = "8123", action)]
@@ -284,5 +293,97 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
                 .context("clean up after SIGINT shutdown")?;
         }
     }
+    Ok(())
+}
+
+#[derive(Debug, Args)]
+struct RunAllArgs {
+    #[clap(flatten)]
+    db_args: DbRunArgs,
+    #[clap(flatten)]
+    ch_args: ChRunArgs,
+
+    #[clap(name = "NEXUS_CONFIG_FILE_PATH", action)]
+    nexus_config_file_path: PathBuf,
+    #[clap(name = "OXIMETER_CONFIG_FILE_PATH", action)]
+    oximeter_config_file_path: PathBuf,
+}
+
+async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
+    // XXX-dap
+    // XXX-dap should provide defaults for everything
+    // XXX-dap ideally this would show you the commands you run by hand
+    // XXX-dap ideally ^C would gracefully stop everything
+    let db_args = args.db_args.clone();
+    let h1 = tokio::spawn(async move { cmd_db_run(&db_args).await });
+
+    // XXX-dap wait for populate
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
+    let ch_args = args.ch_args.clone();
+    let h2 = tokio::spawn(async move { cmd_clickhouse_run(&ch_args).await });
+
+    // Start Nexus
+    let config = omicron_nexus::Config::from_file(&args.nexus_config_file_path)
+        .context("reading Nexus config")?;
+    let h3 = tokio::spawn(async move {
+        omicron_nexus::run_server(&config)
+            .await
+            .map_err(|error| anyhow!("running Nexus: {}", error))
+    });
+
+    // Start Oximeter
+    let config =
+        oximeter_collector::Config::from_file(&args.oximeter_config_file_path)
+            .context("reading Oximeter config")?;
+    let oximeter_id = Uuid::new_v4();
+    let oximeter_address = "[::1]:12223".parse().unwrap(); // XXX-dap
+    let h4 = tokio::spawn(async move {
+        oximeter_collector::Oximeter::new(
+            &config,
+            &oximeter_collector::OximeterArguments {
+                id: oximeter_id,
+                address: oximeter_address,
+            },
+        )
+        .await
+        .unwrap()
+        .serve_forever()
+        .await
+    });
+
+    // Start Sled Agent
+    // XXX-dap copied
+    let tmp = tempfile::tempdir().context("creating temporary directory")?;
+    let config = omicron_sled_agent::sim::Config {
+        id: Uuid::new_v4(),
+        sim_mode: omicron_sled_agent::sim::SimMode::Auto,
+        nexus_address: "127.0.0.1:12221".parse().unwrap(), // XXX-dap
+        dropshot: dropshot::ConfigDropshot {
+            bind_address: "[::1]:12345".parse().unwrap(),
+            request_body_max_bytes: 1024 * 1024,
+            ..Default::default()
+        },
+        log: dropshot::ConfigLogging::StderrTerminal {
+            level: dropshot::ConfigLoggingLevel::Info,
+        },
+        storage: omicron_sled_agent::sim::ConfigStorage {
+            // Create 10 "virtual" U.2s, with 1 TB of storage.
+            zpools: vec![
+                omicron_sled_agent::sim::ConfigZpool { size: 1 << 40 };
+                10
+            ],
+            ip: "::1".parse().unwrap(), // XXX-dap
+        },
+        updates: omicron_sled_agent::sim::ConfigUpdates {
+            zone_artifact_path: tmp.path().to_path_buf(),
+        },
+    };
+
+    let h5 = tokio::spawn(async move {
+        omicron_sled_agent::sim::run_server(&config).await
+    });
+
+    let _ = tokio::join!(h1, h2, h3, h4, h5);
     Ok(())
 }

@@ -4125,16 +4125,24 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.1.11",
+ "dropshot",
  "expectorate",
  "futures",
  "libc",
  "omicron-common 0.1.0",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-sled-agent",
  "omicron-test-utils",
+ "oximeter-collector",
+ "pq-sys",
  "signal-hook",
  "signal-hook-tokio",
  "subprocess",
+ "tempfile",
  "tokio",
  "tokio-postgres",
+ "uuid",
 ]
 
 [[package]]

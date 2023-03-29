@@ -4,16 +4,27 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[build-dependencies.omicron-rpaths]
+path = "../rpaths"
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+dropshot.workspace = true
 futures.workspace = true
 omicron-common.workspace = true
+omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
+omicron-sled-agent.workspace = true
+oximeter-collector.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
