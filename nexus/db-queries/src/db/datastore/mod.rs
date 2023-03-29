@@ -289,6 +289,7 @@ mod test {
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
@@ -1076,7 +1077,7 @@ mod test {
             internal_dns::DNS_ZONE,
             "test suite",
             "test suite",
-            vec![],
+            HashMap::new(),
         );
 
         let external_dns = InitialDnsGroup::new(
@@ -1084,7 +1085,7 @@ mod test {
             "testing.oxide.example",
             "test suite",
             "test suite",
-            vec![],
+            HashMap::new(),
         );
 
         // Initialize the Rack.

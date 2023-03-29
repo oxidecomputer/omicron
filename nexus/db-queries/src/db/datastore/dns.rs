@@ -20,8 +20,7 @@ use async_bb8_diesel::PoolError;
 use diesel::prelude::*;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
-use nexus_types::internal_api::params::DnsKv;
-use nexus_types::internal_api::params::DnsRecordKey;
+use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
@@ -90,7 +89,7 @@ impl DataStore {
         dns_zone_id: Uuid,
         version: Generation,
         pagparams: &DataPageParams<'_, String>,
-    ) -> ListResultVec<DnsKv> {
+    ) -> ListResultVec<(String, Vec<DnsRecord>)> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::dns_name::dsl;
         Ok(paginated(dsl::dns_name, dsl::name, pagparams)
@@ -109,9 +108,7 @@ impl DataStore {
             })?
             .into_iter()
             .filter_map(|n: DnsName| match n.records() {
-                Ok(records) => {
-                    Some(DnsKv { key: DnsRecordKey { name: n.name }, records })
-                }
+                Ok(records) => Some((n.name, records)),
                 Err(error) => {
                     warn!(
                         opctx.log,
@@ -205,8 +202,8 @@ impl DataStore {
                     .await?;
                 let done = names_batch.len()
                     < usize::try_from(batch_size.get()).unwrap();
-                if let Some(last) = names_batch.last() {
-                    marker = Some(last.key.name.clone());
+                if let Some((last_name, _)) = names_batch.last() {
+                    marker = Some(last_name.clone());
                 } else {
                     assert!(done);
                 }
@@ -226,7 +223,7 @@ impl DataStore {
             if !zone_records.is_empty() {
                 zones.push(DnsConfigZone {
                     zone_name: zone.zone_name,
-                    records: zone_records,
+                    records: zone_records.into_iter().collect(),
                 });
             }
         }
@@ -329,12 +326,11 @@ mod test {
     use nexus_db_model::Generation;
     use nexus_db_model::InitialDnsGroup;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::internal_api::params::DnsKv;
     use nexus_types::internal_api::params::DnsRecord;
-    use nexus_types::internal_api::params::DnsRecordKey;
     use nexus_types::internal_api::params::Srv;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use std::collections::HashMap;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -437,7 +433,7 @@ mod test {
             "dummy.oxide.test",
             "test suite",
             "test suite",
-            vec![],
+            HashMap::new(),
         );
         {
             let conn = datastore.pool_for_tests().await.unwrap();
@@ -474,16 +470,10 @@ mod test {
             "dummy.oxide.internal",
             "test suite",
             "test suite",
-            vec![
-                DnsKv {
-                    key: DnsRecordKey { name: "wendell".to_string() },
-                    records: wendell_records.clone(),
-                },
-                DnsKv {
-                    key: DnsRecordKey { name: "krabappel".to_string() },
-                    records: krabappel_records.clone(),
-                },
-            ],
+            HashMap::from([
+                ("wendell".to_string(), wendell_records.clone()),
+                ("krabappel".to_string(), krabappel_records.clone()),
+            ]),
         );
         {
             let conn = datastore.pool_for_tests().await.unwrap();
@@ -503,11 +493,13 @@ mod test {
         assert!(dns_config.time_created <= after);
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "dummy.oxide.internal");
-        assert_eq!(dns_config.zones[0].records.len(), 2);
-        assert_eq!(dns_config.zones[0].records[0].key.name, "krabappel");
-        assert_eq!(dns_config.zones[0].records[0].records, krabappel_records);
-        assert_eq!(dns_config.zones[0].records[1].key.name, "wendell");
-        assert_eq!(dns_config.zones[0].records[1].records, wendell_records);
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([
+                ("krabappel".to_string(), krabappel_records),
+                ("wendell".to_string(), wendell_records)
+            ])
+        );
 
         // Do this again, but controlling the batch size to make sure pagination
         // works right.
@@ -793,15 +785,18 @@ mod test {
         assert_eq!(dns_config_v1.generation, 1);
         assert_eq!(dns_config_v1.zones.len(), 2);
         assert_eq!(dns_config_v1.zones[0].zone_name, "z1.foo");
-        assert_eq!(dns_config_v1.zones[0].records.len(), 2);
-        assert_eq!(dns_config_v1.zones[0].records[0].key.name, "n1");
-        assert_eq!(dns_config_v1.zones[0].records[0].records, records_r1);
-        assert_eq!(dns_config_v1.zones[0].records[1].key.name, "n2");
-        assert_eq!(dns_config_v1.zones[0].records[1].records, records_r1);
+        assert_eq!(
+            dns_config_v1.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records_r1.clone()),
+                ("n2".to_string(), records_r1.clone())
+            ])
+        );
         assert_eq!(dns_config_v1.zones[1].zone_name, "z3.bar");
-        assert_eq!(dns_config_v1.zones[1].records.len(), 1);
-        assert_eq!(dns_config_v1.zones[1].records[0].key.name, "n1");
-        assert_eq!(dns_config_v1.zones[1].records[0].records, records_r2);
+        assert_eq!(
+            dns_config_v1.zones[1].records,
+            HashMap::from([("n1".to_string(), records_r2.clone())])
+        );
 
         // Verify external version 2.
         let dns_config_v2 = datastore
@@ -812,23 +807,29 @@ mod test {
         assert_eq!(dns_config_v2.generation, 2);
         assert_eq!(dns_config_v2.zones.len(), 3);
         assert_eq!(dns_config_v2.zones[0].zone_name, "z1.foo");
-        assert_eq!(dns_config_v2.zones[0].records.len(), 2);
-        assert_eq!(dns_config_v2.zones[0].records[0].key.name, "n1");
-        assert_eq!(dns_config_v2.zones[0].records[0].records, records_r1);
-        assert_eq!(dns_config_v2.zones[0].records[1].key.name, "n3");
-        assert_eq!(dns_config_v2.zones[0].records[1].records, records_r1);
+        assert_eq!(
+            dns_config_v2.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records_r1.clone()),
+                ("n3".to_string(), records_r1.clone())
+            ])
+        );
 
         assert_eq!(dns_config_v2.zones[1].zone_name, "z2.foo");
         assert_eq!(dns_config_v2.zones[1].records.len(), 1);
-        assert_eq!(dns_config_v2.zones[1].records[0].key.name, "n1");
-        assert_eq!(dns_config_v2.zones[1].records[0].records, records_r1);
+        assert_eq!(
+            dns_config_v2.zones[1].records,
+            HashMap::from([("n1".to_string(), records_r1.clone())])
+        );
 
         assert_eq!(dns_config_v2.zones[2].zone_name, "z3.bar");
-        assert_eq!(dns_config_v2.zones[2].records.len(), 2);
-        assert_eq!(dns_config_v2.zones[2].records[0].key.name, "n1");
-        assert_eq!(dns_config_v2.zones[2].records[0].records, records_r1r2);
-        assert_eq!(dns_config_v2.zones[2].records[1].key.name, "n2");
-        assert_eq!(dns_config_v2.zones[2].records[1].records, records_r2);
+        assert_eq!(
+            dns_config_v2.zones[2].records,
+            HashMap::from([
+                ("n1".to_string(), records_r1r2.clone()),
+                ("n2".to_string(), records_r2.clone())
+            ])
+        );
 
         // Verify external version 3
         let dns_config_v3 = datastore
@@ -839,13 +840,15 @@ mod test {
         assert_eq!(dns_config_v3.generation, 3);
         assert_eq!(dns_config_v3.zones.len(), 2);
         assert_eq!(dns_config_v3.zones[0].zone_name, "z2.foo");
-        assert_eq!(dns_config_v3.zones[0].records.len(), 1);
-        assert_eq!(dns_config_v3.zones[0].records[0].key.name, "n1");
-        assert_eq!(dns_config_v3.zones[0].records[0].records, records_r2);
+        assert_eq!(
+            dns_config_v3.zones[0].records,
+            HashMap::from([("n1".to_string(), records_r2.clone())])
+        );
         assert_eq!(dns_config_v3.zones[1].zone_name, "z3.bar");
-        assert_eq!(dns_config_v3.zones[1].records.len(), 1);
-        assert_eq!(dns_config_v3.zones[1].records[0].key.name, "n2");
-        assert_eq!(dns_config_v3.zones[1].records[0].records, records_r2);
+        assert_eq!(
+            dns_config_v3.zones[1].records,
+            HashMap::from([("n2".to_string(), records_r2.clone())])
+        );
 
         // Without specifying a version, we should get v3.
         let dns_config_latest = datastore
@@ -876,11 +879,9 @@ mod test {
         assert_eq!(internal_dns_config_v2.generation, 2);
         assert_eq!(internal_dns_config_v2.zones.len(), 1);
         assert_eq!(internal_dns_config_v2.zones[0].zone_name, "z1.foo");
-        assert_eq!(internal_dns_config_v2.zones[0].records.len(), 1);
-        assert_eq!(internal_dns_config_v2.zones[0].records[0].key.name, "n1");
         assert_eq!(
-            internal_dns_config_v2.zones[0].records[0].records,
-            records_r2
+            internal_dns_config_v2.zones[0].records,
+            HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
         db.cleanup().await.unwrap();

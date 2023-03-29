@@ -122,12 +122,7 @@ fn d2n_zone(
         records: zone
             .records
             .iter()
-            .map(|r| nexus_client::types::DnsKv {
-                key: nexus_client::types::DnsRecordKey {
-                    name: r.key.name.clone(),
-                },
-                records: r.records.iter().map(d2n_record).collect(),
-            })
+            .map(|(n, r)| (n.clone(), r.iter().map(d2n_record).collect()))
             .collect(),
     }
 }

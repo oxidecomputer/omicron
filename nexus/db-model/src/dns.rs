@@ -9,6 +9,7 @@ use nexus_types::internal_api::params;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::{fmt, net::Ipv6Addr};
 use uuid::Uuid;
 
@@ -198,7 +199,7 @@ impl From<SRV> for params::Srv {
 pub struct InitialDnsGroup {
     dns_group: DnsGroup,
     zone_name: String,
-    records: Vec<params::DnsKv>,
+    records: HashMap<String, Vec<params::DnsRecord>>,
     version: Generation,
     dns_zone_id: Uuid,
     time_created: DateTime<Utc>,
@@ -212,7 +213,7 @@ impl InitialDnsGroup {
         zone_name: &str,
         creator: &str,
         comment: &str,
-        records: Vec<params::DnsKv>,
+        records: HashMap<String, Vec<params::DnsRecord>>,
     ) -> InitialDnsGroup {
         InitialDnsGroup {
             dns_group,
@@ -248,13 +249,13 @@ impl InitialDnsGroup {
     pub fn rows_for_names(&self) -> Result<Vec<DnsName>, Error> {
         self.records
             .iter()
-            .map(|r| {
+            .map(|(name, records)| {
                 DnsName::new(
                     self.dns_zone_id,
-                    r.key.name.clone(),
+                    name.clone(),
                     self.version,
                     None,
-                    r.records.clone(),
+                    records.clone(),
                 )
             })
             .collect::<Result<Vec<_>, _>>()

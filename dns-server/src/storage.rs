@@ -92,9 +92,7 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use crate::dns_types::{
-    DnsConfig, DnsConfigParams, DnsConfigZone, DnsKV, DnsRecord, DnsRecordKey,
-};
+use crate::dns_types::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
@@ -278,10 +276,7 @@ impl Store {
                                         tree_name, name
                                     )
                                 })?;
-                        Ok(DnsKV {
-                            key: DnsRecordKey { name: name.to_owned() },
-                            records,
-                        })
+                        Ok((name.to_owned(), records))
                     })
                     .collect::<anyhow::Result<_>>()
                     .context("assembling records")?;
@@ -398,18 +393,16 @@ impl Store {
                 .open_tree(&tree_name)
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
-            for record in &zone_config.records {
-                let DnsRecordKey { name } = &record.key;
-                let name = name.to_lowercase();
-                if record.records.is_empty() {
+            for (name, records) in &zone_config.records {
+                if records.is_empty() {
                     // There's no distinction between in DNS between a name that
                     // doesn't exist at all and one with no records associated
                     // with it.  If there are no records, don't bother inserting
                     // the name.
                     continue;
                 }
-                let records_json = serde_json::to_vec(&record.records)
-                    .with_context(|| {
+                let records_json =
+                    serde_json::to_vec(&records).with_context(|| {
                         format!(
                             "serializing records for zone {:?} key {:?}",
                             zone_name, name
@@ -732,14 +725,13 @@ mod test {
     use super::{Config, Store, UpdateError};
     use crate::dns_types::DnsConfigParams;
     use crate::dns_types::DnsConfigZone;
-    use crate::dns_types::DnsKV;
     use crate::dns_types::DnsRecord;
-    use crate::dns_types::DnsRecordKey;
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
+    use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -859,16 +851,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![
-                    DnsKV {
-                        key: DnsRecordKey { name: "gen1_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    },
-                    DnsKV {
-                        key: DnsRecordKey { name: "shared_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    },
-                ],
+                records: HashMap::from([
+                    ("gen1_name".to_string(), vec![dummy_record.clone()]),
+                    ("shared_name".to_string(), vec![dummy_record.clone()]),
+                ]),
             }],
         };
 
@@ -906,17 +892,17 @@ mod test {
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
-                    records: vec![DnsKV {
-                        key: DnsRecordKey { name: "shared_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    }],
+                    records: HashMap::from([(
+                        "shared_name".to_string(),
+                        vec![dummy_record.clone()],
+                    )]),
                 },
                 DnsConfigZone {
                     zone_name: "zone2.internal".to_string(),
-                    records: vec![DnsKV {
-                        key: DnsRecordKey { name: "gen2_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    }],
+                    records: HashMap::from([(
+                        "gen2_name".to_string(),
+                        vec![dummy_record.clone()],
+                    )]),
                 },
             ],
         };
@@ -943,10 +929,10 @@ mod test {
             generation: 8,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen8_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen8_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
         tc.store.dns_config_update(&update8, "my request id").await.unwrap();
@@ -1005,10 +991,10 @@ mod test {
             generation: 9,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen8_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen8_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
         tc.store.dns_config_update(&update9, "my request id").await.unwrap();
@@ -1034,10 +1020,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen1_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen1_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 
@@ -1059,10 +1045,10 @@ mod test {
             generation: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen2_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen2_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 
@@ -1156,10 +1142,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen1_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen1_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 
