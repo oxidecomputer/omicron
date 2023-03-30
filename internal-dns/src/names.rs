@@ -4,12 +4,12 @@
 
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
-use std::fmt;
+use uuid::Uuid;
 
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
-/// Names for services where backends are interchangeable.
+/// Names of services within the control plane
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
     Clickhouse,
@@ -22,37 +22,50 @@ pub enum ServiceName {
     Dendrite,
     Tfport,
     CruciblePantry,
+    SledAgent(Uuid),
+    Crucible(Uuid),
 }
 
-impl fmt::Display for ServiceName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            ServiceName::Clickhouse => write!(f, "clickhouse"),
-            ServiceName::Cockroach => write!(f, "cockroach"),
-            ServiceName::InternalDNS => write!(f, "internalDNS"),
-            ServiceName::Nexus => write!(f, "nexus"),
-            ServiceName::Oximeter => write!(f, "oximeter"),
-            ServiceName::ManagementGatewayService => write!(f, "mgs"),
-            ServiceName::Wicketd => write!(f, "wicketd"),
-            ServiceName::Dendrite => write!(f, "dendrite"),
-            ServiceName::Tfport => write!(f, "tfport"),
-            ServiceName::CruciblePantry => write!(f, "crucible-pantry"),
+impl ServiceName {
+    fn service_kind(&self) -> &'static str {
+        match self {
+            ServiceName::Clickhouse => "clickhouse",
+            ServiceName::Cockroach => "cockroach",
+            ServiceName::InternalDNS => "nameservice",
+            ServiceName::Nexus => "nexus",
+            ServiceName::Oximeter => "oximeter",
+            ServiceName::ManagementGatewayService => "mgs",
+            ServiceName::Wicketd => "wicketd",
+            ServiceName::Dendrite => "dendrite",
+            ServiceName::Tfport => "tfport",
+            ServiceName::CruciblePantry => "crucible-pantry",
+            ServiceName::SledAgent(_) => "sledagent",
+            ServiceName::Crucible(_) => "crucible",
         }
     }
-}
 
-/// Names for services where backends are not interchangeable.
-#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
-pub enum BackendName {
-    Crucible,
-    SledAgent,
-}
-
-impl fmt::Display for BackendName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self {
-            BackendName::Crucible => write!(f, "crucible"),
-            BackendName::SledAgent => write!(f, "sledagent"),
+    /// Returns the DNS name for this service, ignoring the zone part of the DNS
+    /// name
+    pub(crate) fn dns_name(&self) -> String {
+        match self {
+            ServiceName::Clickhouse
+            | ServiceName::Cockroach
+            | ServiceName::InternalDNS
+            | ServiceName::Nexus
+            | ServiceName::Oximeter
+            | ServiceName::ManagementGatewayService
+            | ServiceName::Wicketd
+            | ServiceName::Dendrite
+            | ServiceName::Tfport
+            | ServiceName::CruciblePantry => {
+                format!("_{}._tcp", self.service_kind())
+            }
+            ServiceName::SledAgent(id) => {
+                format!("_{}._tcp.{}", self.service_kind(), id)
+            }
+            ServiceName::Crucible(id) => {
+                format!("_{}._tcp.{}", self.service_kind(), id)
+            }
         }
     }
 }

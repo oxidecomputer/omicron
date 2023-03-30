@@ -18,7 +18,6 @@ use crucible_agent_client::{
 };
 use futures::StreamExt;
 use internal_dns::ServiceName;
-use internal_dns::SRV;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::backoff::{self, BackoffError};
@@ -274,7 +273,7 @@ pub async fn get_pantry_address(
     nexus
         .resolver()
         .await
-        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
+        .lookup_socket_v6(ServiceName::CruciblePantry)
         .await
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)

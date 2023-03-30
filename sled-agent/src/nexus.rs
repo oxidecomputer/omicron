@@ -8,7 +8,7 @@ pub use crate::mocks::MockNexusClient as NexusClient;
 pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use slog::Logger;
 use std::future::Future;
@@ -52,7 +52,7 @@ impl LazyNexusClient {
     }
 
     pub async fn get_ip(&self) -> Result<Ipv6Addr, ResolveError> {
-        self.inner.resolver.lookup_ipv6(SRV::Service(ServiceName::Nexus)).await
+        self.inner.resolver.lookup_ipv6(ServiceName::Nexus).await
     }
 
     pub async fn get(&self) -> Result<NexusClient, ResolveError> {
