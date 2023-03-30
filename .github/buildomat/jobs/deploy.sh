@@ -43,6 +43,14 @@ _exit_trap() {
 		--client /opt/oxide/softnpu/stuff/client \
 		standalone \
 		dump-state
+	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
+	for p in $PORTS; do
+		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
+		for l in $LAYERS; do
+			pfexec /opt/oxide/opte/bin/opteadm dump-layer -p $p $l
+		done
+	done
 
 	pfexec zfs list
 	pfexec zpool list
@@ -180,11 +188,32 @@ pfexec ./out/softnpu/scadm \
 	standalone \
 	dump-state
 
-./tests/bootstrap
+# Wait for switch zone to come up so that we can configure it
+retry=0
+until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
+do
+	if [[ $retry -gt 30 ]]; then
+		echo "Failed to reach switch zone after 30 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+
+# Nexus (and any instances using the above IP pool) are configured to use external
+# IPs from a fixed subnet (192.168.1.0/24). OPTE/SoftNPU/Boundary Services take care
+# of NATing between the private VPC networks and this "external network".
+# We create a static IP in this subnet in the global zone and configure the switch
+# to use it as the default gateway.
+# NOTE: Keep in sync with $NEXUS_IP/$IP_POOL_START/$IP_POOL_END
+export GATEWAY_IP=192.168.1.199
+export GATEWAY_MAC=$(dladm show-phys -m -p -o ADDRESS | head -n 1)
+pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 
 # NOTE: this script configures softnpu's "rack network" settings using swadm
-GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
+./tools/scrimlet/softnpu-init.sh
 
+./tests/bootstrap
 rm ./tests/bootstrap
 for test_bin in tests/*; do
 	./"$test_bin"
