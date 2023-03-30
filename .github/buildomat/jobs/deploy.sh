@@ -140,27 +140,6 @@ pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
 pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
-# XXX Right now, the Nexus external API is available on a specific IPv4 address
-# on a canned subnet.  We need to create an address in the global zone such
-# that we can, in the test below, reach Nexus.
-#
-# This must be kept in sync with the IP in "smf/sled-agent/non-gimlet/config-rss.toml" and
-# the prefix length which apparently defaults (in the Rust code) to /24.
-#
-pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
-
-#
-# Modify config-rss.toml in the sled-agent zone to use our system's IP and MAC
-# address for upstream connectivity.
-#
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
-sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
-	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
-	-i pkg/config-rss.toml
-tar rf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -rf pkg
-
-#
 # This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
 # before the install.  This doesn't work right now because, above, we made
 # /var/oxide a file system so you can't remove it (EBUSY) like a regular
@@ -171,19 +150,28 @@ rm -rf pkg
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-./tests/bootstrap
-
 # NOTE: this script configures softnpu's "rack network" settings using swadm
 GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
 
 # NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
 # able to reach instances from the same L2 network segment.
-# /out/softnpu/scadm standalone add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+# Keep consistent with `get_system_ip_pool` in `end-to-end-tests`.
+IP_POOL_START="192.168.1.50"
+IP_POOL_END="192.168.1.90"
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
 	--client /opt/oxide/softnpu/stuff/client \
 	standalone \
-	add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+	add-proxy-arp $IP_POOL_START $IP_POOL_END $SOFTNPU_MAC
+
+# We also need to configure proxy arp for Nexus which uses OPTE for external connectivity.
+NEXUS_IP="$(gtar xf out/omicron-sled-agent.tar -O pkg/config-rss.toml | sed -n 's/nexus_external_address = "\(.*\)"/\1/p')"
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp $NEXUS_IP $NEXUS_IP $SOFTNPU_MAC
 
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
@@ -191,6 +179,7 @@ pfexec ./out/softnpu/scadm \
 	standalone \
 	dump-state
 
+./tests/bootstrap
 rm ./tests/bootstrap
 for test_bin in tests/*; do
 	./"$test_bin"
