@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
 use types::RackV1Inventory;
 
 progenitor::generate_api!(
@@ -42,7 +43,9 @@ progenitor::generate_api!(
 ///
 /// This enum has the same shape as `types::GetInventoryResponse`, but uses `std::time::Duration`
 /// rather than `types::Duration`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum GetInventoryResponse {
     Response { inventory: RackV1Inventory, received_ago: Duration },
     Unavailable,

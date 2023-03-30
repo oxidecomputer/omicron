@@ -51,6 +51,7 @@ members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -101,6 +102,7 @@ default-members = [
     "tufaceous",
     "tufaceous-lib",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -131,6 +133,7 @@ clap = { version = "4.1", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
+crossterm = { version = "0.26.1", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
@@ -304,10 +307,12 @@ trust-dns-server = "0.22"
 trybuild = "1.0.80"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
+tui = "0.19.0"
 uuid = { version = "1.3.0", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.7", default-features = false, features = ["std"] }
 walkdir = "2.3"
+wicket = { path = "wicket" }
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }

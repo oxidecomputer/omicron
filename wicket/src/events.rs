@@ -42,6 +42,16 @@ pub enum Event {
     Shutdown,
 }
 
+impl Event {
+    pub fn is_tick(&self) -> bool {
+        if let Event::Tick = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// An event that can be recorded.
 
 /// Instructions for the [`crate::Runner`]

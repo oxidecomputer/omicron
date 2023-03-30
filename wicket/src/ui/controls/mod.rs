@@ -16,7 +16,7 @@ use tui::layout::Rect;
 ///
 /// To allow for distinctive styling on active/selected widgets we allow the
 /// caller to indicate this via the `active` parameter.
-pub trait Control {
+pub trait Control: Send {
     fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action>;
     fn draw(
         &mut self,
