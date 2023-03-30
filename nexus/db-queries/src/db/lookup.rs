@@ -136,6 +136,30 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type Project, identified by its owned name
+    pub fn project_name_owned<'b, 'c>(self, name: Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Project::OwnedName(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Project::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)

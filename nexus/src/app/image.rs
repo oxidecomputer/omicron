@@ -24,7 +24,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
-use ref_cast::RefCast;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -33,28 +32,28 @@ impl super::Nexus {
     pub fn image_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        image_selector: &'a params::ImageSelector,
+        image_selector: params::ImageSelector,
     ) -> LookupResult<lookup::Image<'a>> {
         match image_selector {
             params::ImageSelector {
                 image: NameOrId::Id(id),
-                project_selector: None,
+                project: None,
             } => {
                 let image = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*id);
+                    .image_id(id);
                 Ok(image)
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
-                project_selector: Some(project_selector),
+                project: Some(project),
             } => {
                 let image =
-                    self.project_lookup(opctx, project_selector)?.image_name(Name::ref_cast(name));
+                    self.project_lookup(opctx, params::ProjectSelector { project })?.image_name_owned(name.into());
                 Ok(image)
             }
             params::ImageSelector {
                 image: NameOrId::Id(_),
-                project_selector: Some(_),
+                ..
             } => Err(Error::invalid_request(
                 "when providing image as an ID, project should not be specified",
             )),

@@ -1,6 +1,5 @@
 use crate::authz::ApiResource;
 use crate::db::queries::network_interface;
-use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::CreateResult;
@@ -12,7 +11,6 @@ use omicron_common::api::external::NameOrId;
 
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use uuid::Uuid;
 
 use crate::authz;
@@ -23,33 +21,35 @@ impl super::Nexus {
     pub fn network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        network_interface_selector: &'a params::NetworkInterfaceSelector,
+        network_interface_selector: params::NetworkInterfaceSelector,
     ) -> LookupResult<lookup::NetworkInterface<'a>> {
         match network_interface_selector {
             params::NetworkInterfaceSelector {
-                instance_selector: None,
                 network_interface: NameOrId::Id(id),
+                instance: None,
+                project: None
             } => {
                 let network_interface =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .network_interface_id(*id);
+                        .network_interface_id(id);
                 Ok(network_interface)
             }
             params::NetworkInterfaceSelector {
-                instance_selector: Some(instance_selector),
                 network_interface: NameOrId::Name(name),
+                instance: Some(instance),
+                project
             } => {
                 let network_interface = self
-                    .instance_lookup(opctx, instance_selector)?
-                    .network_interface_name(Name::ref_cast(name));
+                    .instance_lookup(opctx, params::InstanceSelector { project, instance })?
+                    .network_interface_name_owned(name.into());
                 Ok(network_interface)
             }
             params::NetworkInterfaceSelector {
-              instance_selector: Some(_),
               network_interface: NameOrId::Id(_),
+              ..
             } => {
               Err(Error::invalid_request(
-                "when providing network_interface as an id, instance_selector should not be specified"
+                "when providing network_interface as an id instance and project should not be specified"
               ))
             }
             _ => {

@@ -10,7 +10,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
 use nexus_types::identity::Resource;
@@ -26,7 +25,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use ref_cast::RefCast;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -79,31 +77,28 @@ impl super::Nexus {
     pub fn disk_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        disk_selector: &'a params::DiskSelector,
+        disk_selector: params::DiskSelector,
     ) -> LookupResult<lookup::Disk<'a>> {
         match disk_selector {
-            params::DiskSelector {
-                disk: NameOrId::Id(id),
-                project_selector: None,
-            } => {
+            params::DiskSelector { disk: NameOrId::Id(id), project: None } => {
                 let disk =
-                    LookupPath::new(opctx, &self.db_datastore).disk_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).disk_id(id);
                 Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Name(name),
-                project_selector: Some(project_selector),
+                project: Some(project),
             } => {
                 let disk = self
-                    .project_lookup(opctx, project_selector)?
-                    .disk_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .disk_name_owned(name.into());
                 Ok(disk)
             }
             params::DiskSelector {
                 disk: NameOrId::Id(_),
-                project_selector: Some(_),
+                ..
             } => Err(Error::invalid_request(
-                "when providing disk as an ID, project should not be specified",
+                "when providing disk as an ID project should not be specified",
             )),
             _ => Err(Error::invalid_request(
                 "disk should either be UUID or project should be specified",
@@ -405,15 +400,13 @@ impl super::Nexus {
     pub async fn import_blocks_from_url_for_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
-        disk_selector: &params::DiskSelector,
+        disk_lookup: &lookup::Disk<'_>,
         params: params::ImportBlocksFromUrl,
     ) -> UpdateResult<()> {
         let authz_disk: authz::Disk;
 
-        (.., authz_disk) = self
-            .disk_lookup(&opctx, &disk_selector)?
-            .lookup_for(authz::Action::Modify)
-            .await?;
+        (.., authz_disk) =
+            disk_lookup.lookup_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::import_blocks_from_url::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -434,15 +427,13 @@ impl super::Nexus {
     pub async fn disk_manual_import_start(
         self: &Arc<Self>,
         opctx: &OpContext,
-        disk_selector: &params::DiskSelector,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<()> {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (.., authz_disk, db_disk) = self
-            .disk_lookup(&opctx, &disk_selector)?
-            .fetch_for(authz::Action::Modify)
-            .await?;
+        (.., authz_disk, db_disk) =
+            disk_lookup.fetch_for(authz::Action::Modify).await?;
 
         let disk_state: DiskState = db_disk.state().into();
         match disk_state {
@@ -472,16 +463,12 @@ impl super::Nexus {
     /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
     pub async fn disk_manual_import(
         self: &Arc<Self>,
-        opctx: &OpContext,
-        disk_selector: &params::DiskSelector,
+        disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
     ) -> UpdateResult<()> {
         let db_disk: db::model::Disk;
 
-        (.., db_disk) = self
-            .disk_lookup(&opctx, &disk_selector)?
-            .fetch_for(authz::Action::Modify)
-            .await?;
+        (.., db_disk) = disk_lookup.fetch_for(authz::Action::Modify).await?;
 
         let disk_state: DiskState = db_disk.state().into();
         match disk_state {
@@ -599,15 +586,13 @@ impl super::Nexus {
     pub async fn disk_manual_import_stop(
         self: &Arc<Self>,
         opctx: &OpContext,
-        disk_selector: &params::DiskSelector,
+        disk_lookup: &lookup::Disk<'_>,
     ) -> UpdateResult<()> {
         let authz_disk: authz::Disk;
         let db_disk: db::model::Disk;
 
-        (.., authz_disk, db_disk) = self
-            .disk_lookup(&opctx, &disk_selector)?
-            .fetch_for(authz::Action::Modify)
-            .await?;
+        (.., authz_disk, db_disk) =
+            disk_lookup.fetch_for(authz::Action::Modify).await?;
 
         let disk_state: DiskState = db_disk.state().into();
         match disk_state {
@@ -644,7 +629,7 @@ impl super::Nexus {
     ) -> UpdateResult<()> {
         let disk_selector = params::DiskSelector {
             disk: path_disk,
-            project_selector: finalize_params.project_selector,
+            project: finalize_params.project,
         };
 
         let authz_silo: authz::Silo;
@@ -653,7 +638,7 @@ impl super::Nexus {
         let db_disk: db::model::Disk;
 
         (authz_silo, authz_proj, authz_disk, db_disk) = self
-            .disk_lookup(&opctx, &disk_selector)?
+            .disk_lookup(&opctx, disk_selector)?
             .fetch_for(authz::Action::Modify)
             .await?;
 

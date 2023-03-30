@@ -95,100 +95,114 @@ pub struct ProjectSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    // Name or ID of the project
+    pub project: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `disk` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the disk
     pub disk: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `snapshot` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the snapshot
     pub snapshot: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `image` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the image
     pub image: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the instance
     pub instance: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the instance
-    pub instance_selector: Option<InstanceSelector>,
+    pub instance: Option<NameOrId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct NetworkInterfaceSelector {
-    #[serde(flatten)]
-    pub instance_selector: Option<InstanceSelector>,
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the instance, only required if `network_interface` is provided as a `Name`
+    pub instance: Option<NameOrId>,
     /// Name or ID of the network interface
     pub network_interface: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the VPC
     pub vpc: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the VPC
-    pub vpc_selector: Option<VpcSelector>,
+    pub vpc: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the subnet
     pub subnet: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RouterSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the router
     pub router: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OptionalRouterSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the router
-    pub router_selector: Option<RouterSelector>,
+    pub router: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RouteSelector {
-    #[serde(flatten)]
-    /// Name or ID of the router
-    pub router_selector: Option<RouterSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the router, only required if `route` is provided as a `Name`
+    pub router: Option<NameOrId>,
     /// Name or ID of the route
     pub route: NameOrId,
 }
@@ -883,8 +897,8 @@ pub struct InstanceMigrate {
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Character index in the serial buffer from which to read, counting the bytes output since
     /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
     /// provided, `most_recent` must *not* be provided.
@@ -1117,8 +1131,7 @@ pub struct ImportBlocksBulkWrite {
 /// Parameters for finalizing a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FinalizeDisk {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    pub project: Option<NameOrId>,
 
     /// an optional snapshot name
     pub snapshot_name: Option<String>,
