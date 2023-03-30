@@ -30,6 +30,10 @@ pub trait TestInterfaces {
         id: &Uuid,
     ) -> Result<Arc<SledAgentClient>, Error>;
 
+    /// Returns the supplied instance's current active sled ID.
+    async fn instance_sled_id(&self, instance_id: &Uuid)
+        -> Result<Uuid, Error>;
+
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
@@ -73,6 +77,18 @@ impl TestInterfaces for super::Nexus {
             .fetch()
             .await?;
         self.instance_sled(&db_instance).await
+    }
+
+    async fn instance_sled_id(&self, id: &Uuid) -> Result<Uuid, Error> {
+        let opctx = OpContext::for_tests(
+            self.log.new(o!()),
+            Arc::clone(&self.db_datastore),
+        );
+        let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(*id)
+            .fetch()
+            .await?;
+        Ok(db_instance.runtime().sled_id)
     }
 
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error> {

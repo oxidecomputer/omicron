@@ -4,7 +4,9 @@
 
 //! API for controlling a single instance.
 
-use crate::common::instance::{Action as InstanceAction, InstanceStates};
+use crate::common::instance::{
+    Action as InstanceAction, InstanceStates, ObservedPropolisState,
+};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
 use crate::params::{
@@ -269,7 +271,7 @@ impl InstanceInner {
     /// task.
     async fn observe_state(
         &mut self,
-        state: propolis_client::api::InstanceState,
+        state: &ObservedPropolisState,
     ) -> Result<Reaction, Error> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
@@ -289,7 +291,7 @@ impl InstanceInner {
         }
 
         // Update the Sled Agent's internal state machine.
-        let action = self.state.observe_transition(&state);
+        let action = self.state.apply_propolis_observation(state);
         info!(
             self.log,
             "New state: {:?}, action: {:?}",
@@ -946,9 +948,20 @@ impl Instance {
                 .instance_state_monitor()
                 .body(propolis_client::api::InstanceStateMonitorRequest { gen })
                 .send()
-                .await?;
-            let reaction =
-                self.inner.lock().await.observe_state(response.state).await?;
+                .await?
+                .into_inner();
+
+            let reaction = {
+                // The observed state depends on what Propolis reported and on
+                // the `Instance`'s stored state. Take the instance lock to
+                // stabilize that state across this entire operation.
+                let mut inner = self.inner.lock().await;
+                let observed = ObservedPropolisState::new(
+                    inner.state.current(),
+                    &response,
+                );
+                inner.observe_state(&observed).await?
+            };
 
             match reaction {
                 Reaction::Continue => {}
