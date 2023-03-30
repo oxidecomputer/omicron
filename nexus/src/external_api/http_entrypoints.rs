@@ -14,6 +14,7 @@ use super::{
 };
 use crate::authz;
 use crate::db;
+use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
@@ -4416,13 +4417,17 @@ async fn role_view(
 }]
 pub async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
+) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
+        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        Ok(HttpResponseOk(views::CurrentUser {
+            user: user.into(),
+            silo_name: silo.name().clone(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -337,6 +337,19 @@ pub struct User {
     pub silo_id: Uuid,
 }
 
+// SESSION
+
+// Add silo name to User because the console needs to display it
+/// Info about the current user
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct CurrentUser {
+    #[serde(flatten)]
+    pub user: User,
+
+    /** Name of the silo to which this user belongs. */
+    pub silo_name: Name,
+}
+
 // SILO GROUPS
 
 /// Client view of a [`Group`]

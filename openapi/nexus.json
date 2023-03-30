@@ -2096,7 +2096,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/CurrentUser"
                 }
               }
             }
@@ -7455,6 +7455,39 @@
         "required": [
           "start_time",
           "value"
+        ]
+      },
+      "CurrentUser": {
+        "description": "Info about the current user",
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the user",
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this user belongs",
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_name": {
+            "description": "Name of the silo to which this user belongs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "display_name",
+          "id",
+          "silo_id",
+          "silo_name"
         ]
       },
       "Datum": {
