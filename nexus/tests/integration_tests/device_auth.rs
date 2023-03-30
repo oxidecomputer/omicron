@@ -64,38 +64,27 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
     let device_code = auth_response.device_code;
     let user_code = auth_response.user_code;
     assert!(auth_response.verification_uri.ends_with("/device/verify"));
-    assert!(auth_response.verification_uri_complete.ends_with(&user_code));
     assert_eq!(auth_response.expires_in, 300);
 
     // Unauthenticated requests to the verification page redirect to login.
-    RequestBuilder::new(
-        testctx,
-        Method::GET,
-        &format!("/device/verify?user_code={}", &user_code),
-    )
-    .expect_status(Some(StatusCode::FOUND))
-    .expect_response_header(
-        header::LOCATION,
-        &format!(
-            "/spoof_login?state=%2Fdevice%2Fverify%3Fuser_code%3D{}",
-            &user_code
-        ),
-    )
-    .execute()
-    .await
-    .expect("failed to redirect to login on auth failure");
+    RequestBuilder::new(testctx, Method::GET, "/device/verify")
+        .expect_status(Some(StatusCode::FOUND))
+        .expect_response_header(
+            header::LOCATION,
+            "/spoof_login?state=%2Fdevice%2Fverify",
+        )
+        .execute()
+        .await
+        .expect("failed to redirect to login on auth failure");
 
     // Authenticated requests get the console verification page.
-    assert!(NexusRequest::object_get(
-        testctx,
-        &format!("/device/verify?user_code={}", &user_code),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("failed to get verification page")
-    .body
-    .starts_with(b"<html>"));
+    assert!(NexusRequest::object_get(testctx, "/device/verify")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get verification page")
+        .body
+        .starts_with(b"<html>"));
 
     let confirm_params = DeviceAuthVerify { user_code };
 
