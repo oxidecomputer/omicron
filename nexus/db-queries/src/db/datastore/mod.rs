@@ -46,6 +46,7 @@ mod console_session;
 mod dataset;
 mod device_auth;
 mod disk;
+mod dns;
 mod external_ip;
 mod global_image;
 mod identity_provider;
@@ -74,6 +75,7 @@ mod volume;
 mod vpc;
 mod zpool;
 
+pub use rack::RackInit;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
@@ -273,10 +275,10 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
-        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
-        UpdateableComponentType, VpcSubnet, Zpool,
+        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup,
+        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
+        ServiceKind, SiloUser, Sled, SledBaseboard, SledSystemHardware, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -287,6 +289,7 @@ mod test {
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
+    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::sync::Arc;
@@ -1120,15 +1123,35 @@ mod test {
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
+        let internal_dns = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            internal_dns::DNS_ZONE,
+            "test suite",
+            "test suite",
+            HashMap::new(),
+        );
+
+        let external_dns = InitialDnsGroup::new(
+            DnsGroup::External,
+            "testing.oxide.example",
+            "test suite",
+            "test suite",
+            HashMap::new(),
+        );
+
         // Initialize the Rack.
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack.id(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
+                RackInit {
+                    rack_id: rack.id(),
+                    services: vec![],
+                    datasets: vec![],
+                    service_ip_pool_ranges: vec![],
+                    certificates: vec![],
+                    internal_dns: internal_dns.clone(),
+                    external_dns: external_dns.clone(),
+                },
             )
             .await
             .unwrap();
@@ -1138,11 +1161,15 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                rack.id(),
-                vec![],
-                vec![],
-                vec![],
-                vec![],
+                RackInit {
+                    rack_id: rack.id(),
+                    services: vec![],
+                    datasets: vec![],
+                    service_ip_pool_ranges: vec![],
+                    certificates: vec![],
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await
             .unwrap();

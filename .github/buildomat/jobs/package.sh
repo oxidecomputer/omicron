@@ -3,7 +3,7 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.66.1"
+#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
