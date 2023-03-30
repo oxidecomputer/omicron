@@ -475,6 +475,11 @@ impl ServiceManager {
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Vec<(Port, PortTicket)>, Error> {
+        // Only nexus zones need opte ports currently.
+        if req.zone_type != ZoneType::Nexus {
+            return Ok(vec![]);
+        }
+
         let port_manager = &self
             .inner
             .sled_info
