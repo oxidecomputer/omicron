@@ -396,6 +396,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "bhyve_api"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=db39a40be172109de3ca34af8a1c37dd76e715a9#db39a40be172109de3ca34af8a1c37dd76e715a9"
+dependencies = [
+ "bhyve_api_sys",
+ "libc",
+ "num_enum",
+]
+
+[[package]]
+name = "bhyve_api_sys"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=db39a40be172109de3ca34af8a1c37dd76e715a9#db39a40be172109de3ca34af8a1c37dd76e715a9"
+dependencies = [
+ "libc",
+ "num_enum",
+ "serde",
+ "serde_arrays",
+]
+
+[[package]]
 name = "bincode"
 version = "1.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2922,6 +2943,7 @@ name = "illumos-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=db39a40be172109de3ca34af8a1c37dd76e715a9)",
  "cfg-if 1.0.0",
  "ipnetwork",
  "libc",
@@ -3237,15 +3259,15 @@ dependencies = [
 
 [[package]]
 name = "lalrpop"
-version = "0.19.8"
+version = "0.19.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b30455341b0e18f276fa64540aff54deafb54c589de6aca68659c63dd2d5d823"
+checksum = "f34313ec00c2eb5c3c87ca6732ea02dcf3af99c3ff7a8fb622ffb99c9d860a87"
 dependencies = [
  "ascii-canvas",
- "atty",
  "bit-set",
  "diff",
  "ena",
+ "is-terminal",
  "itertools",
  "lalrpop-util",
  "petgraph",
@@ -3259,9 +3281,9 @@ dependencies = [
 
 [[package]]
 name = "lalrpop-util"
-version = "0.19.8"
+version = "0.19.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcf796c978e9b4d983414f4caedc9273aa33ee214c5b887bd55fde84c85d2dc4"
+checksum = "e5c1f7869c94d214466c5fd432dfed12c379fd87786768d36455892d46b18edd"
 
 [[package]]
 name = "lazy_static"
@@ -5424,7 +5446,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=40e8d8e280c312e44047ff9d6b3b261e4537977a#40e8d8e280c312e44047ff9d6b3b261e4537977a"
 dependencies = [
  "anyhow",
- "bhyve_api",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=40e8d8e280c312e44047ff9d6b3b261e4537977a)",
  "bitflags 1.3.2",
  "bitstruct",
  "byteorder",

@@ -4,18 +4,15 @@
 
 //! Wrappers around reservoir controls
 
-use crate::{execute, PFEXEC};
 use omicron_common::api::external::ByteCount;
-
-const RSRVRCTRL: &str = "/usr/lib/rsrvrctl";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Reservoir size must be a multiple of MiB, not: {0}")]
     InvalidSize(ByteCount),
 
-    #[error("Failed to run {RSRVRCTRL}: {0}")]
-    ExecutionError(#[from] crate::ExecutionError),
+    #[error("Failed to create reservoir: {0}")]
+    ReservoirError(#[from] std::io::Error),
 }
 
 /// Controls the size of the memory reservoir
@@ -30,15 +27,13 @@ impl ReservoirControl {
             return Err(Error::InvalidSize(size));
         }
 
-        let mut cmd = std::process::Command::new(PFEXEC);
-        cmd.env_clear();
-        cmd.env("LC_ALL", "C.UTF-8");
+        let ctl = bhyve_api::VmmCtlFd::open()?;
+        ctl.reservoir_resize(
+            size.to_bytes().try_into().map_err(|_| Error::InvalidSize(size))?,
+            0,
+        )
+        .map_err(std::io::Error::from)?;
 
-        cmd.arg(RSRVRCTRL);
-        cmd.arg("-s");
-        cmd.arg(size.to_whole_mebibytes().to_string());
-
-        execute(&mut cmd)?;
         Ok(())
     }
 }
