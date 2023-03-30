@@ -58,6 +58,9 @@ function main
     TOOLS_DIR="$(pwd)/$(dirname $0)"
     source "$TOOLS_DIR/helios_version"
 
+    # Grab the opte version
+    OPTE_VER=$(cat "$TOOLS_DIR/opte_version")
+
     # Convert args to absolute paths
     case $1 in
         /*) HELIOS_PATH=$1 ;;
@@ -112,7 +115,7 @@ function main
 
     ./helios-build experiment-image \
         -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
-        -F optever=0.21 \
+        -F optever=$OPTE_VER \
         -P $tmp_gz/root \
         $HELIOS_BUILD_EXTRA_ARGS
 }
