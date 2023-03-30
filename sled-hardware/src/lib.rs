@@ -323,7 +323,10 @@ impl Disk {
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.
-                let zpool_name = ZpoolName::new(Uuid::new_v4());
+                let zpool_name = match unparsed_disk.variant {
+                    DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
+                    DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
+                };
                 Zpool::create(zpool_name.clone(), &zpool_path)?;
                 zpool_name
             }

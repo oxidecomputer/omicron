@@ -4,36 +4,35 @@
 
 //! Simulated sled agent implementation
 
-use crate::nexus::NexusClient;
-use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
-    InstanceStateRequested,
-};
-use crate::updates::UpdateManager;
-use futures::lock::Mutex;
-use omicron_common::api::external::{Error, ResourceType};
-use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use slog::Logger;
-use std::net::{Ipv6Addr, SocketAddr};
-use std::sync::Arc;
-use uuid::Uuid;
-
-use std::collections::HashMap;
-use std::str::FromStr;
-
-use crucible_client_types::VolumeConstructionRequest;
-use dropshot::HttpServer;
-use omicron_common::address::PROPOLIS_PORT;
-use propolis_client::Client as PropolisClient;
-use propolis_server::mock_server::Context as PropolisContext;
-
 use super::collection::SimCollection;
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
+
+use crate::nexus::NexusClient;
+use crate::params::{
+    DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
+    InstanceStateRequested,
+};
+use crate::updates::UpdateManager;
+use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HttpServer;
+use futures::lock::Mutex;
+use nexus_client::types::PhysicalDiskKind;
+use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::{Error, ResourceType};
+use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use propolis_client::Client as PropolisClient;
+use propolis_server::mock_server::Context as PropolisContext;
+use slog::Logger;
+use std::collections::HashMap;
+use std::net::{Ipv6Addr, SocketAddr};
+use std::str::FromStr;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -356,9 +355,35 @@ impl SledAgent {
         self.disks.sim_poke(id).await;
     }
 
+    /// Adds a Physical Disk to the simulated sled agent.
+    pub async fn create_external_physical_disk(
+        &self,
+        vendor: String,
+        serial: String,
+        model: String,
+    ) {
+        let variant = PhysicalDiskKind::U2;
+        self.storage
+            .lock()
+            .await
+            .insert_physical_disk(vendor, serial, model, variant)
+            .await;
+    }
+
     /// Adds a Zpool to the simulated sled agent.
-    pub async fn create_zpool(&self, id: Uuid, size: u64) {
-        self.storage.lock().await.insert_zpool(id, size).await;
+    pub async fn create_zpool(
+        &self,
+        id: Uuid,
+        vendor: String,
+        serial: String,
+        model: String,
+        size: u64,
+    ) {
+        self.storage
+            .lock()
+            .await
+            .insert_zpool(id, vendor, serial, model, size)
+            .await;
     }
 
     /// Adds a Crucible Dataset within a zpool.

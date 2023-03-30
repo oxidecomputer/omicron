@@ -189,12 +189,19 @@ impl super::Nexus {
     /// Upserts a Zpool into the database, updating it if it already exists.
     pub async fn upsert_zpool(
         &self,
+        opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
         info: ZpoolPutRequest,
     ) -> Result<(), Error> {
         info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
-        let zpool = db::model::Zpool::new(id, sled_id, &info);
+
+        let disk = self
+            .db_datastore
+            .physical_disk_lookup(opctx, info.vendor, info.serial, info.model)
+            .await?;
+        let zpool =
+            db::model::Zpool::new(id, sled_id, disk.id(), info.size.into());
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }

@@ -481,6 +481,7 @@ table! {
         rcgen -> Int8,
 
         sled_id -> Uuid,
+        physical_disk_id -> Uuid,
 
         total_size -> Int8,
     }

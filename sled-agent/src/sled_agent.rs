@@ -247,7 +247,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool.clone(), None).await;
+                storage.upsert_synthetic_zpool(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(

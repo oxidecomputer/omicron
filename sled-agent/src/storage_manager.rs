@@ -127,30 +127,38 @@ pub enum Error {
     },
 }
 
+// The parent of this pool.
+#[derive(Debug)]
+pub enum PoolParent {
+    // A physical disk.
+    PhysicalDisk {
+        // The devfs path to the disk containing this zpool.
+        devfs_path: PathBuf,
+        identity: DiskIdentity,
+    },
+    // A synthetic zpool, created without a real parent disk.
+    Synthetic,
+}
+
 /// A ZFS storage pool.
 struct Pool {
-    id: Uuid,
+    name: ZpoolName,
     info: ZpoolInfo,
     // ZFS filesytem UUID -> Zone.
     zones: HashMap<Uuid, RunningZone>,
-
-    // The devfs path to the disk where this zpool exists.
-    disk_path: Option<PathBuf>,
+    parent: PoolParent,
 }
 
 impl Pool {
     /// Queries for an existing Zpool by name.
     ///
     /// Returns Ok if the pool exists.
-    fn new(
-        name: &ZpoolName,
-        disk_path: Option<PathBuf>,
-    ) -> Result<Pool, Error> {
+    fn new(name: ZpoolName, parent: PoolParent) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
 
         // NOTE: This relies on the name being a UUID exactly.
         // We could be more flexible...
-        Ok(Pool { id: name.id(), info, zones: HashMap::new(), disk_path })
+        Ok(Pool { name, info, zones: HashMap::new(), parent })
     }
 
     /// Associate an already running zone with this pool object.
@@ -169,7 +177,7 @@ impl Pool {
 
     /// Returns the ID of the pool itself.
     fn id(&self) -> Uuid {
-        self.id
+        self.name.id()
     }
 
     /// Returns the path for the configuration of a particular
@@ -181,7 +189,7 @@ impl Pool {
         dataset_id: Uuid,
     ) -> Result<PathBuf, Error> {
         let path = std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-            .join(self.id.to_string());
+            .join(self.id().to_string());
         create_dir_all(&path).await.map_err(|err| Error::Io {
             message: format!("creating config dir {path:?}, which would contain config for {dataset_id}"),
             err,
@@ -561,8 +569,8 @@ struct StorageResources {
     // This should allow us to identify when a U.2 has been removed from
     // one slot and placed into another one.
     disks: Arc<Mutex<HashMap<PathBuf, Disk>>>,
-    // A map of "zpool name" to "pool".
-    pools: Arc<Mutex<HashMap<ZpoolName, Pool>>>,
+    // A map of "Uuid" to "pool".
+    pools: Arc<Mutex<HashMap<Uuid, Pool>>>,
 }
 
 // A worker that starts zones for pools as they are received.
@@ -660,11 +668,31 @@ impl StorageWorker {
 
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
-    fn add_zpool_notify(&mut self, pool_id: Uuid, size: ByteCount) {
+    fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
+        let pool_id = pool.name.id();
         let sled_id = self.sled_id;
+        let DiskIdentity { vendor, serial, model } = match &pool.parent {
+            PoolParent::PhysicalDisk { devfs_path: _, identity } => {
+                identity.clone()
+            }
+            PoolParent::Synthetic => {
+                let id = pool.name.id();
+                DiskIdentity {
+                    vendor: format!("synthetic-vendor-{id}"),
+                    serial: format!("synthetic-vendor-{id}"),
+                    model: format!("synthetic-vendor-{id}"),
+                }
+            }
+        };
         let lazy_nexus_client = self.lazy_nexus_client.clone();
+
         let notify_nexus = move || {
-            let zpool_request = ZpoolPutRequest { size: size.into() };
+            let zpool_request = ZpoolPutRequest {
+                size: size.into(),
+                vendor: vendor.clone(),
+                serial: serial.clone(),
+                model: model.clone(),
+            };
             let lazy_nexus_client = lazy_nexus_client.clone();
             async move {
                 lazy_nexus_client
@@ -817,7 +845,11 @@ impl StorageWorker {
         let zpool_name = disk.zpool_name().clone();
         let disk_path = disk.devfs_path().to_path_buf();
         disks.insert(disk_path.clone(), disk.clone());
-        self.upsert_zpool(&resources, Some(disk_path), &zpool_name).await?;
+        let parent = PoolParent::PhysicalDisk {
+            devfs_path: disk_path,
+            identity: disk.identity().clone(),
+        };
+        self.upsert_zpool(&resources, parent, &zpool_name).await?;
         self.physical_disk_notify(NotifyDiskRequest::Add(disk));
 
         Ok(())
@@ -841,7 +873,7 @@ impl StorageWorker {
         key: &PathBuf,
     ) -> Result<(), Error> {
         if let Some(parsed_disk) = disks.remove(key) {
-            resources.pools.lock().await.remove(&parsed_disk.zpool_name());
+            resources.pools.lock().await.remove(&parsed_disk.zpool_name().id());
             self.physical_disk_notify(NotifyDiskRequest::Remove(
                 parsed_disk.identity().clone(),
             ));
@@ -913,13 +945,13 @@ impl StorageWorker {
     async fn upsert_zpool(
         &mut self,
         resources: &StorageResources,
-        disk_path: Option<PathBuf>,
+        parent: PoolParent,
         pool_name: &ZpoolName,
     ) -> Result<(), Error> {
         let mut pools = resources.pools.lock().await;
-        let zpool = Pool::new(pool_name, disk_path)?;
+        let zpool = Pool::new(pool_name.clone(), parent)?;
 
-        let pool = match pools.entry(pool_name.clone()) {
+        let pool = match pools.entry(pool_name.id()) {
             hash_map::Entry::Occupied(mut entry) => {
                 // The pool already exists.
                 entry.get_mut().info = zpool.info;
@@ -963,7 +995,7 @@ impl StorageWorker {
         }
 
         // Notify Nexus of the zpool.
-        self.add_zpool_notify(pool.id(), size);
+        self.add_zpool_notify(&pool, size);
         Ok(())
     }
 
@@ -975,8 +1007,7 @@ impl StorageWorker {
     ) -> Result<(), Error> {
         info!(self.log, "add_dataset: {:?}", request);
         let mut pools = resources.pools.lock().await;
-        let name = ZpoolName::new(request.zpool_id);
-        let pool = pools.get_mut(&name).ok_or_else(|| {
+        let pool = pools.get_mut(&request.zpool_id).ok_or_else(|| {
             Error::ZpoolNotFound(format!(
                 "{}, looked up while trying to add dataset",
                 request.zpool_id
@@ -1098,8 +1129,8 @@ impl StorageWorker {
                         RemoveDisk(disk) => {
                             self.delete_disk(&resources, disk).await?;
                         },
-                        NewPool { pool_name, disk_path }  => {
-                            self.upsert_zpool(&resources, disk_path, &pool_name).await?;
+                        NewPool { pool_name, parent }  => {
+                            self.upsert_zpool(&resources, parent, &pool_name).await?;
                         },
                         NewFilesystem(request) => {
                             let result = self.add_dataset(&resources, &request).await;
@@ -1120,7 +1151,7 @@ enum StorageWorkerRequest {
     AddDisk(UnparsedDisk),
     RemoveDisk(UnparsedDisk),
     DisksChanged(Vec<UnparsedDisk>),
-    NewPool { pool_name: ZpoolName, disk_path: Option<PathBuf> },
+    NewPool { pool_name: ZpoolName, parent: PoolParent },
     NewFilesystem(NewFilesystemRequest),
 }
 
@@ -1208,16 +1239,16 @@ impl StorageManager {
         self.tx.send(StorageWorkerRequest::RemoveDisk(disk)).await.unwrap();
     }
 
-    /// Adds a zpool to the storage manager.
+    /// Adds a synthetic zpool to the storage manager.
+    pub async fn upsert_synthetic_zpool(&self, name: ZpoolName) {
+        self.upsert_zpool(name, PoolParent::Synthetic).await;
+    }
+
     // Receiver implemented by [StorageWorker::upsert_zpool].
-    pub async fn upsert_zpool(
-        &self,
-        name: ZpoolName,
-        disk_path: Option<PathBuf>,
-    ) {
+    async fn upsert_zpool(&self, name: ZpoolName, parent: PoolParent) {
         info!(self.log, "Inserting zpool: {name:?}");
         self.tx
-            .send(StorageWorkerRequest::NewPool { pool_name: name, disk_path })
+            .send(StorageWorkerRequest::NewPool { pool_name: name, parent })
             .await
             .unwrap();
     }
@@ -1228,27 +1259,30 @@ impl StorageManager {
 
         let mut zpools = Vec::with_capacity(pools.len());
 
-        for (name, pool) in pools.iter() {
-            let disk_type = if let Some(disk_path) = &pool.disk_path {
-                if let Some(disk) = disks.get(disk_path) {
-                    disk.variant().into()
-                } else {
-                    // If the zpool claims to be attached to a disk that we
-                    // don't know about, that's an error.
-                    return Err(Error::ZpoolNotFound(
-                        format!("zpool: {name} claims to be from unknown disk: {disk_path}",
-                            disk_path = disk_path.display()
-                        )
-                    ));
+        for (id, pool) in pools.iter() {
+            let disk_type = match &pool.parent {
+                PoolParent::PhysicalDisk { devfs_path, identity: _ } => {
+                    if let Some(disk) = disks.get(devfs_path) {
+                        disk.variant().into()
+                    } else {
+                        // If the zpool claims to be attached to a disk that we
+                        // don't know about, that's an error.
+                        return Err(Error::ZpoolNotFound(
+                            format!("zpool: {id} claims to be from unknown disk: {devfs_path}",
+                                devfs_path = devfs_path.display()
+                            )
+                        ));
+                    }
                 }
-            } else {
-                // If the pool does not have an associated disk, treat it like a
-                // U.2 device. This should only be the case for "disks attached
-                // via the sled agent config".
-                DiskType::U2
+                PoolParent::Synthetic => {
+                    // If the pool does not have an associated disk, treat it like a
+                    // U.2 device. This should only be the case for "disks attached
+                    // via the sled agent config".
+                    DiskType::U2
+                }
             };
 
-            zpools.push(crate::params::Zpool { id: name.id(), disk_type });
+            zpools.push(crate::params::Zpool { id: *id, disk_type });
         }
 
         Ok(zpools)

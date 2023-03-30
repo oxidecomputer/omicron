@@ -94,6 +94,11 @@ pub struct PhysicalDiskDeleteRequest {
 pub struct ZpoolPutRequest {
     /// Total size of the pool.
     pub size: ByteCount,
+
+    // Information to identify the disk to which this zpool belongs
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
     // TODO: We could include any other data from `ZpoolInfo` we want,
     // such as "allocated/free" space and pool health?
 }

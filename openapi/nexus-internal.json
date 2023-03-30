@@ -2295,6 +2295,12 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
           "size": {
             "description": "Total size of the pool.",
             "allOf": [
@@ -2302,10 +2308,16 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
+          },
+          "vendor": {
+            "type": "string"
           }
         },
         "required": [
-          "size"
+          "model",
+          "serial",
+          "size",
+          "vendor"
         ]
       },
       "ZpoolPutResponse": {

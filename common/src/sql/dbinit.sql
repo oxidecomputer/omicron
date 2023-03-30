@@ -291,7 +291,8 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    /* TODO: Could also store physical disk FK here */
+    /* FK into the Physical Disk table */
+    physical_disk_id UUID NOT NULL,
 
     total_size INT NOT NULL
 );
