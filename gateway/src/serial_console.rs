@@ -11,6 +11,7 @@ use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
 use futures::StreamExt;
+use gateway_messages::SERIAL_CONSOLE_IDLE_TIMEOUT;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
 use hyper::upgrade::Upgraded;
@@ -21,8 +22,11 @@ use slog::Logger;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
+use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::time;
+use tokio::time::MissedTickBehavior;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::Role;
@@ -156,26 +160,42 @@ async fn ws_recv_task(
     mut console_tx: DetachOnDrop,
     log: Logger,
 ) -> Result<(), SerialTaskError> {
-    while let Some(message) = ws_stream.next().await {
-        match message {
-            Ok(Message::Binary(data)) => {
-                console_tx.write(data).await.map_err(SpCommsError::from)?;
+    let mut keepalive = time::interval(SERIAL_CONSOLE_IDLE_TIMEOUT / 4);
+    keepalive.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    loop {
+        select! {
+            maybe_message = ws_stream.next() => {
+                match maybe_message {
+                    Some(Ok(Message::Binary(data))) => {
+                        console_tx
+                            .write(data)
+                            .await
+                            .map_err(SpCommsError::from)?;
+                        keepalive.reset();
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        break;
+                    }
+                    Some(Ok(other)) => {
+                        error!(
+                            log,
+                            "bogus websocket message; terminating task";
+                            "message" => ?other,
+                        );
+                        return Ok(());
+                    }
+                    Some(Err(err)) => return Err(err.into()),
+                }
             }
-            Ok(Message::Close(_)) => {
-                break;
+
+            _= keepalive.tick() => {
+                console_tx.keepalive().await.map_err(SpCommsError::from)?;
             }
-            Ok(other) => {
-                error!(
-                    log,
-                    "bogus websocket message; terminating task";
-                    "message" => ?other,
-                );
-                return Ok(());
-            }
-            Err(err) => return Err(err.into()),
         }
     }
-    info!(log, "remote end closed websocket; terminating task",);
+
+    info!(log, "remote end closed websocket; terminating task");
     Ok(())
 }
 
