@@ -2,17 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use bytes::BytesMut;
+use camino::Utf8PathBuf;
+use slog::info;
+use slog::Drain;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use wicket_dbg::{Cmd, Runner, RunnerHandle};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let drain = slog::Discard;
-    let root = slog::Logger::root(drain, slog::o!());
-    let (mut runner, handle) = Runner::new(root);
+    let log = setup_log()?;
+    let (mut runner, handle) = Runner::new(log.clone());
 
     tokio::spawn(async move {
         runner.run().await;
@@ -24,7 +26,10 @@ async fn main() -> Result<()> {
     // Accept connections serially. We only want one client at a time.
     loop {
         let (sock, _) = listener.accept().await?;
-        process(sock, &handle).await?;
+
+        if let Err(e) = process(sock, &handle).await {
+            info!(log, "Error processing request: {e:#?}");
+        }
     }
 }
 
@@ -33,20 +38,29 @@ async fn process(mut sock: TcpStream, handle: &RunnerHandle) -> Result<()> {
     let mut buf = BytesMut::with_capacity(4096);
     let mut out = Vec::with_capacity(4096);
     loop {
-        loop {
-            sock.read_buf(&mut buf).await?;
-            if buf.len() >= 4 {
-                // We at least have the 4-byte size header
-                let frame_size =
-                    u32::from_le_bytes(<[u8; 4]>::try_from(&buf[..4]).unwrap())
-                        as usize;
-                if buf.len() == frame_size + 4 {
-                    break;
-                }
-                if buf.len() > frame_size + 4 {
-                    bail!("Data size exceeded frame + header size");
-                }
-            }
+        // Read at least the 4-byte size header
+        while buf.len() < 4 {
+            if 0 == sock.read_buf(&mut buf).await? {
+                // EOF - The client disconnected. Just return.
+                return Ok(());
+            };
+        }
+        // We at least have the 4-byte size header
+        let frame_size =
+            u32::from_le_bytes(<[u8; 4]>::try_from(&buf[..4]).unwrap())
+                as usize;
+        let total_size = frame_size + 4;
+
+        // Read the rest of the frame
+        while buf.len() < total_size {
+            if 0 == sock.read_buf(&mut buf).await? {
+                // EOF - The client disconnected. Just return.
+                return Ok(());
+            };
+        }
+
+        if buf.len() > total_size {
+            bail!("Data size exceeded frame + header size");
         }
 
         // We've read a complete frame
@@ -65,4 +79,48 @@ async fn process(mut sock: TcpStream, handle: &RunnerHandle) -> Result<()> {
         buf.clear();
         out.clear();
     }
+}
+
+fn setup_log() -> anyhow::Result<slog::Logger> {
+    let path = log_path()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&path)
+        .with_context(|| format!("error opening log file {path}"))?;
+
+    let decorator = slog_term::PlainDecorator::new(file);
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let stderr_drain = stderr_env_drain("RUST_LOG");
+    let drain = slog::Duplicate::new(drain, stderr_drain).fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+
+    Ok(slog::Logger::root(drain, slog::o!("component" => "wicket-dbg-server")))
+}
+
+fn log_path() -> Result<Utf8PathBuf> {
+    match std::env::var("WICKET_DBG_SERVER_LOG_PATH") {
+        Ok(path) => Ok(path.into()),
+        Err(std::env::VarError::NotPresent) => {
+            Ok("/tmp/wicket_dbg_server.log".into())
+        }
+        Err(std::env::VarError::NotUnicode(_)) => {
+            bail!("WICKET_DBG_SERVER_LOG_PATH is not valid unicode");
+        }
+    }
+}
+
+fn stderr_env_drain(env_var: &str) -> impl Drain<Ok = (), Err = slog::Never> {
+    let stderr_decorator = slog_term::TermDecorator::new().build();
+    let stderr_drain =
+        slog_term::FullFormat::new(stderr_decorator).build().fuse();
+    let mut builder = slog_envlogger::LogBuilder::new(stderr_drain);
+    if let Ok(s) = std::env::var(env_var) {
+        builder = builder.parse(&s);
+    } else {
+        // Log at the info level by default.
+        builder = builder.filter(None, slog::FilterLevel::Info);
+    }
+    builder.build()
 }
