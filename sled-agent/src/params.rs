@@ -431,6 +431,10 @@ pub struct ServiceEnsureBody {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TimeSync {
     pub sync: bool,
+    // These could both be f32, but there is a problem with progenitor/typify
+    // where, although the f32 correctly becomes "float" (and not "double") in
+    // the API spec, that "float" gets converted back to f64 when generating
+    // the client.
     pub skew: f64,
     pub correction: f64,
 }

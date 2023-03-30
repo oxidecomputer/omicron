@@ -243,6 +243,7 @@ pub struct ServiceManagerInner {
     log: Logger,
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
+    skip_timesync: Option<bool>,
     sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
@@ -277,14 +278,17 @@ impl ServiceManager {
     /// - `underlay_vnic`: The underlay's vNIC in the Global Zone.
     /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
+    /// - `skip_timesync`: If true, the sled always reports synced time.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: Logger,
         underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
         sled_mode: SledMode,
+        skip_timesync: Option<bool>,
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
@@ -297,6 +301,7 @@ impl ServiceManager {
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
                 sled_mode,
+                skip_timesync,
                 sidecar_revision,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
@@ -1121,6 +1126,11 @@ impl ServiceManager {
     }
 
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        if let Some(true) = self.inner.skip_timesync {
+            info!(self.inner.log, "Configured to skip timesync checks");
+            return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
+        };
+
         let existing_zones = self.inner.zones.lock().await;
 
         let ntp_zone_name = format!("{}{}", ZONE_PREFIX, ZoneType::NTP);
@@ -1147,8 +1157,8 @@ impl ServiceManager {
                         .map_err(|_| Error::NtpZoneNotReady)?;
 
                     Ok(TimeSync {
-                        sync: skew != 0
-                            && correction != 0
+                        sync: skew != 0.0
+                            && correction != 0.0
                             && correction.abs() <= 0.05,
                         skew,
                         correction,
@@ -1638,6 +1648,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1675,6 +1686,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1714,6 +1726,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1742,6 +1755,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1778,6 +1792,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1808,6 +1823,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )

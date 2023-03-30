@@ -1677,11 +1677,11 @@
         "properties": {
           "correction": {
             "type": "number",
-            "format": "float"
+            "format": "double"
           },
           "skew": {
             "type": "number",
-            "format": "float"
+            "format": "double"
           },
           "sync": {
             "type": "boolean"
