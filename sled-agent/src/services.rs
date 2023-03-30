@@ -1141,7 +1141,10 @@ impl ServiceManager {
             (SwitchZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
-                info!(log, "Re-enabling running switch zone (new address)");
+                info!(log, "Re-enabling running switch zone (new address)";
+                    "old" => format!("{:?}", request.addresses),
+                    "new" => format!("{:?}", new_request.addresses),
+                );
                 *request = new_request;
 
                 let address = request
@@ -1149,6 +1152,25 @@ impl ServiceManager {
                     .get(0)
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
+
+                for addr in &request.addresses {
+                    if *addr == Ipv6Addr::LOCALHOST {
+                        continue;
+                    }
+                    info!(
+                        self.inner.log,
+                        "Ensuring address {} exists",
+                        addr.to_string()
+                    );
+                    let addr_request =
+                        AddressRequest::new_static(IpAddr::V6(*addr), None);
+                    zone.ensure_address(addr_request).await?;
+                    info!(
+                        self.inner.log,
+                        "Ensuring address {} exists - OK",
+                        addr.to_string()
+                    );
+                }
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);
