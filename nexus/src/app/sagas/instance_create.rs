@@ -1075,10 +1075,9 @@ async fn ensure_instance_disk_attach_state(
 pub(super) async fn allocate_sled_ipv6(
     opctx: &OpContext,
     sagactx: NexusActionContext,
-    sled_id_name: &str,
+    sled_uuid: Uuid,
 ) -> Result<Ipv6Addr, ActionError> {
     let osagactx = sagactx.user_data();
-    let sled_uuid = sagactx.lookup::<Uuid>(sled_id_name)?;
     osagactx
         .datastore()
         .next_ipv6_address(opctx, sled_uuid)
@@ -1145,7 +1144,8 @@ async fn sic_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_sled_ipv6(&opctx, sagactx, "server_id").await
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    allocate_sled_ipv6(&opctx, sagactx, sled_uuid).await
 }
 
 async fn sic_create_instance_record(
