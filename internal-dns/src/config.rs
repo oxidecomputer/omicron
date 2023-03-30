@@ -67,15 +67,13 @@ use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
-/// Describes the DNS name used for a control plane host
-///
-/// This does not describe the AAA record itself.
+/// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 enum Host {
-    /// Identifies an AAAA record for a sled.
+    /// Used to construct an AAAA record for a sled.
     Sled(Uuid),
 
-    /// Identifies an AAAA record for a zone within a sled.
+    /// Used to construct an AAAA record for a zone on a sled.
     Zone(Uuid),
 }
 
