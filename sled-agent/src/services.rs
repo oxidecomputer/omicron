@@ -1141,6 +1141,10 @@ impl ServiceManager {
             (SwitchZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
+                // If the switch zone is running but we have new addresses, it
+                // means we're moving from the bootstrap to the underlay
+                // network.  We need to add an underlay address and route in the
+                // switch zone, so dendrite can communicate with nexus.
                 info!(log, "Re-enabling running switch zone (new address)";
                     "old" => format!("{:?}", request.addresses),
                     "new" => format!("{:?}", new_request.addresses),
@@ -1170,6 +1174,15 @@ impl ServiceManager {
                         "Ensuring address {} exists - OK",
                         addr.to_string()
                     );
+                }
+
+                if let Some(info) = self.inner.sled_info.get() {
+                    zone.add_default_route(info.underlay_address)
+                        .await
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        })?;
                 }
 
                 for service in &request.services {
