@@ -150,8 +150,6 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-# NOTE: this script configures softnpu's "rack network" settings using swadm
-GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
 
 # NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
 # able to reach instances from the same L2 network segment.
@@ -180,6 +178,10 @@ pfexec ./out/softnpu/scadm \
 	dump-state
 
 ./tests/bootstrap
+
+# NOTE: this script configures softnpu's "rack network" settings using swadm
+GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
+
 rm ./tests/bootstrap
 for test_bin in tests/*; do
 	./"$test_bin"
