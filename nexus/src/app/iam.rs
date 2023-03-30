@@ -131,7 +131,7 @@ impl super::Nexus {
         let authz_silo = opctx
             .authn
             .silo_required()
-            .internal_context("loading current silo")?;
+            .internal_context("loading current user's silo")?;
         let silo_id = authz_silo.id().into();
         let (.., db_silo) = self.silo_lookup(&opctx, &silo_id)?.fetch().await?;
         Ok(db_silo)
