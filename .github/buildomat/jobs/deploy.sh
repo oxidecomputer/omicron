@@ -156,7 +156,8 @@ OMICRON_NO_UNINSTALL=1 \
 # Keep consistent with `get_system_ip_pool` in `end-to-end-tests`.
 IP_POOL_START="192.168.1.50"
 IP_POOL_END="192.168.1.90"
-SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
+# `dladm` won't return leading zeroes but `scadm` expects them, use sed to add any missing zeroes
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
 	--client /opt/oxide/softnpu/stuff/client \
@@ -164,7 +165,9 @@ pfexec ./out/softnpu/scadm \
 	add-proxy-arp $IP_POOL_START $IP_POOL_END $SOFTNPU_MAC
 
 # We also need to configure proxy arp for Nexus which uses OPTE for external connectivity.
-NEXUS_IP="$(gtar xf out/omicron-sled-agent.tar -O pkg/config-rss.toml | sed -n 's/nexus_external_address = "\(.*\)"/\1/p')"
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+NEXUS_IP="$(sed -n 's/nexus_external_address = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -r pkg
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
 	--client /opt/oxide/softnpu/stuff/client \
