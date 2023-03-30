@@ -403,10 +403,6 @@ pub struct DeviceAuthResponse {
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
 
-    /// A verification URI that includes the `user_code`,
-    /// which is designed for non-textual transmission.
-    pub verification_uri_complete: String,
-
     /// The lifetime in seconds of the `device_code` and `user_code`.
     pub expires_in: u16,
 }

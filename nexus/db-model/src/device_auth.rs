@@ -41,10 +41,6 @@ impl DeviceAuthRequest {
         let scheme = if tls { "https" } else { "http" };
         views::DeviceAuthResponse {
             verification_uri: format!("{scheme}://{host}/device/verify"),
-            verification_uri_complete: format!(
-                "{scheme}://{host}/device/verify?user_code={}",
-                &self.user_code
-            ),
             user_code: self.user_code,
             device_code: self.device_code,
             expires_in: self
