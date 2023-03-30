@@ -713,6 +713,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -721,6 +722,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -760,6 +762,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -768,6 +771,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -797,6 +801,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -805,6 +810,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -834,6 +840,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -842,6 +849,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -880,6 +888,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -888,6 +897,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
