@@ -12,7 +12,7 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use internal_dns::resolver::{ResolveError, Resolver};
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
@@ -316,9 +316,7 @@ impl OximeterAgent {
             address
         } else {
             SocketAddr::new(
-                resolver
-                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
-                    .await?,
+                resolver.lookup_ip(ServiceName::Clickhouse).await?,
                 CLICKHOUSE_PORT,
             )
         };
@@ -532,12 +530,9 @@ impl Oximeter {
                 address
             } else {
                 SocketAddr::V6(SocketAddrV6::new(
-                    resolver
-                        .lookup_ipv6(SRV::Service(ServiceName::Nexus))
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::transient(e.to_string())
-                        })?,
+                    resolver.lookup_ipv6(ServiceName::Nexus).await.map_err(
+                        |e| backoff::BackoffError::transient(e.to_string()),
+                    )?,
                     NEXUS_INTERNAL_PORT,
                     0,
                     0,

@@ -9,7 +9,7 @@ use crate::params::{
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use dns_service_client::types::DnsConfigParams;
-use internal_dns::{BackendName, ServiceName, SRV};
+use internal_dns::ServiceName;
 use omicron_common::address::{
     get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
     DNS_SERVER_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
@@ -206,7 +206,7 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        SRV::Service(ServiceName::Nexus),
+                        ServiceName::Nexus,
                         &zone,
                         omicron_common::address::NEXUS_INTERNAL_PORT,
                     )
@@ -230,7 +230,7 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        SRV::Service(ServiceName::Oximeter),
+                        ServiceName::Oximeter,
                         &zone,
                         omicron_common::address::OXIMETER_PORT,
                     )
@@ -252,11 +252,7 @@ impl Plan {
                 let port = omicron_common::address::COCKROACH_PORT;
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend_zone(
-                        SRV::Service(ServiceName::Cockroach),
-                        &zone,
-                        port,
-                    )
+                    .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
                 let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
@@ -276,11 +272,7 @@ impl Plan {
                 let port = omicron_common::address::CLICKHOUSE_PORT;
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend_zone(
-                        SRV::Service(ServiceName::Clickhouse),
-                        &zone,
-                        port,
-                    )
+                    .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
                 let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
@@ -305,7 +297,7 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, *address.ip()).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        SRV::Backend(BackendName::Crucible, id),
+                        ServiceName::Crucible(id),
                         &zone,
                         address.port(),
                     )
@@ -328,7 +320,7 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, dns_addr).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        SRV::Service(ServiceName::InternalDNS),
+                        ServiceName::InternalDNS,
                         &zone,
                         DNS_SERVER_PORT,
                     )
@@ -359,11 +351,7 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend_zone(
-                        SRV::Service(ServiceName::InternalDNS),
-                        &zone,
-                        port,
-                    )
+                    .service_backend_zone(ServiceName::InternalDNS, &zone, port)
                     .unwrap();
                 request.services.push(ServiceZoneRequest {
                     id,
