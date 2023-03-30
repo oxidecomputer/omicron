@@ -585,8 +585,5 @@ impl SledAgent {
     /// Gets the sled's current time synchronization state
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
         self.inner.services.timesync_get().await.map_err(Error::from)
-
-        //let timesync = TimeSync { sync: true, skew: 0.05, correction: 0.01 };
-        //Ok(timesync)
     }
 }

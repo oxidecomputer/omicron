@@ -416,11 +416,7 @@ impl Plan {
                 };
 
                 dns_builder
-                    .service_backend_zone(
-                        SRV::Service(svcname),
-                        &zone,
-                        NTP_PORT,
-                    )
+                    .service_backend_zone(svcname, &zone, NTP_PORT)
                     .unwrap();
 
                 request.services.push(ServiceZoneRequest {

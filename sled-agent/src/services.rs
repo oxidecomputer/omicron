@@ -1185,7 +1185,7 @@ impl ServiceManager {
         let services = match self.inner.sled_mode {
             // A pure gimlet sled should not be trying to activate a switch zone.
             SledMode::Gimlet => {
-                return Err(Error::SwitchZone(anyhow::anyhow!(
+                return Err(Error::SledLocalZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
                 )))
             }
