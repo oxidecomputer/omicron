@@ -364,7 +364,7 @@ mod test {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =
-            nexus.project_lookup(&opctx, &project_selector).unwrap();
+            nexus.project_lookup(&opctx, project_selector).unwrap();
         nexus
             .project_create_instance(&opctx, &project_lookup, &params)
             .await

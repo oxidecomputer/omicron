@@ -1677,15 +1677,12 @@ pub mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
-            project: PROJECT_NAME.to_string().try_into().unwrap(),
-        };
         let instance_selector = params::InstanceSelector {
-            project_selector: Some(project_selector),
+            project: Some(PROJECT_NAME.to_string().try_into().unwrap()),
             instance: INSTANCE_NAME.to_string().try_into().unwrap(),
         };
         let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector).unwrap();
+            nexus.instance_lookup(&opctx, instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();
     }
 
