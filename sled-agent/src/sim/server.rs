@@ -118,10 +118,11 @@ impl Server {
         // Create all the Zpools requested by the config, and allocate a single
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
-        for (disk_no, zpool) in config.storage.zpools.iter().enumerate() {
-            let vendor = format!("synthetic-vendor");
-            let serial = format!("synthetic-serial-{disk_no}");
-            let model = format!("synthetic-model");
+        for zpool in &config.storage.zpools {
+            let zpool_id = uuid::Uuid::new_v4();
+            let vendor = "synthetic-vendor".to_string();
+            let serial = format!("synthetic-serial-{zpool_id}");
+            let model = "synthetic-model".to_string();
             sled_agent
                 .create_external_physical_disk(
                     vendor.clone(),
@@ -130,7 +131,6 @@ impl Server {
                 )
                 .await;
 
-            let zpool_id = uuid::Uuid::new_v4();
             sled_agent
                 .create_zpool(zpool_id, vendor, serial, model, zpool.size)
                 .await;

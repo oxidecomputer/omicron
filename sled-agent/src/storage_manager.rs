@@ -678,9 +678,9 @@ impl StorageWorker {
             PoolParent::Synthetic => {
                 let id = pool.name.id();
                 DiskIdentity {
-                    vendor: format!("synthetic-vendor-{id}"),
-                    serial: format!("synthetic-vendor-{id}"),
-                    model: format!("synthetic-vendor-{id}"),
+                    vendor: format!("synthetic-vendor"),
+                    serial: format!("synthetic-serial-{id}"),
+                    model: format!("synthetic-model"),
                 }
             }
         };
