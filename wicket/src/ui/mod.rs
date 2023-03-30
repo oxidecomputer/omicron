@@ -44,7 +44,7 @@ impl Screen {
         }
     }
 
-    /// Compute the layout of the [`MainScreen`]
+    /// Compute the layout of the `MainScreen`
     ///
     // A draw is issued after every resize, so no need to return an Action
     pub fn resize(&mut self, state: &mut State, width: u16, height: u16) {

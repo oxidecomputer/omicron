@@ -70,7 +70,7 @@ use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -509,7 +509,7 @@ impl ServiceInner {
         )
         .expect("Failed to create DNS resolver");
         let ip = resolver
-            .lookup_ip(SRV::Service(ServiceName::Nexus))
+            .lookup_ip(ServiceName::Nexus)
             .await
             .expect("Failed to lookup IP");
         let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
