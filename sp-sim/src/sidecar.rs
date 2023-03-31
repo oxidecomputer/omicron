@@ -124,7 +124,7 @@ impl Sidecar {
         sidecar: &SidecarConfig,
         log: Logger,
     ) -> Result<Self> {
-        info!(log, "setting up simualted sidecar");
+        info!(log, "setting up simulated sidecar");
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
@@ -554,6 +554,20 @@ impl SpHandler for Handler {
     ) -> Result<u64, SpError> {
         warn!(
             &self.log, "received serial console write; unsupported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
+    fn serial_console_keepalive(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received serial console keepalive; unsupported by sidecar";
             "sender" => %sender,
             "port" => ?port,
         );

@@ -170,6 +170,7 @@ impl HardwareMonitor {
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,
             sled_mode,
+            sled_config.skip_timesync,
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
         )

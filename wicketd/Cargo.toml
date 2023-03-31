@@ -45,6 +45,7 @@ doc = false
 
 [dev-dependencies]
 expectorate.workspace = true
+flate2.workspace = true
 fs-err.workspace = true
 gateway-test-utils.workspace = true
 http.workspace = true
@@ -53,8 +54,10 @@ installinator-artifact-client.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
+rand.workspace = true
 serde_json.workspace = true
 subprocess.workspace = true
+tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
 wicketd-client.workspace = true

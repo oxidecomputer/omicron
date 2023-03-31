@@ -204,6 +204,29 @@
         }
       }
     },
+    "/timesync": {
+      "get": {
+        "operationId": "timesync_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSync"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update": {
       "post": {
         "operationId": "update_artifact",
@@ -1522,6 +1545,56 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "boundary": {
+                "type": "boolean"
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ntp"
+                ]
+              }
+            },
+            "required": [
+              "boundary",
+              "servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dns_client"
+                ]
+              }
+            },
+            "required": [
+              "servers",
+              "type"
+            ]
           }
         ]
       },
@@ -1597,6 +1670,27 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "TimeSync": {
+        "type": "object",
+        "properties": {
+          "correction": {
+            "type": "number",
+            "format": "double"
+          },
+          "skew": {
+            "type": "number",
+            "format": "double"
+          },
+          "sync": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "correction",
+          "skew",
+          "sync"
         ]
       },
       "UpdateArtifactId": {
@@ -1887,7 +1981,8 @@
           "nexus",
           "oximeter",
           "switch",
-          "crucible_pantry"
+          "crucible_pantry",
+          "ntp"
         ]
       },
       "Zpool": {

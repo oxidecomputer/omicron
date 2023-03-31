@@ -59,7 +59,7 @@ pub enum SpError {
     CreateEtherstubVnic(CreateVnicError),
     #[error("Could not ensure IP address {addr} in global zone for simulated SP: {err}")]
     EnsureGlobalZoneAddressError { addr: Ipv6Addr, err: EnsureGzAddressError },
-    #[error("Could not start simualted SP: {0}")]
+    #[error("Could not start simulated SP: {0}")]
     StartSimSpError(String),
     #[error("Communication with RoT failed: {0}")]
     RotCommunicationError(String),

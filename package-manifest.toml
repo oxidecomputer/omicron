@@ -152,6 +152,17 @@ source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/exter
 output.intermediate_only = true
 output.type = "zone"
 
+[package.ntp]
+service_name = "ntp"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+	{ from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
+	{ from = "smf/ntp/method", to = "/var/svc/method" },
+	{ from = "smf/ntp/etc", to = "/etc/inet" },
+]
+output.type = "zone"
+
 [package.omicron-gateway]
 service_name = "mgs"
 only_for_targets.image = "standard"
