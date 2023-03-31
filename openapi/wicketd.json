@@ -828,6 +828,20 @@
           "version"
         ]
       },
+      "RotInventory": {
+        "description": "RoT-related data that isn't already supplied in [`SpState`].",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          }
+        }
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -1202,7 +1216,7 @@
         ]
       },
       "SpInventory": {
-        "description": "SP related data",
+        "description": "SP-related data",
         "type": "object",
         "properties": {
           "caboose": {
@@ -1226,6 +1240,9 @@
           "ignition": {
             "$ref": "#/components/schemas/SpIgnition"
           },
+          "rot": {
+            "$ref": "#/components/schemas/RotInventory"
+          },
           "state": {
             "$ref": "#/components/schemas/SpState"
           }
@@ -1233,6 +1250,7 @@
         "required": [
           "id",
           "ignition",
+          "rot",
           "state"
         ]
       },

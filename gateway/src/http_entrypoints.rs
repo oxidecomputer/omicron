@@ -29,6 +29,7 @@ use dropshot::WebsocketUpgrade;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
@@ -774,10 +775,17 @@ async fn sp_component_caboose_get(
     let PathSpComponent { sp, component } = path.into_inner();
     let sp = apictx.mgmt_switch.sp(sp.into())?;
 
-    // TODO currently unused, but will be used once we can get RoT caboose
-    // values. At the moment this endpoint only works if the requested component
-    // is the SP itself.
-    let _component = component_from_str(&component)?;
+    // At the moment this endpoint only works if the requested component
+    // is the SP itself; we have no way (yet!) of asking the SP for (e.g.) RoT
+    // caboose values.
+    let component = component_from_str(&component)?;
+    if component != SpComponent::SP_ITSELF {
+        return Err(HttpError::from(SpCommsError::from(
+            CommunicationError::SpError(
+                SpError::RequestUnsupportedForComponent,
+            ),
+        )));
+    }
 
     let from_utf8 = |key: &[u8], bytes| {
         // This helper closure is only called with the ascii-printable [u8; 4]

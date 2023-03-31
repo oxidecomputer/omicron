@@ -5,6 +5,7 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
+use crate::inventory::RotInventory;
 use crate::{RackV1Inventory, SpInventory};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -193,7 +194,7 @@ async fn update_inventory(
     let mut inventory_changed = inventory.len() != old_inventory_len;
 
     // Update any existing SPs that have changed state or add any new ones. For
-    // each of these, keep track so we can fetch their ComponentInfo/Caboose.
+    // each of these, keep track so we can fetch their details.
     let mut to_fetch: Vec<SpIdentifier> = vec![];
     for sp in sps.into_iter() {
         let state = sp.details;
@@ -206,6 +207,7 @@ async fn update_inventory(
                 if curr.state != state
                     || curr.components.is_none()
                     || curr.caboose.is_none()
+                    || curr.rot.caboose.is_none()
                 {
                     to_fetch.push(id);
                 }
@@ -219,24 +221,31 @@ async fn update_inventory(
     }
 
     // Create futures to fetch the details of each SP concurrently
-    let mut component_caboose_stream = to_fetch
+    let mut details_stream = to_fetch
         .into_iter()
         .map(|id| SpDetails::fetch(client.clone(), id, log.clone()))
         .collect::<FuturesUnordered<_>>();
 
     // Execute the futures
     let mut component_responses = BTreeMap::new();
-    let mut caboose_responses = BTreeMap::new();
-    while let Some(details) = component_caboose_stream.next().await {
+    let mut sp_caboose_responses = BTreeMap::new();
+    let mut rot_caboose_responses = BTreeMap::new();
+    while let Some(details) = details_stream.next().await {
         if let Some(components) = details.components {
             component_responses.insert(details.id, components);
         }
         if let Some(caboose) = details.caboose {
-            caboose_responses.insert(details.id, caboose);
+            sp_caboose_responses.insert(details.id, caboose);
+        }
+        if let Some(caboose) = details.rot.caboose {
+            rot_caboose_responses.insert(details.id, caboose);
         }
     }
 
-    if !component_responses.is_empty() || !caboose_responses.is_empty() {
+    if !component_responses.is_empty()
+        || !sp_caboose_responses.is_empty()
+        || !rot_caboose_responses.is_empty()
+    {
         inventory_changed = true;
     }
 
@@ -245,9 +254,14 @@ async fn update_inventory(
         inventory.get_mut(&id).unwrap().components = Some(components);
     }
 
-    // Fill in the caboose for each given SpIdentifier
-    for (id, sp_caboose) in caboose_responses {
+    // Fill in the SP caboose for each given SpIdentifier
+    for (id, sp_caboose) in sp_caboose_responses {
         inventory.get_mut(&id).unwrap().caboose = Some(sp_caboose);
+    }
+
+    // Fill in the RoT caboose for each given SpIdentifier
+    for (id, rot_caboose) in rot_caboose_responses {
+        inventory.get_mut(&id).unwrap().rot.caboose = Some(rot_caboose);
     }
 
     inventory_changed
@@ -260,6 +274,7 @@ struct SpDetails {
     id: SpIdentifier,
     caboose: Option<SpComponentCaboose>,
     components: Option<Vec<SpComponentInfo>>,
+    rot: RotInventory,
 }
 
 impl SpDetails {
@@ -268,16 +283,23 @@ impl SpDetails {
         id: SpIdentifier,
         log: Logger,
     ) -> Self {
-        // Create futures to fetch both the component list and the caboose.
+        // Create futures to fetch everything we need from MGS.
         let components = client.sp_component_list(id.type_, id.slot);
-        let caboose = client.sp_component_caboose_get(
+        let sp_caboose = client.sp_component_caboose_get(
             id.type_,
             id.slot,
             SpComponent::SP_ITSELF.const_as_str(),
         );
+        let rot_caboose = client.sp_component_caboose_get(
+            id.type_,
+            id.slot,
+            SpComponent::ROT.const_as_str(),
+        );
 
         // Wait for both futures, then unpack the results.
-        let (components_res, caboose_res) = futures::join!(components, caboose);
+        let (components_res, sp_caboose_res, rot_caboose_res) =
+            futures::join!(components, sp_caboose, rot_caboose);
+
         let components = match components_res {
             Ok(val) => Some(val.into_inner().components),
             Err(err) => {
@@ -289,7 +311,7 @@ impl SpDetails {
                 None
             }
         };
-        let caboose = match caboose_res {
+        let sp_caboose = match sp_caboose_res {
             Ok(val) => Some(val.into_inner()),
             Err(err) => {
                 warn!(
@@ -300,8 +322,24 @@ impl SpDetails {
                 None
             }
         };
+        let rot_caboose = match rot_caboose_res {
+            Ok(val) => Some(val.into_inner()),
+            Err(err) => {
+                warn!(
+                    log, "Failed to get caboose for rot";
+                    "sp" => ?id,
+                    "err" => %err,
+                );
+                None
+            }
+        };
 
-        Self { id, components, caboose }
+        Self {
+            id,
+            components,
+            caboose: sp_caboose,
+            rot: RotInventory { caboose: rot_caboose },
+        }
     }
 }
 
