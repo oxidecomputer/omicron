@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
@@ -165,15 +166,11 @@ pub struct Nexus {
 
     /// Client for dataplane daemon / switch management API
     dpd_client: Arc<dpd_client::Client>,
+
+    /// Background tasks
+    background_tasks: background::Driver,
 }
 
-// TODO Is it possible to make some of these operations more generic?  A
-// particularly good example is probably list() (or even lookup()), where
-// with the right type parameters, generic code can be written to work on all
-// types.
-//
-// TODO update and delete need to accommodate both with-etag and don't-care
-// TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
@@ -229,10 +226,8 @@ impl Nexus {
             LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
         };
 
-        // TODO-cleanup We may want a first-class subsystem for managing startup
-        // background tasks.  It could use a Future for each one, a status enum
-        // for each one, status communication via channels, and a single task to
-        // run them all.
+        // TODO-cleanup We may want to make the populator a first-class
+        // background task.
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
@@ -246,6 +241,15 @@ impl Nexus {
             Arc::clone(&db_datastore),
             populate_args,
         );
+
+        let background_ctx = OpContext::for_background(
+            log.new(o!("component" => "BackgroundTasks")),
+            Arc::clone(&authz),
+            authn::Context::internal_api(), // XXX-dap
+            Arc::clone(&db_datastore),
+        );
+        let background_tasks =
+            background::init(&background_ctx, Arc::clone(&db_datastore));
 
         let nexus = Nexus {
             id: config.deployment.id,
@@ -279,6 +283,7 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
             dpd_client,
+            background_tasks,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

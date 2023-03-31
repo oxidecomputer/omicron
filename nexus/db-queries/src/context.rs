@@ -46,6 +46,7 @@ pub struct OpContext {
     kind: OpKind,
 }
 
+#[derive(Clone, Copy)]
 pub enum OpKind {
     /// Handling an external API request
     ExternalApiRequest,
@@ -197,6 +198,33 @@ impl OpContext {
             created_walltime,
             metadata: BTreeMap::new(),
             kind: OpKind::Test,
+        }
+    }
+
+    // XXX-dap TODO-doc
+    pub fn child(
+        &self,
+        log: slog::Logger,
+        new_metadata: BTreeMap<String, String>,
+    ) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let mut metadata = self.metadata.clone();
+
+        for (k, v) in new_metadata {
+            metadata.insert(k, v);
+            // XXX-dap
+            // log = log.new(o!(k => v));
+        }
+
+        OpContext {
+            log,
+            authn: self.authn.clone(),
+            authz: self.authz.clone(),
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: self.kind,
         }
     }
 
