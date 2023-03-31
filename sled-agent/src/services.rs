@@ -1141,7 +1141,14 @@ impl ServiceManager {
             (SwitchZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
-                info!(log, "Re-enabling running switch zone (new address)");
+                // If the switch zone is running but we have new addresses, it
+                // means we're moving from the bootstrap to the underlay
+                // network.  We need to add an underlay address and route in the
+                // switch zone, so dendrite can communicate with nexus.
+                info!(log, "Re-enabling running switch zone (new address)";
+                    "old" => format!("{:?}", request.addresses),
+                    "new" => format!("{:?}", new_request.addresses),
+                );
                 *request = new_request;
 
                 let address = request
@@ -1149,6 +1156,34 @@ impl ServiceManager {
                     .get(0)
                     .map(|addr| addr.to_string())
                     .unwrap_or_else(|| "".to_string());
+
+                for addr in &request.addresses {
+                    if *addr == Ipv6Addr::LOCALHOST {
+                        continue;
+                    }
+                    info!(
+                        self.inner.log,
+                        "Ensuring address {} exists",
+                        addr.to_string()
+                    );
+                    let addr_request =
+                        AddressRequest::new_static(IpAddr::V6(*addr), None);
+                    zone.ensure_address(addr_request).await?;
+                    info!(
+                        self.inner.log,
+                        "Ensuring address {} exists - OK",
+                        addr.to_string()
+                    );
+                }
+
+                if let Some(info) = self.inner.sled_info.get() {
+                    zone.add_default_route(info.underlay_address)
+                        .await
+                        .map_err(|err| Error::ZoneCommand {
+                            intent: "Adding Route".to_string(),
+                            err,
+                        })?;
+                }
 
                 for service in &request.services {
                     let smfh = SmfHelper::new(&zone, service);

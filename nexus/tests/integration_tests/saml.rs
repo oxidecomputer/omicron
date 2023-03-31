@@ -1045,20 +1045,17 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
 
     assert_same_items(silo_group_names, vec!["SRE", "Admins"]);
 
-    let session_me: views::User = NexusRequest::new(
+    let session_me = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me")
             .header(http::header::COOKIE, session_cookie_value.clone())
             .expect_status(Some(StatusCode::OK)),
     )
-    .execute()
-    .await
-    .expect("expected success")
-    .parsed_body()
-    .unwrap();
+    .execute_and_parse_unwrap::<views::CurrentUser>()
+    .await;
 
-    assert_eq!(session_me.display_name, "some@customer.com");
+    assert_eq!(session_me.user.display_name, "some@customer.com");
 
-    let session_me: ResultsPage<views::Group> = NexusRequest::new(
+    let groups: ResultsPage<views::Group> = NexusRequest::new(
         RequestBuilder::new(client, Method::GET, "/v1/me/groups")
             .header(http::header::COOKIE, session_cookie_value)
             .expect_status(Some(StatusCode::OK)),
@@ -1070,7 +1067,7 @@ async fn test_post_saml_response(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     let session_me_group_ids =
-        session_me.items.iter().map(|g| g.id).collect::<Vec<_>>();
+        groups.items.iter().map(|g| g.id).collect::<Vec<_>>();
 
     assert_same_items(session_me_group_ids, silo_group_ids);
 }
