@@ -362,7 +362,7 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend_zone(ServiceName::InternalDNS, &zone, port)
+                    .service_backend_zone(ServiceName::CruciblePantry, &zone, port)
                     .unwrap();
                 request.services.push(ServiceZoneRequest {
                     id,
