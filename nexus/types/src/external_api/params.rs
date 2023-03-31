@@ -95,7 +95,7 @@ pub struct ProjectSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
-    // Name or ID of the project
+    /// Name or ID of the project
     pub project: Option<NameOrId>,
 }
 

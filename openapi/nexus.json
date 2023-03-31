@@ -639,6 +639,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -682,6 +683,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -720,6 +722,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -768,6 +771,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -806,6 +810,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -891,6 +896,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -984,6 +990,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1240,6 +1247,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1284,6 +1292,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1424,6 +1433,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1467,6 +1477,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1525,6 +1536,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1587,6 +1599,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1642,6 +1655,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1688,6 +1702,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1733,6 +1748,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1788,6 +1804,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1984,6 +2001,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2029,6 +2047,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3082,6 +3101,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3125,6 +3145,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6878,6 +6899,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6921,6 +6943,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6974,6 +6997,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
