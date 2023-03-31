@@ -4,6 +4,7 @@
 
 //! API for allocating and managing data links.
 
+use crate::destructor::{Deletable, Destructor};
 use crate::dladm::{
     CreateVnicError, DeleteVnicError, VnicSource, VNIC_PREFIX,
     VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL, VNIC_PREFIX_GUEST,
@@ -22,11 +23,12 @@ use crate::dladm::MockDladm as Dladm;
 /// A shareable wrapper around an atomic counter.
 /// May be used to allocate runtime-unique IDs for objects
 /// which have naming constraints - such as VNICs.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct VnicAllocator<DL: VnicSource + 'static> {
     value: Arc<AtomicU64>,
     scope: String,
     data_link: DL,
+    destructor: Destructor<LinkDestruction>,
 }
 
 impl<DL: VnicSource + Clone> VnicAllocator<DL> {
@@ -46,6 +48,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
             value: Arc::new(AtomicU64::new(0)),
             scope: scope.as_ref().to_string(),
             data_link,
+            destructor: Destructor::new(),
         }
     }
 
@@ -60,7 +63,12 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
         Dladm::create_vnic(&self.data_link, &name, mac, None)?;
-        Ok(Link { name, deleted: false, kind: LinkKind::OxideControlVnic })
+        Ok(Link {
+            name,
+            deleted: false,
+            kind: LinkKind::OxideControlVnic,
+            destructor: Some(self.destructor.clone()),
+        })
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -68,13 +76,19 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
             value: self.value.clone(),
             scope: format!("{}{}", scope.as_ref(), self.scope),
             data_link: self.data_link.clone(),
+            destructor: self.destructor.clone(),
         }
     }
 
     pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
         let name = self.next();
         Dladm::create_vnic(&self.data_link, &name, None, None)?;
-        Ok(Link { name, deleted: false, kind: LinkKind::OxideBootstrapVnic })
+        Ok(Link {
+            name,
+            deleted: false,
+            kind: LinkKind::OxideBootstrapVnic,
+            destructor: Some(self.destructor.clone()),
+        })
     }
 
     /// Allocates a new VNIC name, which should be unique within the
@@ -124,11 +138,21 @@ pub struct InvalidLinkKind(String);
 /// Note that the "ownership" of the VNIC is based on convention;
 /// another process in the global zone could also modify / destroy
 /// the VNIC while this object is alive.
-#[derive(Debug)]
 pub struct Link {
     name: String,
     deleted: bool,
     kind: LinkKind,
+    destructor: Option<Destructor<LinkDestruction>>,
+}
+
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Link {{ name: {}, deleted: {}, kind: {:?} }}",
+            self.name, self.deleted, self.kind
+        )
+    }
 }
 
 impl Link {
@@ -141,6 +165,8 @@ impl Link {
                 name: name.as_ref().to_owned(),
                 deleted: false,
                 kind,
+                // TODO: NO
+                destructor: Some(Destructor::new()),
             }),
             None => Err(InvalidLinkKind(name.as_ref().to_owned())),
         }
@@ -154,6 +180,7 @@ impl Link {
             name: name.as_ref().to_owned(),
             deleted: false,
             kind: LinkKind::Physical,
+            destructor: None,
         }
     }
 
@@ -162,8 +189,9 @@ impl Link {
         if self.deleted || self.kind == LinkKind::Physical {
             Ok(())
         } else {
+            Dladm::delete_vnic(&self.name)?;
             self.deleted = true;
-            Dladm::delete_vnic(&self.name)
+            Ok(())
         }
     }
 
@@ -178,10 +206,23 @@ impl Link {
 
 impl Drop for Link {
     fn drop(&mut self) {
-        let r = self.delete();
-        if let Err(e) = r {
-            eprintln!("Failed to delete Link: {}", e);
+        if let Some(destructor) = self.destructor.take() {
+            destructor
+                .enqueue_destroy(LinkDestruction { name: self.name.clone() });
         }
+    }
+}
+
+// TODO: This derive should not be necessary...
+struct LinkDestruction {
+    name: String,
+}
+
+#[async_trait::async_trait]
+impl Deletable for LinkDestruction {
+    async fn delete(&self) -> Result<(), anyhow::Error> {
+        Dladm::delete_vnic(&self.name)?;
+        Ok(())
     }
 }
 
@@ -190,8 +231,8 @@ mod test {
     use super::*;
     use crate::dladm::Etherstub;
 
-    #[test]
-    fn test_allocate() {
+    #[tokio::test]
+    async fn test_allocate() {
         let allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         assert_eq!("oxFoo0", allocator.next());
@@ -199,8 +240,8 @@ mod test {
         assert_eq!("oxFoo2", allocator.next());
     }
 
-    #[test]
-    fn test_allocate_within_scopes() {
+    #[tokio::test]
+    async fn test_allocate_within_scopes() {
         let allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
         assert_eq!("oxFoo0", allocator.next());
