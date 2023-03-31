@@ -14,6 +14,7 @@ use std::time::Duration;
 
 mod common;
 mod dns_config;
+mod dns_servers;
 
 pub use common::Driver;
 
@@ -36,6 +37,27 @@ pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> Driver {
         "dns_config_internal",
         Duration::from_secs(60),
         Box::new(dns_config_internal),
+        opctx.child(
+            log,
+            BTreeMap::from([(
+                "dns_group".to_string(),
+                format!("{:?}", DnsGroup::Internal),
+            )]),
+        ),
+    );
+
+    // Background task: internal DNS server list watcher
+    let dns_servers_internal = dns_servers::DnsServersWatcher::new(
+        Arc::clone(&datastore),
+        DnsGroup::Internal,
+    );
+    let dns_servers_internal_watcher = dns_servers_internal.watcher();
+    let log =
+        opctx.log.new(o!("dns_group" => format!("{:?}", DnsGroup::Internal)));
+    driver.register(
+        "dns_servers_internal",
+        Duration::from_secs(60),
+        Box::new(dns_servers_internal),
         opctx.child(
             log,
             BTreeMap::from([(
