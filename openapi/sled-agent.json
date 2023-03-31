@@ -1595,6 +1595,24 @@
               "servers",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "maghemite"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "type"
+            ]
           }
         ]
       },
@@ -1608,6 +1626,12 @@
               "type": "string",
               "format": "ipv6"
             }
+          },
+          "enable_ipv6_forwarding": {
+            "type": "boolean"
+          },
+          "enable_ipv6_routing": {
+            "type": "boolean"
           },
           "gz_addresses": {
             "default": [],
@@ -1633,6 +1657,8 @@
         },
         "required": [
           "addresses",
+          "enable_ipv6_forwarding",
+          "enable_ipv6_routing",
           "id",
           "services",
           "zone_type"

@@ -43,6 +43,8 @@ pub const WICKETD_PORT: u16 = 12226;
 pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
 pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
+pub const MAGHEMITE_PORT: u16 = 8000;
+
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 pub const NTP_PORT: u16 = 123;

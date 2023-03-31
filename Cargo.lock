@@ -4370,6 +4370,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
+ "itertools",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",

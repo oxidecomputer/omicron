@@ -70,3 +70,37 @@ pub fn find_chelsio_links() -> Result<Vec<PhysicalLink>, Error> {
             .collect())
     }
 }
+
+/// Return links to delegate to the switch zone for transmit mode maghemite
+pub fn find_switch_zone_nics() -> Result<Vec<AddrObject>, Error> {
+    let underlay_nics = find_switch_zone_links_for_maghemite()?;
+
+    let mut addr_objs = Vec::with_capacity(underlay_nics.len());
+    for nic in underlay_nics {
+        let addrobj = AddrObject::new(&nic.0, "ll")?;
+        // Do not call `Zones::ensure_has_link_local_v6_address` here! It must
+        // be called inside the switch zone
+        addr_objs.push(addrobj);
+    }
+
+    Ok(addr_objs)
+}
+
+/// Return links to delegate to the switch zone for transmit mode maghemite
+pub(crate) fn find_switch_zone_links_for_maghemite(
+) -> Result<Vec<PhysicalLink>, Error> {
+    #[allow(clippy::if_same_then_else)]
+    let nic_names: Vec<&str> = if is_gimlet().map_err(Error::SystemDetection)? {
+        // tfportd in the switch zone will add links when it boots, no
+        // delegation is required.
+        vec![]
+    } else {
+        // For non-gimlet based testing, hard code your own interfaces here.
+        vec![]
+    };
+
+    Ok(nic_names
+        .into_iter()
+        .map(|name| PhysicalLink(name.to_string()))
+        .collect())
+}

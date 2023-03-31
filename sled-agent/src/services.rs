@@ -31,6 +31,7 @@ use crate::params::{
     ZoneType,
 };
 use crate::smf_helper::SmfHelper;
+use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
@@ -38,6 +39,7 @@ use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::ZONE_PREFIX;
+use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -52,6 +54,7 @@ use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use slog::Logger;
@@ -141,6 +144,9 @@ pub enum Error {
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
+
+    #[error("Execution error: {0}")]
+    ExecutionError(#[from] illumos_utils::ExecutionError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -313,13 +319,17 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::new(log)?,
+                ddmd_client: DdmAdminClient::localhost(log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
             }),
         };
         Ok(mgr)
+    }
+
+    pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
+        self.inner.switch_zone_bootstrap_address
     }
 
     /// Loads services from the services manager, and returns once all requested
@@ -474,10 +484,10 @@ impl ServiceManager {
     //
     // NOTE: This function is implemented to return the first link found, under
     // the assumption that "at most one" would be necessary.
-    fn link_needed(
+    fn links_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Option<Link>, Error> {
+    ) -> Result<Vec<Link>, Error> {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
@@ -492,7 +502,7 @@ impl ServiceManager {
                         .new_control(None)
                     {
                         Ok(n) => {
-                            return Ok(Some(n));
+                            return Ok(vec![n]);
                         }
                         Err(e) => {
                             return Err(Error::NexusVnicCreation(e));
@@ -505,7 +515,7 @@ impl ServiceManager {
                     // bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
-                            return Ok(Some(link));
+                            return Ok(vec![link]);
                         }
                         Err(_) => {
                             return Err(Error::MissingDevice {
@@ -514,10 +524,32 @@ impl ServiceManager {
                         }
                     }
                 }
+                ServiceType::Maghemite { .. } => {
+                    // underlay::find_switch_zone_nics will only return a
+                    // non-empty vector if non-gimlet interfaces are hard coded.
+                    let mut links = Vec::with_capacity(8);
+
+                    for nic in underlay::find_switch_zone_nics()? {
+                        match Dladm::verify_link(nic.interface()) {
+                            Ok(link) => {
+                                links.push(link);
+                            }
+
+                            Err(_) => {
+                                return Err(Error::MissingDevice {
+                                    device: nic.to_string(),
+                                });
+                            }
+                        }
+                    }
+
+                    return Ok(links);
+                }
                 _ => (),
             }
         }
-        Ok(None)
+
+        Ok(vec![])
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -590,7 +622,7 @@ impl ServiceManager {
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
         let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
-        let link = self.link_needed(request)?;
+        let links = self.links_needed(request)?;
         let limit_priv = Self::privs_needed(request);
         let needs_bootstrap_address = bootstrap_vnic.is_some();
 
@@ -613,12 +645,20 @@ impl ServiceManager {
             // opte_ports=
             vec![],
             bootstrap_vnic,
-            link,
+            links.clone(),
             limit_priv,
         )
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
+
+        for link in &links {
+            info!(self.inner.log, "Ensuring {}/ll exists in zone", link.name(),);
+            Zones::ensure_has_link_local_v6_address(
+                Some(running_zone.name()),
+                &AddrObject::new(link.name(), "ll").unwrap(),
+            )?;
+        }
 
         if needs_bootstrap_address {
             let bootstrap_address =
@@ -1002,11 +1042,82 @@ impl ServiceManager {
                     self.configure_dns_client(&running_zone, &service).await?;
                     continue;
                 }
+                ServiceType::Maghemite { mode } => {
+                    info!(self.inner.log, "Setting up Maghemite service");
+
+                    smfh.setprop("config/mode", &mode)?;
+                    smfh.setprop("config/admin_host", "::")?;
+
+                    // XXX: tfportd is started in the switch zone when it boots,
+                    // and it will add links for both the rear and front ports
+                    // inside that zone. However, this may take some time.
+                    // Unfortunately [ddmd currently panics if a link is not
+                    // ready][1]. This code is written assuming that [1] is
+                    // fixed: it will configure maghemite to listen on all rear
+                    // ports.
+                    //
+                    // [1]: https://github.com/oxidecomputer/maghemite/issues/53
+
+                    let maghemite_interfaces: Vec<AddrObject> =
+                        if is_gimlet().map_err(|e| {
+                            Error::Underlay(underlay::Error::SystemDetection(e))
+                        })? {
+                            (1..32)
+                                .map(|i| {
+                                    AddrObject::new(
+                                        &format!("tfport{}", i), // XXX rearN soon!
+                                        "ll",
+                                    )
+                                    .unwrap()
+                                })
+                                .collect()
+                        } else {
+                            underlay::find_switch_zone_nics()?
+                        };
+
+                    smfh.setprop(
+                        "config/interfaces",
+                        format!(
+                            "\'({})\'",
+                            maghemite_interfaces
+                                .iter()
+                                .map(|interface| format!(r#""{}""#, interface))
+                                .join(" "),
+                        ),
+                    )?;
+
+                    smfh.refresh()?;
+                }
             }
 
             debug!(self.inner.log, "enabling service");
             smfh.enable()?;
         }
+
+        if request.enable_ipv6_forwarding {
+            running_zone.enable_ipv6_forwarding().map_err(|e| {
+                Error::ZoneCommand {
+                    intent: format!(
+                        "enable ipv6-forwarding in zone {}",
+                        running_zone.name()
+                    ),
+                    err: e,
+                }
+            })?;
+        }
+
+        if request.enable_ipv6_routing {
+            running_zone.enable_ipv6_routing().map_err(|e| {
+                Error::ZoneCommand {
+                    intent: format!(
+                        "enable ipv6-routing in zone {}",
+                        running_zone.name()
+                    ),
+                    err: e,
+                }
+            })?;
+        }
+
         Ok(running_zone)
     }
 
@@ -1219,6 +1330,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd,
+                    ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
         };
@@ -1233,6 +1345,8 @@ impl ServiceManager {
             addresses,
             gz_addresses: vec![],
             services,
+            enable_ipv6_forwarding: true,
+            enable_ipv6_routing: true,
         };
 
         self.ensure_zone(
@@ -1397,6 +1511,11 @@ impl ServiceManager {
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
+                        }
+                        ServiceType::Maghemite { mode } => {
+                            smfh.delpropvalue("config/mode", "*")?;
+                            smfh.addpropvalue("config/mode", &mode)?;
+                            smfh.refresh()?;
                         }
                         _ => (),
                     }
@@ -1563,6 +1682,8 @@ mod test {
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
+                enable_ipv6_forwarding: false,
+                enable_ipv6_routing: false,
             }],
         })
         .await
@@ -1579,6 +1700,8 @@ mod test {
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
+                enable_ipv6_forwarding: false,
+                enable_ipv6_routing: false,
             }],
         })
         .await

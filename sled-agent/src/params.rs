@@ -274,6 +274,7 @@ pub enum ServiceType {
     CruciblePantry,
     Ntp { servers: Vec<String>, boundary: bool },
     DnsClient { servers: Vec<String>, domain: Option<String> },
+    Maghemite { mode: String },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -289,6 +290,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
             ServiceType::Ntp { .. } => write!(f, "ntp"),
             ServiceType::DnsClient { .. } => write!(f, "dns_client"),
+            ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
     }
 }
@@ -326,6 +328,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::DnsClient { servers, domain } => {
                 AutoSt::DnsClient { servers, domain }
             }
+            St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }
     }
 }
@@ -399,6 +402,10 @@ pub struct ServiceZoneRequest {
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
     pub services: Vec<ServiceType>,
+    // Enable ipv6 forwarding in the zone
+    pub enable_ipv6_forwarding: bool,
+    // Enable ipv6 routing in the zone
+    pub enable_ipv6_routing: bool,
 }
 
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
@@ -414,6 +421,8 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
             services,
+            enable_ipv6_forwarding: s.enable_ipv6_forwarding,
+            enable_ipv6_routing: s.enable_ipv6_routing,
         }
     }
 }
