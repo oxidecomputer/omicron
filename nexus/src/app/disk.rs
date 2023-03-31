@@ -624,23 +624,11 @@ impl super::Nexus {
     pub async fn disk_finalize_import(
         self: &Arc<Self>,
         opctx: &OpContext,
-        path_disk: NameOrId,
-        finalize_params: params::FinalizeDisk,
+        disk_lookup: &lookup::Disk<'_>,
+        finalize_params: &params::FinalizeDisk,
     ) -> UpdateResult<()> {
-        let disk_selector = params::DiskSelector {
-            disk: path_disk,
-            project: finalize_params.project,
-        };
-
-        let authz_silo: authz::Silo;
-        let authz_proj: authz::Project;
-        let authz_disk: authz::Disk;
-        let db_disk: db::model::Disk;
-
-        (authz_silo, authz_proj, authz_disk, db_disk) = self
-            .disk_lookup(&opctx, disk_selector)?
-            .fetch_for(authz::Action::Modify)
-            .await?;
+        let (authz_silo, authz_proj, authz_disk, db_disk) =
+            disk_lookup.fetch_for(authz::Action::Modify).await?;
 
         let saga_params = sagas::finalize_disk::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -648,7 +636,7 @@ impl super::Nexus {
             project_id: authz_proj.id(),
             disk_id: authz_disk.id(),
             disk_name: db_disk.name().clone(),
-            snapshot_name: finalize_params.snapshot_name,
+            snapshot_name: finalize_params.snapshot_name.clone(),
         };
 
         self.execute_saga::<sagas::finalize_disk::SagaFinalizeDisk>(

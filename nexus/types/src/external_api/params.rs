@@ -1131,10 +1131,11 @@ pub struct ImportBlocksBulkWrite {
 /// Parameters for finalizing a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FinalizeDisk {
-    pub project: Option<NameOrId>,
-
-    /// an optional snapshot name
-    pub snapshot_name: Option<String>,
+    /// If specified a snapshot of the disk will be created with the given
+    /// name at the end of finalization. If not specified, a snapshot for
+    /// the disk will _not_ be created. A snapshot can be manually created
+    /// once the disk transitions into the `Detached` state.
+    pub snapshot_name: Option<Name>,
 }
 
 // IMAGES

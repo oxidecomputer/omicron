@@ -1675,17 +1675,21 @@ async fn disk_import_blocks_from_url(
 async fn disk_finalize_import(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::DiskPath>,
-    query_params: Query<params::FinalizeDisk>,
+    query_params: Query<params::OptionalProjectSelector>,
+    finalize_params: TypedBody<params::FinalizeDisk>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
+        let params = finalize_params.into_inner();
+        let disk_selector =
+            params::DiskSelector { disk: path.disk, project: query.project };
+        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
 
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-
-        nexus.disk_finalize_import(&opctx, path.disk, query).await?;
+        nexus.disk_finalize_import(&opctx, &disk_lookup, &params).await?;
 
         Ok(HttpResponseUpdatedNoContent())
     };
