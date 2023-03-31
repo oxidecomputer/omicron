@@ -28,6 +28,7 @@ pub struct VnicAllocator<DL: VnicSource + 'static> {
     value: Arc<AtomicU64>,
     scope: String,
     data_link: DL,
+    // Manages dropped Vnics, and repeatedly attempts to delete them.
     destructor: Destructor<LinkDestruction>,
 }
 
@@ -69,6 +70,22 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
             kind: LinkKind::OxideControlVnic,
             destructor: Some(self.destructor.clone()),
         })
+    }
+
+    /// Takes ownership of an existing VNIC.
+    pub fn wrap_existing<S: AsRef<str>>(
+        &self,
+        name: S,
+    ) -> Result<Link, InvalidLinkKind> {
+        match LinkKind::from_name(name.as_ref()) {
+            Some(kind) => Ok(Link {
+                name: name.as_ref().to_owned(),
+                deleted: false,
+                kind,
+                destructor: Some(self.destructor.clone()),
+            }),
+            None => Err(InvalidLinkKind(name.as_ref().to_owned())),
+        }
     }
 
     fn new_superscope<S: AsRef<str>>(&self, scope: S) -> Self {
@@ -156,22 +173,6 @@ impl std::fmt::Debug for Link {
 }
 
 impl Link {
-    /// Takes ownership of an existing VNIC.
-    pub fn wrap_existing<S: AsRef<str>>(
-        name: S,
-    ) -> Result<Self, InvalidLinkKind> {
-        match LinkKind::from_name(name.as_ref()) {
-            Some(kind) => Ok(Self {
-                name: name.as_ref().to_owned(),
-                deleted: false,
-                kind,
-                // TODO: NO
-                destructor: Some(Destructor::new()),
-            }),
-            None => Err(InvalidLinkKind(name.as_ref().to_owned())),
-        }
-    }
-
     /// Wraps a physical nic in a Link structure.
     ///
     /// It is the caller's responsibility to ensure this is a physical link.
@@ -213,7 +214,7 @@ impl Drop for Link {
     }
 }
 
-// TODO: This derive should not be necessary...
+// Represents the request to destroy a VNIC
 struct LinkDestruction {
     name: String,
 }
