@@ -13,8 +13,8 @@ use std::fmt::Display;
 use std::iter::Iterator;
 use tui::text::Text;
 use wicketd_client::types::{
-    RackV1Inventory, RotSlot, RotState, SpComponentInfo, SpIgnition, SpState,
-    SpType,
+    RackV1Inventory, RotSlot, RotState, SpComponentCaboose, SpComponentInfo,
+    SpIgnition, SpState, SpType,
 };
 
 lazy_static! {
@@ -59,6 +59,7 @@ impl Inventory {
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,
+                caboose: sp.caboose,
                 components: sp.components,
             };
 
@@ -102,6 +103,7 @@ impl Inventory {
 pub struct Sp {
     ignition: SpIgnition,
     state: SpState,
+    caboose: Option<SpComponentCaboose>,
     components: Option<Vec<SpComponentInfo>>,
 }
 
@@ -123,13 +125,16 @@ impl Component {
     }
 
     pub fn sp_version(&self) -> String {
-        match &self.sp().state {
-            SpState::Enabled { version, .. } => version.version.to_string(),
-            _ => "UNKNOWN".to_string(),
-        }
+        self.sp()
+            .caboose
+            .as_ref()
+            .and_then(|caboose| caboose.version.as_deref())
+            .unwrap_or("UNKNOWN")
+            .to_string()
     }
 
     pub fn rot_version(&self) -> String {
+        // TODO read RoT caboose instead, once it exists?
         match &self.sp().state {
             SpState::Enabled { rot, .. } => match rot {
                 RotState::Enabled { active, slot_a, slot_b } => {

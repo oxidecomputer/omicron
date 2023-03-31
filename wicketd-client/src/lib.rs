@@ -25,6 +25,7 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     patch =
         {
+        SpComponentCaboose = { derives = [PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpComponentInfo= { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
