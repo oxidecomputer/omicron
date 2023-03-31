@@ -19,7 +19,9 @@ use omicron_common::backoff::{
 };
 use slog::{info, Drain, Logger};
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -172,12 +174,11 @@ impl Server {
         .context("initializing DNS storage")
         .map_err(|e| e.to_string())?;
 
+        let dns_bind: SocketAddrV6 = "[::1]:0".parse().unwrap();
         let (dns_server, dns_dropshot_server) = dns_server::start_servers(
             dns_log,
             store,
-            &dns_server::dns_server::Config {
-                bind_address: "[::1]:0".parse().unwrap(),
-            },
+            &dns_server::dns_server::Config { bind_address: dns_bind.into() },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
@@ -216,8 +217,17 @@ impl Server {
             .context("initializing DNS")
             .map_err(|e| e.to_string())?;
 
+        // Record the internal DNS server as though RSS had provisioned it so
+        // that Nexus knows about it.
+        let services = vec![NexusTypes::ServicePutRequest {
+            address: *dns_bind.ip(),
+            kind: NexusTypes::ServiceKind::InternalDNS,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+        }];
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
-            services: vec![],
+            services,
             datasets,
             internal_services_ip_pool_ranges: vec![],
             certs: vec![],

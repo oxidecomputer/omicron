@@ -245,7 +245,7 @@ impl Nexus {
         let background_ctx = OpContext::for_background(
             log.new(o!("component" => "BackgroundTasks")),
             Arc::clone(&authz),
-            authn::Context::internal_api(), // XXX-dap
+            authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
         let background_tasks =
