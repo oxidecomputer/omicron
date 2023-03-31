@@ -1230,12 +1230,18 @@ impl SpHandler for Handler {
         &mut self,
         key: [u8; 4],
     ) -> std::result::Result<&'static [u8], SpError> {
-        warn!(
-            &self.log,
-            "received request for caboose key; not supported by simulated gimlet";
-            "key" => ?key,
-        );
-        Err(SpError::RequestUnsupportedForSp)
+        static GITC: &[u8] = b"ffffffff";
+        static BORD: &[u8] = b"SimGimletSp";
+        static NAME: &[u8] = b"SimGimlet";
+        static VERS: &[u8] = b"0.0.1";
+
+        match &key {
+            b"GITC" => Ok(GITC),
+            b"BORD" => Ok(BORD),
+            b"NAME" => Ok(NAME),
+            b"VERS" => Ok(VERS),
+            _ => Err(SpError::NoSuchCabooseKey(key)),
+        }
     }
 }
 
