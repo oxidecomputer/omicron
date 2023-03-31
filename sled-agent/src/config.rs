@@ -37,6 +37,8 @@ pub struct Config {
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
+    /// Optionally skip waiting for time synchronization
+    pub skip_timesync: Option<bool>,
 
     /// The data link on which we infer the bootstrap address.
     ///

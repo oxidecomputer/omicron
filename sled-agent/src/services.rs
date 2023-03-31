@@ -27,7 +27,8 @@
 
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
+    ZoneType,
 };
 use crate::smf_helper::SmfHelper;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -36,6 +37,7 @@ use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
+use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -57,6 +59,7 @@ use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
@@ -90,8 +93,8 @@ pub enum Error {
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
 
-    #[error("Switch zone error: {0}")]
-    SwitchZone(anyhow::Error),
+    #[error("Sled-local zone error: {0}")]
+    SledLocalZone(anyhow::Error),
 
     #[error("Failed to issue SMF command: {0}")]
     SmfCommand(#[from] crate::smf_helper::Error),
@@ -121,8 +124,8 @@ pub enum Error {
     #[error("Failed to create Vnic for Nexus: {0}")]
     NexusVnicCreation(illumos_utils::dladm::CreateVnicError),
 
-    #[error("Failed to create Vnic in switch zone: {0}")]
-    SwitchVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create Vnic in sled-local zone: {0}")]
+    SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
 
     #[error("Failed to add GZ addresses: {message}: {err}")]
     GzAddress {
@@ -135,6 +138,9 @@ pub enum Error {
 
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
+
+    #[error("NTP zone not ready")]
+    NtpZoneNotReady,
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -207,11 +213,11 @@ impl Task {
     }
 }
 
-// Describes the Switch Zone state.
-enum SwitchZone {
-    // The switch zone is not currently running.
+/// Describes the state of a sled-local zone.
+enum SledLocalZone {
+    // The zone is not currently running.
     Disabled,
-    // The Zone is still initializing - it may be awaiting the initialization
+    // The zone is still initializing - it may be awaiting the initialization
     // of certain links.
     Initializing {
         // The request for the zone
@@ -235,8 +241,9 @@ enum SwitchZone {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
-    switch_zone: Mutex<SwitchZone>,
+    switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
+    skip_timesync: Option<bool>,
     sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
@@ -271,14 +278,17 @@ impl ServiceManager {
     /// - `underlay_vnic`: The underlay's vNIC in the Global Zone.
     /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
+    /// - `skip_timesync`: If true, the sled always reports synced time.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: Logger,
         underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
         sled_mode: SledMode,
+        skip_timesync: Option<bool>,
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Self, Error> {
@@ -289,8 +299,9 @@ impl ServiceManager {
                 log: log.clone(),
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
-                switch_zone: Mutex::new(SwitchZone::Disabled),
+                switch_zone: Mutex::new(SledLocalZone::Disabled),
                 sled_mode,
+                skip_timesync,
                 sidecar_revision,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
@@ -432,13 +443,29 @@ impl ServiceManager {
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Option<Link>, Error> {
-        if req.zone_type == ZoneType::Switch {
-            match self.inner.bootstrap_vnic_allocator.new_bootstrap() {
-                Ok(link) => Ok(Some(link)),
-                Err(e) => Err(Error::SwitchVnicCreation(e)),
+        match req.zone_type {
+            ZoneType::Switch => {
+                match self.inner.bootstrap_vnic_allocator.new_bootstrap() {
+                    Ok(link) => Ok(Some(link)),
+                    Err(e) => Err(Error::SledLocalVnicCreation(e)),
+                }
             }
-        } else {
-            Ok(None)
+            _ => Ok(None),
+        }
+    }
+
+    // If we are running in the switch zone, we need a bootstrap vnic so we can
+    // listen on a bootstrap address for the wicketd artifact server.
+    //
+    // No other zone besides the switch and global zones should have a
+    // bootstrap address.
+    fn bootstrap_address_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Option<Ipv6Addr> {
+        match req.zone_type {
+            ZoneType::Switch => Some(self.inner.switch_zone_bootstrap_address),
+            _ => None,
         }
     }
 
@@ -453,7 +480,8 @@ impl ServiceManager {
     ) -> Result<Option<Link>, Error> {
         for svc in &req.services {
             match svc {
-                ServiceType::Nexus { .. } => {
+                ServiceType::Nexus { .. }
+                | ServiceType::Ntp { boundary: true, .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
                         .inner
@@ -497,12 +525,62 @@ impl ServiceManager {
     fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
         let mut needed = Vec::new();
         for svc in &req.services {
-            if let ServiceType::Tfport { .. } = svc {
-                needed.push("default".to_string());
-                needed.push("sys_dl_config".to_string());
+            match svc {
+                ServiceType::Tfport { .. } => {
+                    needed.push("default".to_string());
+                    needed.push("sys_dl_config".to_string());
+                }
+                ServiceType::Ntp { .. } => {
+                    needed.push("default".to_string());
+                    needed.push("sys_time".to_string());
+                    needed.push("proc_priocntl".to_string());
+                }
+                _ => (),
             }
         }
         needed
+    }
+
+    async fn configure_dns_client(
+        &self,
+        running_zone: &RunningZone,
+        service: &ServiceType,
+    ) -> Result<(), Error> {
+        if let ServiceType::DnsClient { servers, domain } = service {
+            let smfh = SmfHelper::new(&running_zone, service);
+
+            let etc = PathBuf::from(running_zone.root()).join("etc");
+            let resolv_conf = etc.join("resolv.conf");
+            let nsswitch_conf = etc.join("nsswitch.conf");
+            let nsswitch_dns = etc.join("nsswitch.dns");
+
+            if servers.is_empty() {
+                // Disable the dns/client service
+                smfh.disable()?;
+            } else {
+                debug!(self.inner.log, "enabling {:?}", service);
+                let mut config = String::new();
+                if let Some(d) = domain {
+                    config.push_str(&format!("domain {d}\n"));
+                }
+                for s in servers {
+                    config.push_str(&format!("nameserver {s}\n"));
+                }
+
+                debug!(self.inner.log, "creating {}", resolv_conf.display());
+                tokio::fs::write(&resolv_conf, config).await.map_err(
+                    |err| Error::Io { path: resolv_conf.clone(), err },
+                )?;
+
+                tokio::fs::copy(&nsswitch_dns, &nsswitch_conf).await.map_err(
+                    |err| Error::Io { path: nsswitch_dns.clone(), err },
+                )?;
+
+                smfh.refresh()?;
+                smfh.enable()?;
+            }
+        }
+        Ok(())
     }
 
     async fn initialize_zone(
@@ -543,16 +621,15 @@ impl ServiceManager {
         let running_zone = RunningZone::boot(installed_zone).await?;
 
         if needs_bootstrap_address {
+            let bootstrap_address =
+                self.bootstrap_address_needed(request).unwrap();
             info!(
                 self.inner.log,
-                "Ensuring bootstrap address {} exists in switch zone",
-                self.inner.switch_zone_bootstrap_address.to_string()
+                "Ensuring bootstrap address {} exists in {} zone",
+                bootstrap_address.to_string(),
+                request.zone_type.to_string()
             );
-            running_zone
-                .ensure_bootstrap_address(
-                    self.inner.switch_zone_bootstrap_address,
-                )
-                .await?;
+            running_zone.ensure_bootstrap_address(bootstrap_address).await?;
         }
 
         for addr in &request.addresses {
@@ -756,8 +833,9 @@ impl ServiceManager {
                         ),
                     )?;
 
-                    // Refresh the manifest with the new properties we set,
-                    // so they become "effective" properties when the service is enabled.
+                    // Refresh the manifest with the new properties we set, so
+                    // they become "effective" properties when the service is
+                    // enabled.
                     smfh.refresh()?;
                 }
                 ServiceType::Oximeter => {
@@ -836,7 +914,7 @@ impl ServiceManager {
                                     device_names[0].clone(),
                                 )?;
                             } else {
-                                return Err(Error::SwitchZone(
+                                return Err(Error::SledLocalZone(
                                     anyhow::anyhow!(
                                     "{dev_cnt} devices needed for tofino asic"
                                 ),
@@ -886,6 +964,43 @@ impl ServiceManager {
                         )?;
                     }
                     smfh.refresh()?;
+                }
+                ServiceType::Ntp { servers, boundary } => {
+                    info!(
+                        self.inner.log,
+                        "Set up NTP service boundary={}, Servers={:?}",
+                        boundary,
+                        servers
+                    );
+
+                    let sled_info =
+                        if let Some(info) = self.inner.sled_info.get() {
+                            info
+                        } else {
+                            return Err(Error::SledAgentNotReady);
+                        };
+
+                    let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
+                        sled_info.underlay_address,
+                    )
+                    .net();
+
+                    smfh.setprop("config/allow", &format!("{}", rack_net))?;
+                    smfh.setprop(
+                        "config/boundary",
+                        if *boundary { "true" } else { "false" },
+                    )?;
+
+                    smfh.delpropvalue("config/server", "*")?;
+                    for server in servers {
+                        smfh.addpropvalue("config/server", server)?;
+                    }
+
+                    smfh.refresh()?;
+                }
+                ServiceType::DnsClient { .. } => {
+                    self.configure_dns_client(&running_zone, &service).await?;
+                    continue;
                 }
             }
 
@@ -1011,6 +1126,54 @@ impl ServiceManager {
         Ok(())
     }
 
+    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        if let Some(true) = self.inner.skip_timesync {
+            info!(self.inner.log, "Configured to skip timesync checks");
+            return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
+        };
+
+        let existing_zones = self.inner.zones.lock().await;
+
+        let ntp_zone_name = format!("{}{}", ZONE_PREFIX, ZoneType::NTP);
+
+        let ntp_zone = existing_zones
+            .iter()
+            .find(|z| z.name() == ntp_zone_name)
+            .ok_or_else(|| Error::NtpZoneNotReady)?;
+
+        // XXXNTP - This could be replaced with a direct connection to the
+        // daemon using a patched version of the chrony_candm crate to allow
+        // a custom server socket path. From the GZ, it should be possible to
+        // connect to the UNIX socket at
+        // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
+
+        match ntp_zone.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"]) {
+            Ok(stdout) => {
+                let v: Vec<&str> = stdout.split(',').collect();
+
+                if v.len() > 9 {
+                    let correction = f64::from_str(v[4])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+                    let skew = f64::from_str(v[9])
+                        .map_err(|_| Error::NtpZoneNotReady)?;
+
+                    Ok(TimeSync {
+                        sync: (skew != 0.0 || correction != 0.0)
+                            && correction.abs() <= 0.05,
+                        skew,
+                        correction,
+                    })
+                } else {
+                    Err(Error::NtpZoneNotReady)
+                }
+            }
+            Err(e) => {
+                info!(self.inner.log, "chronyc command failed: {}", e);
+                Err(Error::NtpZoneNotReady)
+            }
+        }
+    }
+
     /// Ensures that a switch zone exists with the provided IP adddress.
     pub async fn activate_switch(
         &self,
@@ -1022,7 +1185,7 @@ impl ServiceManager {
         let services = match self.inner.sled_mode {
             // A pure gimlet sled should not be trying to activate a switch zone.
             SledMode::Gimlet => {
-                return Err(Error::SwitchZone(anyhow::anyhow!(
+                return Err(Error::SledLocalZone(anyhow::anyhow!(
                     "attempted to activate switch zone on non-scrimlet sled"
                 )))
             }
@@ -1072,7 +1235,8 @@ impl ServiceManager {
             services,
         };
 
-        self.ensure_switch_zone(
+        self.ensure_zone(
+            ZoneType::Switch,
             // request=
             Some(request),
             // filesystems=
@@ -1083,7 +1247,8 @@ impl ServiceManager {
 
     /// Ensures that no switch zone is active.
     pub async fn deactivate_switch(&self) -> Result<(), Error> {
-        self.ensure_switch_zone(
+        self.ensure_zone(
+            ZoneType::Switch,
             // request=
             None,
             // filesystems=
@@ -1092,60 +1257,70 @@ impl ServiceManager {
         .await
     }
 
-    // Forcefully initialize a switch zone.
+    // Forcefully initialize a sled-local zone.
     //
-    // This is a helper function for "ensure_switch_zone".
-    fn start_switch_zone(
+    // This is a helper function for "ensure_zone".
+    fn start_zone(
         self,
-        switch_zone: &mut SwitchZone,
+        zone: &mut SledLocalZone,
         request: ServiceZoneRequest,
         filesystems: Vec<zone::Fs>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
-        *switch_zone = SwitchZone::Initializing {
+        let zone_type = request.zone_type.clone();
+        *zone = SledLocalZone::Initializing {
             request,
             filesystems,
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_zone_loop(exit_rx).await
+                    self.initialize_zone_loop(zone_type, exit_rx).await
                 }),
             }),
         };
     }
 
     // Moves the current state to align with the "request".
-    async fn ensure_switch_zone(
+    async fn ensure_zone(
         &self,
+        zone_type: ZoneType,
         request: Option<ServiceZoneRequest>,
         filesystems: Vec<zone::Fs>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
-        let mut switch_zone = self.inner.switch_zone.lock().await;
 
-        match (&mut *switch_zone, request) {
-            (SwitchZone::Disabled, Some(request)) => {
-                info!(log, "Enabling switch zone (new)");
-                self.clone().start_switch_zone(
-                    &mut switch_zone,
-                    request,
-                    filesystems,
-                );
+        let mut sled_zone;
+        match zone_type {
+            ZoneType::Switch => {
+                sled_zone = self.inner.switch_zone.lock().await;
             }
-            (SwitchZone::Initializing { request, .. }, Some(new_request)) => {
-                info!(log, "Enabling switch zone (already underway)");
-                // The switch zone has not started yet -- we can simply replace
+            _ => panic!("Unhandled zone type"),
+        }
+        let zone_typestr = zone_type.to_string();
+
+        match (&mut *sled_zone, request) {
+            (SledLocalZone::Disabled, Some(request)) => {
+                info!(log, "Enabling {zone_typestr} zone (new)");
+                self.clone().start_zone(&mut sled_zone, request, filesystems);
+            }
+            (
+                SledLocalZone::Initializing { request, .. },
+                Some(new_request),
+            ) => {
+                info!(log, "Enabling {zone_typestr} zone (already underway)");
+                // The zone has not started yet -- we can simply replace
                 // the next request with our new request.
                 *request = new_request;
             }
-            (SwitchZone::Running { request, zone }, Some(new_request))
+            (SledLocalZone::Running { request, zone }, Some(new_request))
                 if request.addresses != new_request.addresses =>
             {
                 // If the switch zone is running but we have new addresses, it
                 // means we're moving from the bootstrap to the underlay
                 // network.  We need to add an underlay address and route in the
                 // switch zone, so dendrite can communicate with nexus.
-                info!(log, "Re-enabling running switch zone (new address)";
+                info!(log,
+                    "Re-enabling running {zone_typestr} zone (new address)";
                     "old" => format!("{:?}", request.addresses),
                     "new" => format!("{:?}", new_request.addresses),
                 );
@@ -1227,21 +1402,21 @@ impl ServiceManager {
                     }
                 }
             }
-            (SwitchZone::Running { .. }, Some(_)) => {
-                info!(log, "Enabling switch zone (already complete)");
+            (SledLocalZone::Running { .. }, Some(_)) => {
+                info!(log, "Enabling {zone_typestr} zone (already complete)");
             }
-            (SwitchZone::Disabled, None) => {
-                info!(log, "Disabling switch zone (already complete)");
+            (SledLocalZone::Disabled, None) => {
+                info!(log, "Disabling {zone_typestr} zone (already complete)");
             }
-            (SwitchZone::Initializing { worker, .. }, None) => {
-                info!(log, "Disabling switch zone (was initializing)");
+            (SledLocalZone::Initializing { worker, .. }, None) => {
+                info!(log, "Disabling {zone_typestr} zone (was initializing)");
                 worker.take().unwrap().stop().await;
-                *switch_zone = SwitchZone::Disabled;
+                *sled_zone = SledLocalZone::Disabled;
             }
-            (SwitchZone::Running { zone, .. }, None) => {
-                info!(log, "Disabling switch zone (was running)");
+            (SledLocalZone::Running { zone, .. }, None) => {
+                info!(log, "Disabling {zone_typestr} zone (was running)");
                 let _ = zone.stop().await;
-                *switch_zone = SwitchZone::Disabled;
+                *sled_zone = SledLocalZone::Disabled;
             }
         }
         Ok(())
@@ -1249,18 +1424,30 @@ impl ServiceManager {
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
-    async fn initialize_zone_loop(&self, mut exit_rx: oneshot::Receiver<()>) {
+    async fn initialize_zone_loop(
+        &self,
+        zone_type: ZoneType,
+        mut exit_rx: oneshot::Receiver<()>,
+    ) {
         loop {
             {
-                let mut switch_zone = self.inner.switch_zone.lock().await;
-                match &*switch_zone {
-                    SwitchZone::Initializing {
-                        request, filesystems, ..
+                let mut sled_zone;
+                match zone_type {
+                    ZoneType::Switch => {
+                        sled_zone = self.inner.switch_zone.lock().await;
+                    }
+                    _ => panic!("Unhandled zone type"),
+                }
+                match &*sled_zone {
+                    SledLocalZone::Initializing {
+                        request,
+                        filesystems,
+                        ..
                     } => {
                         match self.initialize_zone(&request, filesystems).await
                         {
                             Ok(zone) => {
-                                *switch_zone = SwitchZone::Running {
+                                *sled_zone = SledLocalZone::Running {
                                     request: request.clone(),
                                     zone,
                                 };
@@ -1269,7 +1456,8 @@ impl ServiceManager {
                             Err(err) => {
                                 warn!(
                                     self.inner.log,
-                                    "Failed to initialize switch zone: {err}"
+                                    "Failed to initialize {} zone: {err}",
+                                    zone_type.to_string()
                                 );
                             }
                         }
@@ -1410,7 +1598,7 @@ mod test {
         let delete_vnic_ctx = MockDladm::delete_vnic_context();
         delete_vnic_ctx.expect().returning(|_| Ok(()));
 
-        // Explicitly drop the servie manager
+        // Explicitly drop the service manager
         drop(mgr);
     }
 
@@ -1460,6 +1648,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1497,6 +1686,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1536,6 +1726,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1564,6 +1755,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1600,6 +1792,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1630,6 +1823,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
+            None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )

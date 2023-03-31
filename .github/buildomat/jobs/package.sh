@@ -109,6 +109,7 @@ zones=(
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
 	out/switch-softnpu.tar.gz
+	out/ntp.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

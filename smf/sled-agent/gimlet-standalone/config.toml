@@ -14,6 +14,10 @@ sled_mode = "scrimlet"
 # this information.
 sidecar_revision = "b"
 
+# Setting this to true causes sled-agent to always report that its time is
+# in-sync, rather than querying its NTP zone.
+skip_timesync = true
+
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
 #
