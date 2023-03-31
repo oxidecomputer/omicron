@@ -391,7 +391,7 @@ pub async fn policy_view(
             .id()
             .into();
 
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
         Ok(HttpResponseOk(policy))
     };
@@ -422,7 +422,7 @@ async fn policy_update(
             .internal_context("loading current silo")?
             .id()
             .into();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
@@ -503,7 +503,7 @@ async fn silo_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &path.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let (.., silo) = silo_lookup.fetch().await?;
         Ok(HttpResponseOk(silo.try_into()?))
     };
@@ -527,7 +527,7 @@ async fn silo_delete(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let params = path_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &params.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, params.silo)?;
         nexus.silo_delete(&opctx, &silo_lookup).await?;
         Ok(HttpResponseDeleted())
     };
@@ -549,7 +549,7 @@ async fn silo_policy_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &path.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let policy = nexus.silo_fetch_policy(&opctx, &silo_lookup).await?;
         Ok(HttpResponseOk(policy))
     };
@@ -576,7 +576,7 @@ async fn silo_policy_update(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &path.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let policy =
             nexus.silo_update_policy(&opctx, &silo_lookup, &new_policy).await?;
         Ok(HttpResponseOk(policy))
@@ -604,7 +604,7 @@ async fn silo_user_list(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanById::from_query(&query)?;
         let silo_lookup =
-            nexus.silo_lookup(&opctx, &scan_params.selector.silo)?;
+            nexus.silo_lookup(&opctx, scan_params.selector.silo.clone())?;
         let users = nexus
             .silo_list_users(&opctx, &silo_lookup, &pag_params)
             .await?
@@ -644,7 +644,7 @@ async fn silo_user_view(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         let user =
             nexus.silo_user_fetch(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseOk(user.into()))
@@ -673,7 +673,7 @@ async fn silo_identity_provider_list(
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let silo_lookup =
-            nexus.silo_lookup(&opctx, &scan_params.selector.silo)?;
+            nexus.silo_lookup(&opctx, scan_params.selector.silo.clone())?;
         let identity_providers = nexus
             .identity_provider_list(&opctx, &silo_lookup, &paginated_by)
             .await?
@@ -707,7 +707,7 @@ async fn saml_identity_provider_create(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         let provider = nexus
             .saml_identity_provider_create(
                 &opctx,
@@ -739,13 +739,13 @@ async fn saml_identity_provider_view(
         let query = query_params.into_inner();
         let saml_identity_provider_selector =
             params::SamlIdentityProviderSelector {
-                silo_selector: Some(query),
+                silo: Some(query.silo),
                 saml_identity_provider: path.provider,
             };
         let (.., provider) = nexus
             .saml_identity_provider_lookup(
                 &opctx,
-                &saml_identity_provider_selector,
+                saml_identity_provider_selector,
             )?
             .fetch()
             .await?;
@@ -778,7 +778,7 @@ async fn local_idp_user_create(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         let user = nexus
             .local_idp_create_user(
                 &opctx,
@@ -808,7 +808,7 @@ async fn local_idp_user_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         nexus.local_idp_delete_user(&opctx, &silo_lookup, path.user_id).await?;
         Ok(HttpResponseDeleted())
     };
@@ -836,7 +836,7 @@ async fn local_idp_user_set_password(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let silo_lookup = nexus.silo_lookup(&opctx, &query.silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
         nexus
             .local_idp_user_set_password(
                 &opctx,

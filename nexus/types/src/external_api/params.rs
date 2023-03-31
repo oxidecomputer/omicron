@@ -70,8 +70,8 @@ impl From<Name> for SiloSelector {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SamlIdentityProviderSelector {
-    #[serde(flatten)]
-    pub silo_selector: Option<SiloSelector>,
+    /// Name or ID of the silo in which the SAML identity provider is associated
+    pub silo: Option<NameOrId>,
     /// Name or ID of the SAML identity provider
     pub saml_identity_provider: NameOrId,
 }

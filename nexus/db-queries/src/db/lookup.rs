@@ -306,6 +306,15 @@ impl<'a> LookupPath<'a> {
         Silo::Name(Root { lookup_root: self }, name)
     }
 
+    /// Select a resource of type Silo, identified by its owned name
+    pub fn silo_name_owned<'b, 'c>(self, name: Name) -> Silo<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Silo::OwnedName(Root { lookup_root: self }, name)
+    }
+
     /// Select a resource of type SiloUser, identified by its id
     pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
         SiloUser::PrimaryKey(Root { lookup_root: self }, id)
