@@ -480,7 +480,8 @@ impl ServiceManager {
     ) -> Result<Option<Link>, Error> {
         for svc in &req.services {
             match svc {
-                ServiceType::Nexus { .. } | ServiceType::Ntp { .. } => {
+                ServiceType::Nexus { .. }
+                | ServiceType::Ntp { boundary: true, .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
                         .inner
@@ -1157,8 +1158,7 @@ impl ServiceManager {
                         .map_err(|_| Error::NtpZoneNotReady)?;
 
                     Ok(TimeSync {
-                        sync: skew != 0.0
-                            && correction != 0.0
+                        sync: (skew != 0.0 || correction != 0.0)
                             && correction.abs() <= 0.05,
                         skew,
                         correction,
