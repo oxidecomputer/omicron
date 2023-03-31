@@ -8,7 +8,10 @@
 use crate::{RackV1Inventory, SpInventory};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
-use gateway_client::types::{SpComponentList, SpIdentifier, SpInfo};
+use gateway_client::types::{
+    SpComponentCaboose, SpComponentInfo, SpIdentifier, SpInfo,
+};
+use gateway_messages::SpComponent;
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{info, o, warn, Logger};
@@ -190,7 +193,7 @@ async fn update_inventory(
     let mut inventory_changed = inventory.len() != old_inventory_len;
 
     // Update any existing SPs that have changed state or add any new ones. For
-    // each of these, keep track so we can fetch their ComponentInfo.
+    // each of these, keep track so we can fetch their ComponentInfo/Caboose.
     let mut to_fetch: Vec<SpIdentifier> = vec![];
     for sp in sps.into_iter() {
         let state = sp.details;
@@ -200,7 +203,10 @@ async fn update_inventory(
         inventory
             .entry(id)
             .and_modify(|curr| {
-                if curr.state != state || curr.components.is_none() {
+                if curr.state != state
+                    || curr.components.is_none()
+                    || curr.caboose.is_none()
+                {
                     to_fetch.push(id);
                 }
                 curr.state = state.clone();
@@ -212,43 +218,91 @@ async fn update_inventory(
             });
     }
 
-    // Create futures to fetch `SpComponentInfo` for each SP concurrently
-    let component_stream = to_fetch
+    // Create futures to fetch the details of each SP concurrently
+    let mut component_caboose_stream = to_fetch
         .into_iter()
-        .map(|id| async move {
-            let client = client.clone();
-            (id, client.sp_component_list(id.type_, id.slot).await)
-        })
+        .map(|id| SpDetails::fetch(client.clone(), id, log.clone()))
         .collect::<FuturesUnordered<_>>();
 
     // Execute the futures
-    let responses: BTreeMap<SpIdentifier, SpComponentList> = component_stream
-        .filter_map(|(id, res)| async move {
-            match res {
-                Ok(val) => Some((id, val.into_inner())),
-                Err(err) => {
-                    warn!(
-                        log,
-                        "Failed to get component list for sp: {id:?}, {err})"
-                    );
-                    None
-                }
-            }
-        })
-        .collect()
-        .await;
+    let mut component_responses = BTreeMap::new();
+    let mut caboose_responses = BTreeMap::new();
+    while let Some(details) = component_caboose_stream.next().await {
+        if let Some(components) = details.components {
+            component_responses.insert(details.id, components);
+        }
+        if let Some(caboose) = details.caboose {
+            caboose_responses.insert(details.id, caboose);
+        }
+    }
 
-    if !responses.is_empty() {
+    if !component_responses.is_empty() || !caboose_responses.is_empty() {
         inventory_changed = true;
     }
 
     // Fill in the components for each given SpIdentifier
-    for (id, sp_component_list) in responses {
-        inventory.get_mut(&id).unwrap().components =
-            Some(sp_component_list.components);
+    for (id, components) in component_responses {
+        inventory.get_mut(&id).unwrap().components = Some(components);
+    }
+
+    // Fill in the caboose for each given SpIdentifier
+    for (id, sp_caboose) in caboose_responses {
+        inventory.get_mut(&id).unwrap().caboose = Some(sp_caboose);
     }
 
     inventory_changed
+}
+
+// Container for details of an SP we have to fetch with separate MGS requests
+// from the main `sp_list()`.
+#[derive(Debug)]
+struct SpDetails {
+    id: SpIdentifier,
+    caboose: Option<SpComponentCaboose>,
+    components: Option<Vec<SpComponentInfo>>,
+}
+
+impl SpDetails {
+    async fn fetch(
+        client: gateway_client::Client,
+        id: SpIdentifier,
+        log: Logger,
+    ) -> Self {
+        // Create futures to fetch both the component list and the caboose.
+        let components = client.sp_component_list(id.type_, id.slot);
+        let caboose = client.sp_component_caboose_get(
+            id.type_,
+            id.slot,
+            SpComponent::SP_ITSELF.const_as_str(),
+        );
+
+        // Wait for both futures, then unpack the results.
+        let (components_res, caboose_res) = futures::join!(components, caboose);
+        let components = match components_res {
+            Ok(val) => Some(val.into_inner().components),
+            Err(err) => {
+                warn!(
+                    log, "Failed to get component list for sp";
+                    "sp" => ?id,
+                    "err" => %err,
+                );
+                None
+            }
+        };
+        let caboose = match caboose_res {
+            Ok(val) => Some(val.into_inner()),
+            Err(err) => {
+                warn!(
+                    log, "Failed to get caboose for sp";
+                    "sp" => ?id,
+                    "err" => %err,
+                );
+                None
+            }
+        };
+
+        Self { id, components, caboose }
+    }
 }
 
 async fn poll_sps(

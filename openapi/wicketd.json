@@ -920,6 +920,29 @@
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
+        ]
+      },
       "SpComponentInfo": {
         "description": "Overview of a single SP component.",
         "type": "object",
@@ -1182,6 +1205,14 @@
         "description": "SP related data",
         "type": "object",
         "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
           "components": {
             "nullable": true,
             "type": "array",

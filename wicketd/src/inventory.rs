@@ -5,7 +5,7 @@
 //! Rack inventory for display by wicket
 
 use gateway_client::types::{
-    SpComponentInfo, SpIdentifier, SpIgnition, SpState,
+    SpComponentCaboose, SpComponentInfo, SpIdentifier, SpIgnition, SpState,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -18,6 +18,7 @@ pub struct SpInventory {
     pub ignition: SpIgnition,
     pub state: SpState,
     pub components: Option<Vec<SpComponentInfo>>,
+    pub caboose: Option<SpComponentCaboose>,
 }
 
 impl SpInventory {
@@ -29,7 +30,7 @@ impl SpInventory {
         ignition: SpIgnition,
         state: SpState,
     ) -> SpInventory {
-        SpInventory { id, ignition, state, components: None }
+        SpInventory { id, ignition, state, components: None, caboose: None }
     }
 }
 
