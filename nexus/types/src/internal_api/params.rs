@@ -10,7 +10,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
@@ -157,7 +156,9 @@ pub struct DatasetPutRequest {
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
+    // XXX-dap case of these
     InternalDNS,
+    InternalDNSConfig,
     Nexus {
         // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
         // While it's true that Nexus will only run with a single address,
@@ -175,6 +176,7 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
+            InternalDNSConfig => "internal_dns_config",
             InternalDNS => "internal_dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
@@ -193,7 +195,7 @@ pub struct ServicePutRequest {
     pub sled_id: Uuid,
 
     /// Address on which a service is responding to requests.
-    pub address: Ipv6Addr,
+    pub address: SocketAddrV6,
 
     /// Type of service being inserted.
     pub kind: ServiceKind,

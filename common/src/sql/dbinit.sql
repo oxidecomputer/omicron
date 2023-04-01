@@ -108,12 +108,15 @@ CREATE INDEX ON omicron.public.sled (
  */
 
 CREATE TYPE omicron.public.service_kind AS ENUM (
+  'crucible_pantry',
+  'dendrite',
+  'external_dns_config',
+  'external_dns',
+  'internal_dns_config',
   'internal_dns',
   'nexus',
   'oximeter',
-  'dendrite',
-  'tfport',
-  'crucible_pantry'
+  'tfport'
 );
 
 CREATE TABLE omicron.public.service (
@@ -126,13 +129,21 @@ CREATE TABLE omicron.public.service (
     sled_id UUID NOT NULL,
     /* The IP address of the service. */
     ip INET NOT NULL,
+    /* The UDP or TCP port on which the service listens. */
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     /* Indicates the type of service. */
     kind omicron.public.service_kind NOT NULL
 );
 
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
-    sled_id
+    sled_id,
+    id
+);
+
+CREATE INDEX ON omicron.public.service (
+    kind,
+    id
 );
 
 -- Extended information for services where "service.kind = nexus"

@@ -2266,6 +2266,20 @@
           {
             "type": "object",
             "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s_config"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "content": {
                 "type": "object",
                 "properties": {
@@ -2354,8 +2368,7 @@
         "properties": {
           "address": {
             "description": "Address on which a service is responding to requests.",
-            "type": "string",
-            "format": "ipv6"
+            "type": "string"
           },
           "kind": {
             "description": "Type of service being inserted.",

@@ -74,7 +74,9 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
-use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
+use omicron_common::address::{
+    get_sled_address, CRUCIBLE_PANTRY_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -543,7 +545,9 @@ impl ServiceInner {
 
             for zone in &service_request.services {
                 for svc in &zone.services {
-                    let kind = match svc {
+                    // XXX-dap it would be better to plumb the ports from where
+                    // we really determined them rather than assume them here.
+                    match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
                             // NOTE: Eventually, this IP pool will be entirely
                             // user-supplied. For now, however, it's inferred
@@ -564,18 +568,66 @@ impl ServiceInner {
                             };
                             internal_services_ip_pool_ranges.push(range);
 
-                            NexusTypes::ServiceKind::Nexus {
-                                external_address: *external_ip,
-                            }
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NEXUS_INTERNAL_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Nexus {
+                                    external_address: *external_ip,
+                                },
+                            });
                         }
-                        ServiceType::InternalDns { .. } => {
-                            NexusTypes::ServiceKind::InternalDNS
+                        ServiceType::InternalDns {
+                            server_address,
+                            dns_address,
+                        } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: server_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::InternalDNSConfig,
+                            });
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: dns_address.to_string(),
+                                kind: NexusTypes::ServiceKind::InternalDNS,
+                            });
                         }
                         ServiceType::Oximeter => {
-                            NexusTypes::ServiceKind::Oximeter
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    OXIMETER_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Oximeter,
+                            });
                         }
                         ServiceType::CruciblePantry => {
-                            NexusTypes::ServiceKind::CruciblePantry
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CRUCIBLE_PANTRY_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::CruciblePantry,
+                            });
                         }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
@@ -583,15 +635,7 @@ impl ServiceInner {
                                 svc
                             )));
                         }
-                    };
-
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id: zone.id,
-                        sled_id,
-                        // TODO: Should this be a vec, or a single value?
-                        address: zone.addresses[0],
-                        kind,
-                    })
+                    }
                 }
             }
 

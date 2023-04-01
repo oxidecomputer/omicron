@@ -12,7 +12,7 @@ use nexus_db_model::ServiceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::DataPageParams;
-use std::net::IpAddr;
+use std::net::{SocketAddr, SocketAddrV6};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -23,7 +23,7 @@ const MAX_DNS_SERVERS: u32 = 10;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DnsServersList {
-    addresses: Vec<IpAddr>,
+    addresses: Vec<SocketAddr>,
 }
 
 /// Background task that keeps track of the latest list of DNS servers for a DNS
@@ -77,9 +77,11 @@ impl BackgroundTask for DnsServersWatcher {
             };
 
             // Read the latest configuration for this DNS group.
+            // XXX-dap working here: next step is to get sled agent reporting
+            // two services for the DNS servers
             let service_kind = match self.dns_group {
-                DnsGroup::Internal => ServiceKind::InternalDNS,
-                DnsGroup::External => todo!(), // XXX-dap
+                DnsGroup::Internal => ServiceKind::InternalDNSConfig,
+                DnsGroup::External => ServiceKind::ExternalDNSConfig,
             };
 
             let pagparams = DataPageParams {
@@ -118,7 +120,7 @@ impl BackgroundTask for DnsServersWatcher {
             let new_config = DnsServersList {
                 addresses: services
                     .into_iter()
-                    .map(|s| (*s.ip).into())
+                    .map(|s| SocketAddrV6::new(*s.ip, *s.port, 0, 0).into())
                     .collect(),
             };
             let new_addrs_dbg = format!("{:?}", new_config);

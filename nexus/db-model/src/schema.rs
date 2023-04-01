@@ -400,6 +400,7 @@ table! {
 
         sled_id -> Uuid,
         ip -> Inet,
+        port -> Int4,
         kind -> crate::ServiceKindEnum,
     }
 }
