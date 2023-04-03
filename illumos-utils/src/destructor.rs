@@ -61,13 +61,7 @@ impl<T: Deletable> DestructorWorker<T> {
                     }
                 }
                 msg = self.rx.recv() => {
-                    let msg = match msg {
-                        Some(msg) => msg,
-                        // This should only occur if the sender drops
-                        // before closing.
-                        None => Message::Exit,
-                    };
-
+                    let msg = msg.unwrap_or(Message::Exit);
                     match msg {
                         Message::Data(object) => self.enqueue_destroy(object),
                         Message::Exit => {
@@ -160,6 +154,9 @@ impl<T: Deletable> Destructor<T> {
     ///
     /// Consumes "self" to prevent subsequent objects from being enqueued
     /// to the Destructor.
+    ///
+    /// If there is more than one reference to "self", it is returned
+    /// as the Result's error type.
     pub async fn try_close(self) -> Result<(), Self> {
         let handle = {
             let mut inner = self.inner.lock().unwrap();
@@ -374,7 +371,7 @@ mod test {
         drop(obj);
         assert!(destructor.try_close().await.is_ok());
 
-        // Dropping the detructor before the object is fine, if weird.
+        // Dropping the destructor before the object is fine, if weird.
         // It prevents the worker from being "joined" upon.
         let destructor = Destructor::<ObjectDestruction>::new();
         let obj = Object { ctx: Some(()), destructor: destructor.clone() };

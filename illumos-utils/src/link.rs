@@ -29,7 +29,7 @@ pub struct VnicAllocator<DL: VnicSource + 'static> {
     scope: String,
     data_link: DL,
     // Manages dropped Vnics, and repeatedly attempts to delete them.
-    destructor: Destructor<LinkDestruction>,
+    destructor: Destructor<VnicDestruction>,
 }
 
 impl<DL: VnicSource + Clone> VnicAllocator<DL> {
@@ -159,16 +159,16 @@ pub struct Link {
     name: String,
     deleted: bool,
     kind: LinkKind,
-    destructor: Option<Destructor<LinkDestruction>>,
+    destructor: Option<Destructor<VnicDestruction>>,
 }
 
 impl std::fmt::Debug for Link {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Link {{ name: {}, deleted: {}, kind: {:?} }}",
-            self.name, self.deleted, self.kind
-        )
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fmt.debug_struct("Link")
+            .field("name", &self.name)
+            .field("deleted", &self.deleted)
+            .field("kind", &self.kind)
+            .finish()
     }
 }
 
@@ -209,18 +209,18 @@ impl Drop for Link {
     fn drop(&mut self) {
         if let Some(destructor) = self.destructor.take() {
             destructor
-                .enqueue_destroy(LinkDestruction { name: self.name.clone() });
+                .enqueue_destroy(VnicDestruction { name: self.name.clone() });
         }
     }
 }
 
 // Represents the request to destroy a VNIC
-struct LinkDestruction {
+struct VnicDestruction {
     name: String,
 }
 
 #[async_trait::async_trait]
-impl Deletable for LinkDestruction {
+impl Deletable for VnicDestruction {
     async fn delete(&self) -> Result<(), anyhow::Error> {
         Dladm::delete_vnic(&self.name)?;
         Ok(())
