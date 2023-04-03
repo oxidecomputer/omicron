@@ -23,96 +23,57 @@ use std::time::Duration;
 pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> common::Driver {
     let mut driver = common::Driver::new();
 
-    let log_dns_internal =
-        opctx.log.new(o!("dns_group" => format!("{:?}", DnsGroup::Internal)));
-    let log_dns_external =
-        opctx.log.new(o!("dns_group" => format!("{:?}", DnsGroup::External)));
-    let metadata_internal = BTreeMap::from([(
-        "dns_group".to_string(),
-        format!("{:?}", DnsGroup::Internal),
-    )]);
-    let metadata_external = BTreeMap::from([(
-        "dns_group".to_string(),
-        format!("{:?}", DnsGroup::External),
-    )]);
-
-    // Background task: internal DNS config watcher
-    let dns_config_internal = dns_config::DnsConfigWatcher::new(
-        Arc::clone(&datastore),
-        DnsGroup::Internal,
-    );
-    let dns_config_internal_watcher = dns_config_internal.watcher();
-    driver.register(
-        "dns_config_internal",
-        Duration::from_secs(60),
-        Box::new(dns_config_internal),
-        opctx.child(log_dns_internal.clone(), metadata_internal.clone()),
-    );
-
-    // Background task: internal DNS server list watcher
-    let dns_servers_internal = dns_servers::DnsServersWatcher::new(
-        Arc::clone(&datastore),
-        DnsGroup::Internal,
-    );
-    let dns_servers_internal_watcher = dns_servers_internal.watcher();
-    driver.register(
-        "dns_servers_internal",
-        Duration::from_secs(60),
-        Box::new(dns_servers_internal),
-        opctx.child(log_dns_internal.clone(), metadata_internal.clone()),
-    );
-
-    // Background task: internal DNS propagation
-    let dns_propagate_internal = dns_propagation::DnsPropagator::new(
-        dns_config_internal_watcher.clone(),
-        dns_servers_internal_watcher.clone(),
-    );
-    driver.register(
-        "dns_propgation_internal",
-        Duration::from_secs(60),
-        Box::new(dns_propagate_internal),
-        opctx.child(log_dns_internal.clone(), metadata_internal.clone()),
-    );
-
-    // Background task: external DNS config watcher
-    let dns_config_external = dns_config::DnsConfigWatcher::new(
-        Arc::clone(&datastore),
-        DnsGroup::External,
-    );
-    let dns_config_external_watcher = dns_config_external.watcher();
-    driver.register(
-        "dns_config_external",
-        Duration::from_secs(60),
-        Box::new(dns_config_external),
-        opctx.child(log_dns_external.clone(), metadata_external.clone()),
-    );
-
-    // Background task: external DNS server list watcher
-    let dns_servers_external = dns_servers::DnsServersWatcher::new(
-        Arc::clone(&datastore),
-        DnsGroup::External,
-    );
-    let dns_servers_external_watcher = dns_servers_external.watcher();
-    driver.register(
-        "dns_servers_external",
-        Duration::from_secs(60),
-        Box::new(dns_servers_external),
-        opctx.child(log_dns_external.clone(), metadata_external.clone()),
-    );
-
-    // Background task: external DNS propagation
-    let dns_propagate_external = dns_propagation::DnsPropagator::new(
-        dns_config_external_watcher.clone(),
-        dns_servers_external_watcher.clone(),
-    );
-    driver.register(
-        "dns_propagation_external",
-        Duration::from_secs(60),
-        Box::new(dns_propagate_external),
-        opctx.child(log_dns_external.clone(), metadata_external.clone()),
-    );
-
-    // XXX-dap set up hooks to activate the propagator when other stuff changes.
+    init_dns(&mut driver, opctx, datastore.clone(), DnsGroup::Internal);
+    init_dns(&mut driver, opctx, datastore.clone(), DnsGroup::External);
 
     driver
+}
+
+fn init_dns(
+    driver: &mut common::Driver,
+    opctx: &OpContext,
+    datastore: Arc<DataStore>,
+    dns_group: DnsGroup,
+) {
+    let dns_group_name = dns_group.to_string();
+    let log = opctx.log.new(o!("dns_group" => dns_group_name.clone()));
+    let metadata =
+        BTreeMap::from([("dns_group".to_string(), dns_group_name.clone())]);
+
+    // Background task: DNS config watcher
+    let dns_config =
+        dns_config::DnsConfigWatcher::new(Arc::clone(&datastore), dns_group);
+    let dns_config_watcher = dns_config.watcher();
+    driver.register(
+        format!("dns_config_{}", dns_group),
+        Duration::from_secs(60),
+        Box::new(dns_config),
+        opctx.child(log.clone(), metadata.clone()),
+        vec![],
+    );
+
+    // Background task: DNS server list watcher
+    let dns_servers =
+        dns_servers::DnsServersWatcher::new(Arc::clone(&datastore), dns_group);
+    let dns_servers_watcher = dns_servers.watcher();
+    driver.register(
+        format!("dns_servers_{}", dns_group),
+        Duration::from_secs(60),
+        Box::new(dns_servers),
+        opctx.child(log.clone(), metadata.clone()),
+        vec![],
+    );
+
+    // Background task: DNS propagation
+    let dns_propagate = dns_propagation::DnsPropagator::new(
+        dns_config_watcher.clone(),
+        dns_servers_watcher.clone(),
+    );
+    driver.register(
+        format!("dns_propagation_{}", dns_group),
+        Duration::from_secs(60),
+        Box::new(dns_propagate),
+        opctx.child(log.clone(), metadata.clone()),
+        vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
+    );
 }

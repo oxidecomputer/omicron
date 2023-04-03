@@ -23,7 +23,7 @@ const MAX_DNS_SERVERS: u32 = 10;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct DnsServersList {
-    addresses: Vec<SocketAddr>,
+    pub addresses: Vec<SocketAddr>,
 }
 
 /// Background task that keeps track of the latest list of DNS servers for a DNS
@@ -77,8 +77,6 @@ impl BackgroundTask for DnsServersWatcher {
             };
 
             // Read the latest configuration for this DNS group.
-            // XXX-dap working here: next step is to get sled agent reporting
-            // two services for the DNS servers
             let service_kind = match self.dns_group {
                 DnsGroup::Internal => ServiceKind::InternalDNSConfig,
                 DnsGroup::External => ServiceKind::ExternalDNSConfig,

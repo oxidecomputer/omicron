@@ -6,10 +6,15 @@
 
 use super::common::BackgroundTask;
 use super::dns_servers::DnsServersList;
+use anyhow::Context;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
+use futures::stream;
+use futures::stream::TryStreamExt;
 use futures::FutureExt;
+use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use std::net::SocketAddr;
 use tokio::sync::watch;
 
 /// Background task that propagates DNS configuration to DNS servers
@@ -111,5 +116,47 @@ async fn dns_propagate(
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
 ) -> anyhow::Result<()> {
-    todo!();
+    let limit = Some(5); // XXX-dap
+                         // XXX-dap ideally would report all problems
+    stream::iter(&servers.addresses)
+        .map(Ok::<_, anyhow::Error>)
+        .try_for_each_concurrent(limit, |server_addr| async move {
+            dns_propagate_one(opctx, log, dns_config, server_addr).await
+        })
+        .await
+}
+
+async fn dns_propagate_one(
+    opctx: &OpContext,
+    log: &slog::Logger,
+    dns_config: &DnsConfigParams,
+    server_addr: &SocketAddr,
+) -> anyhow::Result<()> {
+    let url = format!("http://{}", server_addr);
+    let log = log.new(o!("dns_server_url" => url.clone()));
+    let client = dns_service_client::Client::new(&url, log.clone());
+
+    // XXX-dap It might be useful to distinguish between permanent and transient
+    // errors only to control how hard we back off.
+    let result = client.dns_config_put(dns_config).await.with_context(|| {
+        format!(
+            "failed to propagate DNS generation {} to server {}",
+            dns_config.generation,
+            server_addr.to_string()
+        )
+    });
+
+    match result {
+        Err(error) => {
+            warn!(log, "{:#}", error);
+            Err(error)
+        }
+        Ok(_) => {
+            info!(
+                log,
+                "DNS server now at generation {}", dns_config.generation
+            );
+            Ok(())
+        }
+    }
 }

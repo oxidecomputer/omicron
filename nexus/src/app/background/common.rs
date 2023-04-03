@@ -7,6 +7,9 @@
 use chrono::DateTime;
 use chrono::Utc;
 use futures::future::BoxFuture;
+use futures::stream::FuturesUnordered;
+use futures::FutureExt;
+use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -38,7 +41,7 @@ pub struct Driver {
 }
 
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub struct TaskHandle(&'static str);
+pub struct TaskHandle(String);
 
 impl Driver {
     pub fn new() -> Driver {
@@ -47,26 +50,27 @@ impl Driver {
 
     pub fn register(
         &mut self,
-        name: &'static str,
+        name: String,
         period: Duration,
         imp: Box<dyn BackgroundTask>,
         opctx: OpContext,
+        watchers: Vec<Box<dyn GenericWatcher>>,
     ) -> TaskHandle {
         let (status_tx, status_rx) =
             watch::channel(TaskStatus { current: None, last: None });
         let notify = Arc::new(Notify::new());
 
-        let log = opctx.log.new(o!("background_task" => name));
+        let log = opctx.log.new(o!("background_task" => name.clone()));
         let opctx = opctx.child(
             log,
-            BTreeMap::from([("background_task".to_string(), name.to_string())]),
+            BTreeMap::from([("background_task".to_string(), name.clone())]),
         );
         let task_exec =
             TaskExec::new(period, imp, Arc::clone(&notify), opctx, status_tx);
-        let tokio_task = tokio::task::spawn(task_exec.run());
+        let tokio_task = tokio::task::spawn(task_exec.run(watchers));
 
         let task = Task { status: status_rx, tokio_task, notify };
-        if self.tasks.insert(TaskHandle(name), task).is_some() {
+        if self.tasks.insert(TaskHandle(name.clone()), task).is_some() {
             panic!("started two background tasks called {:?}", name);
         }
 
@@ -134,11 +138,14 @@ impl TaskExec {
         TaskExec { period, imp, notify, opctx, status_tx, iteration: 0 }
     }
 
-    async fn run(mut self) {
+    async fn run(mut self, mut deps: Vec<Box<dyn GenericWatcher>>) {
         let mut interval = tokio::time::interval(self.period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
+            let mut dependencies: FuturesUnordered<_> =
+                deps.iter_mut().map(|w| w.wait_for_change()).collect();
+
             tokio::select! {
                 _ = interval.tick() => {
                     self.activate(ActivationReason::Timeout).await;
@@ -146,6 +153,10 @@ impl TaskExec {
 
                 _ = self.notify.notified() => {
                     self.activate(ActivationReason::Signaled).await;
+                }
+
+                _ = dependencies.next(), if dependencies.len() > 0 => {
+                    self.activate(ActivationReason::Dependency).await;
                 }
             }
         }
@@ -206,6 +217,7 @@ impl TaskExec {
 pub enum ActivationReason {
     Signaled,
     Timeout,
+    Dependency,
 }
 
 #[derive(Clone, Debug)]
@@ -228,4 +240,18 @@ pub struct LastResult {
     pub start_time: DateTime<Utc>,
     pub elapsed: Duration,
     pub value: serde_json::Value,
+}
+
+pub trait GenericWatcher: Send {
+    fn wait_for_change<'a>(
+        &'a mut self,
+    ) -> BoxFuture<'a, Result<(), watch::error::RecvError>>;
+}
+
+impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
+    fn wait_for_change<'a>(
+        &'a mut self,
+    ) -> BoxFuture<'a, Result<(), watch::error::RecvError>> {
+        async { self.changed().await }.boxed()
+    }
 }
