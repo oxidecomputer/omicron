@@ -274,7 +274,7 @@ source.repo = "maghemite"
 source.commit = "ecd9dd42e97ec395fa2b8fbdf9e7f017c6bd36e6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "c365c25f87cb13d2960dc196cd18849dc99bbba0f992f7cb4168feff47fa855d"
+source.sha256 = "6d8544b46f4aaf2c873583ab07c110d61c699cb25d070c77e9083fcc28820131"
 output.type = "zone"
 
 [package.dendrite-stub]
