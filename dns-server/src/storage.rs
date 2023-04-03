@@ -125,7 +125,7 @@ pub struct Store {
     db: Arc<sled::Db>,
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
-    poisoned: AtomicBool,
+    poisoned: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -186,6 +186,7 @@ impl Store {
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
+            poisoned: Arc::new(AtomicBool::new(false)),
         };
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
@@ -727,35 +728,38 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
         // the UpdateGuard without finishing it.  That's why this is the place
         // to identify and report the problem.
         //
-        // The first thing we'll do is unconditionally poison the store so that
-        // any subsequent attempt to update it will fail explicitly.
-        self.store.poisoned.store(true, Ordering::SeqCst);
+        // The first thing we'll do is poison the store so that any subsequent
+        // attempt to update it will fail explicitly.
+        if !self.finished {
+            self.store.poisoned.store(true, Ordering::SeqCst);
 
-        // Now, in the case above where a code path just forgot to finish the
-        // UpdateGuard, we want to panic right here.  That makes this problem
-        // maximally debuggable: it points precisely to where the missed call
-        // was.  But it's also possible that we got here because the current
-        // thread is panicking, causing the UpdateGuard to be dropped.  There's
-        // no point in panicking again because there's no bug here.  Plus, it's
-        // quite disruptive to panic while panicking.  So we don't want to panic
-        // if we're already panicking.
-        //
-        // TODO-cleanup Better than all this would be to enforce at compile-time
-        // that the UpdateGuard gets finished before it gets dropped.  Maybe
-        // better than the above would be to have `drop` of the UpdateGuard
-        // do the same thing as `finish()`, similar to `MutexGuard`.  This is
-        // tricky because:
-        // - we cannot take the async lock from the synchronous Drop function
-        // - it's risky to use a std Mutex since taking the lock could block the
-        //   executor; plus, if the lock were poisoned due to a panic, we'd
-        //   panic while panicking again
-        // - it doesn't seem like we can use `blocking_lock()` because we _are_
-        //   in an async context (i.e., running as part of a task in an async
-        //   runtime), even if we're not in an async block
-        // - we could use a semaphore like tokio's MutexGuard does, but that
-        //   involves unsafe code
-        if !self.finished && !std::thread::panicking() {
-            panic!("dropped UpdateGuard without finishing update");
+            // Now, in the case above where a code path just forgot to finish
+            // the UpdateGuard, we want to panic right here.  That makes this
+            // problem maximally debuggable: it points precisely to where the
+            // missed call was.  But it's also possible that we got here because
+            // the current thread is panicking, causing the UpdateGuard to be
+            // dropped.  There's no point in panicking again because there's no
+            // bug here.  Plus, it's quite disruptive to panic while panicking.
+            // So we don't want to panic if we're already panicking.
+            //
+            // TODO-cleanup Better than all this would be to enforce at
+            // compile-time that the UpdateGuard gets finished before it gets
+            // dropped.  Maybe better than the above would be to have `drop` of
+            // the UpdateGuard do the same thing as `finish()`, similar to
+            // `MutexGuard`.  This is tricky because:
+            // - we cannot take the async lock from the synchronous Drop
+            //   function
+            // - it's risky to use a std Mutex since taking the lock could block
+            //   the executor; plus, if the lock were poisoned due to a panic,
+            //   we'd panic while panicking again
+            // - it doesn't seem like we can use `blocking_lock()` because we
+            //   _are_ in an async context (i.e., running as part of a task in
+            //   an async runtime), even if we're not in an async block
+            // - we could use a semaphore like tokio's MutexGuard does, but that
+            //   involves unsafe code
+            if !std::thread::panicking() {
+                panic!("dropped UpdateGuard without finishing update");
+            }
         }
     }
 }
