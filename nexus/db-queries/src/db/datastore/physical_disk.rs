@@ -101,14 +101,22 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
         let disk = dsl::physical_disk
-            .filter(dsl::vendor.eq(vendor))
-            .filter(dsl::serial.eq(serial))
-            .filter(dsl::model.eq(model))
+            .filter(dsl::vendor.eq(vendor.clone()))
+            .filter(dsl::serial.eq(serial.clone()))
+            .filter(dsl::model.eq(model.clone()))
             .select(PhysicalDisk::as_select())
             .first_async(self.pool())
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::PhysicalDisk,
+                        LookupType::ByCompositeId(
+                            format!("vendor: {vendor}, serial: {serial}, id: {model}")
+                        ),
+                    ),
+                )
             })?;
         Ok(disk)
     }

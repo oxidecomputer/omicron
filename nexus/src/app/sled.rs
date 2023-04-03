@@ -159,7 +159,9 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Upserts a physical disk into the database, updating it if it already exists.
+    /// Removes a physical disk from the database.
+    ///
+    /// TODO: Remove Zpools and datasets contained within this disk.
     pub async fn delete_physical_disk(
         &self,
         opctx: &OpContext,
