@@ -60,60 +60,30 @@
 //!
 //! This module provides types used to assemble that configuration.
 
-use crate::names::{BackendName, ServiceName, DNS_ZONE};
+use crate::names::{ServiceName, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
-/// Describes the DNS name that will be used for a control plane service
-///
-/// This does not describe the SRV record itself.
-#[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
-pub enum SRV {
-    /// A service identified and accessed by name, such as "nexus", "CRDB", etc.
-    ///
-    /// This is used in cases where services are interchangeable.
-    Service(ServiceName),
-
-    /// A service identified by name and a unique identifier.
-    ///
-    /// This is used in cases where services are not interchangeable, such as
-    /// for the Sled agent.
-    Backend(BackendName, Uuid),
-}
-
-impl SRV {
-    /// Returns the DNS name for this service, ignoring the zone part of the DNS
-    /// name
-    pub(crate) fn dns_name(&self) -> String {
-        match &self {
-            SRV::Service(name) => format!("_{}._tcp", name),
-            SRV::Backend(name, id) => format!("_{}._tcp.{}", name, id),
-        }
-    }
-}
-
-/// Describes the DNS name used for a control plane host
-///
-/// This does not describe the AAA record itself.
+/// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum AAAA {
-    /// Identifies an AAAA record for a sled.
+enum Host {
+    /// Used to construct an AAAA record for a sled.
     Sled(Uuid),
 
-    /// Identifies an AAAA record for a zone within a sled.
+    /// Used to construct an AAAA record for a zone on a sled.
     Zone(Uuid),
 }
 
-impl AAAA {
+impl Host {
     /// Returns the DNS name for this host, ignoring the zone part of the DNS
     /// name
     pub(crate) fn dns_name(&self) -> String {
         match &self {
-            AAAA::Sled(id) => format!("{}.sled", id),
-            AAAA::Zone(id) => format!("{}.host", id),
+            Host::Sled(id) => format!("{}.sled", id),
+            Host::Zone(id) => format!("{}.host", id),
         }
     }
 }
@@ -153,14 +123,14 @@ pub struct DnsConfigBuilder {
     zones: BTreeMap<Uuid, Ipv6Addr>,
 
     /// set of services (see module-level comment) that have been configured so
-    /// far, mapping the name of the service (encapsulated in an [`SRV`]) to the
-    /// backends configured for that service.  The set of backends is
+    /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
+    /// to the backends configured for that service.  The set of backends is
     /// represented as a mapping from the zone's uuid to the port on which it's
     /// running the service.
-    service_instances_zones: BTreeMap<SRV, BTreeMap<Uuid, u16>>,
+    service_instances_zones: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
 
     /// similar to service_instances_zones, but for services that run on sleds
-    service_instances_sleds: BTreeMap<SRV, BTreeMap<Uuid, u16>>,
+    service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -241,7 +211,7 @@ impl DnsConfigBuilder {
     /// backend for this service.
     pub fn service_backend_zone(
         &mut self,
-        service: SRV,
+        service: ServiceName,
         zone: &Zone,
         port: u16,
     ) -> anyhow::Result<()> {
@@ -281,7 +251,7 @@ impl DnsConfigBuilder {
     /// backend for this service.
     pub fn service_backend_sled(
         &mut self,
-        service: SRV,
+        service: ServiceName,
         sled: &Sled,
         port: u16,
     ) -> anyhow::Result<()> {
@@ -318,13 +288,13 @@ impl DnsConfigBuilder {
     pub fn build(self) -> DnsConfigParams {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
-            let name = AAAA::Sled(sled_id).dns_name();
+            let name = Host::Sled(sled_id).dns_name();
             (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone_id, zone_ip)| {
-            let name = AAAA::Zone(zone_id).dns_name();
+            let name = Host::Zone(zone_id).dns_name();
             (name, vec![DnsRecord::Aaaa(zone_ip)])
         });
 
@@ -342,7 +312,7 @@ impl DnsConfigBuilder {
                             port,
                             target: format!(
                                 "{}.{}",
-                                AAAA::Zone(zone_id).dns_name(),
+                                Host::Zone(zone_id).dns_name(),
                                 DNS_ZONE
                             ),
                         })
@@ -365,7 +335,7 @@ impl DnsConfigBuilder {
                             port,
                             target: format!(
                                 "{}.{}",
-                                AAAA::Sled(sled_id).dns_name(),
+                                Host::Sled(sled_id).dns_name(),
                                 DNS_ZONE
                             ),
                         })
@@ -395,62 +365,43 @@ impl DnsConfigBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{BackendName, DnsConfigBuilder, ServiceName, AAAA, SRV};
+    use super::{DnsConfigBuilder, Host, ServiceName};
     use crate::DNS_ZONE;
     use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
     use uuid::Uuid;
 
     #[test]
     fn display_srv_service() {
+        assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
+        assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
+        assert_eq!(ServiceName::InternalDNS.dns_name(), "_nameservice._tcp",);
+        assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
+        assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
+        assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);
         assert_eq!(
-            SRV::Service(ServiceName::Clickhouse).dns_name(),
-            "_clickhouse._tcp",
-        );
-        assert_eq!(
-            SRV::Service(ServiceName::Cockroach).dns_name(),
-            "_cockroach._tcp",
-        );
-        assert_eq!(
-            SRV::Service(ServiceName::InternalDNS).dns_name(),
-            "_internalDNS._tcp",
-        );
-        assert_eq!(SRV::Service(ServiceName::Nexus).dns_name(), "_nexus._tcp",);
-        assert_eq!(
-            SRV::Service(ServiceName::Oximeter).dns_name(),
-            "_oximeter._tcp",
-        );
-        assert_eq!(
-            SRV::Service(ServiceName::Dendrite).dns_name(),
-            "_dendrite._tcp",
-        );
-        assert_eq!(
-            SRV::Service(ServiceName::CruciblePantry).dns_name(),
+            ServiceName::CruciblePantry.dns_name(),
             "_crucible-pantry._tcp",
         );
-    }
-
-    #[test]
-    fn display_srv_backend() {
         let uuid = Uuid::nil();
         assert_eq!(
-            SRV::Backend(BackendName::Crucible, uuid).dns_name(),
+            ServiceName::Crucible(uuid).dns_name(),
             "_crucible._tcp.00000000-0000-0000-0000-000000000000",
         );
         assert_eq!(
-            SRV::Backend(BackendName::SledAgent, uuid).dns_name(),
+            ServiceName::SledAgent(uuid).dns_name(),
             "_sledagent._tcp.00000000-0000-0000-0000-000000000000",
         );
     }
 
     #[test]
-    fn display_aaaa() {
+    fn display_hosts() {
         let uuid = Uuid::nil();
         assert_eq!(
-            AAAA::Sled(uuid).dns_name(),
+            Host::Sled(uuid).dns_name(),
             "00000000-0000-0000-0000-000000000000.sled",
         );
         assert_eq!(
-            AAAA::Zone(uuid).dns_name(),
+            Host::Zone(uuid).dns_name(),
             "00000000-0000-0000-0000-000000000000.host",
         );
     }
@@ -512,37 +463,17 @@ mod test {
 
             // A service with two backends on two zones using two different
             // ports
-            b.service_backend_zone(
-                SRV::Service(ServiceName::Nexus),
-                &zone1,
-                123,
-            )
-            .unwrap();
-            b.service_backend_zone(
-                SRV::Service(ServiceName::Nexus),
-                &zone2,
-                124,
-            )
-            .unwrap();
+            b.service_backend_zone(ServiceName::Nexus, &zone1, 123).unwrap();
+            b.service_backend_zone(ServiceName::Nexus, &zone2, 124).unwrap();
 
             // Another service, using one of the same zones (so the same zone is
             // used in two services)
-            b.service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone2,
-                125,
-            )
-            .unwrap();
-            b.service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone3,
-                126,
-            )
-            .unwrap();
+            b.service_backend_zone(ServiceName::Oximeter, &zone2, 125).unwrap();
+            b.service_backend_zone(ServiceName::Oximeter, &zone3, 126).unwrap();
 
             // A sharded service
             b.service_backend_sled(
-                SRV::Backend(BackendName::SledAgent, sled1_uuid),
+                ServiceName::SledAgent(sled1_uuid),
                 &sled1,
                 123,
             )
@@ -621,22 +552,14 @@ mod test {
         let sled = builder1.host_sled(sled1_uuid, SLED1_IP).unwrap();
         let mut builder2 = DnsConfigBuilder::new();
         let error = builder2
-            .service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone,
-                123,
-            )
+            .service_backend_zone(ServiceName::Oximeter, &zone, 123)
             .unwrap_err();
         assert_eq!(
             error.to_string(),
             "zone 001de000-c04e-4000-8000-000000000001 has not been defined"
         );
         let error = builder2
-            .service_backend_sled(
-                SRV::Service(ServiceName::Oximeter),
-                &sled,
-                123,
-            )
+            .service_backend_sled(ServiceName::Oximeter, &sled, 123)
             .unwrap_err();
         assert_eq!(
             error.to_string(),
@@ -648,18 +571,10 @@ mod test {
         let mut builder = DnsConfigBuilder::new();
         let zone = builder.host_zone(zone1_uuid, ZONE1_IP).unwrap();
         builder
-            .service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone,
-                123,
-            )
+            .service_backend_zone(ServiceName::Oximeter, &zone, 123)
             .unwrap();
         let error = builder
-            .service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone,
-                123,
-            )
+            .service_backend_zone(ServiceName::Oximeter, &zone, 123)
             .unwrap_err();
         assert_eq!(
             error.to_string(),
@@ -668,11 +583,7 @@ mod test {
             (previously port 123, now 123)"
         );
         let error = builder
-            .service_backend_zone(
-                SRV::Service(ServiceName::Oximeter),
-                &zone,
-                456,
-            )
+            .service_backend_zone(ServiceName::Oximeter, &zone, 456)
             .unwrap_err();
         assert_eq!(
             error.to_string(),

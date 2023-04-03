@@ -12,3 +12,4 @@ smf/nexus/root.json
 core
 *.vdev
 debug.out
+rusty-tags.vi
