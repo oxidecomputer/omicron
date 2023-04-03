@@ -26,6 +26,8 @@ impl_enum_type!(
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Tfport => b"tfport"
+    NTP => b"ntp"
+    DNSClient => b"dns_client"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -67,6 +69,10 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::Tfport => ServiceKind::Tfport,
             internal_api::params::ServiceKind::CruciblePantry => {
                 ServiceKind::CruciblePantry
+            }
+            internal_api::params::ServiceKind::NTP => ServiceKind::NTP,
+            internal_api::params::ServiceKind::DNSClient => {
+                ServiceKind::DNSClient
             }
         }
     }

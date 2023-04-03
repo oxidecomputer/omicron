@@ -183,6 +183,13 @@
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
         "properties": {
+          "dns_servers": {
+            "description": "The external DNS server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "gateway": {
             "description": "Internet gateway information.",
             "allOf": [
@@ -196,6 +203,13 @@
             "type": "string",
             "format": "ip"
           },
+          "ntp_servers": {
+            "description": "The external NTP server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "rack_secret_threshold": {
             "description": "The minimum number of sleds required to unlock the rack secret.\n\nIf this value is less than 2, no rack secret will be created on startup; this is the typical case for single-server test/development.",
             "type": "integer",
@@ -208,8 +222,10 @@
           }
         },
         "required": [
+          "dns_servers",
           "gateway",
           "nexus_external_address",
+          "ntp_servers",
           "rack_secret_threshold",
           "rack_subnet"
         ]

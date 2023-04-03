@@ -2359,6 +2359,34 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "n_t_p"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "d_n_s_client"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },

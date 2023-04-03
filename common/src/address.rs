@@ -45,6 +45,8 @@ pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
+pub const NTP_PORT: u16 = 123;
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
