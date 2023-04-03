@@ -49,6 +49,14 @@ impl SimInstance {
             Some(p) => InstanceState::from(*p).0,
         }
     }
+
+    /// Indicates whether there is a reboot transition pending for this
+    /// instance.
+    fn reboot_pending(&self) -> bool {
+        self.propolis_queue
+            .iter()
+            .any(|s| matches!(s, PropolisInstanceState::Rebooting))
+    }
 }
 
 #[async_trait]
@@ -93,10 +101,7 @@ impl Simulatable for SimInstance {
                 | ApiInstanceState::Running
                 | ApiInstanceState::Rebooting
                 | ApiInstanceState::Migrating => {}
-                ApiInstanceState::Stopping
-                | ApiInstanceState::Stopped
-                | ApiInstanceState::Failed
-                | ApiInstanceState::Destroyed => {
+                ApiInstanceState::Stopping | ApiInstanceState::Stopped => {
                     // TODO: Normally, Propolis forbids direct transitions from
                     // a stopped state back to a running state. Instead, Nexus
                     // creates a new Propolis and sends state change requests to
@@ -113,7 +118,9 @@ impl Simulatable for SimInstance {
                     self.propolis_queue
                         .push_back(PropolisInstanceState::Running);
                 }
-                ApiInstanceState::Repairing => {
+                ApiInstanceState::Repairing
+                | ApiInstanceState::Failed
+                | ApiInstanceState::Destroyed => {
                     return Err(Error::invalid_request(&format!(
                         "can't request state Running with terminal state {}",
                         self.terminal_state()
@@ -147,11 +154,16 @@ impl Simulatable for SimInstance {
             },
             InstanceStateRequested::Reboot => match self.terminal_state() {
                 ApiInstanceState::Running => {
-                    self.state.transition(ApiInstanceState::Rebooting);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Rebooting);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Running);
+                    // Further requests to reboot are ignored if the instance
+                    // is currently rebooting or about to reboot (though in this
+                    // simulation reboot
+                    if !self.reboot_pending() {
+                        self.state.transition(ApiInstanceState::Rebooting);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Rebooting);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Running);
+                    }
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
@@ -194,6 +206,12 @@ impl Simulatable for SimInstance {
 
     fn desired(&self) -> Option<Self::RequestedState> {
         self.propolis_queue.back().map(|terminal| match terminal {
+            // State change requests may queue these states as intermediate
+            // states, but the simulation (and the tests that rely on it) is
+            // currently not expected to come to rest in any of these states.
+            //
+            // This is an internal invariant of the current simulation; panic
+            // to assert it here.
             PropolisInstanceState::Creating
             | PropolisInstanceState::Starting
             | PropolisInstanceState::Migrating

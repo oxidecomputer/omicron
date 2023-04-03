@@ -160,7 +160,7 @@ impl<S: Simulatable> SimObject<S> {
     }
 }
 
-/// The mdoes of operation for the "poke" operation.
+/// The modes of operation for the "poke" operation.
 pub enum PokeMode {
     /// Make the simulated object take a single step.
     SingleStep,
