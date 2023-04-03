@@ -161,24 +161,31 @@ impl<T: Deletable> Destructor<T> {
     /// Consumes "self" to prevent subsequent objects from being enqueued
     /// to the Destructor.
     pub async fn try_close(self) -> Result<(), Self> {
-        let mut inner = self.inner.lock().unwrap();
-        if inner.handle.is_none() {
-            return Ok(());
-        }
-        if Arc::strong_count(&self.inner) != 1 {
-            drop(inner);
-            return Err(self);
-        }
-        // Unwrap safety: the handle must be "Some", so we only get here if the
-        // DestructorWorker is still running.
-        //
-        // This relies on the assumption that "Exit" is the only way to stop the
-        // worker.
-        inner.tx.send(Message::Exit).map_err(|err| err.to_string()).unwrap();
+        let handle = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.handle.is_none() {
+                return Ok(());
+            }
+            if Arc::strong_count(&self.inner) != 1 {
+                drop(inner);
+                return Err(self);
+            }
+            // Unwrap safety: the handle must be "Some", so we only get here if the
+            // DestructorWorker is still running.
+            //
+            // This relies on the assumption that "Exit" is the only way to stop the
+            // worker.
+            inner
+                .tx
+                .send(Message::Exit)
+                .map_err(|err| err.to_string())
+                .unwrap();
 
-        // Unwrap safety: we validated "inner.handle.is_none()" was false
-        // earlier, under a Mutex.
-        let _ = inner.handle.take().unwrap().await;
+            // Unwrap safety: we validated "inner.handle.is_none()" was false
+            // earlier, under a Mutex.
+            inner.handle.take().unwrap()
+        };
+        let _ = handle.await;
         Ok(())
     }
 }
@@ -261,11 +268,8 @@ mod test {
         drop(obj);
         // The object may or may not be destroyed until the destructor is fully
         // closed.
-        loop {
-            match destructor.try_close().await {
-                Err(d) => destructor = d,
-                Ok(()) => break,
-            };
+        while let Err(d) = destructor.try_close().await {
+            destructor = d;
         }
         assert!(*deleted.lock().unwrap());
     }
@@ -315,11 +319,8 @@ mod test {
         drop(obj);
         // The object may or may not be destroyed until the destructor is fully
         // closed.
-        loop {
-            match destructor.try_close().await {
-                Err(d) => destructor = d,
-                Ok(()) => break,
-            };
+        while let Err(d) = destructor.try_close().await {
+            destructor = d;
         }
         assert!(*delete_count.lock().unwrap() == 3);
     }
