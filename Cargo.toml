@@ -154,7 +154,7 @@ expectorate = "1.0.6"
 fatfs = "0.3.6"
 flate2 = "1.0.25"
 fs-err = "2.9.0"
-futures = "0.3.27"
+futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "2dcc63c645005a7184ba754b5c42c341a0777c66" }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2dcc63c645005a7184ba754b5c42c341a0777c66" }
