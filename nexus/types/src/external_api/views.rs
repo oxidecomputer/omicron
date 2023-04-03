@@ -337,6 +337,19 @@ pub struct User {
     pub silo_id: Uuid,
 }
 
+// SESSION
+
+// Add silo name to User because the console needs to display it
+/// Info about the current user
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct CurrentUser {
+    #[serde(flatten)]
+    pub user: User,
+
+    /** Name of the silo to which this user belongs. */
+    pub silo_name: Name,
+}
+
 // SILO GROUPS
 
 /// Client view of a [`Group`]
@@ -402,10 +415,6 @@ pub struct DeviceAuthResponse {
     /// The URI should be short and easy to remember as end users
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
-
-    /// A verification URI that includes the `user_code`,
-    /// which is designed for non-textual transmission.
-    pub verification_uri_complete: String,
 
     /// The lifetime in seconds of the `device_code` and `user_code`.
     pub expires_in: u16,

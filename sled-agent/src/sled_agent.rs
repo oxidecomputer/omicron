@@ -11,7 +11,7 @@ use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, Zpool,
+    InstanceRuntimeStateRequested, ServiceEnsureBody, TimeSync, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -321,7 +321,9 @@ impl SledAgent {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
 
-        if self.inner.hardware.is_scrimlet_driver_loaded() {
+        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
+
+        if scrimlet {
             let switch_zone_ip = Some(self.inner.switch_zone_ip());
             if let Err(e) =
                 self.inner.services.activate_switch(switch_zone_ip).await
@@ -420,8 +422,8 @@ impl SledAgent {
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped exponential
-            // backoff.
+            // until it succeeds. We retry with an randomized, capped
+            // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
             // return a permanent error from the `notify_nexus` closure.
@@ -582,5 +584,10 @@ impl SledAgent {
             .firewall_rules_ensure(rules)
             .await
             .map_err(Error::from)
+    }
+    //
+    /// Gets the sled's current time synchronization state
+    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        self.inner.services.timesync_get().await.map_err(Error::from)
     }
 }

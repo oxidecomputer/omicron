@@ -165,6 +165,12 @@ checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 
 [[package]]
 name = "arrayvec"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
+
+[[package]]
+name = "arrayvec"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
@@ -528,7 +534,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c2f0dc9a68c6317d884f97cc36cf5a3d20ba14ce404227df55e1af708ab04bc"
 dependencies = [
  "arrayref",
- "arrayvec",
+ "arrayvec 0.7.2",
  "constant_time_eq 0.2.4",
 ]
 
@@ -1237,6 +1243,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c063cd8cc95f5c377ed0d4b49a4b21f632396ff690e8470c29b3359b346984b"
 dependencies = [
  "cfg-if 1.0.0",
+]
+
+[[package]]
+name = "crossterm"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab9f7409c70a38a56216480fba371ee460207dd8926ccf5b4160591759559170"
+dependencies = [
+ "bitflags 1.3.2",
+ "crossterm_winapi",
+ "libc",
+ "mio",
+ "parking_lot 0.12.1",
+ "serde",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
 ]
 
 [[package]]
@@ -2118,6 +2141,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fd-lock"
+version = "3.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ef1a30ae415c3a691a4f41afddc2dbcd6d70baf338368d85ebc1e8ed92cedb9"
+dependencies = [
+ "cfg-if 1.0.0",
+ "rustix",
+ "windows-sys 0.45.0",
+]
+
+[[package]]
 name = "ff"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2395,7 +2429,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a15a3f8f58bb7b2fadc94f42a4747022ae6d401d#a15a3f8f58bb7b2fadc94f42a4747022ae6d401d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2dcc63c645005a7184ba754b5c42c341a0777c66#2dcc63c645005a7184ba754b5c42c341a0777c66"
 dependencies = [
  "bitflags 1.3.2",
  "hubpack 0.1.1",
@@ -2410,7 +2444,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=a15a3f8f58bb7b2fadc94f42a4747022ae6d401d#a15a3f8f58bb7b2fadc94f42a4747022ae6d401d"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2dcc63c645005a7184ba754b5c42c341a0777c66#2dcc63c645005a7184ba754b5c42c341a0777c66"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3918,6 +3952,15 @@ name = "normalize-line-endings"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.47.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1df031e117bca634c262e9bd3173776844b6c17a90b3741c9163663b4385af76"
+dependencies = [
+ "windows-sys 0.45.0",
+]
 
 [[package]]
 name = "num-bigint"
@@ -5806,6 +5849,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reedline"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3afcd7fc553d129e9a03d17f15c4b4748baa589570f01a372caae2de81989b8"
+dependencies = [
+ "chrono",
+ "crossterm 0.24.0",
+ "fd-lock",
+ "itertools",
+ "nu-ansi-term",
+ "serde",
+ "strip-ansi-escapes",
+ "strum",
+ "strum_macros",
+ "thiserror",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "ref-cast"
 version = "1.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7137,6 +7200,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strip-ansi-escapes"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "011cbb39cf7c1f62871aea3cc46e5817b0937b49e9447370c93cacbe93a766d8"
+dependencies = [
+ "vte",
+]
+
+[[package]]
 name = "strsim"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8209,6 +8281,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
+name = "utf8parse"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
+
+[[package]]
 name = "uuid"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8257,6 +8335,27 @@ dependencies = [
  "serde-big-array 0.5.1",
  "uint-zigzag",
  "zeroize",
+]
+
+[[package]]
+name = "vte"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cbce692ab4ca2f1f3047fcf732430249c0e971bfdd2b234cf2c47ad93af5983"
+dependencies = [
+ "arrayvec 0.5.2",
+ "utf8parse",
+ "vte_generate_state_changes",
+]
+
+[[package]]
+name = "vte_generate_state_changes"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d257817081c7dffcdbab24b9e62d2def62e2ff7d00b1c20062551e6cccc145ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]
@@ -8463,6 +8562,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "wicket-dbg"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "camino",
+ "ciborium",
+ "clap 4.1.11",
+ "crossterm 0.26.1",
+ "reedline",
+ "serde",
+ "slog",
+ "slog-async",
+ "slog-envlogger",
+ "slog-term",
+ "tokio",
+ "tui",
+ "wicket",
+]
+
+[[package]]
 name = "wicketd"
 version = "0.1.0"
 dependencies = [
@@ -8476,6 +8596,7 @@ dependencies = [
  "display-error-chain",
  "dropshot",
  "expectorate",
+ "flate2",
  "fs-err",
  "futures",
  "gateway-client",
@@ -8492,6 +8613,7 @@ dependencies = [
  "omicron-test-utils",
  "openapi-lint",
  "openapiv3",
+ "rand 0.8.5",
  "reqwest",
  "schemars",
  "serde",
@@ -8501,6 +8623,7 @@ dependencies = [
  "slog-dtrace",
  "snafu",
  "subprocess",
+ "tar",
  "tempfile",
  "thiserror",
  "tokio",

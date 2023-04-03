@@ -12,7 +12,7 @@ use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
 use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -200,7 +200,7 @@ impl Server {
             .host_zone(pantry_zone_id, *pantry_addr.ip())
             .expect("failed to set up DNS");
         dns.service_backend_zone(
-            SRV::Service(ServiceName::CruciblePantry),
+            ServiceName::CruciblePantry,
             &pantry_zone,
             pantry_addr.port(),
         )
