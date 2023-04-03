@@ -715,7 +715,7 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
         // could use a semaphore like tokio's MutexGuard does, but that would
         // involve unsafe code.)
         if !self.finished {
-            panic!("attempted to return early without finishing update!");
+            error!(self.store.log, "DNS UpdateGuard attempted to return early without finishing update!");
         }
     }
 }
