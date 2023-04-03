@@ -295,7 +295,9 @@ impl<'de> Deserialize<'de> for ZpoolName {
             Ok(ZpoolName::new_internal(id))
         } else {
             Err(serde::de::Error::custom(
-                "Bad zpool prefix - must start with 'oxp_'",
+                format!(
+                    "Bad zpool prefix - must start with '{ZPOOL_EXTERNAL_PREFIX}' or '{ZPOOL_INTERNAL_PREFIX}'"
+                )
             ))
         }
     }
@@ -313,8 +315,7 @@ impl FromStr for ZpoolName {
             Ok(ZpoolName::new_internal(id))
         } else {
             Err(format!(
-                "Bad zpool name {}; must start with {}",
-                s, ZPOOL_EXTERNAL_PREFIX
+                "Bad zpool name {s}; must start with '{ZPOOL_EXTERNAL_PREFIX}' or '{ZPOOL_INTERNAL_PREFIX}'",
             ))
         }
     }
