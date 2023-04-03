@@ -243,15 +243,15 @@ pub struct LastResult {
 }
 
 pub trait GenericWatcher: Send {
-    fn wait_for_change<'a>(
-        &'a mut self,
-    ) -> BoxFuture<'a, Result<(), watch::error::RecvError>>;
+    fn wait_for_change(
+        &mut self,
+    ) -> BoxFuture<'_, Result<(), watch::error::RecvError>>;
 }
 
 impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
-    fn wait_for_change<'a>(
-        &'a mut self,
-    ) -> BoxFuture<'a, Result<(), watch::error::RecvError>> {
+    fn wait_for_change(
+        &mut self,
+    ) -> BoxFuture<'_, Result<(), watch::error::RecvError>> {
         async { self.changed().await }.boxed()
     }
 }

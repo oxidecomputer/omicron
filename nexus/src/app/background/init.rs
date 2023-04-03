@@ -24,7 +24,7 @@ pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> common::Driver {
     let mut driver = common::Driver::new();
 
     init_dns(&mut driver, opctx, datastore.clone(), DnsGroup::Internal);
-    init_dns(&mut driver, opctx, datastore.clone(), DnsGroup::External);
+    init_dns(&mut driver, opctx, datastore, DnsGroup::External);
 
     driver
 }
@@ -37,8 +37,7 @@ fn init_dns(
 ) {
     let dns_group_name = dns_group.to_string();
     let log = opctx.log.new(o!("dns_group" => dns_group_name.clone()));
-    let metadata =
-        BTreeMap::from([("dns_group".to_string(), dns_group_name.clone())]);
+    let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
 
     // Background task: DNS config watcher
     let dns_config =
@@ -53,8 +52,7 @@ fn init_dns(
     );
 
     // Background task: DNS server list watcher
-    let dns_servers =
-        dns_servers::DnsServersWatcher::new(Arc::clone(&datastore), dns_group);
+    let dns_servers = dns_servers::DnsServersWatcher::new(datastore, dns_group);
     let dns_servers_watcher = dns_servers.watcher();
     driver.register(
         format!("dns_servers_{}", dns_group),
@@ -73,7 +71,7 @@ fn init_dns(
         format!("dns_propagation_{}", dns_group),
         Duration::from_secs(60),
         Box::new(dns_propagate),
-        opctx.child(log.clone(), metadata.clone()),
+        opctx.child(log, metadata),
         vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
     );
 }

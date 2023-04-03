@@ -723,7 +723,6 @@ impl ServiceInner {
                         }
                         ServiceType::DnsClient { .. } => {
                             // XXX-dap Do we need do anything here?
-                            ();
                         }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(

@@ -168,7 +168,9 @@ pub struct Nexus {
     dpd_client: Arc<dpd_client::Client>,
 
     /// Background tasks
-    background_tasks: background::Driver,
+    // This field is not currently used, but will be when we start activating
+    // background tasks from elsewhere in Nexus.
+    _background_tasks: background::Driver,
 }
 
 impl Nexus {
@@ -283,7 +285,7 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
             dpd_client,
-            background_tasks,
+            _background_tasks: background_tasks,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

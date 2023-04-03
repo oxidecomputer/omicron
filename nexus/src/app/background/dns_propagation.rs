@@ -92,7 +92,7 @@ impl BackgroundTask for DnsPropagator {
             ));
 
             // Propate the config to all of the DNS servers.
-            match dns_propagate(opctx, &log, &dns_config, &dns_servers).await {
+            match dns_propagate(&log, &dns_config, &dns_servers).await {
                 Ok(_) => {
                     info!(&log, "DNS propagation: done");
                     // XXX-dap track this somewhere for visibility
@@ -111,7 +111,6 @@ impl BackgroundTask for DnsPropagator {
 }
 
 async fn dns_propagate(
-    opctx: &OpContext,
     log: &slog::Logger,
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
@@ -121,13 +120,12 @@ async fn dns_propagate(
     stream::iter(&servers.addresses)
         .map(Ok::<_, anyhow::Error>)
         .try_for_each_concurrent(limit, |server_addr| async move {
-            dns_propagate_one(opctx, log, dns_config, server_addr).await
+            dns_propagate_one(log, dns_config, server_addr).await
         })
         .await
 }
 
 async fn dns_propagate_one(
-    opctx: &OpContext,
     log: &slog::Logger,
     dns_config: &DnsConfigParams,
     server_addr: &SocketAddr,
@@ -141,8 +139,7 @@ async fn dns_propagate_one(
     let result = client.dns_config_put(dns_config).await.with_context(|| {
         format!(
             "failed to propagate DNS generation {} to server {}",
-            dns_config.generation,
-            server_addr.to_string()
+            dns_config.generation, server_addr,
         )
     });
 
