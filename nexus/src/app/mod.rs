@@ -161,7 +161,7 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
+    resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
 
     /// Client for dataplane daemon / switch management API
     dpd_client: Arc<dpd_client::Client>,
@@ -180,7 +180,7 @@ impl Nexus {
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
+        resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
@@ -621,12 +621,12 @@ impl Nexus {
 
     pub async fn set_resolver(
         &self,
-        resolver: dns_service_client::multiclient::Resolver,
+        resolver: internal_dns::resolver::Resolver,
     ) {
         *self.resolver.lock().await = resolver;
     }
 
-    pub async fn resolver(&self) -> dns_service_client::multiclient::Resolver {
+    pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()
     }

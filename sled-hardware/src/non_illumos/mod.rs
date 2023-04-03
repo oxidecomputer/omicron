@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DiskError, DiskPaths, DiskVariant, Partition, ScrimletMode,
+    Baseboard, DiskError, DiskPaths, DiskVariant, Partition, SledMode,
     UnparsedDisk,
 };
 use slog::Logger;
@@ -21,10 +21,7 @@ use tokio::sync::broadcast;
 pub struct HardwareManager {}
 
 impl HardwareManager {
-    pub fn new(
-        _log: &Logger,
-        _scrimlet_override: Option<ScrimletMode>,
-    ) -> Result<Self, String> {
+    pub fn new(_log: &Logger, _sled_mode: SledMode) -> Result<Self, String> {
         unimplemented!("Accessing hardware unsupported on non-illumos");
     }
 

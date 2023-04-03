@@ -20,78 +20,45 @@ use serde::{
 use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
+macro_rules! path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "Name or ID of the "]
+            #[doc = $name]
+            pub $param: NameOrId,
+        }
+    };
+}
+
+path_param!(ProjectPath, project, "project");
+path_param!(InstancePath, instance, "instance");
+path_param!(NetworkInterfacePath, interface, "network interface");
+path_param!(VpcPath, vpc, "VPC");
+path_param!(SubnetPath, subnet, "subnet");
+path_param!(RouterPath, router, "router");
+path_param!(RoutePath, route, "route");
+path_param!(DiskPath, disk, "disk");
+path_param!(SnapshotPath, snapshot, "snapshot");
+path_param!(ImagePath, image, "image");
+path_param!(SiloPath, silo, "silo");
+path_param!(ProviderPath, provider, "SAML identity provider");
+path_param!(IpPoolPath, pool, "IP pool");
+path_param!(SshKeyPath, ssh_key, "SSH key");
+
+// Only by ID because groups have an `external_id` instead of a name and
+// therefore don't implement `ObjectIdentity`, which makes lookup by name
+// inconvenient. We should figure this out more generally, as there are several
+// resources like this.
 #[derive(Deserialize, JsonSchema)]
-pub struct ProjectPath {
-    pub project: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct InstancePath {
-    pub instance: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct NetworkInterfacePath {
-    pub interface: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct VpcPath {
-    pub vpc: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SubnetPath {
-    pub subnet: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RouterPath {
-    pub router: NameOrId,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct RoutePath {
-    pub route: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct DiskPath {
-    pub disk: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SnapshotPath {
-    pub snapshot: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ImagePath {
-    pub image: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SiloPath {
-    pub silo: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ProviderPath {
-    pub provider: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct IpPoolPath {
-    pub pool: NameOrId,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SshKeyPath {
-    pub ssh_key: NameOrId,
+pub struct GroupPath {
+    /// ID of the group
+    pub group: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
+    /// Name or ID of the silo
     pub silo: NameOrId,
 }
 
@@ -105,16 +72,8 @@ impl From<Name> for SiloSelector {
 pub struct SamlIdentityProviderSelector {
     #[serde(flatten)]
     pub silo_selector: Option<SiloSelector>,
+    /// Name or ID of the SAML identity provider
     pub saml_identity_provider: NameOrId,
-}
-
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    pub group: Uuid,
 }
 
 // The shape of this selector is slightly different than the others given that
@@ -122,12 +81,15 @@ pub struct GroupPath {
 // the environment the user is authetnicated in
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
+    /// ID of the silo user
     pub silo_user_id: Uuid,
+    /// Name or ID of the SSH key
     pub ssh_key: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
+    /// Name or ID of the project
     pub project: NameOrId,
 }
 
@@ -141,6 +103,7 @@ pub struct OptionalProjectSelector {
 pub struct DiskSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the disk
     pub disk: NameOrId,
 }
 
@@ -148,6 +111,7 @@ pub struct DiskSelector {
 pub struct SnapshotSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the snapshot
     pub snapshot: NameOrId,
 }
 
@@ -155,6 +119,7 @@ pub struct SnapshotSelector {
 pub struct ImageSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the image
     pub image: NameOrId,
 }
 
@@ -162,12 +127,14 @@ pub struct ImageSelector {
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the instance
     pub instance: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
     #[serde(flatten)]
+    /// Name or ID of the instance
     pub instance_selector: Option<InstanceSelector>,
 }
 
@@ -175,6 +142,7 @@ pub struct OptionalInstanceSelector {
 pub struct NetworkInterfaceSelector {
     #[serde(flatten)]
     pub instance_selector: Option<InstanceSelector>,
+    /// Name or ID of the network interface
     pub network_interface: NameOrId,
 }
 
@@ -182,12 +150,14 @@ pub struct NetworkInterfaceSelector {
 pub struct VpcSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the VPC
     pub vpc: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
     #[serde(flatten)]
+    /// Name or ID of the VPC
     pub vpc_selector: Option<VpcSelector>,
 }
 
@@ -195,6 +165,7 @@ pub struct OptionalVpcSelector {
 pub struct SubnetSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the subnet
     pub subnet: NameOrId,
 }
 
@@ -202,19 +173,23 @@ pub struct SubnetSelector {
 pub struct RouterSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the router
     pub router: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OptionalRouterSelector {
     #[serde(flatten)]
+    /// Name or ID of the router
     pub router_selector: Option<RouterSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RouteSelector {
     #[serde(flatten)]
+    /// Name or ID of the router
     pub router_selector: Option<RouterSelector>,
+    /// Name or ID of the route
     pub route: NameOrId,
 }
 
@@ -536,7 +511,7 @@ pub struct SamlIdentityProviderCreate {
     /// customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing key pair
+    /// request signing key pair
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
 
@@ -1098,6 +1073,9 @@ pub enum DiskSource {
     Image { image_id: Uuid },
     /// Create a disk from a global image
     GlobalImage { image_id: Uuid },
+    /// Create a blank disk that will accept bulk writes or pull blocks from an
+    /// external source.
+    ImportingBlocks { block_size: BlockSize },
 }
 
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
@@ -1112,21 +1090,38 @@ pub struct DiskCreate {
     pub size: ByteCount,
 }
 
-/// TODO-v1: Delete this
-/// Parameters for the [`Disk`](omicron_common::api::external::Disk) to be
-/// attached or detached to an instance
+// equivalent to crucible_pantry_client::types::ExpectedDigest
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskIdentifier {
-    pub name: Name,
+#[serde(rename_all = "snake_case")]
+pub enum ExpectedDigest {
+    Sha256(String),
 }
 
-/// TODO-v1: Delete this
-/// Parameters for the
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface) to be
-/// attached or detached to an instance.
+/// Parameters for importing blocks from a URL to a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceIdentifier {
-    pub interface_name: Name,
+pub struct ImportBlocksFromUrl {
+    /// the source to pull blocks from
+    pub url: String,
+    /// Expected digest of all blocks when importing from a URL
+    pub expected_digest: Option<ExpectedDigest>,
+}
+
+/// Parameters for importing blocks with a bulk write
+// equivalent to crucible_pantry_client::types::BulkWriteRequest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImportBlocksBulkWrite {
+    pub offset: u64,
+    pub base64_encoded_data: String,
+}
+
+/// Parameters for finalizing a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FinalizeDisk {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+
+    /// an optional snapshot name
+    pub snapshot_name: Option<String>,
 }
 
 // IMAGES

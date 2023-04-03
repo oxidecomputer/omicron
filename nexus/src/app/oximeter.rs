@@ -8,9 +8,9 @@ use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
-use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::PaginationParams;
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::ServiceName;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -64,7 +64,7 @@ impl LazyTimeseriesClient {
                 resolver
                     .lock()
                     .await
-                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
+                    .lookup_ip(ServiceName::Clickhouse)
                     .await?,
                 CLICKHOUSE_PORT,
             ),

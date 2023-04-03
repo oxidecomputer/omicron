@@ -14,6 +14,7 @@ use super::{
 };
 use crate::authz;
 use crate::db;
+use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
@@ -114,6 +115,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_view)?;
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
+
+        api.register(disk_bulk_write_import_start)?;
+        api.register(disk_bulk_write_import)?;
+        api.register(disk_bulk_write_import_stop)?;
+        api.register(disk_import_blocks_from_url)?;
+        api.register(disk_finalize_import)?;
 
         api.register(instance_list)?;
         api.register(instance_view)?;
@@ -1516,6 +1523,7 @@ async fn disk_metrics_list(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
+
         let selector = selector_params.into_inner();
         let limit = rqctx.page_limit(&query)?;
         let disk_selector = params::DiskSelector {
@@ -1538,6 +1546,162 @@ async fn disk_metrics_list(
             .await?;
 
         Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Start the process of importing blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-start",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import_start(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import_start(&opctx, &disk_selector).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Import blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    import_params: TypedBody<params::ImportBlocksBulkWrite>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let params = import_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import(&opctx, &disk_selector, params).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Stop the process of importing blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-stop",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import_stop(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import_stop(&opctx, &disk_selector).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Send request to import blocks from URL
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/import",
+    tags = ["disks"],
+}]
+async fn disk_import_blocks_from_url(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    import_params: TypedBody<params::ImportBlocksFromUrl>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let params = import_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus
+            .import_blocks_from_url_for_disk(&opctx, &disk_selector, params)
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Finalize disk when imports are done
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/finalize",
+    tags = ["disks"],
+}]
+async fn disk_finalize_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::FinalizeDisk>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_finalize_import(&opctx, path.disk, query).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4253,13 +4417,17 @@ async fn role_view(
 }]
 pub async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
+) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
+        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        Ok(HttpResponseOk(views::CurrentUser {
+            user: user.into(),
+            silo_name: silo.name().clone(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

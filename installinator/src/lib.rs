@@ -18,3 +18,6 @@ mod write;
 
 pub use dispatch::*;
 pub use write::*;
+
+#[cfg(feature = "image-standard")]
+compile_error!("Installinator should not be built with `-i standard`");

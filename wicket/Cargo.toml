@@ -9,10 +9,12 @@ default-run = "wicket"
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
+ciborium.workspace = true
 clap.workspace = true
-crossterm = { version = "0.26.1", features = ["event-stream"] }
+crossterm.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
+humantime.workspace = true
 lazy_static.workspace = true
 omicron-common.workspace = true
 reqwest.workspace = true
@@ -30,7 +32,7 @@ libsw.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
-tui = "0.19.0"
+tui.workspace = true
 tui-tree-widget = "0.11.0"
 
 wicketd-client.workspace = true

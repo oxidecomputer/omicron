@@ -16,7 +16,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::Duration;
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use nexus_db_queries::context::{OpContext, OpKind};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::nexus_config;
@@ -139,9 +139,11 @@ impl ServerContext {
         let az_subnet =
             Ipv6Subnet::<AZ_PREFIX>::new(config.deployment.subnet.net().ip());
         info!(log, "Setting up resolver on subnet: {:?}", az_subnet);
-        let resolver =
-            dns_service_client::multiclient::Resolver::new(&az_subnet)
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
+        let resolver = internal_dns::resolver::Resolver::new_from_subnet(
+            log.new(o!("component" => "DnsResolver")),
+            az_subnet,
+        )
+        .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
         // Set up DB pool
         let url = match &config.deployment.database {
@@ -149,7 +151,7 @@ impl ServerContext {
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
                 let address = resolver
-                    .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+                    .lookup_ipv6(ServiceName::Cockroach)
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;
                 info!(log, "DB address: {}", address);

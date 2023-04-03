@@ -167,18 +167,6 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // Fetch instance by name, project_name, and organization_id
-    let fetched_instance = instance_get(
-        &client,
-        format!(
-            "/v1/instances/{}?project={}",
-            instance.identity.name, project.identity.name
-        )
-        .as_str(),
-    )
-    .await;
-    assert_eq!(fetched_instance.identity.id, instance.identity.id);
-
     // Fetch instance by name and project_name
     let fetched_instance = instance_get(
         &client,
@@ -2522,11 +2510,15 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Stop and delete instance
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
-
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
+
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+
+    // Store the sled agent for this instance for later disk simulation
+    let sa = nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
@@ -2547,6 +2539,57 @@ async fn test_disks_detached_when_instance_destroyed(
     assert_eq!(disks.len(), 8);
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
+
+        // Simulate each one of the disks to move from "Detaching" to "Detached"
+        sa.disk_finish_transition(disk.identity.id).await;
+    }
+
+    // Ensure that the disks can be attached to another instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nfsv2".parse().unwrap(),
+            description: String::from("probably serving data too!"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("nfsv2"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: (0..8)
+            .map(|i| {
+                params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach {
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
+                    },
+                )
+            })
+            .collect(),
+        start: true,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance creation!");
+
+    // Assert disks are attached to this new instance
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+
+    assert_eq!(disks.len(), 8);
+    for disk in &disks {
+        assert!(matches!(disk.state, DiskState::Attached(_)));
     }
 }
 

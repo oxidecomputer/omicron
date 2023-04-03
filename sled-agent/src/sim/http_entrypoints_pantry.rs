@@ -224,10 +224,7 @@ async fn bulk_write(
     )
     .map_err(|e| HttpError::for_bad_request(None, e.to_string()))?;
 
-    pantry
-        .bulk_write(path.id.clone(), body.offset, data)
-        .await
-        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+    pantry.bulk_write(path.id.clone(), body.offset, data).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

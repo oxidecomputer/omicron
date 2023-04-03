@@ -20,31 +20,45 @@ pub struct SmfHelper<'t> {
     service_name: String,
     smf_name: String,
     default_smf_name: String,
+    import: bool,
 }
 
 impl<'t> SmfHelper<'t> {
     pub fn new(running_zone: &'t RunningZone, service: &ServiceType) -> Self {
         let service_name = service.to_string();
-        let smf_name = format!("svc:/system/illumos/{}", service);
+        let (smf_name, import) = match service {
+            ServiceType::DnsClient { .. } => {
+                ("svc:/network/dns/client".to_string(), false)
+            }
+            _ => (format!("svc:/system/illumos/{}", service_name), true),
+        };
         let default_smf_name = format!("{}:default", smf_name);
 
-        SmfHelper { running_zone, service_name, smf_name, default_smf_name }
+        SmfHelper {
+            running_zone,
+            service_name,
+            smf_name,
+            default_smf_name,
+            import,
+        }
     }
 
     pub fn import_manifest(&self) -> Result<(), Error> {
-        self.running_zone
-            .run_cmd(&[
-                illumos_utils::zone::SVCCFG,
-                "import",
-                &format!(
-                    "/var/svc/manifest/site/{}/manifest.xml",
-                    self.service_name
-                ),
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: "importing manifest".to_string(),
-                err,
-            })?;
+        if self.import {
+            self.running_zone
+                .run_cmd(&[
+                    illumos_utils::zone::SVCCFG,
+                    "import",
+                    &format!(
+                        "/var/svc/manifest/site/{}/manifest.xml",
+                        self.service_name
+                    ),
+                ])
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "importing manifest".to_string(),
+                    err,
+                })?;
+        }
         Ok(())
     }
 
@@ -138,6 +152,21 @@ impl<'t> SmfHelper<'t> {
             ])
             .map_err(|err| Error::ZoneCommand {
                 intent: format!("Enable {} service", self.default_smf_name),
+                err,
+            })?;
+        Ok(())
+    }
+
+    pub fn disable(&self) -> Result<(), Error> {
+        self.running_zone
+            .run_cmd(&[
+                illumos_utils::zone::SVCADM,
+                "disable",
+                "-t",
+                &self.default_smf_name,
+            ])
+            .map_err(|err| Error::ZoneCommand {
+                intent: format!("Disable {} service", self.default_smf_name),
                 err,
             })?;
         Ok(())

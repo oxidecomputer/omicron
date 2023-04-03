@@ -13,23 +13,32 @@ use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
-use sled_hardware::{is_gimlet, ScrimletMode};
+use sled_hardware::is_gimlet;
 use std::path::{Path, PathBuf};
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SledMode {
+    Auto,
+    Gimlet,
+    Scrimlet,
+}
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
-    /// if set to Disabled).
-    pub scrimlet_override: Option<ScrimletMode>,
+    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
+    /// Optionally skip waiting for time synchronization
+    pub skip_timesync: Option<bool>,
 
     /// The data link on which we infer the bootstrap address.
     ///

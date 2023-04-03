@@ -341,32 +341,35 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::User>()
+        .parsed_body::<views::CurrentUser>()
         .unwrap();
 
     assert_eq!(
         priv_user,
-        views::User {
-            id: USER_TEST_PRIVILEGED.id(),
-            display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-            silo_id: DEFAULT_SILO.id(),
+        views::CurrentUser {
+            user: views::User {
+                id: USER_TEST_PRIVILEGED.id(),
+                display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+                silo_id: DEFAULT_SILO.id(),
+            },
+            silo_name: DEFAULT_SILO.name().clone()
         }
     );
 
     let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .expect("failed to get current user")
-        .parsed_body::<views::User>()
-        .unwrap();
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
 
     assert_eq!(
         unpriv_user,
-        views::User {
-            id: USER_TEST_UNPRIVILEGED.id(),
-            display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-            silo_id: DEFAULT_SILO.id(),
+        views::CurrentUser {
+            user: views::User {
+                id: USER_TEST_UNPRIVILEGED.id(),
+                display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+                silo_id: DEFAULT_SILO.id(),
+            },
+            silo_name: DEFAULT_SILO.name().clone()
         }
     );
 }

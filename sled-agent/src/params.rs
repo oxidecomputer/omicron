@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
-use omicron_common::address::{
-    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
-    OXIMETER_PORT,
-};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -20,6 +15,7 @@ pub use illumos_utils::opte::params::NetworkInterface;
 pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -186,41 +182,6 @@ pub struct Zpool {
     pub disk_type: DiskType,
 }
 
-// The type of networking 'ASIC' the Dendrite service is expected to manage
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DendriteAsic {
-    TofinoAsic,
-    TofinoStub,
-    Softnpu,
-}
-
-impl std::fmt::Display for DendriteAsic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DendriteAsic::TofinoAsic => "tofino_asic",
-                DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::Softnpu => "softnpu",
-            }
-        )
-    }
-}
-
-impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
-    fn from(a: DendriteAsic) -> Self {
-        match a {
-            DendriteAsic::TofinoAsic => Self::TofinoAsic,
-            DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::Softnpu => Self::Softnpu,
-        }
-    }
-}
-
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -286,28 +247,6 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
-impl DatasetEnsureBody {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    pub fn srv(&self) -> SRV {
-        match self.dataset_kind {
-            DatasetKind::Crucible => {
-                SRV::Backend(BackendName::Crucible, self.id)
-            }
-            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
-            DatasetKind::CockroachDb { .. } => {
-                SRV::Service(ServiceName::Cockroach)
-            }
-        }
-    }
-
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
-    }
-}
-
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
@@ -333,6 +272,8 @@ pub enum ServiceType {
     Dendrite { asic: DendriteAsic },
     Tfport { pkt_source: String },
     CruciblePantry,
+    Ntp { servers: Vec<String>, boundary: bool },
+    DnsClient { servers: Vec<String>, domain: Option<String> },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -346,6 +287,8 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
+            ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::DnsClient { .. } => write!(f, "dns_client"),
         }
     }
 }
@@ -368,9 +311,21 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+            St::Dendrite { asic } => {
+                use sled_agent_client::types::DendriteAsic as AutoAsic;
+                let asic = match asic {
+                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
+                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
+                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
+                };
+                AutoSt::Dendrite { asic }
+            }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
+            St::Ntp { servers, boundary } => AutoSt::Ntp { servers, boundary },
+            St::DnsClient { servers, domain } => {
+                AutoSt::DnsClient { servers, domain }
+            }
         }
     }
 }
@@ -390,6 +345,8 @@ pub enum ZoneType {
     Switch,
     #[serde(rename = "crucible_pantry")]
     CruciblePantry,
+    #[serde(rename = "ntp")]
+    NTP,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -400,6 +357,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
+            ZoneType::NTP => Self::Ntp,
         }
     }
 }
@@ -413,6 +371,7 @@ impl std::fmt::Display for ZoneType {
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
+            NTP => "ntp",
         };
         write!(f, "{name}")
     }
@@ -442,61 +401,6 @@ pub struct ServiceZoneRequest {
     pub services: Vec<ServiceType>,
 }
 
-impl ServiceZoneRequest {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    // XXX: any reason this can't just be service.to_string()?
-    pub fn srv(&self, service: &ServiceType) -> SRV {
-        match service {
-            ServiceType::InternalDns { .. } => {
-                SRV::Service(ServiceName::InternalDNS)
-            }
-            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
-            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
-            ServiceType::ManagementGatewayService => {
-                SRV::Service(ServiceName::ManagementGatewayService)
-            }
-            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
-            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
-            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
-            ServiceType::CruciblePantry { .. } => {
-                SRV::Service(ServiceName::CruciblePantry)
-            }
-        }
-    }
-
-    pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
-        match service {
-            ServiceType::InternalDns { server_address, .. } => {
-                Some(*server_address)
-            }
-            ServiceType::Nexus { internal_ip, .. } => {
-                Some(SocketAddrV6::new(*internal_ip, NEXUS_INTERNAL_PORT, 0, 0))
-            }
-            ServiceType::Oximeter => {
-                Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
-            }
-            ServiceType::ManagementGatewayService => {
-                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
-            }
-            // TODO: Is this correct?
-            ServiceType::Wicketd => None,
-            ServiceType::Dendrite { .. } => {
-                Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
-            }
-            ServiceType::Tfport { .. } => None,
-            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
-                self.addresses[0],
-                CRUCIBLE_PANTRY_PORT,
-                0,
-                0,
-            )),
-        }
-    }
-}
-
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
     fn from(s: ServiceZoneRequest) -> Self {
         let mut services = Vec::new();
@@ -522,4 +426,15 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct TimeSync {
+    pub sync: bool,
+    // These could both be f32, but there is a problem with progenitor/typify
+    // where, although the f32 correctly becomes "float" (and not "double") in
+    // the API spec, that "float" gets converted back to f64 when generating
+    // the client.
+    pub skew: f64,
+    pub correction: f64,
 }

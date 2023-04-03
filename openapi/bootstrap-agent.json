@@ -1,0 +1,239 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Oxide Bootstrap Agent API",
+    "description": "API for interacting with individual sleds",
+    "contact": {
+      "url": "https://oxide.computer",
+      "email": "api@oxide.computer"
+    },
+    "version": "0.0.1"
+  },
+  "paths": {
+    "/components": {
+      "get": {
+        "summary": "Provides a list of components known to the bootstrap agent.",
+        "description": "This API is intended to allow early boot services (such as Wicket) to query the underlying component versions installed on a sled.",
+        "operationId": "components_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_Component",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Component"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rack-initialize": {
+      "post": {
+        "summary": "Initializes the rack with the provided configuration.",
+        "operationId": "rack_initialize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RackInitializeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Resets the rack to an unconfigured state.",
+        "operationId": "rack_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sled-initialize": {
+      "delete": {
+        "summary": "Resets this particular sled to an unconfigured state.",
+        "operationId": "sled_reset",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Component": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SemverVersion"
+          }
+        },
+        "required": [
+          "name",
+          "version"
+        ]
+      },
+      "Error": {
+        "description": "Error information from a response.",
+        "type": "object",
+        "properties": {
+          "error_code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "request_id"
+        ]
+      },
+      "Gateway": {
+        "description": "Information about the internet gateway used for externally-facing services.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "nullable": true,
+            "description": "IP address of the Internet gateway, which is particularly relevant for external-facing services (such as Nexus).",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "mac": {
+            "description": "MAC address of the internet gateway above. This is used to provide external connectivity into guests, by allowing OPTE to forward traffic destined for the broader network to the gateway.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mac"
+        ]
+      },
+      "MacAddr": {
+        "example": "ff:ff:ff:ff:ff:ff",
+        "title": "A MAC address",
+        "description": "A Media Access Control address, in EUI-48 format",
+        "type": "string",
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
+        "maxLength": 17
+      },
+      "RackInitializeRequest": {
+        "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
+        "type": "object",
+        "properties": {
+          "dns_servers": {
+            "description": "The external DNS server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gateway": {
+            "description": "Internet gateway information.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Gateway"
+              }
+            ]
+          },
+          "nexus_external_address": {
+            "description": "The address on which Nexus should serve an external interface.",
+            "type": "string",
+            "format": "ip"
+          },
+          "ntp_servers": {
+            "description": "The external NTP server addresses.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_secret_threshold": {
+            "description": "The minimum number of sleds required to unlock the rack secret.\n\nIf this value is less than 2, no rack secret will be created on startup; this is the typical case for single-server test/development.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "rack_subnet": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "dns_servers",
+          "gateway",
+          "nexus_external_address",
+          "ntp_servers",
+          "rack_secret_threshold",
+          "rack_subnet"
+        ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      }
+    }
+  }
+}
