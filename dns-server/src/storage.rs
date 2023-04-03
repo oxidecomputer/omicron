@@ -346,7 +346,7 @@ impl Store {
         ));
 
         // Lock out concurrent updates.  We must not return until we've released
-        // the "updating" lock!  (See UpdateGuard's `drop` impl.)
+        // the "updating" lock.
         let update = self.begin_update(req_id, config.generation).await?;
 
         info!(log, "attempting generation update");
