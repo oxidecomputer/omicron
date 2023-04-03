@@ -41,9 +41,9 @@ pub struct SimInstance {
 }
 
 impl SimInstance {
-    /// Returns the state the simulated instance will reach if its queue is
-    /// drained.
-    fn terminal_state(&self) -> ApiInstanceState {
+    /// Returns the "resting" state the simulated instance will reach if its
+    /// queue is drained.
+    fn next_resting_state(&self) -> ApiInstanceState {
         match self.propolis_queue.back() {
             None => self.state.current().run_state,
             Some(p) => InstanceState::from(*p).0,
@@ -87,72 +87,81 @@ impl Simulatable for SimInstance {
         target: &InstanceStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
         match target {
-            InstanceStateRequested::Running => match self.terminal_state() {
-                ApiInstanceState::Creating => {
-                    // The non-simulated sled agent explicitly and synchronously
-                    // publishes the "Starting" state when cold-booting a new VM
-                    // (so that the VM appears to be starting while its Propolis
-                    // process is being launched).
-                    self.state.transition(ApiInstanceState::Starting);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Running);
+            InstanceStateRequested::Running => {
+                match self.next_resting_state() {
+                    ApiInstanceState::Creating => {
+                        // The non-simulated sled agent explicitly and
+                        // synchronously publishes the "Starting" state when
+                        // cold-booting a new VM (so that the VM appears to be
+                        // starting while its Propolis process is being
+                        // launched).
+                        self.state.transition(ApiInstanceState::Starting);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Running);
+                    }
+                    ApiInstanceState::Starting
+                    | ApiInstanceState::Running
+                    | ApiInstanceState::Rebooting
+                    | ApiInstanceState::Migrating => {}
+                    ApiInstanceState::Stopping | ApiInstanceState::Stopped => {
+                        // TODO: Normally, Propolis forbids direct transitions
+                        // from a stopped state back to a running state.
+                        // Instead, Nexus creates a new Propolis and sends state
+                        // change requests to that. This arm abstracts this
+                        // behavior away and just allows a fake instance to
+                        // transition right back to a running state after being
+                        // stopped.
+                        //
+                        // This will change in the future when the sled agents
+                        // (both real and simulated) split "registering" an
+                        // instance with the agent and actually starting it into
+                        // separate actions.
+                        self.state.transition(ApiInstanceState::Starting);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Starting);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Running);
+                    }
+                    ApiInstanceState::Repairing
+                    | ApiInstanceState::Failed
+                    | ApiInstanceState::Destroyed => {
+                        return Err(Error::invalid_request(&format!(
+                            "can't request state Running with pending resting \
+                        state {}",
+                            self.next_resting_state()
+                        )))
+                    }
                 }
-                ApiInstanceState::Starting
-                | ApiInstanceState::Running
-                | ApiInstanceState::Rebooting
-                | ApiInstanceState::Migrating => {}
-                ApiInstanceState::Stopping | ApiInstanceState::Stopped => {
-                    // TODO: Normally, Propolis forbids direct transitions from
-                    // a stopped state back to a running state. Instead, Nexus
-                    // creates a new Propolis and sends state change requests to
-                    // that. This arm abstracts this behavior away and just
-                    // allows a fake instance to transition right back to a
-                    // running state after being stopped.
-                    //
-                    // This will change in the future when the sled agents (both
-                    // real and simulated) split "registering" an instance with
-                    // the agent and actually starting it into separate actions.
-                    self.state.transition(ApiInstanceState::Starting);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Starting);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Running);
+            }
+            InstanceStateRequested::Stopped => {
+                match self.next_resting_state() {
+                    ApiInstanceState::Creating => {
+                        self.state.transition(ApiInstanceState::Destroyed);
+                    }
+                    ApiInstanceState::Running => {
+                        self.state.transition(ApiInstanceState::Stopping);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Stopping);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Stopped);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Destroyed);
+                    }
+                    // Idempotently allow requests to stop an instance that is
+                    // already stopping.
+                    ApiInstanceState::Stopping
+                    | ApiInstanceState::Stopped
+                    | ApiInstanceState::Destroyed => {}
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "can't request state Stopped with pending resting \
+                        state {}",
+                            self.next_resting_state()
+                        )))
+                    }
                 }
-                ApiInstanceState::Repairing
-                | ApiInstanceState::Failed
-                | ApiInstanceState::Destroyed => {
-                    return Err(Error::invalid_request(&format!(
-                        "can't request state Running with terminal state {}",
-                        self.terminal_state()
-                    )))
-                }
-            },
-            InstanceStateRequested::Stopped => match self.terminal_state() {
-                ApiInstanceState::Creating => {
-                    self.state.transition(ApiInstanceState::Destroyed);
-                }
-                ApiInstanceState::Running => {
-                    self.state.transition(ApiInstanceState::Stopping);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Stopping);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Stopped);
-                    self.propolis_queue
-                        .push_back(PropolisInstanceState::Destroyed);
-                }
-                // Idempotently allow requests to stop an instance that is
-                // already stopping.
-                ApiInstanceState::Stopping
-                | ApiInstanceState::Stopped
-                | ApiInstanceState::Destroyed => {}
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "can't request state Stopped with terminal state {}",
-                        self.terminal_state()
-                    )))
-                }
-            },
-            InstanceStateRequested::Reboot => match self.terminal_state() {
+            }
+            InstanceStateRequested::Reboot => match self.next_resting_state() {
                 ApiInstanceState::Running => {
                     // Further requests to reboot are ignored if the instance
                     // is currently rebooting or about to reboot.
@@ -169,8 +178,8 @@ impl Simulatable for SimInstance {
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
-                        "can't request Reboot with terminal state {}",
-                        self.terminal_state()
+                        "can't request Reboot with pending resting state {}",
+                        self.next_resting_state()
                     )))
                 }
             },
@@ -219,7 +228,7 @@ impl Simulatable for SimInstance {
             | PropolisInstanceState::Migrating
             | PropolisInstanceState::Repairing
             | PropolisInstanceState::Failed => panic!(
-                "terminal state {:?} doesn't map to a requested state",
+                "pending resting state {:?} doesn't map to a requested state",
                 terminal
             ),
             PropolisInstanceState::Running => InstanceStateRequested::Running,
