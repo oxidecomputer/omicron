@@ -6,6 +6,7 @@
 
 use super::common;
 use super::dns_config;
+use super::dns_propagation;
 use super::dns_servers;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -61,6 +62,18 @@ pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> common::Driver {
         opctx.child(log_dns_internal.clone(), metadata_internal.clone()),
     );
 
+    // Background task: internal DNS propagation
+    let dns_propagate_internal = dns_propagation::DnsPropagator::new(
+        dns_config_internal_watcher.clone(),
+        dns_servers_internal_watcher.clone(),
+    );
+    driver.register(
+        "dns_propgation_internal",
+        Duration::from_secs(60),
+        Box::new(dns_propagate_internal),
+        opctx.child(log_dns_internal.clone(), metadata_internal.clone()),
+    );
+
     // Background task: external DNS config watcher
     let dns_config_external = dns_config::DnsConfigWatcher::new(
         Arc::clone(&datastore),
@@ -86,6 +99,20 @@ pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> common::Driver {
         Box::new(dns_servers_external),
         opctx.child(log_dns_external.clone(), metadata_external.clone()),
     );
+
+    // Background task: external DNS propagation
+    let dns_propagate_external = dns_propagation::DnsPropagator::new(
+        dns_config_external_watcher.clone(),
+        dns_servers_external_watcher.clone(),
+    );
+    driver.register(
+        "dns_propagation_external",
+        Duration::from_secs(60),
+        Box::new(dns_propagate_external),
+        opctx.child(log_dns_external.clone(), metadata_external.clone()),
+    );
+
+    // XXX-dap set up hooks to activate the propagator when other stuff changes.
 
     driver
 }
