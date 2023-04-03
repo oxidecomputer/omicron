@@ -335,7 +335,7 @@ impl Store {
         ));
 
         // Lock out concurrent updates.  We must not return until we've released
-        // the "updating" lock.
+        // the "updating" lock!  (See UpdateGuard's `drop` impl.)
         let update = self.begin_update(req_id, config.generation).await?;
 
         info!(log, "attempting generation update");
@@ -701,6 +701,22 @@ impl<'a, 'b> UpdateGuard<'a, 'b> {
             _ => (),
         };
         self.finished = true;
+    }
+}
+
+impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+    fn drop(&mut self) {
+        // TODO-cleanup It would be far better if we could enforce this at
+        // compile-time, similar to a MutexGuard.  The obvious approach of doing
+        // it on drop does not work because we cannot take the async lock from
+        // the synchronous Drop function.  And we don't want to use a std Mutex
+        // and risk blocking the executor.  And it doesn't seem like we can use
+        // blocking_lock() because we _are_ in an asynchronous context.  We
+        // could use a semaphore like tokio's MutexGuard does, but that would
+        // involve unsafe code.)
+        if !self.finished {
+            panic!("attempted to return early without finishing update!");
+        }
     }
 }
 
