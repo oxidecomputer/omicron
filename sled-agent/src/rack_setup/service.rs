@@ -75,7 +75,8 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::{
-    get_sled_address, CRUCIBLE_PANTRY_PORT, NEXUS_INTERNAL_PORT, OXIMETER_PORT,
+    get_sled_address, CRUCIBLE_PANTRY_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
+    OXIMETER_PORT,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -706,9 +707,23 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::Ntp { .. } => NexusTypes::ServiceKind::NTP,
+                        ServiceType::Ntp { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NTP_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::NTP,
+                            });
+                        }
                         ServiceType::DnsClient { .. } => {
-                            NexusTypes::ServiceKind::DNSClient
+                            // XXX-dap Do we need do anything here?
+                            ();
                         }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
