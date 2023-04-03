@@ -122,7 +122,7 @@ pub struct Store {
     log: slog::Logger,
     db: Arc<sled::Db>,
     keep: usize,
-    updating: Arc<Mutex<Option<UpdateInfo>>>,
+    updating: Arc<Mutex<Updating>>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -182,7 +182,7 @@ impl Store {
             log,
             db,
             keep: config.keep_old_generations,
-            updating: Arc::new(Mutex::new(None)),
+            updating: Arc::new(Mutex::new(Updating::None)),
         };
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
@@ -299,19 +299,54 @@ impl Store {
         generation: u64,
     ) -> Result<UpdateGuard<'a, 'b>, UpdateError> {
         let mut update = self.updating.lock().await;
-        if let Some(ref update) = *update {
-            let elapsed =
-                chrono::Duration::from_std(update.start_instant.elapsed())
-                    .context("elapsed duration out of range")?;
-            return Err(UpdateError::UpdateInProgress {
-                start_time: update.start_time,
-                elapsed,
-                generation: update.generation,
-                req_id: update.req_id.clone(),
-            });
+
+        match *update {
+            Updating::InProgress(ref update) => {
+                let elapsed =
+                    chrono::Duration::from_std(update.start_instant.elapsed())
+                        .context("elapsed duration out of range")?;
+                return Err(UpdateError::UpdateInProgress {
+                    start_time: update.start_time,
+                    elapsed,
+                    generation: update.generation,
+                    req_id: update.req_id.clone(),
+                });
+            }
+            Updating::Poisoned {
+                previous_update,
+                dropped_at,
+                dropped_instant,
+                dropped_wall_time,
+            } => {
+                // This happens either because the whole `Store` was dropped
+                // while an update was in progress (in which case, this is
+                // potentially okay) or because a code path called
+                // `begin_update()` and then dropped the UpdateGuard without
+                // finishing the update (which is a programmer error that we
+                // want to identify as quickly as possible).  We can't really
+                // know which case we're in when we create the Poisoned value.
+                // But by the time we get here, we know the Store didn't get
+                // dropped.  Panic to turn this otherwise hard-to-debug refcount
+                // leak into an explicit, fatal failure that says exactly what
+                // happened and where.
+                panic!(
+                    "attempt to begin update after a previous UpdateGuard
+                    was dropped while unfinished\n\
+                    previous update: {:?}\n\
+                    guard was dropped at {} (instant {}, {:?} ago)\n\
+                    from this stack trace:\n\
+                    {:?}\n",
+                    previous_update,
+                    dropped_wall_time,
+                    dropped_instant,
+                    dropped_instant.elapsed(),
+                    dropped_at,
+                );
+            }
+            Updating::None => (),
         }
 
-        *update = Some(UpdateInfo {
+        *update = Updating::InProgress(UpdateInfo {
             start_time: chrono::Utc::now(),
             start_instant: std::time::Instant::now(),
             generation,
@@ -667,7 +702,24 @@ pub(crate) enum QueryError {
     ParseFail(#[source] anyhow::Error),
 }
 
+/// Describes the state of update
+enum Updating {
+    /// No update in progress
+    None,
+    /// An update is in progress
+    InProgress(UpdateInfo),
+    /// A previous update attempt was unexpectedly cancelled.
+    // See Store::begin_update() for more on this.
+    Poisoned {
+        previous_update: Option<UpdateInfo>,
+        dropped_at: std::backtrace::Backtrace,
+        dropped_instant: std::time::Instant,
+        dropped_wall_time: chrono::DateTime<chrono::Utc>,
+    },
+}
+
 /// Describes an ongoing update, if any
+#[derive(Debug)]
 struct UpdateInfo {
     start_time: chrono::DateTime<chrono::Utc>,
     start_instant: std::time::Instant,
@@ -683,22 +735,47 @@ struct UpdateGuard<'store, 'req_id> {
     finished: bool,
 }
 
+impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+    fn drop(&mut self) -> ! {
+        if !self.finished {
+            let mut update = self.store.updating.lock().await;
+            *update = Updating::Poisoned {
+                previous_update: *update,
+                dropped_at: std::backtrace::Backtrace::force_capture(),
+                dropped_instant: std::time::Instant::now(),
+                dropped_wall_time: chrono::Utc::now(),
+            }
+        }
+    }
+}
+
 impl<'a, 'b> UpdateGuard<'a, 'b> {
     async fn finish(mut self) {
         let store = self.store;
         let mut update = store.updating.lock().await;
         match update.take() {
-            None => panic!(
+            Updating::None => panic!(
                 "expected to end update from req_id {:?}, but \
                 there is no update in progress",
                 self.req_id,
             ),
-            Some(UpdateInfo { req_id, .. }) if req_id != self.req_id => panic!(
-                "expected to end update from req_id {:?}, but \
+            Updating::InProgress(UpdateInfo { req_id, .. })
+                if req_id != self.req_id =>
+            {
+                panic!(
+                    "expected to end update from req_id {:?}, but \
                     the current update is from req_id {:?}",
-                self.req_id, req_id
-            ),
-            _ => (),
+                    self.req_id, req_id
+                )
+            }
+            Updating::Poisoned { .. } => {
+                // This should be impossible because if the update state was
+                // poisoned, we would have panicked when we next attempted to
+                // begin an update.
+                panic!("attempting to finish poisoned update");
+            }
+
+            Updating::InProgress(_) => (),
         };
         self.finished = true;
     }
