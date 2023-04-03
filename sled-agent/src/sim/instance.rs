@@ -155,9 +155,11 @@ impl Simulatable for SimInstance {
             InstanceStateRequested::Reboot => match self.terminal_state() {
                 ApiInstanceState::Running => {
                     // Further requests to reboot are ignored if the instance
-                    // is currently rebooting or about to reboot (though in this
-                    // simulation reboot
-                    if !self.reboot_pending() {
+                    // is currently rebooting or about to reboot.
+                    if self.state.current().run_state
+                        != ApiInstanceState::Rebooting
+                        && !self.reboot_pending()
+                    {
                         self.state.transition(ApiInstanceState::Rebooting);
                         self.propolis_queue
                             .push_back(PropolisInstanceState::Rebooting);
