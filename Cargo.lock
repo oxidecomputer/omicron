@@ -4215,7 +4215,7 @@ name = "omicron-dev-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.1.11",
+ "clap 4.2.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -4497,7 +4497,6 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.1",
  "dropshot",
  "expectorate",
  "futures",
