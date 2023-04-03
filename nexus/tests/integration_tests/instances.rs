@@ -167,18 +167,6 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // Fetch instance by name, project_name, and organization_id
-    let fetched_instance = instance_get(
-        &client,
-        format!(
-            "/v1/instances/{}?project={}",
-            instance.identity.name, project.identity.name
-        )
-        .as_str(),
-    )
-    .await;
-    assert_eq!(fetched_instance.identity.id, instance.identity.id);
-
     // Fetch instance by name and project_name
     let fetched_instance = instance_get(
         &client,

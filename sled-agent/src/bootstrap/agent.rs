@@ -1000,6 +1000,8 @@ mod tests {
                     address: None,
                     mac: MacAddr6::nil().into(),
                 },
+                ntp_servers: vec![String::from("test.pool.example.com")],
+                dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
             trust_quorum_share: Some(

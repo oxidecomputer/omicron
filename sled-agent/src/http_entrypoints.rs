@@ -7,7 +7,7 @@
 use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
-    Zpool,
+    TimeSync, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -36,6 +36,7 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
+        api.register(timesync_get)?;
 
         Ok(())
     }
@@ -231,4 +232,15 @@ async fn vpc_firewall_rules_put(
         .map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/timesync",
+}]
+async fn timesync_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<TimeSync>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
 }

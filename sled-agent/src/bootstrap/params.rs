@@ -33,6 +33,12 @@ pub struct RackInitializeRequest {
     /// Internet gateway information.
     pub gateway: Gateway,
 
+    /// The external NTP server addresses.
+    pub ntp_servers: Vec<String>,
+
+    /// The external DNS server addresses.
+    pub dns_servers: Vec<String>,
+
     /// The address on which Nexus should serve an external interface.
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
     // this should be pulled from a pool of addresses.
@@ -70,6 +76,12 @@ pub struct SledAgentRequest {
     // Longer-term, it probably makes sense to store this in CRDB and transfer
     // it to Sled Agent as part of the request to launch Nexus.
     pub gateway: Gateway,
+
+    /// The external NTP servers to use
+    pub ntp_servers: Vec<String>,
+    //
+    /// The external DNS servers to use
+    pub dns_servers: Vec<String>,
 
     // Note: The order of these fields is load bearing, because we serialize
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
@@ -205,6 +217,8 @@ mod tests {
                         address: None,
                         mac: MacAddr6::nil().into(),
                     },
+                    ntp_servers: vec![String::from("test.pool.example.com")],
+                    dns_servers: vec![String::from("1.1.1.1")],
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 }),
                 Some(

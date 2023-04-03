@@ -16,7 +16,7 @@ use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use chrono::Duration;
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use nexus_db_queries::context::{OpContext, OpKind};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX, COCKROACH_PORT};
 use omicron_common::nexus_config;
@@ -151,7 +151,7 @@ impl ServerContext {
             nexus_config::Database::FromDns => {
                 info!(log, "Accessing DB url from DNS");
                 let address = resolver
-                    .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+                    .lookup_ipv6(ServiceName::Cockroach)
                     .await
                     .map_err(|e| format!("Failed to lookup IP: {}", e))?;
                 info!(log, "DB address: {}", address);

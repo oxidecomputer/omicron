@@ -26,6 +26,12 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             types::DiskState::Creating => Self::Creating,
             types::DiskState::Detached => Self::Detached,
+            types::DiskState::ImportReady => Self::ImportReady,
+            types::DiskState::ImportingFromUrl => Self::ImportingFromUrl,
+            types::DiskState::ImportingFromBulkWrites => {
+                Self::ImportingFromBulkWrites
+            }
+            types::DiskState::Finalizing => Self::Finalizing,
             types::DiskState::Maintenance => Self::Maintenance,
             types::DiskState::Attaching(u) => Self::Attaching(u),
             types::DiskState::Attached(u) => Self::Attached(u),
@@ -129,6 +135,10 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             DiskState::Creating => Self::Creating,
             DiskState::Detached => Self::Detached,
+            DiskState::ImportReady => Self::ImportReady,
+            DiskState::ImportingFromUrl => Self::ImportingFromUrl,
+            DiskState::ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
+            DiskState::Finalizing => Self::Finalizing,
             DiskState::Maintenance => Self::Maintenance,
             DiskState::Attaching(u) => Self::Attaching(u),
             DiskState::Attached(u) => Self::Attached(u),
