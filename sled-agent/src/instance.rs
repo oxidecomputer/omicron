@@ -796,34 +796,28 @@ impl Instance {
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
-        match target.run_state {
+
+        let (propolis_state, next_published) = match target.run_state {
             InstanceStateRequested::Running => {
-                inner
-                    .propolis_state_put(
-                        propolis_client::api::InstanceStateRequested::Run,
-                    )
-                    .await?;
+                (propolis_client::api::InstanceStateRequested::Run, None)
             }
             InstanceStateRequested::Stopped
-            | InstanceStateRequested::Destroyed => {
-                inner
-                    .propolis_state_put(
-                        propolis_client::api::InstanceStateRequested::Stop,
-                    )
-                    .await?;
-                inner.state.transition(InstanceState::Stopping);
-            }
-            InstanceStateRequested::Reboot => {
-                inner
-                    .propolis_state_put(
-                        propolis_client::api::InstanceStateRequested::Reboot,
-                    )
-                    .await?;
-                inner.state.transition(InstanceState::Rebooting);
-            }
+            | InstanceStateRequested::Destroyed => (
+                propolis_client::api::InstanceStateRequested::Stop,
+                Some(InstanceState::Stopping),
+            ),
+            InstanceStateRequested::Reboot => (
+                propolis_client::api::InstanceStateRequested::Reboot,
+                Some(InstanceState::Rebooting),
+            ),
             InstanceStateRequested::Migrating => {
                 unimplemented!("Live migration not yet implemented");
             }
+        };
+
+        inner.propolis_state_put(propolis_state).await?;
+        if let Some(s) = next_published {
+            inner.state.transition(s);
         }
 
         Ok(inner.state.current().clone())
