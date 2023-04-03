@@ -714,7 +714,7 @@ impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
         // blocking_lock() because we _are_ in an asynchronous context.  We
         // could use a semaphore like tokio's MutexGuard does, but that would
         // involve unsafe code.)
-        if !self.finished {
+        if !self.finished && !std::thread::panicking() {
             panic!("attempted to return early without finishing update!");
         }
     }
