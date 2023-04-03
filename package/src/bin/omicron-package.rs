@@ -15,6 +15,7 @@ use omicron_zone_package::config::Config as PackageConfig;
 use omicron_zone_package::package::{Package, PackageOutput, PackageSource};
 use omicron_zone_package::progress::Progress;
 use omicron_zone_package::target::Target;
+use once_cell::sync::Lazy;
 use rayon::prelude::*;
 use ring::digest::{Context as DigestContext, Digest, SHA256};
 use sled_hardware::cleanup::cleanup_networking_resources;
@@ -23,14 +24,35 @@ use slog::o;
 use slog::Drain;
 use slog::Logger;
 use slog::{info, warn};
-use std::env;
-use std::fs::create_dir_all;
+use std::fs::{create_dir_all, OpenOptions};
+use std::io::BufReader as StdBufReader;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{collections::HashMap, sync::Mutex};
+use std::{env, mem};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+
+static BUILD_CACHE: Lazy<Mutex<HashMap<PathBuf, Vec<u8>>>> = Lazy::new(|| {
+    let args = Args::try_parse().unwrap();
+    let target_dir = &args.artifact_dir;
+    let cache_file = PathBuf::from(target_dir).join("build-cache.json");
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(cache_file)
+        .unwrap();
+    let reader = StdBufReader::new(file);
+
+    let cache: HashMap<PathBuf, Vec<u8>> =
+        serde_json::from_reader(reader).unwrap_or_else(|_| HashMap::new());
+
+    Mutex::new(cache)
+});
 
 /// All packaging subcommands.
 #[derive(Debug, Subcommand)]
@@ -282,12 +304,13 @@ async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
 
 // Ensures a package exists, either by creating it or downloading it.
 async fn get_package(
-    target: &Target,
+    config: &Config,
     ui: &Arc<ProgressUI>,
     package_name: &String,
     package: &Package,
     output_directory: &Path,
 ) -> Result<()> {
+    let target = &config.target;
     let total_work = package.get_total_work_for_target(&target)?;
     let progress = ui.add_package(package_name.to_string(), total_work);
     match &package.source {
@@ -359,21 +382,56 @@ async fn get_package(
         }
         PackageSource::Local { .. } | PackageSource::Composite { .. } => {
             progress.set_message("bundle package".into());
-            package
-                .create_with_progress_for_target(&progress, &target, package_name, &output_directory)
-                .await
-                .with_context(|| {
-                    let msg = format!("failed to create {package_name} in {output_directory:?}");
-                    if let Some(hint) = &package.setup_hint {
-                        format!("{msg}\nHint: {hint}")
-                    } else {
-                        msg
-                    }
-                })?;
+
+            let output_file = match package.output {
+                PackageOutput::Zone { .. } => {
+                    output_directory.join(format!("{}.tar.gz", package_name))
+                }
+                PackageOutput::Tarball => {
+                    package.get_output_path(package_name, output_directory)
+                }
+            };
+
+            let cache = BUILD_CACHE.lock().unwrap();
+            let hash = cache.get(&output_file).map(ToOwned::to_owned);
+            mem::drop(cache);
+
+            if hash.is_none()
+                || !does_hash_match(&output_file, &hash.unwrap()).await
+            {
+                let file = package
+                    .create_with_progress_for_target(&progress, &target, package_name, &output_directory)
+                    .await
+                    .with_context(|| {
+                        let msg = format!("failed to create {package_name} in {output_directory:?}");
+                        if let Some(hint) = &package.setup_hint {
+                            format!("{msg}\nHint: {hint}")
+                        } else {
+                            msg
+                        }
+                    })?;
+                // make sure this is all written out before we try and get the digest
+                file.sync_all()?;
+
+                let digest = get_sha256_digest(&output_file).await?;
+
+                let mut cache = BUILD_CACHE.lock().unwrap();
+                cache.insert(output_file, digest.as_ref().to_vec());
+            }
         }
     }
     progress.finish();
     Ok(())
+}
+
+/// returns true if the file exists and matches the hash, false otherwise
+async fn does_hash_match(path: &PathBuf, hash: &[u8]) -> bool {
+    let digest = match get_sha256_digest(&path).await {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+
+    digest.as_ref() == hash
 }
 
 async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
@@ -407,7 +465,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
                 None,
                 |((package_name, package), ui)| async move {
                     get_package(
-                        &config.target,
+                        &config,
                         &ui,
                         package_name,
                         package,
@@ -828,7 +886,8 @@ async fn main() -> Result<()> {
     };
 
     let get_config = || -> Result<Config> {
-        let target_path = args.artifact_dir.join("target").join(&args.target);
+        let target_dir = args.artifact_dir.join("target");
+        let target_path = target_dir.join(&args.target);
         let raw_target =
             std::fs::read_to_string(&target_path).map_err(|e| {
                 eprintln!(
@@ -902,6 +961,14 @@ async fn main() -> Result<()> {
             do_clean(&get_config()?, &args.artifact_dir, &install_dir).await?;
         }
     }
+
+    // write out the cache
+    let cache = BUILD_CACHE.lock().unwrap();
+
+    let target_dir = &args.artifact_dir;
+    let cache_file = PathBuf::from(target_dir).join("build-cache.json");
+
+    std::fs::write(cache_file, serde_json::to_string_pretty(&*cache).unwrap())?;
 
     Ok(())
 }
