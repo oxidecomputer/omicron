@@ -41,7 +41,7 @@ pub enum Error {
     Opte(#[from] illumos_utils::opte::Error),
 
     #[error("Failed to create reservoir: {0}")]
-    Reservoir(#[from] illumos_utils::rsrvrctl::Error),
+    Reservoir(#[from] illumos_utils::vmm_reservoir::Error),
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
@@ -107,7 +107,7 @@ impl InstanceManager {
         const MiB: i64 = 1024 * 1024;
         let reservoir_size = ByteCount::try_from((reservoir_size / MiB) * MiB)
             .map_err(Error::BadRamSize)?;
-        illumos_utils::rsrvrctl::ReservoirControl::set(reservoir_size)?;
+        illumos_utils::vmm_reservoir::ReservoirControl::set(reservoir_size)?;
         *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
         Ok(())
     }

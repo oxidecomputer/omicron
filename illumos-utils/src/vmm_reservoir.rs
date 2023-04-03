@@ -11,7 +11,7 @@ pub enum Error {
     #[error("Reservoir size must be a multiple of MiB, not: {0}")]
     InvalidSize(ByteCount),
 
-    #[error("Failed to create reservoir: {0}")]
+    #[error("Failed to set reservoir size: {0}")]
     ReservoirError(#[from] std::io::Error),
 }
 
