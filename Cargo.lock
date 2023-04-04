@@ -4211,6 +4211,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-dev-tools"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap 4.2.1",
+ "dropshot",
+ "expectorate",
+ "futures",
+ "libc",
+ "nexus-test-interface",
+ "nexus-test-utils",
+ "omicron-common 0.1.0",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "oxide-client",
+ "pq-sys",
+ "signal-hook",
+ "signal-hook-tokio",
+ "subprocess",
+ "tokio",
+ "tokio-postgres",
+ "toml 0.7.3",
+]
+
+[[package]]
 name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
@@ -4471,15 +4497,11 @@ name = "omicron-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.1",
  "dropshot",
  "expectorate",
  "futures",
  "libc",
  "omicron-common 0.1.0",
- "postgres-protocol",
- "signal-hook",
- "signal-hook-tokio",
  "slog",
  "subprocess",
  "tempfile",
