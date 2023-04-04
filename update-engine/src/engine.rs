@@ -769,5 +769,7 @@ mod tests {
         assert!(step_1_run, "Step 1 was run");
         assert!(step_2_run, "Step 2 was run");
         assert!(!step_3_run, "Step 3 was not run");
+
+        logctx.cleanup_successful();
     }
 }
