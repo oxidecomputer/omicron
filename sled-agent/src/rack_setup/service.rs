@@ -963,9 +963,10 @@ impl ServiceInner {
                 // we must provide the set of *all* services that should be
                 // executing on a sled.
                 //
-                // This means re-requesting the DNS service, even if it is
-                // already running - this is fine, however, as the receiving
-                // sled agent doesn't modify the already-running service.
+                // This means re-requesting the DNS and NTP services, even if
+                // they are already running - this is fine, however, as the
+                // receiving sled agent doesn't modify the already-running
+                // service.
                 self.initialize_services(
                     *sled_address,
                     &services_request.services,

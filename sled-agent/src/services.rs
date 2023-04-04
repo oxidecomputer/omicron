@@ -37,7 +37,6 @@ use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
-use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -337,9 +336,9 @@ impl ServiceManager {
                 config,
                 physical_link_vnic_allocator: VnicAllocator::new(
                     "Public",
-                    // NOTE: Right now, we only use a connection to one of the Chelsio
-                    // links. Longer-term, when we we use OPTE, we'll be able to use both
-                    // connections.
+                    // NOTE: Right now, we only use a connection to one of the
+                    // Chelsio links. Longer-term, when we we use OPTE, we'll
+                    // be able to use both connections.
                     physical_link,
                 ),
                 underlay_address,
@@ -365,6 +364,55 @@ impl ServiceManager {
                 err,
             })?;
             let mut existing_zones = self.inner.zones.lock().await;
+
+            // Initialize and DNS and NTP services first as they are required
+            // for time synchronization, which is a pre-requisite for the other
+            // services.
+            self.initialize_services_locked(
+                &mut existing_zones,
+                &cfg.services
+                    .clone()
+                    .into_iter()
+                    .filter(|svc| {
+                        matches!(
+                            svc.zone_type,
+                            ZoneType::InternalDNS | ZoneType::NTP
+                        )
+                    })
+                    .collect(),
+            )
+            .await?;
+
+            drop(existing_zones);
+
+            // Wait for time synchronization
+            info!(&self.inner.log, "Waiting for sled time synchronization");
+            loop {
+                let ts = self.timesync_get().await;
+                match ts {
+                    Ok(TimeSync { sync: true, .. }) => {
+                        info!(&self.inner.log, "Time is synchronized");
+                        break;
+                    }
+                    Ok(ts) => {
+                        info!(
+                            &self.inner.log,
+                            "Time not yet synchronized {:?}", ts
+                        );
+                    }
+                    Err(e) => {
+                        info!(
+                            self.inner.log,
+                            "Error checking for time synchronization: {}", e
+                        );
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+
+            let mut existing_zones = self.inner.zones.lock().await;
+
+            // Initialize all remaining serivces
             self.initialize_services_locked(&mut existing_zones, &cfg.services)
                 .await?;
         } else {
@@ -1080,8 +1128,9 @@ impl ServiceManager {
 
     /// Ensures that particular services should be initialized.
     ///
-    /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
+    /// These services will be instantiated by this function, and will be
+    /// recorded to a local file to ensure they start automatically on next
+    /// boot.
     pub async fn ensure_persistent(
         &self,
         request: ServiceEnsureBody,
@@ -1155,7 +1204,8 @@ impl ServiceManager {
 
         let existing_zones = self.inner.zones.lock().await;
 
-        let ntp_zone_name = format!("{}{}", ZONE_PREFIX, ZoneType::NTP);
+        let ntp_zone_name =
+            InstalledZone::get_zone_name(&ZoneType::NTP.to_string(), None);
 
         let ntp_zone = existing_zones
             .iter()
