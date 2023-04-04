@@ -326,6 +326,7 @@ async fn finalize_import(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &finalize_url)
+            .raw_body(Some("{}".to_string()))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
