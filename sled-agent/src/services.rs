@@ -32,6 +32,7 @@ use crate::params::{
 };
 use crate::smf_helper::SmfHelper;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
@@ -653,10 +654,15 @@ impl ServiceManager {
         let running_zone = RunningZone::boot(installed_zone).await?;
 
         for link in running_zone.links() {
-            info!(self.inner.log, "Ensuring {}/ll exists in zone", link.name(),);
+            info!(
+                self.inner.log,
+                "Ensuring {}/{} exists in zone",
+                link.name(),
+                IPV6_LINK_LOCAL_NAME
+            );
             Zones::ensure_has_link_local_v6_address(
                 Some(running_zone.name()),
-                &AddrObject::new(link.name(), "ll").unwrap(),
+                &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME).unwrap(),
             )?;
         }
 
@@ -1066,7 +1072,7 @@ impl ServiceManager {
                                 .map(|i| {
                                     AddrObject::new(
                                         &format!("tfport{}", i), // XXX rearN soon!
-                                        "ll",
+                                        IPV6_LINK_LOCAL_NAME,
                                     )
                                     .unwrap()
                                 })
