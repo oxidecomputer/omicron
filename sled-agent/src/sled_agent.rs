@@ -10,9 +10,9 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, SledRole, TimeSync,
-    Zpool,
+    DatasetKind, DiskStateRequested, InstanceHardware,
+    InstanceMigrationTargetParams, InstanceStateRequested, ServiceEnsureBody,
+    SledRole, TimeSync, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
