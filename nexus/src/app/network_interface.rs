@@ -75,14 +75,6 @@ impl super::Nexus {
 
         // NOTE: We need to lookup the VPC and VPC Subnet, since we need both
         // IDs for creating the network interface.
-        //
-        // TODO-correctness: There are additional races here. The VPC and VPC
-        // Subnet could both be deleted between the time we fetch them and
-        // actually insert the record for the interface. The solution is likely
-        // to make both objects implement `DatastoreCollection` for their
-        // children, and then use `VpcSubnet::insert_resource` inside the
-        // `instance_create_network_interface` method. See
-        // https://github.com/oxidecomputer/omicron/issues/738.
         let vpc_name = db::model::Name(params.vpc_name.clone());
         let subnet_name = db::model::Name(params.subnet_name.clone());
         let (.., authz_vpc, authz_subnet, db_subnet) =
