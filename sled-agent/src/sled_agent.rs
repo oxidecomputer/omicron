@@ -11,7 +11,8 @@ use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, TimeSync, Zpool,
+    InstanceRuntimeStateRequested, ServiceEnsureBody, SledRole, TimeSync,
+    Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -498,6 +499,15 @@ impl SledAgent {
     pub async fn zpools_get(&self) -> Result<Vec<Zpool>, Error> {
         let zpools = self.inner.storage.get_zpools().await?;
         Ok(zpools)
+    }
+
+    /// Returns whether or not the sled believes itself to be a scrimlet
+    pub async fn get_role(&self) -> SledRole {
+        if self.inner.hardware.is_scrimlet() {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        }
     }
 
     /// Ensures that a filesystem type exists within the zpool.

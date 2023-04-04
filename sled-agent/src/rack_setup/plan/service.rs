@@ -11,8 +11,8 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use dns_service_client::types::DnsConfigParams;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
-    get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DNS_PORT,
-    DNS_SERVER_PORT, NTP_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet, DENDRITE_PORT,
+    DNS_PORT, DNS_SERVER_PORT, NTP_PORT, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -122,6 +122,29 @@ impl Plan {
         }
     }
 
+    async fn is_sled_scrimlet(
+        log: &Logger,
+        address: SocketAddrV6,
+    ) -> Result<bool, PlanError> {
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .map_err(PlanError::HttpClient)?;
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", address),
+            client,
+            log.new(o!("SledAgentClient" => address.to_string())),
+        );
+
+        let role = client.sled_role_get().await?.into_inner();
+        match role {
+            SledAgentTypes::SledRole::Gimlet => Ok(false),
+            SledAgentTypes::SledRole::Scrimlet => Ok(true),
+        }
+    }
+
     // Gets zpool UUIDs from U.2 devices on the sled.
     async fn get_u2_zpools_from_sled(
         log: &Logger,
@@ -198,6 +221,7 @@ impl Plan {
             .collect::<Vec<String>>();
 
         let mut boundary_ntp_servers = vec![];
+        let mut seen_any_scrimlet = false;
 
         for idx in 0..sled_addrs.len() {
             let sled_address = sled_addrs[idx];
@@ -205,9 +229,25 @@ impl Plan {
                 Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip());
             let u2_zpools =
                 Self::get_u2_zpools_from_sled(log, sled_address).await?;
-            let mut addr_alloc = AddressBumpAllocator::new(subnet);
+            let is_scrimlet = Self::is_sled_scrimlet(log, sled_address).await?;
 
+            let mut addr_alloc = AddressBumpAllocator::new(subnet);
             let mut request = SledRequest::default();
+
+            // Scrimlets get DNS records for running dendrite
+            if is_scrimlet {
+                let id = Uuid::new_v4();
+                let address = get_switch_zone_address(subnet);
+                let zone = dns_builder.host_zone(id, address).unwrap();
+                dns_builder
+                    .service_backend_zone(
+                        ServiceName::Dendrite,
+                        &zone,
+                        DENDRITE_PORT,
+                    )
+                    .unwrap();
+                seen_any_scrimlet = true;
+            }
 
             // The first enumerated sleds get assigned the responsibility
             // of hosting Nexus.
@@ -433,6 +473,12 @@ impl Plan {
             }
 
             allocations.push((sled_address, request));
+        }
+
+        if !seen_any_scrimlet {
+            return Err(PlanError::SledInitialization(format!(
+                "No scrimlets observed"
+            )));
         }
 
         let mut services = std::collections::HashMap::new();

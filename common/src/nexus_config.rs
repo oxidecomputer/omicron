@@ -174,9 +174,10 @@ pub struct TimeseriesDbConfig {
 }
 
 /// Configuration for the `Dendrite` dataplane daemon.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct DpdConfig {
-    pub address: SocketAddr,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
 }
 
 // A deserializable type that does no validation on the tunable parameters.
@@ -542,7 +543,9 @@ mod test {
                     }),
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
                     dendrite: DpdConfig {
-                        address: SocketAddr::from_str("[::1]:12224").unwrap()
+                        address: Some(
+                            SocketAddr::from_str("[::1]:12224").unwrap()
+                        )
                     },
                 },
             }
