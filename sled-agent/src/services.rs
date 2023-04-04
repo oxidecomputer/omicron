@@ -252,6 +252,7 @@ pub struct ServiceManagerInner {
     sled_mode: SledMode,
     skip_timesync: Option<bool>,
     sidecar_revision: String,
+    switch_zone_maghemite_links: Vec<PhysicalLink>,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
@@ -298,6 +299,7 @@ impl ServiceManager {
         skip_timesync: Option<bool>,
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -310,6 +312,7 @@ impl ServiceManager {
                 sled_mode,
                 skip_timesync,
                 sidecar_revision,
+                switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
@@ -526,19 +529,21 @@ impl ServiceManager {
                     }
                 }
                 ServiceType::Maghemite { .. } => {
-                    // underlay::find_switch_zone_nics will only return a
-                    // non-empty vector if non-gimlet interfaces are hard coded.
-                    let mut links = Vec::with_capacity(8);
+                    // If on a non-gimlet, sled-agent can be configured to map
+                    // links into the switch zone. Validate those links here.
+                    let mut links = Vec::with_capacity(
+                        self.inner.switch_zone_maghemite_links.len(),
+                    );
 
-                    for nic in underlay::find_switch_zone_nics()? {
-                        match Dladm::verify_link(nic.interface()) {
+                    for link in &self.inner.switch_zone_maghemite_links {
+                        match Dladm::verify_link(&link.to_string()) {
                             Ok(link) => {
                                 links.push(link);
                             }
 
                             Err(_) => {
                                 return Err(Error::MissingDevice {
-                                    device: nic.to_string(),
+                                    device: link.to_string(),
                                 });
                             }
                         }
@@ -1078,7 +1083,17 @@ impl ServiceManager {
                                 })
                                 .collect()
                         } else {
-                            underlay::find_switch_zone_nics()?
+                            self.inner
+                                .switch_zone_maghemite_links
+                                .iter()
+                                .map(|i| {
+                                    AddrObject::new(
+                                        &i.to_string(),
+                                        IPV6_LINK_LOCAL_NAME,
+                                    )
+                                    .unwrap()
+                                })
+                                .collect()
                         };
 
                     smfh.setprop(
@@ -1780,6 +1795,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1818,6 +1834,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1858,6 +1875,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1887,6 +1905,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1924,6 +1943,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1955,6 +1975,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
