@@ -28,7 +28,7 @@ use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
 use propolis_server::mock_server::Context as PropolisContext;
 
-use super::collection::SimCollection;
+use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
@@ -314,7 +314,11 @@ impl SledAgent {
 
         let instance_run_time_state = self
             .instances
-            .sim_ensure(&instance_id, initial_hardware.runtime, target)
+            .sim_ensure(
+                &instance_id,
+                initial_hardware.runtime,
+                target.run_state,
+            )
             .await?;
 
         for disk_request in &initial_hardware.disks {
@@ -360,11 +364,11 @@ impl SledAgent {
     }
 
     pub async fn instance_poke(&self, id: Uuid) {
-        self.instances.sim_poke(id).await;
+        self.instances.sim_poke(id, PokeMode::Drain).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
-        self.disks.sim_poke(id).await;
+        self.disks.sim_poke(id, PokeMode::SingleStep).await;
     }
 
     /// Adds a Zpool to the simulated sled agent.

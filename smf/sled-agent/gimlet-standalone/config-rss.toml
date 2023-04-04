@@ -14,6 +14,9 @@ rack_secret_threshold = 1
 # NOTE: In the lab, use "172.20.15.226"
 nexus_external_address = "192.168.1.20"
 
+ntp_servers = [ "ntp.eng.oxide.computer" ]
+dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+
 [gateway]
 
 # IP address of Internet gateway

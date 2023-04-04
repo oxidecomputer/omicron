@@ -167,18 +167,6 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // Fetch instance by name, project_name, and organization_id
-    let fetched_instance = instance_get(
-        &client,
-        format!(
-            "/v1/instances/{}?project={}",
-            instance.identity.name, project.identity.name
-        )
-        .as_str(),
-    )
-    .await;
-    assert_eq!(fetched_instance.identity.id, instance.identity.id);
-
     // Fetch instance by name and project_name
     let fetched_instance = instance_get(
         &client,
@@ -310,15 +298,6 @@ async fn test_instances_create_reboot_halt(
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
-    assert!(
-        instance_next.runtime.time_run_state_updated
-            > instance.runtime.time_run_state_updated
-    );
-
-    let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -391,15 +370,6 @@ async fn test_instances_create_reboot_halt(
     let instance_next =
         instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
-    assert!(
-        instance_next.runtime.time_run_state_updated
-            > instance.runtime.time_run_state_updated
-    );
-
-    let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
