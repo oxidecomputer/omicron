@@ -251,8 +251,8 @@ impl Simulatable for SimDisk {
         self.state.current()
     }
 
-    fn desired(&self) -> &Option<Self::RequestedState> {
-        self.state.desired()
+    fn desired(&self) -> Option<Self::RequestedState> {
+        self.state.desired().clone()
     }
 
     fn ready_to_destroy(&self) -> bool {
