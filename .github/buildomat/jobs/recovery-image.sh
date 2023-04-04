@@ -3,7 +3,7 @@
 #: name = "helios / build recovery OS image"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.66.1"
+#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"=/work/helios/image/output/os.tar.gz",
 #: ]

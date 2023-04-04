@@ -98,7 +98,7 @@ impl<S: Simulatable> SimObject<S> {
         &mut self,
         target: S::RequestedState,
     ) -> Result<Option<S::RequestedState>, Error> {
-        let dropped = self.object.desired().clone();
+        let dropped = self.object.desired();
         let old_gen = self.object.generation();
         let action = self.object.request_transition(&target)?;
         if old_gen == self.object.generation() {
@@ -148,7 +148,7 @@ impl<S: Simulatable> SimObject<S> {
 
     fn transition_finish(&mut self) {
         let current = self.object.current().clone();
-        let desired = self.object.desired().clone();
+        let desired = self.object.desired();
         let action = self.object.execute_desired_transition();
         info!(self.log, "simulated transition finish";
             "state_before" => ?current,
@@ -158,6 +158,16 @@ impl<S: Simulatable> SimObject<S> {
             "action" => ?action,
         );
     }
+}
+
+/// The modes of operation for the "poke" operation.
+pub enum PokeMode {
+    /// Make the simulated object take a single step.
+    SingleStep,
+
+    /// Make the simulated object take steps until it no longer reports an
+    /// explicit destination state.
+    Drain,
 }
 
 /// A collection of `Simulatable` objects, each represented by a `SimObject`
@@ -203,7 +213,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     async fn sim_step(&self, id: Uuid, mut rx: Receiver<()>) {
         while rx.next().await.is_some() {
             tokio::time::sleep(Duration::from_millis(1500)).await;
-            self.sim_poke(id).await;
+            self.sim_poke(id, PokeMode::SingleStep).await;
         }
     }
 
@@ -211,45 +221,57 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     /// This is invoked either by `sim_step()` (if the simulation mode is
     /// `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
     /// is `SimMode::Api).
-    pub async fn sim_poke(&self, id: Uuid) {
-        let (new_state, to_destroy) = {
-            // The object must be present in `objects` because it only gets
-            // removed when it comes to rest in the "Destroyed" state, but we
-            // can only get here if there's an asynchronous state transition
-            // desired.
-            //
-            // We do as little as possible with the lock held.  In particular,
-            // we want to finish this work before calling out to notify the
-            // nexus.
-            let mut objects = self.objects.lock().await;
-            let mut object = objects.remove(&id).unwrap();
-            object.transition_finish();
-            let after = object.object.current().clone();
-            if object.object.desired().is_none()
-                && object.object.ready_to_destroy()
-            {
-                (after, Some(object))
-            } else {
-                objects.insert(id, object);
-                (after, None)
-            }
-        };
+    pub async fn sim_poke(&self, id: Uuid, mode: PokeMode) {
+        let mut should_step = true;
 
-        // Notify Nexus that the object's state has changed.
-        // TODO-robustness: If this fails, we need to put it on some list of
-        // updates to retry later.
-        S::notify(&self.nexus_client, &id, new_state).await.unwrap();
+        while should_step {
+            let (new_state, to_destroy) = {
+                // The object must be present in `objects` because it only gets
+                // removed when it comes to rest in the "Destroyed" state, but
+                // we can only get here if there's an asynchronous state
+                // transition desired.
+                //
+                // We do as little as possible with the lock held.  In
+                // particular, we want to finish this work before calling out to
+                // notify the nexus.
+                let mut objects = self.objects.lock().await;
+                let mut object = objects.remove(&id).unwrap();
+                object.transition_finish();
+                let after = object.object.current().clone();
 
-        // If the object came to rest destroyed, complete any async cleanup
-        // needed now.
-        // TODO-debugging It would be nice to have visibility into objects that
-        // are cleaning up in case we have to debug resource leaks here.
-        // TODO-correctness Is it a problem that nobody waits on the background
-        // task?  If we did it here, we'd deadlock, since we're invoked from the
-        // background task.
-        if let Some(destroyed_object) = to_destroy {
-            if let Some(mut tx) = destroyed_object.channel_tx {
-                tx.close_channel();
+                if matches!(mode, PokeMode::SingleStep)
+                    || object.object.desired().is_none()
+                {
+                    should_step = false;
+                }
+
+                if object.object.desired().is_none()
+                    && object.object.ready_to_destroy()
+                {
+                    (after, Some(object))
+                } else {
+                    objects.insert(id, object);
+                    (after, None)
+                }
+            };
+
+            // Notify Nexus that the object's state has changed.
+            // TODO-robustness: If this fails, we need to put it on some list of
+            // updates to retry later.
+            S::notify(&self.nexus_client, &id, new_state).await.unwrap();
+
+            // If the object came to rest destroyed, complete any async cleanup
+            // needed now.
+            // TODO-debugging It would be nice to have visibility
+            // into objects that are cleaning up in case we have to debug
+            // resource leaks here.
+            // TODO-correctness Is it a problem that nobody
+            // waits on the background task?  If we did it here, we'd deadlock,
+            // since we're invoked from the background task.
+            if let Some(destroyed_object) = to_destroy {
+                if let Some(mut tx) = destroyed_object.channel_tx {
+                    tx.close_channel();
+                }
             }
         }
     }
@@ -329,10 +351,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
-    use crate::params::{
-        DiskStateRequested, InstanceRuntimeStateRequested,
-        InstanceStateRequested,
-    };
+    use crate::params::{DiskStateRequested, InstanceStateRequested};
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
@@ -407,39 +426,20 @@ mod test {
         assert_eq!(r1.gen, instance.object.current().gen);
         assert!(rx.try_next().is_err());
 
-        // We should be able to transition immediately to any other stopped
-        // state.  We can't do this for "Creating" because transition() treats
-        // that as a transition to "Running".
-        let stopped_states = vec![
-            InstanceStateRequested::Stopped,
-            InstanceStateRequested::Destroyed,
-        ];
-        let mut rprev = r1;
-        for state in stopped_states {
-            assert!(rprev.run_state.is_stopped());
-            let dropped = instance
-                .transition(InstanceRuntimeStateRequested {
-                    run_state: state,
-                    migration_params: None,
-                })
-                .unwrap();
-            assert!(dropped.is_none());
-            assert!(instance.object.desired().is_none());
-            let rnext = instance.object.current().clone();
-            assert!(rnext.gen > rprev.gen);
-            assert!(rnext.time_updated >= rprev.time_updated);
-            match state {
-                InstanceStateRequested::Stopped => {
-                    assert_eq!(rnext.run_state, InstanceState::Stopped);
-                }
-                InstanceStateRequested::Destroyed => {
-                    assert_eq!(rnext.run_state, InstanceState::Destroyed);
-                }
-                _ => panic!("Unexpected requested state: {}", state),
-            }
-            assert!(rx.try_next().is_err());
-            rprev = rnext;
-        }
+        // Stopping an instance that was never started synchronously destroys
+        // it.
+        let rprev = r1;
+        assert!(rprev.run_state.is_stopped());
+        let dropped =
+            instance.transition(InstanceStateRequested::Stopped).unwrap();
+        assert!(dropped.is_none());
+        assert!(instance.object.desired().is_none());
+        let rnext = instance.object.current().clone();
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rnext.run_state, InstanceState::Destroyed);
+        assert!(rx.try_next().is_err());
+
         logctx.cleanup_successful();
     }
 
@@ -470,12 +470,8 @@ mod test {
         // process.
         let mut rprev = r1;
         assert!(rx.try_next().is_err());
-        let dropped = instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_params: None,
-            })
-            .unwrap();
+        let dropped =
+            instance.transition(InstanceStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         assert!(rx.try_next().is_ok());
@@ -502,12 +498,8 @@ mod test {
         // If we transition again to "Running", the process should complete
         // immediately.
         assert!(!rprev.run_state.is_stopped());
-        let dropped = instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_params: None,
-            })
-            .unwrap();
+        let dropped =
+            instance.transition(InstanceStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
@@ -521,12 +513,8 @@ mod test {
         // again.
         assert!(!rprev.run_state.is_stopped());
         assert!(rx.try_next().is_err());
-        let dropped = instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Destroyed,
-                migration_params: None,
-            })
-            .unwrap();
+        let dropped =
+            instance.transition(InstanceStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current().clone();
@@ -536,91 +524,34 @@ mod test {
         assert!(!rnext.run_state.is_stopped());
         rprev = rnext;
 
+        // Propolis publishes its own transition to Stopping before it publishes
+        // Stopped.
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.object.desired().is_none());
-        assert_eq!(rprev.run_state, InstanceState::Stopping);
-        assert_eq!(rnext.run_state, InstanceState::Stopped);
-        rprev = rnext;
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rprev.gen, rnext.gen);
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_sim_instance_preempt_transition() {
-        let logctx = test_setup_log("test_sim_instance_preempt_transition");
-        let (mut instance, mut rx) = make_instance(&logctx);
-        let r1 = instance.object.current().clone();
-
-        info!(logctx.log, "new instance"; "run_state" => ?r1.run_state);
-        assert_eq!(r1.run_state, InstanceState::Creating);
-        assert_eq!(r1.gen, Generation::new());
-
-        // There's no asynchronous transition going on yet so a
-        // transition_finish() shouldn't change anything.
-        assert!(instance.object.desired().is_none());
-        instance.transition_finish();
-        assert!(instance.object.desired().is_none());
-        assert_eq!(&r1.time_updated, &instance.object.current().time_updated);
-        assert_eq!(&r1.run_state, &instance.object.current().run_state);
-        assert_eq!(r1.gen, instance.object.current().gen);
-        assert!(rx.try_next().is_err());
-
-        // Now, if we transition to "Running", we must go through the async
-        // process.
-        let mut rprev = r1;
-        // Now let's test the behavior of dropping a transition.  We'll start
-        // transitioning back to "Running".  Then, while we're still in
-        // "Starting", will transition back to "Destroyed".  We should
-        // immediately go to "Stopping", and completing the transition should
-        // take us to "Destroyed".
-        assert!(rprev.run_state.is_stopped());
-        let dropped = instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_params: None,
-            })
-            .unwrap();
-        assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
-        let rnext = instance.object.current().clone();
-        assert!(rnext.gen > rprev.gen);
-        assert!(rnext.time_updated >= rprev.time_updated);
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        assert!(!rnext.run_state.is_stopped());
-        rprev = rnext;
-
-        // Interrupt the async transition with a new one.
-        let dropped = instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Destroyed,
-                migration_params: None,
-            })
-            .unwrap();
-        assert_eq!(dropped.unwrap().run_state, InstanceStateRequested::Running);
-        let rnext = instance.object.current().clone();
-        assert!(rnext.gen > rprev.gen);
-        assert!(rnext.time_updated >= rprev.time_updated);
+        assert_eq!(rprev.run_state, InstanceState::Stopping);
         assert_eq!(rnext.run_state, InstanceState::Stopping);
         rprev = rnext;
 
-        // Finish the async transition.
+        // Stopping goes to Stopped...
         instance.transition_finish();
         let rnext = instance.object.current().clone();
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated >= rprev.time_updated);
-        assert!(instance.object.desired().is_none());
+        assert!(instance.object.desired().is_some());
         assert_eq!(rprev.run_state, InstanceState::Stopping);
         assert_eq!(rnext.run_state, InstanceState::Stopped);
         rprev = rnext;
+
+        // ...and Stopped (internally) goes to Destroyed, though the sled agent
+        // hides this state from clients.
         instance.transition_finish();
         let rnext = instance.object.current().clone();
-        assert_eq!(rprev.gen, rnext.gen);
-
+        assert!(rnext.gen > rprev.gen);
+        assert_eq!(rprev.run_state, InstanceState::Stopped);
+        assert_eq!(rnext.run_state, InstanceState::Stopped);
         logctx.cleanup_successful();
     }
 
@@ -637,10 +568,7 @@ mod test {
         assert_eq!(r1.run_state, InstanceState::Creating);
         assert_eq!(r1.gen, Generation::new());
         assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_params: None,
-            })
+            .transition(InstanceStateRequested::Running)
             .unwrap()
             .is_none());
         instance.transition_finish();
@@ -652,14 +580,18 @@ mod test {
         }
 
         assert!(rnext.gen > rprev.gen);
-        // Now, take it through a reboot sequence.
+
+        // Now reboot the instance. This is dispatched to Propolis, which will
+        // move to the Rebooting state and then back to Running.
         assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
+            .transition(InstanceStateRequested::Reboot)
             .unwrap()
             .is_none());
+        let (rprev, rnext) = (rnext, instance.object.current().clone());
+        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.time_updated > rprev.time_updated);
+        assert_eq!(rnext.run_state, InstanceState::Rebooting);
+        instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current().clone());
 
         // Chrono doesn't give us enough precision, so sleep a bit
@@ -681,132 +613,7 @@ mod test {
 
         assert!(rnext.gen > rprev.gen);
         assert!(rnext.time_updated > rprev.time_updated);
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        assert!(instance.object.desired().is_some());
-        instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.object.current().clone());
-        assert!(rnext.gen > rprev.gen);
-        assert!(rnext.time_updated > rprev.time_updated);
         assert_eq!(rnext.run_state, InstanceState::Running);
-        assert!(instance.object.desired().is_none());
-
-        // Begin a reboot.  Then, while it's still "Stopping", begin another
-        // reboot.  This should go through exactly one reboot sequence, as the
-        // second reboot is totally superfluous.
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_none());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Rebooting);
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_none());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Rebooting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Running);
-        assert!(instance.object.desired().is_none());
-        instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.object.current().clone());
-        assert_eq!(rprev.gen, rnext.gen);
-
-        // Begin a reboot.  Then, while it's "Starting" (on the way back up),
-        // begin another reboot.  This should go through a second reboot
-        // sequence.
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_none());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Rebooting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_some());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Rebooting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Running);
-        assert!(instance.object.desired().is_none());
-        instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.object.current().clone());
-        assert_eq!(rprev.gen, rnext.gen);
-
-        // At this point, we've exercised what happens when a reboot is issued
-        // from "Running", from "Starting" with a reboot in progress, from
-        // "Stopping" with a reboot in progress.  All that's left is "Starting"
-        // with no reboot in progress.  First, stop the instance.  Then start
-        // it.  Then, while it's starting, begin a reboot sequence.
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Stopped,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_none());
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Stopped);
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Running,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_none());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        assert!(instance
-            .transition(InstanceRuntimeStateRequested {
-                run_state: InstanceStateRequested::Reboot,
-                migration_params: None,
-            })
-            .unwrap()
-            .is_some());
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Rebooting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Starting);
-        instance.transition_finish();
-        let rnext = instance.object.current().clone();
-        assert_eq!(rnext.run_state, InstanceState::Running);
-        assert!(instance.object.desired().is_none());
-        instance.transition_finish();
-        let (rprev, rnext) = (rnext, instance.object.current().clone());
-        assert_eq!(rprev.gen, rnext.gen);
-
-        // Issuing a reboot from any other state is not defined, including from
-        // "Stopping" while not in the process of a reboot and from any
-        // "stopped" state.  instance_ensure() will prevent this, while
-        // transition() will allow it.  We don't test the behavior of
-        // transition() because it's subject to change.
-
         logctx.cleanup_successful();
     }
 

@@ -51,6 +51,8 @@ mod test {
                 address: None,
                 mac: macaddr::MacAddr6::nil().into(),
             },
+            ntp_servers: vec![String::from("test.pool.example.com")],
+            dns_servers: vec![String::from("1.1.1.1")],
             nexus_external_address: "192.168.1.20".parse().unwrap(),
         };
 

@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-/// types describing DNS records and configuration
+//! types describing DNS records and configuration
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -25,19 +27,7 @@ pub struct DnsConfig {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfigZone {
     pub zone_name: String,
-    pub records: Vec<DnsKV>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename = "DnsKv")]
-pub struct DnsKV {
-    pub key: DnsRecordKey,
-    pub records: Vec<DnsRecord>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct DnsRecordKey {
-    pub name: String,
+    pub records: HashMap<String, Vec<DnsRecord>>,
 }
 
 #[allow(clippy::upper_case_acronyms)]

@@ -92,15 +92,15 @@
 // backwards-compatible way (but obviously one wouldn't get the scaling benefits
 // while continuing to use the old API).
 
-use crate::dns_types::{
-    DnsConfig, DnsConfigParams, DnsConfigZone, DnsKV, DnsRecord, DnsRecordKey,
-};
+use crate::dns_types::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -125,6 +125,7 @@ pub struct Store {
     db: Arc<sled::Db>,
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
+    poisoned: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -185,6 +186,7 @@ impl Store {
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
+            poisoned: Arc::new(AtomicBool::new(false)),
         };
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
@@ -278,10 +280,7 @@ impl Store {
                                         tree_name, name
                                     )
                                 })?;
-                        Ok(DnsKV {
-                            key: DnsRecordKey { name: name.to_owned() },
-                            records,
-                        })
+                        Ok((name.to_owned(), records))
                     })
                     .collect::<anyhow::Result<_>>()
                     .context("assembling records")?;
@@ -303,6 +302,13 @@ impl Store {
         req_id: &'b str,
         generation: u64,
     ) -> Result<UpdateGuard<'a, 'b>, UpdateError> {
+        if self.poisoned.load(Ordering::SeqCst) {
+            panic!(
+                "store is poisoned (attempted update after previous \
+                UpdateGuard was dropped)"
+            );
+        }
+
         let mut update = self.updating.lock().await;
         if let Some(ref update) = *update {
             let elapsed =
@@ -340,7 +346,7 @@ impl Store {
         ));
 
         // Lock out concurrent updates.  We must not return until we've released
-        // the "updating" lock!  (See UpdateGuard's `drop` impl.)
+        // the "updating" lock.
         let update = self.begin_update(req_id, config.generation).await?;
 
         info!(log, "attempting generation update");
@@ -398,18 +404,16 @@ impl Store {
                 .open_tree(&tree_name)
                 .with_context(|| format!("creating tree {:?}", &tree_name))?;
 
-            for record in &zone_config.records {
-                let DnsRecordKey { name } = &record.key;
-                let name = name.to_lowercase();
-                if record.records.is_empty() {
+            for (name, records) in &zone_config.records {
+                if records.is_empty() {
                     // There's no distinction between in DNS between a name that
                     // doesn't exist at all and one with no records associated
                     // with it.  If there are no records, don't bother inserting
                     // the name.
                     continue;
                 }
-                let records_json = serde_json::to_vec(&record.records)
-                    .with_context(|| {
+                let records_json =
+                    serde_json::to_vec(&records).with_context(|| {
                         format!(
                             "serializing records for zone {:?} key {:?}",
                             zone_name, name
@@ -713,16 +717,49 @@ impl<'a, 'b> UpdateGuard<'a, 'b> {
 
 impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
     fn drop(&mut self) {
-        // TODO-cleanup It would be far better if we could enforce this at
-        // compile-time, similar to a MutexGuard.  The obvious approach of doing
-        // it on drop does not work because we cannot take the async lock from
-        // the synchronous Drop function.  And we don't want to use a std Mutex
-        // and risk blocking the executor.  And it doesn't seem like we can use
-        // blocking_lock() because we _are_ in an asynchronous context.  We
-        // could use a semaphore like tokio's MutexGuard does, but that would
-        // involve unsafe code.)
+        // UpdateGuard exists because we must enforce at most one Update is
+        // happening at a time, but we also want to catch the case where an
+        // errant code path begins an update and forgets to call
+        // UpdateGuard::finish().  Why?  If this happens, the DNS server will
+        // forever report "update in progress" errors, and nothing will ever fix
+        // it.  This is essentially a refcount leak, and it's very difficult to
+        // debug since we wouldn't know what code path caused the problem.  But
+        // we *do* know what code path caused the problem: it's whoever dropped
+        // the UpdateGuard without finishing it.  That's why this is the place
+        // to identify and report the problem.
+        //
+        // The first thing we'll do is poison the store so that any subsequent
+        // attempt to update it will fail explicitly.
         if !self.finished {
-            panic!("attempted to return early without finishing update!");
+            self.store.poisoned.store(true, Ordering::SeqCst);
+
+            // Now, in the case above where a code path just forgot to finish
+            // the UpdateGuard, we want to panic right here.  That makes this
+            // problem maximally debuggable: it points precisely to where the
+            // missed call was.  But it's also possible that we got here because
+            // the current thread is panicking, causing the UpdateGuard to be
+            // dropped.  There's no point in panicking again because there's no
+            // bug here.  Plus, it's quite disruptive to panic while panicking.
+            // So we don't want to panic if we're already panicking.
+            //
+            // TODO-cleanup Better than all this would be to enforce at
+            // compile-time that the UpdateGuard gets finished before it gets
+            // dropped.  Maybe better than the above would be to have `drop` of
+            // the UpdateGuard do the same thing as `finish()`, similar to
+            // `MutexGuard`.  This is tricky because:
+            // - we cannot take the async lock from the synchronous Drop
+            //   function
+            // - it's risky to use a std Mutex since taking the lock could block
+            //   the executor; plus, if the lock were poisoned due to a panic,
+            //   we'd panic while panicking again
+            // - it doesn't seem like we can use `blocking_lock()` because we
+            //   _are_ in an async context (i.e., running as part of a task in
+            //   an async runtime), even if we're not in an async block
+            // - we could use a semaphore like tokio's MutexGuard does, but that
+            //   involves unsafe code
+            if !std::thread::panicking() {
+                panic!("dropped UpdateGuard without finishing update");
+            }
         }
     }
 }
@@ -732,14 +769,13 @@ mod test {
     use super::{Config, Store, UpdateError};
     use crate::dns_types::DnsConfigParams;
     use crate::dns_types::DnsConfigZone;
-    use crate::dns_types::DnsKV;
     use crate::dns_types::DnsRecord;
-    use crate::dns_types::DnsRecordKey;
     use crate::storage::QueryError;
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
+    use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -859,16 +895,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![
-                    DnsKV {
-                        key: DnsRecordKey { name: "gen1_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    },
-                    DnsKV {
-                        key: DnsRecordKey { name: "shared_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    },
-                ],
+                records: HashMap::from([
+                    ("gen1_name".to_string(), vec![dummy_record.clone()]),
+                    ("shared_name".to_string(), vec![dummy_record.clone()]),
+                ]),
             }],
         };
 
@@ -906,17 +936,17 @@ mod test {
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
-                    records: vec![DnsKV {
-                        key: DnsRecordKey { name: "shared_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    }],
+                    records: HashMap::from([(
+                        "shared_name".to_string(),
+                        vec![dummy_record.clone()],
+                    )]),
                 },
                 DnsConfigZone {
                     zone_name: "zone2.internal".to_string(),
-                    records: vec![DnsKV {
-                        key: DnsRecordKey { name: "gen2_name".to_string() },
-                        records: vec![dummy_record.clone()],
-                    }],
+                    records: HashMap::from([(
+                        "gen2_name".to_string(),
+                        vec![dummy_record.clone()],
+                    )]),
                 },
             ],
         };
@@ -943,10 +973,10 @@ mod test {
             generation: 8,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen8_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen8_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
         tc.store.dns_config_update(&update8, "my request id").await.unwrap();
@@ -1005,10 +1035,10 @@ mod test {
             generation: 9,
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen8_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen8_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
         tc.store.dns_config_update(&update9, "my request id").await.unwrap();
@@ -1034,10 +1064,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen1_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen1_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 
@@ -1059,10 +1089,10 @@ mod test {
             generation: 2,
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen2_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen2_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 
@@ -1156,10 +1186,10 @@ mod test {
             generation: 1,
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
-                records: vec![DnsKV {
-                    key: DnsRecordKey { name: "gen1_name".to_string() },
-                    records: vec![dummy_record.clone()],
-                }],
+                records: HashMap::from([(
+                    "gen1_name".to_string(),
+                    vec![dummy_record.clone()],
+                )]),
             }],
         };
 

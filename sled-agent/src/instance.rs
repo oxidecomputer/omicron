@@ -12,6 +12,7 @@ use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
 use crate::params::{
     InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceStateRequested,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
@@ -504,10 +505,7 @@ impl Instance {
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
         // Update nexus with an in-progress state while we set up the instance.
-        let desired = inner.state.desired().clone();
-        inner
-            .state
-            .transition(InstanceState::Starting, desired.map(|d| d.run_state));
+        inner.state.transition(InstanceState::Starting);
         inner
             .lazy_nexus_client
             .get()
@@ -779,10 +777,16 @@ impl Instance {
         }
     }
 
-    /// Transitions an instance object to a new state, taking any actions
-    /// necessary to perform state transitions.
+    /// Attempts to change the current state of the instance by issuing an
+    /// appropriate state change command to its Propolis.
     ///
-    /// Returns the new state after starting the transition.
+    /// Returns the instance's state after applying any changes required by this
+    /// call. Note that if the instance's Propolis is in the middle of its own
+    /// state transition, it may publish states that supersede the state
+    /// published by this routine in perhaps-surprising ways. For example, if an
+    /// instance begins to stop when Propolis has just begun to handle a prior
+    /// request to reboot, the instance's state may proceed from Stopping to
+    /// Rebooting to Running to Stopping to Stopped.
     ///
     /// # Panics
     ///
@@ -792,17 +796,30 @@ impl Instance {
         target: InstanceRuntimeStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
-        if let Some(action) = inner
-            .state
-            .request_transition(&target)
-            .map_err(|e| Error::Transition(e))?
-        {
-            info!(
-                &inner.log,
-                "transition to {:?}; action: {:#?}", target, action
-            );
-            inner.take_action(action).await?;
+
+        let (propolis_state, next_published) = match target.run_state {
+            InstanceStateRequested::Running => {
+                (propolis_client::api::InstanceStateRequested::Run, None)
+            }
+            InstanceStateRequested::Stopped
+            | InstanceStateRequested::Destroyed => (
+                propolis_client::api::InstanceStateRequested::Stop,
+                Some(InstanceState::Stopping),
+            ),
+            InstanceStateRequested::Reboot => (
+                propolis_client::api::InstanceStateRequested::Reboot,
+                Some(InstanceState::Rebooting),
+            ),
+            InstanceStateRequested::Migrating => {
+                unimplemented!("Live migration not yet implemented");
+            }
+        };
+
+        inner.propolis_state_put(propolis_state).await?;
+        if let Some(s) = next_published {
+            inner.state.transition(s);
         }
+
         Ok(inner.state.current().clone())
     }
 

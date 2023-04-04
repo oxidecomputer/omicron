@@ -22,7 +22,7 @@ pub enum ResolveError {
     Resolve(#[from] trust_dns_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
-    NotFound(crate::SRV),
+    NotFound(crate::ServiceName),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
@@ -103,7 +103,7 @@ impl Resolver {
     // API that can be improved upon later.
     pub async fn lookup_ipv6(
         &self,
-        srv: crate::SRV,
+        srv: crate::ServiceName,
     ) -> Result<Ipv6Addr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
@@ -119,7 +119,7 @@ impl Resolver {
     /// Returns an error if the record does not exist.
     pub async fn lookup_socket_v6(
         &self,
-        srv: crate::SRV,
+        srv: crate::ServiceName,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         debug!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
@@ -153,7 +153,7 @@ impl Resolver {
 
     pub async fn lookup_ip(
         &self,
-        srv: crate::SRV,
+        srv: crate::ServiceName,
     ) -> Result<IpAddr, ResolveError> {
         let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
         debug!(self.log, "lookup srv"; "dns_name" => &name);
@@ -170,12 +170,13 @@ impl Resolver {
 mod test {
     use super::ResolveError;
     use super::Resolver;
-    use crate::{BackendName, DnsConfigBuilder, ServiceName, SRV};
+    use crate::{DnsConfigBuilder, ServiceName};
     use anyhow::Context;
     use assert_matches::assert_matches;
     use dns_service_client::types::DnsConfigParams;
     use omicron_test_utils::dev::test_setup_log;
     use slog::{o, Logger};
+    use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
@@ -291,7 +292,7 @@ mod test {
         let resolver = dns_server.resolver().unwrap();
 
         let err = resolver
-            .lookup_ip(SRV::Service(ServiceName::Cockroach))
+            .lookup_ip(ServiceName::Cockroach)
             .await
             .expect_err("Looking up non-existent service should fail");
 
@@ -320,18 +321,14 @@ mod test {
         let ip = Ipv6Addr::from_str("ff::01").unwrap();
         let zone = dns_config.host_zone(Uuid::new_v4(), ip).unwrap();
         dns_config
-            .service_backend_zone(
-                SRV::Service(ServiceName::Cockroach),
-                &zone,
-                12345,
-            )
+            .service_backend_zone(ServiceName::Cockroach, &zone, 12345)
             .unwrap();
         let dns_config = dns_config.build();
         dns_server.update(&dns_config).await.unwrap();
 
         let resolver = dns_server.resolver().unwrap();
         let found_ip = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .lookup_ipv6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
         assert_eq!(found_ip, ip,);
@@ -378,9 +375,9 @@ mod test {
             0,
         );
 
-        let srv_crdb = SRV::Service(ServiceName::Cockroach);
-        let srv_clickhouse = SRV::Service(ServiceName::Clickhouse);
-        let srv_backend = SRV::Backend(BackendName::Crucible, Uuid::new_v4());
+        let srv_crdb = ServiceName::Cockroach;
+        let srv_clickhouse = ServiceName::Clickhouse;
+        let srv_backend = ServiceName::Crucible(Uuid::new_v4());
 
         let mut dns_builder = DnsConfigBuilder::new();
         for db_ip in &cockroach_addrs {
@@ -418,14 +415,14 @@ mod test {
         // Look up Cockroach
         let resolver = dns_server.resolver().unwrap();
         let ip = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .lookup_ipv6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
         assert!(cockroach_addrs.iter().any(|addr| addr.ip() == &ip));
 
         // Look up Clickhouse
         let ip = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Clickhouse))
+            .lookup_ipv6(ServiceName::Clickhouse)
             .await
             .expect("Should have been able to look up IP address");
         assert_eq!(&ip, clickhouse_addr.ip());
@@ -440,13 +437,13 @@ mod test {
         // If we deploy a new generation that removes all records, then we don't
         // find anything any more.
         dns_config.generation += 1;
-        dns_config.zones[0].records = Vec::new();
+        dns_config.zones[0].records = HashMap::new();
         dns_server.update(&dns_config).await.unwrap();
 
         // If we remove the records for all services, we won't find them any
         // more.  (e.g., there's no hidden caching going on)
         let error = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .lookup_ipv6(ServiceName::Cockroach)
             .await
             .expect_err("unexpectedly found records");
         assert_matches!(
@@ -478,14 +475,14 @@ mod test {
         let mut dns_builder = DnsConfigBuilder::new();
         let ip1 = Ipv6Addr::from_str("ff::01").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
-        let srv_crdb = SRV::Service(ServiceName::Cockroach);
+        let srv_crdb = ServiceName::Cockroach;
         dns_builder
             .service_backend_zone(srv_crdb.clone(), &zone, 12345)
             .unwrap();
         let dns_config = dns_builder.build();
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .lookup_ipv6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
         assert_eq!(found_ip, ip1);
@@ -495,7 +492,7 @@ mod test {
         let mut dns_builder = DnsConfigBuilder::new();
         let ip2 = Ipv6Addr::from_str("ee::02").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
-        let srv_crdb = SRV::Service(ServiceName::Cockroach);
+        let srv_crdb = ServiceName::Cockroach;
         dns_builder
             .service_backend_zone(srv_crdb.clone(), &zone, 54321)
             .unwrap();
@@ -503,7 +500,7 @@ mod test {
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
-            .lookup_ipv6(SRV::Service(ServiceName::Cockroach))
+            .lookup_ipv6(ServiceName::Cockroach)
             .await
             .expect("Should have been able to look up IP address");
         assert_eq!(found_ip, ip2);

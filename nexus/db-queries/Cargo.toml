@@ -74,6 +74,7 @@ oximeter.workspace = true
 assert_matches.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
+internal-dns.workspace = true
 itertools.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true

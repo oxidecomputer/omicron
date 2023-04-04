@@ -14,6 +14,10 @@ sled_mode = "scrimlet"
 # this information.
 sidecar_revision = "b"
 
+# Setting this to true causes sled-agent to always report that its time is
+# in-sync, rather than querying its NTP zone.
+skip_timesync = true
+
 # A file-backed zpool can be manually created with the following:
 # # truncate -s 10GB testpool.vdev
 # # zpool create oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b "$PWD/testpool.vdev"
