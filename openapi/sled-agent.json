@@ -950,7 +950,7 @@
             "description": "If we're migrating this instance, the details needed to drive the migration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceMigrateParams"
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
               }
             ]
           },
@@ -958,7 +958,7 @@
             "description": "requested runtime state of the Instance",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeStateRequested"
+                "$ref": "#/components/schemas/InstanceStateRequested"
               }
             ]
           }
@@ -1042,7 +1042,7 @@
           "snapshot_id"
         ]
       },
-      "InstanceMigrateParams": {
+      "InstanceMigrationTargetParams": {
         "type": "object",
         "properties": {
           "src_propolis_addr": {
@@ -1142,44 +1142,6 @@
           "time_updated"
         ]
       },
-      "InstanceRuntimeStateMigrateParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "migration_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_propolis_id",
-          "migration_id"
-        ]
-      },
-      "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeStateMigrateParams"
-              }
-            ]
-          },
-          "run_state": {
-            "$ref": "#/components/schemas/InstanceStateRequested"
-          }
-        },
-        "required": [
-          "run_state"
-        ]
-      },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
         "oneOf": [
@@ -1277,13 +1239,6 @@
             "type": "string",
             "enum": [
               "reboot"
-            ]
-          },
-          {
-            "description": "Migrate the instance to another node.",
-            "type": "string",
-            "enum": [
-              "migrating"
             ]
           },
           {

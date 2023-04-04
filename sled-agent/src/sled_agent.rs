@@ -529,8 +529,8 @@ impl SledAgent {
         &self,
         instance_id: Uuid,
         initial: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
-        migrate: Option<InstanceMigrateParams>,
+        target: InstanceStateRequested,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         self.inner
             .instances

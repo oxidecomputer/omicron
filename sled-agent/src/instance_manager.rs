@@ -7,7 +7,7 @@
 use crate::nexus::LazyNexusClient;
 use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -93,8 +93,8 @@ impl InstanceManager {
         &self,
         instance_id: Uuid,
         initial_hardware: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
-        migrate: Option<InstanceMigrateParams>,
+        target: InstanceStateRequested,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
@@ -363,10 +363,7 @@ mod test {
             .ensure(
                 test_uuid(),
                 new_initial_instance(),
-                InstanceRuntimeStateRequested {
-                    run_state: InstanceStateRequested::Running,
-                    migration_params: None,
-                },
+                InstanceStateRequested::Running,
                 None,
             )
             .await
@@ -453,15 +450,12 @@ mod test {
 
         let id = test_uuid();
         let rt = new_initial_instance();
-        let target = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
-        };
+        let target = InstanceStateRequested::Running;
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target, None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target, None).await.unwrap();
         // Transition only.
         im.ensure(id, rt, target, None).await.unwrap();
 

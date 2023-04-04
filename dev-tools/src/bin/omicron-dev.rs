@@ -2,13 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Developer tool for setting up a local database for use by Omicron
+//! Developer tool for easily running bits of Omicron
 
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use clap::Args;
 use clap::Parser;
 use futures::stream::StreamExt;
+use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_test_utils::dev;
@@ -24,6 +26,7 @@ async fn main() -> Result<(), anyhow::Error> {
         OmicronDb::DbPopulate { ref args } => cmd_db_populate(args).await,
         OmicronDb::DbWipe { ref args } => cmd_db_wipe(args).await,
         OmicronDb::ChRun { ref args } => cmd_clickhouse_run(args).await,
+        OmicronDb::RunAll { ref args } => cmd_run_all(args).await,
     };
     if let Err(error) = result {
         fatal(CmdError::Failure(format!("{:#}", error)));
@@ -59,9 +62,15 @@ enum OmicronDb {
         #[clap(flatten)]
         args: ChRunArgs,
     },
+
+    /// Run a full simulated control plane
+    RunAll {
+        #[clap(flatten)]
+        args: RunAllArgs,
+    },
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct DbRunArgs {
     /// Path to store database data (default: temp dir cleaned up on exit)
     #[clap(long, action)]
@@ -227,7 +236,7 @@ async fn cmd_db_wipe(args: &DbWipeArgs) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
     #[clap(short, long, default_value = "8123", action)]
@@ -284,5 +293,78 @@ async fn cmd_clickhouse_run(args: &ChRunArgs) -> Result<(), anyhow::Error> {
                 .context("clean up after SIGINT shutdown")?;
         }
     }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Args)]
+struct RunAllArgs {
+    /// Nexus external API listen port.  Use `0` to request any available port.
+    #[clap(long, action)]
+    nexus_listen_port: Option<u16>,
+}
+
+async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
+    // Start a stream listening for SIGINT
+    let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
+    let mut signal_stream = signals.fuse();
+
+    // Read configuration.
+    let config_str = include_str!("../../../nexus/examples/config.toml");
+    let mut config: omicron_common::nexus_config::Config =
+        toml::from_str(config_str).context("parsing example config")?;
+    config.pkg.log = dropshot::ConfigLogging::File {
+        // See LogContext::new(),
+        path: "UNUSED".to_string().into(),
+        level: dropshot::ConfigLoggingLevel::Trace,
+        if_exists: dropshot::ConfigLoggingIfExists::Fail,
+    };
+
+    if let Some(p) = args.nexus_listen_port {
+        config.deployment.dropshot_external.bind_address.set_port(p);
+    }
+
+    // Start up a ControlPlaneTestContext, which tautologically sets up
+    // everything needed for a simulated control plane.
+    println!("omicron-dev: setting up all services ... ");
+    let cptestctx = nexus_test_utils::test_setup_with_config::<
+        omicron_nexus::Server,
+    >("omicron-dev", &mut config)
+    .await;
+    println!("omicron-dev: services are running.");
+
+    // Print out basic information about what was started.
+    // NOTE: The stdout strings here are not intended to be stable, but they are
+    // used by the test suite.
+    let addr =
+        cptestctx.server.get_http_server_external_address().await.ok_or_else(
+            || anyhow!("Nexus unexpectedly had no external HTTP address"),
+        )?;
+    println!("omicron-dev: nexus external API:    {:?}", addr);
+    println!(
+        "omicron-dev: nexus internal API:    {:?}",
+        cptestctx.server.get_http_server_internal_address().await,
+    );
+    println!(
+        "omicron-dev: cockroachdb pid:       {}",
+        cptestctx.database.pid(),
+    );
+    println!(
+        "omicron-dev: cockroachdb URL:       {}",
+        cptestctx.database.pg_config()
+    );
+    println!(
+        "omicron-dev: cockroachdb directory: {}",
+        cptestctx.database.temp_dir().display()
+    );
+
+    // Wait for a signal.
+    let caught_signal = signal_stream.next().await;
+    assert_eq!(caught_signal.unwrap(), SIGINT);
+    eprintln!(
+        "omicron-dev: caught signal, shutting down and removing \
+        temporary directory"
+    );
+
+    cptestctx.teardown().await;
     Ok(())
 }

@@ -72,13 +72,13 @@ pub struct InstanceEnsureBody {
     /// has never seen this Instance before).
     pub initial: InstanceHardware,
     /// requested runtime state of the Instance
-    pub target: InstanceRuntimeStateRequested,
+    pub target: InstanceStateRequested,
     /// If we're migrating this instance, the details needed to drive the migration
-    pub migrate: Option<InstanceMigrateParams>,
+    pub migrate: Option<InstanceMigrationTargetParams>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrateParams {
+pub struct InstanceMigrationTargetParams {
     pub src_propolis_id: Uuid,
     pub src_propolis_addr: SocketAddr,
 }
@@ -107,8 +107,6 @@ pub enum InstanceStateRequested {
     /// Issue a reset command to the instance, such that it should
     /// stop and then immediately become running.
     Reboot,
-    /// Migrate the instance to another node.
-    Migrating,
     /// Stop the instance and delete it.
     Destroyed,
 }
@@ -125,7 +123,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Migrating => "migrating",
             InstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -136,7 +133,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Migrating => false,
             InstanceStateRequested::Destroyed => true,
         }
     }
@@ -144,20 +140,9 @@ impl InstanceStateRequested {
 
 /// Instance runtime state to update for a migration.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateMigrateParams {
+pub struct InstanceMigrationSourceParams {
     pub migration_id: Uuid,
     pub dst_propolis_id: Uuid,
-}
-
-/// Used to request an Instance state change from a sled agent
-///
-/// Right now, it's only the run state and migration id that can
-/// be changed, though we might want to support changing properties
-/// like "ncpus" here.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateRequested {
-    pub run_state: InstanceStateRequested,
-    pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
