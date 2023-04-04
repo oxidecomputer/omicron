@@ -645,6 +645,9 @@ impl ServiceInner {
                                 external_address: *external_ip,
                             }
                         }
+                        ServiceType::Dendrite { .. } => {
+                            NexusTypes::ServiceKind::Dendrite
+                        }
                         ServiceType::InternalDns { .. } => {
                             NexusTypes::ServiceKind::InternalDNS
                         }
@@ -899,7 +902,7 @@ impl ServiceInner {
             if let Some(plan) = ServicePlan::load(&self.log).await? {
                 plan
             } else {
-                ServicePlan::create(&self.log, &config, &sled_addresses).await?
+                ServicePlan::create(&self.log, &config, &plan.sleds).await?
             };
 
         // Set up internal DNS and NTP services.

@@ -4,6 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
+use crate::bootstrap::params::SledAgentRequest;
 use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
 };
@@ -206,7 +207,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        sled_addrs: &Vec<SocketAddrV6>,
+        sleds: &HashMap<SocketAddrV6, SledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();
@@ -223,22 +224,23 @@ impl Plan {
         let mut boundary_ntp_servers = vec![];
         let mut seen_any_scrimlet = false;
 
-        for idx in 0..sled_addrs.len() {
-            let sled_address = sled_addrs[idx];
+        for (idx, (sled_address, sled_request)) in sleds.iter().enumerate() {
             let subnet: Ipv6Subnet<SLED_PREFIX> =
                 Ipv6Subnet::<SLED_PREFIX>::new(*sled_address.ip());
             let u2_zpools =
-                Self::get_u2_zpools_from_sled(log, sled_address).await?;
-            let is_scrimlet = Self::is_sled_scrimlet(log, sled_address).await?;
+                Self::get_u2_zpools_from_sled(log, *sled_address).await?;
+            let is_scrimlet =
+                Self::is_sled_scrimlet(log, *sled_address).await?;
 
             let mut addr_alloc = AddressBumpAllocator::new(subnet);
             let mut request = SledRequest::default();
 
             // Scrimlets get DNS records for running dendrite
             if is_scrimlet {
-                let id = Uuid::new_v4();
                 let address = get_switch_zone_address(subnet);
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let zone = dns_builder
+                    .host_dendrite(sled_request.id, address)
+                    .unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::Dendrite,
@@ -472,7 +474,7 @@ impl Plan {
                 });
             }
 
-            allocations.push((sled_address, request));
+            allocations.push((*sled_address, request));
         }
 
         if !seen_any_scrimlet {
