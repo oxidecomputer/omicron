@@ -112,9 +112,9 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::PhysicalDisk,
-                        LookupType::ByCompositeId(
-                            format!("vendor: {vendor}, serial: {serial}, id: {model}")
-                        ),
+                        LookupType::ByCompositeId(format!(
+                            "vendor: {vendor}, serial: {serial}, id: {model}"
+                        )),
                     ),
                 )
             })?;

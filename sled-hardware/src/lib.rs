@@ -265,6 +265,10 @@ impl UnparsedDisk {
     pub fn variant(&self) -> DiskVariant {
         self.variant
     }
+
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
+    }
 }
 
 /// A physical disk conforming to the expected partition layout.
