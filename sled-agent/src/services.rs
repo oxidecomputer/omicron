@@ -645,14 +645,14 @@ impl ServiceManager {
             // opte_ports=
             vec![],
             bootstrap_vnic,
-            links.clone(),
+            links,
             limit_priv,
         )
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        for link in &links {
+        for link in running_zone.links() {
             info!(self.inner.log, "Ensuring {}/ll exists in zone", link.name(),);
             Zones::ensure_has_link_local_v6_address(
                 Some(running_zone.name()),

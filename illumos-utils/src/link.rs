@@ -124,7 +124,7 @@ pub struct InvalidLinkKind(String);
 /// Note that the "ownership" of the VNIC is based on convention;
 /// another process in the global zone could also modify / destroy
 /// the VNIC while this object is alive.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Link {
     name: String,
     deleted: bool,

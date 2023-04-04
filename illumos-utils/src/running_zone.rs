@@ -395,6 +395,10 @@ impl RunningZone {
         }
         Ok(())
     }
+
+    pub fn links(&self) -> &Vec<Link> {
+        &self.inner.links
+    }
 }
 
 impl Drop for RunningZone {
