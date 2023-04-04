@@ -6,8 +6,7 @@
 
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
-    InstanceStateRequested,
+    DiskStateRequested, InstanceHardware, InstanceStateRequested,
 };
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
@@ -210,7 +209,7 @@ impl SledAgent {
         self: &Arc<Self>,
         instance_id: Uuid,
         mut initial_hardware: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
+        target: InstanceStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -230,7 +229,7 @@ impl SledAgent {
                 time_updated: chrono::Utc::now(),
             };
 
-            let target = match target.run_state {
+            let target = match target {
                 InstanceStateRequested::Running
                 | InstanceStateRequested::Reboot => {
                     DiskStateRequested::Attached(instance_id)
@@ -239,7 +238,6 @@ impl SledAgent {
                 | InstanceStateRequested::Destroyed => {
                     DiskStateRequested::Detached
                 }
-                _ => panic!("state {} not covered!", target.run_state),
             };
 
             let id = match disk.volume_construction_request {
@@ -292,7 +290,7 @@ impl SledAgent {
                 )?;
             }
 
-            let body = match target.run_state {
+            let body = match target {
                 InstanceStateRequested::Running => {
                     propolis_client::types::InstanceStateRequested::Run
                 }
@@ -303,9 +301,6 @@ impl SledAgent {
                 InstanceStateRequested::Reboot => {
                     propolis_client::types::InstanceStateRequested::Reboot
                 }
-                InstanceStateRequested::Migrating => {
-                    propolis_client::types::InstanceStateRequested::MigrateStart
-                }
             };
             client.instance_state_put().body(body).send().await.map_err(
                 |e| Error::internal_error(&format!("propolis-client: {}", e)),
@@ -314,11 +309,7 @@ impl SledAgent {
 
         let instance_run_time_state = self
             .instances
-            .sim_ensure(
-                &instance_id,
-                initial_hardware.runtime,
-                target.run_state,
-            )
+            .sim_ensure(&instance_id, initial_hardware.runtime, target)
             .await?;
 
         for disk_request in &initial_hardware.disks {

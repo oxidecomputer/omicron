@@ -11,8 +11,7 @@ use crate::params::NetworkInterface;
 use crate::params::SourceNatConfig;
 use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
-    InstanceStateRequested,
+    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
@@ -303,7 +302,7 @@ impl InstanceInner {
         instance: Instance,
         instance_ticket: InstanceTicket,
         setup: PropolisSetup,
-        migrate: Option<InstanceMigrateParams>,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
         let PropolisSetup { client, running_zone, port_tickets } = setup;
 
@@ -424,11 +423,11 @@ mockall::mock! {
         pub async fn start(
             &self,
             instance_ticket: InstanceTicket,
-            migrate: Option<InstanceMigrateParams>,
+            migrate: Option<InstanceMigrationTargetParams>,
         ) -> Result<(), Error>;
         pub async fn transition(
             &self,
-            target: InstanceRuntimeStateRequested,
+            target: InstanceStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
         pub async fn issue_snapshot_request(
             &self,
@@ -703,7 +702,7 @@ impl Instance {
     pub async fn start(
         &self,
         instance_ticket: InstanceTicket,
-        migrate: Option<InstanceMigrateParams>,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
         let mut inner = self.inner.lock().await;
 
@@ -793,11 +792,11 @@ impl Instance {
     /// This method may panic if it has been invoked before [`Instance::start`].
     pub async fn transition(
         &self,
-        target: InstanceRuntimeStateRequested,
+        target: InstanceStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
 
-        let (propolis_state, next_published) = match target.run_state {
+        let (propolis_state, next_published) = match target {
             InstanceStateRequested::Running => {
                 (propolis_client::api::InstanceStateRequested::Run, None)
             }
@@ -810,9 +809,6 @@ impl Instance {
                 propolis_client::api::InstanceStateRequested::Reboot,
                 Some(InstanceState::Rebooting),
             ),
-            InstanceStateRequested::Migrating => {
-                unimplemented!("Live migration not yet implemented");
-            }
         };
 
         inner.propolis_state_put(propolis_state).await?;
@@ -951,11 +947,6 @@ mod test {
 
         // Trying to transition before the instance has been initialized will
         // result in a panic.
-        inst.transition(InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
-        })
-        .await
-        .unwrap();
+        inst.transition(InstanceStateRequested::Running).await.unwrap();
     }
 }

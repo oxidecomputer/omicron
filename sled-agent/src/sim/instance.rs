@@ -183,9 +183,6 @@ impl Simulatable for SimInstance {
                     )))
                 }
             },
-            InstanceStateRequested::Migrating => {
-                unimplemented!("Migration not implemented yet");
-            }
             InstanceStateRequested::Destroyed => {
                 self.state
                     .observe_transition(&PropolisInstanceState::Destroyed);
