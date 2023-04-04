@@ -31,6 +31,7 @@ pub struct UpdateEngine<'a, S: StepSpec> {
     // TODO: for now, this is a sequential series of steps. This can potentially
     // be a graph in the future.
     log: slog::Logger,
+    sender: mpsc::Sender<Event<S>>,
     // This is a mutex to allow borrows to steps to be held by both
     // ComponentRegistrar and NewStep at the same time. (This could also be a
     // `RefCell` if a `Send` bound isn't required.)
@@ -42,9 +43,10 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 
 impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
-    pub fn new(log: &slog::Logger) -> Self {
+    pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
         Self {
             log: log.new(slog::o!("component" => "UpdateEngine")),
+            sender,
             steps: Default::default(),
         }
     }
@@ -74,10 +76,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     }
 
     /// Executes the list of steps. The sender is a list of steps.
-    pub async fn execute(
-        self,
-        sender: mpsc::Sender<Event<S>>,
-    ) -> Result<(), ExecutionError<S>> {
+    pub async fn execute(self) -> Result<(), ExecutionError<S>> {
         let total_start = Instant::now();
 
         let steps = {
@@ -119,7 +118,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
 
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
-            sender.send(Event::Step(StepEvent {
+            self.sender.send(Event::Step(StepEvent {
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
@@ -137,7 +136,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 .await
         };
 
-        sender
+        self.sender
             .send(Event::Step(StepEvent {
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::ExecutionStarted {
@@ -150,7 +149,12 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
 
         let (mut step_res, mut reporter) = first_step
             .exec
-            .execute(&self.log, total_start, first_step_info, sender.clone())
+            .execute(
+                &self.log,
+                total_start,
+                first_step_info,
+                self.sender.clone(),
+            )
             .await?;
 
         // Now run all remaining steps.
@@ -169,7 +173,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
 
             (step_res, reporter) = step
                 .exec
-                .execute(&self.log, total_start, step_info, sender.clone())
+                .execute(&self.log, total_start, step_info, self.sender.clone())
                 .await?;
         }
 
@@ -718,7 +722,10 @@ mod tests {
         let mut step_2_run = false;
         let mut step_3_run = false;
 
-        let engine: UpdateEngine<TestSpec> = UpdateEngine::new(&logctx.log);
+        // Make a buffer big enough that the engine can never fill it up.
+        let (sender, receiver) = mpsc::channel(512);
+        let engine: UpdateEngine<TestSpec> =
+            UpdateEngine::new(&logctx.log, sender);
 
         engine
             .new_step("foo".to_owned(), 0, "Step 1", |_| async {
@@ -741,11 +748,8 @@ mod tests {
             })
             .register();
 
-        // Make a buffer big enough that the engine can never fill it up.
-        let (sender, receiver) = mpsc::channel(512);
-
         engine
-            .execute(sender)
+            .execute()
             .await
             .expect_err("step 2 failed so we should see an error here");
 

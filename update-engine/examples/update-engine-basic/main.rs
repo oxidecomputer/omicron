@@ -28,8 +28,9 @@ async fn main() {
     let logctx = test_setup_log("update_engine_basic_example");
 
     let context = ExampleContext::new(&logctx.log);
+    let (display_handle, sender) = make_displayer(&logctx.log);
 
-    let engine = UpdateEngine::new(&logctx.log);
+    let engine = UpdateEngine::new(&logctx.log, sender);
 
     // Download component 1.
     let component_1 = engine.for_component(ExampleComponent::Component1);
@@ -53,8 +54,7 @@ async fn main() {
     // Now write component 2 out to disk.
     context.register_write_step(&component_2, download_handle_2, true);
 
-    let (display_handle, sender) = make_displayer(&logctx.log);
-    _ = engine.execute(sender).await;
+    _ = engine.execute().await;
 
     // Wait until all messages have been received by the displayer.
     _ = display_handle.await;
