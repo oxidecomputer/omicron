@@ -286,6 +286,7 @@ pub struct PackageConfig {
     #[serde(default)]
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
+    #[serde(default)]
     pub dendrite: DpdConfig,
 }
 
