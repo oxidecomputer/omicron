@@ -35,6 +35,52 @@
         }
       }
     },
+    "/ignition/{type}/{slot}/{command}": {
+      "post": {
+        "summary": "Send an ignition command targeting a specific SP.",
+        "description": "This endpoint acts as a proxy to the MGS endpoint performing the same function, allowing wicket to communicate exclusively with wicketd (even though wicketd adds no meaningful functionality here beyond what MGS offers).",
+        "operationId": "post_ignition_command",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IgnitionCommand"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to wicketd.",
@@ -1946,6 +1992,15 @@
               "kind"
             ]
           }
+        ]
+      },
+      "IgnitionCommand": {
+        "description": "Ignition command.",
+        "type": "string",
+        "enum": [
+          "power_on",
+          "power_off",
+          "power_reset"
         ]
       }
     }
