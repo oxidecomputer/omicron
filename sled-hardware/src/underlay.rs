@@ -7,6 +7,7 @@
 use crate::is_gimlet;
 use illumos_utils::addrobj;
 use illumos_utils::addrobj::AddrObject;
+use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
@@ -77,7 +78,7 @@ pub fn find_switch_zone_nics() -> Result<Vec<AddrObject>, Error> {
 
     let mut addr_objs = Vec::with_capacity(underlay_nics.len());
     for nic in underlay_nics {
-        let addrobj = AddrObject::new(&nic.0, "ll")?;
+        let addrobj = AddrObject::new(&nic.0, IPV6_LINK_LOCAL_NAME)?;
         // Do not call `Zones::ensure_has_link_local_v6_address` here! It must
         // be called inside the switch zone
         addr_objs.push(addrobj);
