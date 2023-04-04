@@ -476,9 +476,9 @@ impl Plan {
         }
 
         if !seen_any_scrimlet {
-            return Err(PlanError::SledInitialization(format!(
-                "No scrimlets observed"
-            )));
+            return Err(PlanError::SledInitialization(
+                "No scrimlets observed".to_string(),
+            ));
         }
 
         let mut services = std::collections::HashMap::new();
