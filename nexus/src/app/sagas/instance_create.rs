@@ -27,7 +27,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
 use std::convert::TryFrom;
@@ -1241,10 +1240,6 @@ async fn sic_instance_ensure(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let runtime_params = InstanceRuntimeStateRequested {
-        run_state: InstanceStateRequested::Running,
-        migration_params: None,
-    };
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // instance name now.  See oxidecomputer/omicron#1536.
@@ -1297,7 +1292,7 @@ async fn sic_instance_ensure(
                 &opctx,
                 &authz_instance,
                 &db_instance,
-                runtime_params,
+                InstanceStateRequested::Running,
             )
             .await
             .map_err(ActionError::action_failed)?;
