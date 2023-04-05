@@ -1,185 +1,185 @@
 API operations found with tag "disks"
-OPERATION ID                             URL PATH
-disk_bulk_write_import                   /v1/disks/{disk}/bulk-write
-disk_bulk_write_import_start             /v1/disks/{disk}/bulk-write-start
-disk_bulk_write_import_stop              /v1/disks/{disk}/bulk-write-stop
-disk_create                              /v1/disks
-disk_delete                              /v1/disks/{disk}
-disk_finalize_import                     /v1/disks/{disk}/finalize
-disk_import_blocks_from_url              /v1/disks/{disk}/import
-disk_list                                /v1/disks
-disk_metrics_list                        /v1/disks/{disk}/metrics/{metric}
-disk_view                                /v1/disks/{disk}
+OPERATION ID                             METHOD   URL PATH
+disk_bulk_write_import                   post     /v1/disks/{disk}/bulk-write
+disk_bulk_write_import_start             post     /v1/disks/{disk}/bulk-write-start
+disk_bulk_write_import_stop              post     /v1/disks/{disk}/bulk-write-stop
+disk_create                              post     /v1/disks
+disk_delete                              delete   /v1/disks/{disk}
+disk_finalize_import                     post     /v1/disks/{disk}/finalize
+disk_import_blocks_from_url              post     /v1/disks/{disk}/import
+disk_list                                get      /v1/disks
+disk_metrics_list                        get      /v1/disks/{disk}/metrics/{metric}
+disk_view                                get      /v1/disks/{disk}
 
 API operations found with tag "hidden"
-OPERATION ID                             URL PATH
-device_access_token                      /device/token
-device_auth_confirm                      /device/confirm
-device_auth_request                      /device/auth
-login_spoof                              /login
-logout                                   /logout
+OPERATION ID                             METHOD   URL PATH
+device_access_token                      post     /device/token
+device_auth_confirm                      post     /device/confirm
+device_auth_request                      post     /device/auth
+login_spoof                              post     /login
+logout                                   post     /logout
 
 API operations found with tag "images"
-OPERATION ID                             URL PATH
-image_create                             /v1/images
-image_delete                             /v1/images/{image}
-image_list                               /v1/images
-image_view                               /v1/images/{image}
+OPERATION ID                             METHOD   URL PATH
+image_create                             post     /v1/images
+image_delete                             delete   /v1/images/{image}
+image_list                               get      /v1/images
+image_view                               get      /v1/images/{image}
 
 API operations found with tag "instances"
-OPERATION ID                             URL PATH
-instance_create                          /v1/instances
-instance_delete                          /v1/instances/{instance}
-instance_disk_attach                     /v1/instances/{instance}/disks/attach
-instance_disk_detach                     /v1/instances/{instance}/disks/detach
-instance_disk_list                       /v1/instances/{instance}/disks
-instance_external_ip_list                /v1/instances/{instance}/external-ips
-instance_list                            /v1/instances
-instance_migrate                         /v1/instances/{instance}/migrate
-instance_network_interface_create        /v1/network-interfaces
-instance_network_interface_delete        /v1/network-interfaces/{interface}
-instance_network_interface_list          /v1/network-interfaces
-instance_network_interface_update        /v1/network-interfaces/{interface}
-instance_network_interface_view          /v1/network-interfaces/{interface}
-instance_reboot                          /v1/instances/{instance}/reboot
-instance_serial_console                  /v1/instances/{instance}/serial-console
-instance_serial_console_stream           /v1/instances/{instance}/serial-console/stream
-instance_start                           /v1/instances/{instance}/start
-instance_stop                            /v1/instances/{instance}/stop
-instance_view                            /v1/instances/{instance}
+OPERATION ID                             METHOD   URL PATH
+instance_create                          post     /v1/instances
+instance_delete                          delete   /v1/instances/{instance}
+instance_disk_attach                     post     /v1/instances/{instance}/disks/attach
+instance_disk_detach                     post     /v1/instances/{instance}/disks/detach
+instance_disk_list                       get      /v1/instances/{instance}/disks
+instance_external_ip_list                get      /v1/instances/{instance}/external-ips
+instance_list                            get      /v1/instances
+instance_migrate                         post     /v1/instances/{instance}/migrate
+instance_network_interface_create        post     /v1/network-interfaces
+instance_network_interface_delete        delete   /v1/network-interfaces/{interface}
+instance_network_interface_list          get      /v1/network-interfaces
+instance_network_interface_update        put      /v1/network-interfaces/{interface}
+instance_network_interface_view          get      /v1/network-interfaces/{interface}
+instance_reboot                          post     /v1/instances/{instance}/reboot
+instance_serial_console                  get      /v1/instances/{instance}/serial-console
+instance_serial_console_stream           get      /v1/instances/{instance}/serial-console/stream
+instance_start                           post     /v1/instances/{instance}/start
+instance_stop                            post     /v1/instances/{instance}/stop
+instance_view                            get      /v1/instances/{instance}
 
 API operations found with tag "login"
-OPERATION ID                             URL PATH
-login_local                              /login/{silo_name}/local
-login_saml                               /login/{silo_name}/saml/{provider_name}
-login_saml_begin                         /login/{silo_name}/saml/{provider_name}
+OPERATION ID                             METHOD   URL PATH
+login_local                              post     /login/{silo_name}/local
+login_saml                               post     /login/{silo_name}/saml/{provider_name}
+login_saml_begin                         get      /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "policy"
-OPERATION ID                             URL PATH
-system_policy_update                     /v1/system/policy
-system_policy_view                       /v1/system/policy
+OPERATION ID                             METHOD   URL PATH
+system_policy_update                     put      /v1/system/policy
+system_policy_view                       get      /v1/system/policy
 
 API operations found with tag "projects"
-OPERATION ID                             URL PATH
-project_create                           /v1/projects
-project_delete                           /v1/projects/{project}
-project_list                             /v1/projects
-project_policy_update                    /v1/projects/{project}/policy
-project_policy_view                      /v1/projects/{project}/policy
-project_update                           /v1/projects/{project}
-project_view                             /v1/projects/{project}
+OPERATION ID                             METHOD   URL PATH
+project_create                           post     /v1/projects
+project_delete                           delete   /v1/projects/{project}
+project_list                             get      /v1/projects
+project_policy_update                    put      /v1/projects/{project}/policy
+project_policy_view                      get      /v1/projects/{project}/policy
+project_update                           put      /v1/projects/{project}
+project_view                             get      /v1/projects/{project}
 
 API operations found with tag "roles"
-OPERATION ID                             URL PATH
-role_list                                /v1/system/roles
-role_view                                /v1/system/roles/{role_name}
+OPERATION ID                             METHOD   URL PATH
+role_list                                get      /v1/system/roles
+role_view                                get      /v1/system/roles/{role_name}
 
 API operations found with tag "session"
-OPERATION ID                             URL PATH
-current_user_groups                      /v1/me/groups
-current_user_ssh_key_create              /v1/me/ssh-keys
-current_user_ssh_key_delete              /v1/me/ssh-keys/{ssh_key}
-current_user_ssh_key_list                /v1/me/ssh-keys
-current_user_ssh_key_view                /v1/me/ssh-keys/{ssh_key}
-current_user_view                        /v1/me
+OPERATION ID                             METHOD   URL PATH
+current_user_groups                      get      /v1/me/groups
+current_user_ssh_key_create              post     /v1/me/ssh-keys
+current_user_ssh_key_delete              delete   /v1/me/ssh-keys/{ssh_key}
+current_user_ssh_key_list                get      /v1/me/ssh-keys
+current_user_ssh_key_view                get      /v1/me/ssh-keys/{ssh_key}
+current_user_view                        get      /v1/me
 
 API operations found with tag "silos"
-OPERATION ID                             URL PATH
-group_list                               /v1/groups
-group_view                               /v1/groups/{group}
-policy_update                            /v1/policy
-policy_view                              /v1/policy
-user_list                                /v1/users
+OPERATION ID                             METHOD   URL PATH
+group_list                               get      /v1/groups
+group_view                               get      /v1/groups/{group}
+policy_update                            put      /v1/policy
+policy_view                              get      /v1/policy
+user_list                                get      /v1/users
 
 API operations found with tag "snapshots"
-OPERATION ID                             URL PATH
-snapshot_create                          /v1/snapshots
-snapshot_delete                          /v1/snapshots/{snapshot}
-snapshot_list                            /v1/snapshots
-snapshot_view                            /v1/snapshots/{snapshot}
+OPERATION ID                             METHOD   URL PATH
+snapshot_create                          post     /v1/snapshots
+snapshot_delete                          delete   /v1/snapshots/{snapshot}
+snapshot_list                            get      /v1/snapshots
+snapshot_view                            get      /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
-OPERATION ID                             URL PATH
-certificate_create                       /v1/system/certificates
-certificate_delete                       /v1/system/certificates/{certificate}
-certificate_list                         /v1/system/certificates
-certificate_view                         /v1/system/certificates/{certificate}
-ip_pool_create                           /v1/system/ip-pools
-ip_pool_delete                           /v1/system/ip-pools/{pool}
-ip_pool_list                             /v1/system/ip-pools
-ip_pool_range_add                        /v1/system/ip-pools/{pool}/ranges/add
-ip_pool_range_list                       /v1/system/ip-pools/{pool}/ranges
-ip_pool_range_remove                     /v1/system/ip-pools/{pool}/ranges/remove
-ip_pool_service_range_add                /v1/system/ip-pools-service/ranges/add
-ip_pool_service_range_list               /v1/system/ip-pools-service/ranges
-ip_pool_service_range_remove             /v1/system/ip-pools-service/ranges/remove
-ip_pool_service_view                     /v1/system/ip-pools-service
-ip_pool_update                           /v1/system/ip-pools/{pool}
-ip_pool_view                             /v1/system/ip-pools/{pool}
-local_idp_user_create                    /v1/system/identity-providers/local/users
-local_idp_user_delete                    /v1/system/identity-providers/local/users/{user_id}
-local_idp_user_set_password              /v1/system/identity-providers/local/users/{user_id}/set-password
-physical_disk_list                       /v1/system/hardware/disks
-rack_list                                /v1/system/hardware/racks
-rack_view                                /v1/system/hardware/racks/{rack_id}
-saga_list                                /v1/system/sagas
-saga_view                                /v1/system/sagas/{saga_id}
-saml_identity_provider_create            /v1/system/identity-providers/saml
-saml_identity_provider_view              /v1/system/identity-providers/saml/{provider}
-silo_create                              /v1/system/silos
-silo_delete                              /v1/system/silos/{silo}
-silo_identity_provider_list              /v1/system/identity-providers
-silo_list                                /v1/system/silos
-silo_policy_update                       /v1/system/silos/{silo}/policy
-silo_policy_view                         /v1/system/silos/{silo}/policy
-silo_user_list                           /v1/system/users
-silo_user_view                           /v1/system/users/{user_id}
-silo_view                                /v1/system/silos/{silo}
-sled_list                                /v1/system/hardware/sleds
-sled_physical_disk_list                  /v1/system/hardware/sleds/{sled_id}/disks
-sled_view                                /v1/system/hardware/sleds/{sled_id}
-system_component_version_list            /v1/system/update/components
-system_image_create                      /system/images
-system_image_delete                      /system/images/{image_name}
-system_image_list                        /system/images
-system_image_view                        /system/images/{image_name}
-system_image_view_by_id                  /system/by-id/images/{id}
-system_metric                            /v1/system/metrics/{metric_name}
-system_update_components_list            /v1/system/update/updates/{version}/components
-system_update_list                       /v1/system/update/updates
-system_update_refresh                    /v1/system/update/refresh
-system_update_start                      /v1/system/update/start
-system_update_stop                       /v1/system/update/stop
-system_update_view                       /v1/system/update/updates/{version}
-system_version                           /v1/system/update/version
-update_deployment_view                   /v1/system/update/deployments/{id}
-update_deployments_list                  /v1/system/update/deployments
-user_builtin_list                        /v1/system/users-builtin
-user_builtin_view                        /v1/system/users-builtin/{user}
+OPERATION ID                             METHOD   URL PATH
+certificate_create                       post     /v1/system/certificates
+certificate_delete                       delete   /v1/system/certificates/{certificate}
+certificate_list                         get      /v1/system/certificates
+certificate_view                         get      /v1/system/certificates/{certificate}
+ip_pool_create                           post     /v1/system/ip-pools
+ip_pool_delete                           delete   /v1/system/ip-pools/{pool}
+ip_pool_list                             get      /v1/system/ip-pools
+ip_pool_range_add                        post     /v1/system/ip-pools/{pool}/ranges/add
+ip_pool_range_list                       get      /v1/system/ip-pools/{pool}/ranges
+ip_pool_range_remove                     post     /v1/system/ip-pools/{pool}/ranges/remove
+ip_pool_service_range_add                post     /v1/system/ip-pools-service/ranges/add
+ip_pool_service_range_list               get      /v1/system/ip-pools-service/ranges
+ip_pool_service_range_remove             post     /v1/system/ip-pools-service/ranges/remove
+ip_pool_service_view                     get      /v1/system/ip-pools-service
+ip_pool_update                           put      /v1/system/ip-pools/{pool}
+ip_pool_view                             get      /v1/system/ip-pools/{pool}
+local_idp_user_create                    post     /v1/system/identity-providers/local/users
+local_idp_user_delete                    delete   /v1/system/identity-providers/local/users/{user_id}
+local_idp_user_set_password              post     /v1/system/identity-providers/local/users/{user_id}/set-password
+physical_disk_list                       get      /v1/system/hardware/disks
+rack_list                                get      /v1/system/hardware/racks
+rack_view                                get      /v1/system/hardware/racks/{rack_id}
+saga_list                                get      /v1/system/sagas
+saga_view                                get      /v1/system/sagas/{saga_id}
+saml_identity_provider_create            post     /v1/system/identity-providers/saml
+saml_identity_provider_view              get      /v1/system/identity-providers/saml/{provider}
+silo_create                              post     /v1/system/silos
+silo_delete                              delete   /v1/system/silos/{silo}
+silo_identity_provider_list              get      /v1/system/identity-providers
+silo_list                                get      /v1/system/silos
+silo_policy_update                       put      /v1/system/silos/{silo}/policy
+silo_policy_view                         get      /v1/system/silos/{silo}/policy
+silo_user_list                           get      /v1/system/users
+silo_user_view                           get      /v1/system/users/{user_id}
+silo_view                                get      /v1/system/silos/{silo}
+sled_list                                get      /v1/system/hardware/sleds
+sled_physical_disk_list                  get      /v1/system/hardware/sleds/{sled_id}/disks
+sled_view                                get      /v1/system/hardware/sleds/{sled_id}
+system_component_version_list            get      /v1/system/update/components
+system_image_create                      post     /system/images
+system_image_delete                      delete   /system/images/{image_name}
+system_image_list                        get      /system/images
+system_image_view                        get      /system/images/{image_name}
+system_image_view_by_id                  get      /system/by-id/images/{id}
+system_metric                            get      /v1/system/metrics/{metric_name}
+system_update_components_list            get      /v1/system/update/updates/{version}/components
+system_update_list                       get      /v1/system/update/updates
+system_update_refresh                    post     /v1/system/update/refresh
+system_update_start                      post     /v1/system/update/start
+system_update_stop                       post     /v1/system/update/stop
+system_update_view                       get      /v1/system/update/updates/{version}
+system_version                           get      /v1/system/update/version
+update_deployment_view                   get      /v1/system/update/deployments/{id}
+update_deployments_list                  get      /v1/system/update/deployments
+user_builtin_list                        get      /v1/system/users-builtin
+user_builtin_view                        get      /v1/system/users-builtin/{user}
 
 API operations found with tag "vpcs"
-OPERATION ID                             URL PATH
-vpc_create                               /v1/vpcs
-vpc_delete                               /v1/vpcs/{vpc}
-vpc_firewall_rules_update                /v1/vpc-firewall-rules
-vpc_firewall_rules_view                  /v1/vpc-firewall-rules
-vpc_list                                 /v1/vpcs
-vpc_router_create                        /v1/vpc-routers
-vpc_router_delete                        /v1/vpc-routers/{router}
-vpc_router_list                          /v1/vpc-routers
-vpc_router_route_create                  /v1/vpc-router-routes
-vpc_router_route_delete                  /v1/vpc-router-routes/{route}
-vpc_router_route_list                    /v1/vpc-router-routes
-vpc_router_route_update                  /v1/vpc-router-routes/{route}
-vpc_router_route_view                    /v1/vpc-router-routes/{route}
-vpc_router_update                        /v1/vpc-routers/{router}
-vpc_router_view                          /v1/vpc-routers/{router}
-vpc_subnet_create                        /v1/vpc-subnets
-vpc_subnet_delete                        /v1/vpc-subnets/{subnet}
-vpc_subnet_list                          /v1/vpc-subnets
-vpc_subnet_list_network_interfaces       /v1/vpc-subnets/{subnet}/network-interfaces
-vpc_subnet_update                        /v1/vpc-subnets/{subnet}
-vpc_subnet_view                          /v1/vpc-subnets/{subnet}
-vpc_update                               /v1/vpcs/{vpc}
-vpc_view                                 /v1/vpcs/{vpc}
+OPERATION ID                             METHOD   URL PATH
+vpc_create                               post     /v1/vpcs
+vpc_delete                               delete   /v1/vpcs/{vpc}
+vpc_firewall_rules_update                put      /v1/vpc-firewall-rules
+vpc_firewall_rules_view                  get      /v1/vpc-firewall-rules
+vpc_list                                 get      /v1/vpcs
+vpc_router_create                        post     /v1/vpc-routers
+vpc_router_delete                        delete   /v1/vpc-routers/{router}
+vpc_router_list                          get      /v1/vpc-routers
+vpc_router_route_create                  post     /v1/vpc-router-routes
+vpc_router_route_delete                  delete   /v1/vpc-router-routes/{route}
+vpc_router_route_list                    get      /v1/vpc-router-routes
+vpc_router_route_update                  put      /v1/vpc-router-routes/{route}
+vpc_router_route_view                    get      /v1/vpc-router-routes/{route}
+vpc_router_update                        put      /v1/vpc-routers/{router}
+vpc_router_view                          get      /v1/vpc-routers/{router}
+vpc_subnet_create                        post     /v1/vpc-subnets
+vpc_subnet_delete                        delete   /v1/vpc-subnets/{subnet}
+vpc_subnet_list                          get      /v1/vpc-subnets
+vpc_subnet_list_network_interfaces       get      /v1/vpc-subnets/{subnet}/network-interfaces
+vpc_subnet_update                        put      /v1/vpc-subnets/{subnet}
+vpc_subnet_view                          get      /v1/vpc-subnets/{subnet}
+vpc_update                               put      /v1/vpcs/{vpc}
+vpc_view                                 get      /v1/vpcs/{vpc}
 
