@@ -10,8 +10,9 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::VpcFirewallRule;
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, ServiceEnsureBody, TimeSync, Zpool,
+    DatasetKind, DiskStateRequested, InstanceHardware,
+    InstanceMigrationTargetParams, InstanceStateRequested, ServiceEnsureBody,
+    TimeSync, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -519,8 +520,8 @@ impl SledAgent {
         &self,
         instance_id: Uuid,
         initial: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
-        migrate: Option<InstanceMigrateParams>,
+        target: InstanceStateRequested,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         self.inner
             .instances

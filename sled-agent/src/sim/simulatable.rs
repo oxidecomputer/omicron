@@ -103,7 +103,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     ///
     /// If this returns None, either no state was requested, or the desired
     /// state has been reached.
-    fn desired(&self) -> &Option<Self::RequestedState>;
+    fn desired(&self) -> Option<Self::RequestedState>;
 
     /// Returns true if the state `current` is a terminal state representing that
     /// the object has been destroyed.
