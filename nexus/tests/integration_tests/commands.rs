@@ -152,7 +152,7 @@ fn test_nexus_openapi() {
             .or_default()
             .push((
                 op.operation_id.as_ref().unwrap().to_string(),
-                method.to_string(),
+                method.to_string().to_uppercase(),
                 path.to_string(),
             ));
     }
