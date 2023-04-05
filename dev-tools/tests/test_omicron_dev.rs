@@ -11,7 +11,9 @@ use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
+use oxide_client::ClientHiddenExt;
 use std::io::BufRead;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use subprocess::Exec;
@@ -124,25 +126,119 @@ fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
     }
 }
 
+/// Encapsulates the information we need from a running `omicron-dev run-all`
+/// command.
+#[derive(Debug)]
+struct RunAll {
+    subproc: subprocess::Popen,
+    cmd_pid: u32,
+    db_pid: u32,
+    postgres_config: tokio_postgres::Config,
+    temp_dir: PathBuf,
+    external_url: String,
+}
+
+/// Like `run_db_run()`, but for the `run-all` command
+fn run_run_all(exec: Exec) -> RunAll {
+    let cmdline = exec.to_cmdline_lossy();
+    eprintln!("will run: {}", cmdline);
+
+    let subproc = exec
+        .stdout(Redirection::Pipe)
+        .popen()
+        .expect("failed to start command");
+    let mut subproc_out =
+        std::io::BufReader::new(subproc.stdout.as_ref().unwrap());
+    let cmd_pid = subproc.pid().unwrap();
+    let (mut db_pid, mut external_url, mut postgres_url, mut temp_dir) =
+        (None, None, None, None);
+
+    eprintln!("waiting for stdout from child process");
+    while db_pid.is_none()
+        || external_url.is_none()
+        || postgres_url.is_none()
+        || temp_dir.is_none()
+    {
+        let mut buf = String::with_capacity(80);
+        match subproc_out.read_line(&mut buf) {
+            Ok(0) => {
+                panic!("unexpected EOF from child process stdout");
+            }
+            Err(e) => {
+                panic!("unexpected error reading child process stdout: {}", e);
+            }
+            _ => (),
+        }
+
+        if let Some(s) =
+            buf.strip_prefix("omicron-dev: cockroachdb directory: ")
+        {
+            eprint!("found cockroachdb directory: {}", s);
+            temp_dir = Some(PathBuf::from(s.trim().to_string()));
+            continue;
+        }
+
+        if let Some(s) = buf.strip_prefix("omicron-dev: nexus external API: ") {
+            eprint!("found Nexus external API: {}", s);
+            external_url = Some(s.trim().to_string());
+            continue;
+        }
+
+        if let Some(s) = buf.strip_prefix("omicron-dev: cockroachdb pid: ") {
+            eprint!("found cockroachdb pid: {}", s);
+            db_pid =
+                Some(s.trim().to_string().parse().expect("pid was not a u32"));
+            continue;
+        }
+
+        if let Some(s) = buf.strip_prefix("omicron-dev: cockroachdb URL: ") {
+            eprint!("found postgres listen URL: {}", s);
+            postgres_url = Some(s.trim().to_string());
+            continue;
+        }
+    }
+
+    assert!(process_running(cmd_pid));
+
+    let postgres_config = postgres_url
+        .as_ref()
+        .unwrap()
+        .parse::<tokio_postgres::Config>()
+        .expect("invalid PostgreSQL URL");
+
+    RunAll {
+        subproc,
+        cmd_pid,
+        db_pid: db_pid.unwrap(),
+        external_url: external_url.unwrap(),
+        postgres_config,
+        temp_dir: temp_dir.unwrap(),
+    }
+}
+
 /// Waits for the subprocess to exit and returns status information
 ///
 /// This assumes the caller has arranged for the processes to terminate.  This
 /// function verifies that both the omicron-dev and CockroachDB processes are
 /// gone and that the temporary directory has been cleaned up.
-fn verify_graceful_exit(mut dbrun: DbRun) -> subprocess::ExitStatus {
-    let wait_result = dbrun
-        .subproc
+fn verify_graceful_exit(
+    mut subproc: subprocess::Popen,
+    cmd_pid: u32,
+    db_pid: u32,
+    temp_dir: &Path,
+) -> subprocess::ExitStatus {
+    let wait_result = subproc
         .wait_timeout(TIMEOUT)
         .expect("failed to wait for process to exit")
         .unwrap_or_else(|| {
             panic!("timed out waiting {:?} for process to exit", &TIMEOUT)
         });
 
-    assert!(!process_running(dbrun.cmd_pid));
-    assert!(!process_running(dbrun.db_pid));
+    assert!(!process_running(cmd_pid));
+    assert!(!process_running(db_pid));
     assert_eq!(
         libc::ENOENT,
-        std::fs::metadata(&dbrun.temp_dir)
+        std::fs::metadata(temp_dir)
             .expect_err("temporary directory still exists")
             .raw_os_error()
             .unwrap()
@@ -250,7 +346,7 @@ async fn test_db_run() {
 
     // Figure out what process group our child processes are in.  (That won't be
     // the child's pid because the immediate shell will be in our process group,
-    // and its the omicron-dev command that's the process group leader.)
+    // and it's the omicron-dev command that's the process group leader.)
     let pgid = unsafe { libc::getpgid(dbrun.db_pid as libc::pid_t) };
     assert_ne!(pgid, -1);
 
@@ -259,7 +355,70 @@ async fn test_db_run() {
     eprintln!("sending SIGINT to process group {}", pgid);
     assert_eq!(0, unsafe { libc::kill(-pgid, libc::SIGINT) });
 
-    let wait = verify_graceful_exit(dbrun);
+    let wait = verify_graceful_exit(
+        dbrun.subproc,
+        dbrun.cmd_pid,
+        dbrun.db_pid,
+        &dbrun.temp_dir,
+    );
+    eprintln!("wait result: {:?}", wait);
+    assert!(matches!(wait, subprocess::ExitStatus::Exited(0)));
+}
+
+// Exercises the normal use case of `omicron-dev run-all`: everything starts up,
+// we can connect to Nexus and CockroachDB and query them, then we simulate the
+// user typing ^C at the shell, and then it cleans up its temporary directory.
+//
+// This mirrors the `test_db_run()` test.
+#[tokio::test]
+async fn test_run_all() {
+    let cmd_path = path_to_omicron_dev();
+
+    let cmdstr = format!(
+        "( set -o monitor; {} run-all --nexus-listen-port 0)",
+        cmd_path.display()
+    );
+    let exec =
+        Exec::cmd("bash").arg("-c").arg(cmdstr).stderr(Redirection::Merge);
+    let runall = run_run_all(exec);
+
+    // Make sure we can connect to CockroachDB.
+    let (client, connection) = runall
+        .postgres_config
+        .connect(tokio_postgres::NoTls)
+        .await
+        .expect("failed to connect to newly setup database");
+    let conn_task = tokio::spawn(async { connection.await });
+    assert!(has_omicron_schema(&client).await);
+    drop(client);
+    conn_task
+        .await
+        .expect("failed to join on connection")
+        .expect("connection failed with an error");
+    eprintln!("cleaned up connection");
+
+    // Make sure we can connect to Nexus.
+    let client =
+        oxide_client::Client::new(&format!("http://{}", runall.external_url));
+    let _ = client.logout().send().await.unwrap();
+
+    // Figure out what process group our child processes are in.  (That won't be
+    // the child's pid because the immediate shell will be in our process group,
+    // and it's the omicron-dev command that's the process group leader.)
+    let pgid = unsafe { libc::getpgid(runall.db_pid as libc::pid_t) };
+    assert_ne!(pgid, -1);
+
+    // Send SIGINT to that process group.  This simulates an interactive session
+    // where the user hits ^C.  Make sure everything is cleaned up gracefully.
+    eprintln!("sending SIGINT to process group {}", pgid);
+    assert_eq!(0, unsafe { libc::kill(-pgid, libc::SIGINT) });
+
+    let wait = verify_graceful_exit(
+        runall.subproc,
+        runall.cmd_pid,
+        runall.db_pid,
+        &runall.temp_dir,
+    );
     eprintln!("wait result: {:?}", wait);
     assert!(matches!(wait, subprocess::ExitStatus::Exited(0)));
 }
@@ -286,7 +445,12 @@ async fn test_db_killed() {
     assert_eq!(0, unsafe {
         libc::kill(dbrun.db_pid as libc::pid_t, libc::SIGKILL)
     });
-    let wait = verify_graceful_exit(dbrun);
+    let wait = verify_graceful_exit(
+        dbrun.subproc,
+        dbrun.cmd_pid,
+        dbrun.db_pid,
+        &dbrun.temp_dir,
+    );
     eprintln!("wait result: {:?}", wait);
     assert!(matches!(wait, subprocess::ExitStatus::Exited(1),));
 }

@@ -7,19 +7,10 @@ use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::sagas::declare_saga_actions;
 use crate::authn;
 use crate::db::identity::Resource;
-use crate::db::model::IpKind;
 use crate::external_api::params;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::InstanceEnsureBody;
-use sled_agent_client::types::InstanceHardware;
-use sled_agent_client::types::InstanceMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
-use sled_agent_client::types::InstanceStateRequested;
-use sled_agent_client::types::SourceNatConfig;
 use std::net::Ipv6Addr;
 use steno::ActionError;
 use steno::Node;
@@ -137,8 +128,11 @@ async fn sim_allocate_propolis_ip(
 }
 
 async fn sim_instance_migrate(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    todo!("Migration action not yet implemented");
+
+    /*
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -243,7 +237,7 @@ async fn sim_instance_migrate(
             &InstanceEnsureBody {
                 initial: instance_hardware,
                 target,
-                migrate: Some(InstanceMigrateParams {
+                migrate: Some(InstanceMigrationTargetParams {
                     src_propolis_addr: src_propolis_addr.to_string(),
                     src_propolis_id,
                 }),
@@ -262,6 +256,7 @@ async fn sim_instance_migrate(
         .map_err(ActionError::action_failed)?;
 
     Ok(())
+        */
 }
 
 async fn sim_cleanup_source(
