@@ -4,8 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::dladm::Dladm;
-use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::NetworkInterface;
@@ -18,7 +16,6 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
-use opte_ioctl::OpteHdl;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
@@ -26,15 +23,11 @@ use oxide_vpc::api::Ipv4Cfg;
 use oxide_vpc::api::Ipv4Cidr;
 use oxide_vpc::api::Ipv4PrefixLen;
 use oxide_vpc::api::MacAddr;
-use oxide_vpc::api::PhysNet;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
-use oxide_vpc::api::SetFwRulesReq;
-use oxide_vpc::api::SetVirt2PhysReq;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
 use slog::info;
-use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -110,6 +103,7 @@ impl PortManager {
     }
 
     /// Create an OPTE port for the given guest instance.
+    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
         instance_id: Uuid,
@@ -122,9 +116,9 @@ impl PortManager {
         // virtual IPv6 networks.
         let private_ip = match nic.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
+            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
+                "IPv6 is not yet supported for guest interfaces",
+            ))),
         }?;
 
         // Argument checking and conversions into OPTE data types.
@@ -140,17 +134,16 @@ impl PortManager {
                 Gateway::from_subnet(&subnet),
             ),
             IpNetwork::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
+                return Err(Error::InvalidArgument(String::from(
                     "IPv6 is not yet supported for guest interfaces",
-                ))
-                .into());
+                )));
             }
         };
         let gateway_ip = match gateway.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
+            IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
+                "IPv6 is not yet supported for guest interfaces",
+            ))),
         }?;
         let boundary_services = default_boundary_services();
 
@@ -160,9 +153,9 @@ impl PortManager {
                 let external_ip = match snat.ip {
                     IpAddr::V4(ip) => ip.into(),
                     IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
+                        return Err(Error::InvalidArgument(String::from(
+                            "IPv6 is not yet supported for external addresses",
+                        )));
                     }
                 };
                 let ports = snat.first_port..=snat.last_port;
@@ -178,16 +171,14 @@ impl PortManager {
         // See https://github.com/oxidecomputer/omicron/issues/1467
         // See https://github.com/oxidecomputer/opte/issues/196
         let external_ip = match external_ips {
-            Some(ref ips) if !ips.is_empty() => {
-                match ips[0] {
-                    IpAddr::V4(ipv4) => Some(ipv4.into()),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
-                    }
+            Some(ref ips) if !ips.is_empty() => match ips[0] {
+                IpAddr::V4(ipv4) => Some(ipv4.into()),
+                IpAddr::V6(_) => {
+                    return Err(Error::InvalidArgument(String::from(
+                        "IPv6 is not yet supported for external addresses",
+                    )));
                 }
-            }
+            },
             _ => None,
         };
 
@@ -204,7 +195,8 @@ impl PortManager {
         // The Port object's drop implementation will clean up both of those, if
         // any of the remaining fallible operations fail.
         let port_name = self.inner.next_port_name();
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        #[cfg(target_os = "illumos")]
+        let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
 
         // TODO-completeness: Add support for IPv6.
         let vpc_cfg = VpcCfg {
@@ -233,12 +225,14 @@ impl PortManager {
             // TODO-completeness (#2153): Plumb domain search list
             domain_list: vec![],
         };
-        hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
         debug!(
             self.inner.log,
-            "Created xde device for guest port";
+            "Createing xde device for guest port";
             "port_name" => &port_name,
+            "vpc_cfg" => ?&vpc_cfg,
         );
+        #[cfg(target_os = "illumos")]
+        hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
 
         // Initialize firewall rules for the new port.
         let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
@@ -257,7 +251,8 @@ impl PortManager {
             "port_name" => &port_name,
             "rules" => ?&rules,
         );
-        hdl.set_fw_rules(&SetFwRulesReq {
+        #[cfg(target_os = "illumos")]
+        hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
             port_name: port_name.clone(),
             rules,
         })?;
@@ -277,19 +272,22 @@ impl PortManager {
         // create a superfluous VNIC on the OPTE device, solely so Viona can use
         // it.
         let vnic = {
-            let phys = PhysicalLink(port_name.clone());
             let vnic_name = format!("v{}", port_name);
-            if let Err(e) =
-                Dladm::create_vnic(&phys, &vnic_name, Some(nic.mac), None)
-            {
-                warn!(
+            #[cfg(target_os = "illumos")]
+            if let Err(e) = crate::dladm::Dladm::create_vnic(
+                &crate::dladm::PhysicalLink(port_name.clone()),
+                &vnic_name,
+                Some(nic.mac),
+                None,
+            ) {
+                slog::warn!(
                     self.inner.log,
                     "Failed to create overlay VNIC for xde device";
                     "port_name" => port_name.as_str(),
                     "err" => ?e
                 );
                 if let Err(e) = hdl.delete_xde(&port_name) {
-                    warn!(
+                    slog::warn!(
                         self.inner.log,
                         "Failed to clean up xde device after failure to create overlay VNIC";
                         "err" => ?e
@@ -347,7 +345,7 @@ impl PortManager {
             IpAddr::V4(ip) => {
                 let prefix =
                     Ipv4PrefixLen::new(subnet.prefix()).map_err(|e| {
-                        opte_ioctl::Error::InvalidArgument(format!(
+                        Error::InvalidArgument(format!(
                             "Invalid IPv4 subnet prefix: {}",
                             e
                         ))
@@ -359,6 +357,7 @@ impl PortManager {
                     dest: cidr.into(),
                     target: RouterTarget::VpcSubnet(IpCidr::Ip4(cidr)),
                 };
+                #[cfg(target_os = "illumos")]
                 hdl.add_router_entry(&route)?;
                 debug!(
                     self.inner.log,
@@ -368,10 +367,9 @@ impl PortManager {
                 );
             }
             IpAddr::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
+                return Err(Error::InvalidArgument(String::from(
                     "IPv6 not yet supported",
-                ))
-                .into());
+                )));
             }
         }
 
@@ -395,6 +393,7 @@ impl PortManager {
         let dest =
             Ipv4Cidr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), prefix);
         let target = RouterTarget::InternetGateway;
+        #[cfg(target_os = "illumos")]
         hdl.add_router_entry(&AddRouterEntryReq {
             port_name,
             dest: dest.into(),
@@ -409,10 +408,12 @@ impl PortManager {
         Ok((port, ticket))
     }
 
+    #[cfg(target_os = "illumos")]
     pub fn firewall_rules_ensure(
         &self,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
+        use opte_ioctl::OpteHdl;
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
         for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
@@ -423,20 +424,34 @@ impl PortManager {
                 "port" => ?&port_name,
                 "rules" => ?&rules,
             );
-            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+            hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
+                port_name,
+                rules,
+            })?;
         }
         Ok(())
     }
 
+    #[cfg(not(target_os = "illumos"))]
+    pub fn firewall_rules_ensure(
+        &self,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        Ok(())
+    }
+
+    #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        use opte_ioctl::OpteHdl;
 
-        hdl.set_v2p(&SetVirt2PhysReq {
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
-            phys: PhysNet {
+            phys: oxide_vpc::api::PhysNet {
                 ether: oxide_vpc::api::MacAddr::from(
                     (*mapping.virtual_mac).into_array(),
                 ),
@@ -448,11 +463,31 @@ impl PortManager {
         Ok(())
     }
 
+    #[cfg(not(target_os = "illumos"))]
+    pub fn set_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring virtual NIC mapping");
+        Ok(())
+    }
+
+    #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
         _mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
+        slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub fn unset_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())
     }
 }

@@ -11,15 +11,6 @@ use slog::info;
 use slog::Logger;
 use std::path::Path;
 
-mod firewall_rules;
-mod port;
-mod port_manager;
-
-pub use firewall_rules::opte_firewall_rules;
-pub use port::Port;
-pub use port_manager::PortManager;
-pub use port_manager::PortTicket;
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Failure interacting with the OPTE ioctl(2) interface: {0}")]
@@ -48,6 +39,9 @@ pub enum Error {
 
     #[error(transparent)]
     ResetLinkpropError(#[from] crate::dladm::ResetLinkpropError),
+
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
 }
 
 /// Delete all xde devices on the system.
