@@ -30,7 +30,7 @@ use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
 };
-use crate::smf_helper::SmfHelper;
+use crate::smf_helper::{Service, SmfHelper};
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
@@ -544,41 +544,55 @@ impl ServiceManager {
     async fn configure_dns_client(
         &self,
         running_zone: &RunningZone,
-        service: &ServiceType,
+        dns_servers: &Vec<String>,
+        domain: &Option<String>,
     ) -> Result<(), Error> {
-        if let ServiceType::DnsClient { servers, domain } = service {
-            let smfh = SmfHelper::new(&running_zone, service);
+        struct DnsClient {}
 
-            let etc = PathBuf::from(running_zone.root()).join("etc");
-            let resolv_conf = etc.join("resolv.conf");
-            let nsswitch_conf = etc.join("nsswitch.conf");
-            let nsswitch_dns = etc.join("nsswitch.dns");
-
-            if servers.is_empty() {
-                // Disable the dns/client service
-                smfh.disable()?;
-            } else {
-                debug!(self.inner.log, "enabling {:?}", service);
-                let mut config = String::new();
-                if let Some(d) = domain {
-                    config.push_str(&format!("domain {d}\n"));
-                }
-                for s in servers {
-                    config.push_str(&format!("nameserver {s}\n"));
-                }
-
-                debug!(self.inner.log, "creating {}", resolv_conf.display());
-                tokio::fs::write(&resolv_conf, config).await.map_err(
-                    |err| Error::Io { path: resolv_conf.clone(), err },
-                )?;
-
-                tokio::fs::copy(&nsswitch_dns, &nsswitch_conf).await.map_err(
-                    |err| Error::Io { path: nsswitch_dns.clone(), err },
-                )?;
-
-                smfh.refresh()?;
-                smfh.enable()?;
+        impl crate::smf_helper::Service for DnsClient {
+            fn service_name(&self) -> String {
+                "dns_client".to_string()
             }
+            fn smf_name(&self) -> String {
+                "svc:/network/dns/client".to_string()
+            }
+            fn should_import(&self) -> bool {
+                false
+            }
+        }
+
+        let service = DnsClient {};
+        let smfh = SmfHelper::new(&running_zone, &service);
+
+        let etc = PathBuf::from(running_zone.root()).join("etc");
+        let resolv_conf = etc.join("resolv.conf");
+        let nsswitch_conf = etc.join("nsswitch.conf");
+        let nsswitch_dns = etc.join("nsswitch.dns");
+
+        if dns_servers.is_empty() {
+            // Disable the dns/client service
+            smfh.disable()?;
+        } else {
+            debug!(self.inner.log, "enabling {:?}", service.service_name());
+            let mut config = String::new();
+            if let Some(d) = domain {
+                config.push_str(&format!("domain {d}\n"));
+            }
+            for s in dns_servers {
+                config.push_str(&format!("nameserver {s}\n"));
+            }
+
+            debug!(self.inner.log, "creating {}", resolv_conf.display());
+            tokio::fs::write(&resolv_conf, config)
+                .await
+                .map_err(|err| Error::Io { path: resolv_conf.clone(), err })?;
+
+            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
+                .await
+                .map_err(|err| Error::Io { path: nsswitch_dns.clone(), err })?;
+
+            smfh.refresh()?;
+            smfh.enable()?;
         }
         Ok(())
     }
@@ -965,12 +979,17 @@ impl ServiceManager {
                     }
                     smfh.refresh()?;
                 }
-                ServiceType::Ntp { servers, boundary } => {
+                ServiceType::Ntp {
+                    ntp_servers,
+                    boundary,
+                    dns_servers,
+                    domain,
+                } => {
                     info!(
                         self.inner.log,
                         "Set up NTP service boundary={}, Servers={:?}",
                         boundary,
-                        servers
+                        ntp_servers
                     );
 
                     let sled_info =
@@ -992,15 +1011,17 @@ impl ServiceManager {
                     )?;
 
                     smfh.delpropvalue("config/server", "*")?;
-                    for server in servers {
+                    for server in ntp_servers {
                         smfh.addpropvalue("config/server", server)?;
                     }
+                    self.configure_dns_client(
+                        &running_zone,
+                        &dns_servers,
+                        &domain,
+                    )
+                    .await?;
 
                     smfh.refresh()?;
-                }
-                ServiceType::DnsClient { .. } => {
-                    self.configure_dns_client(&running_zone, &service).await?;
-                    continue;
                 }
             }
 
