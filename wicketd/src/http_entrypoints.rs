@@ -6,6 +6,7 @@
 
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
+use dropshot::Query;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -52,6 +53,12 @@ pub fn api() -> WicketdApiDescription {
     api
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ForceRefresh {
+    /// If true, refresh inventory from MGS instead of returning cached data.
+    pub force_refresh: bool,
+}
+
 /// A status endpoint used to report high level information known to wicketd.
 ///
 /// This endpoint can be polled to see if there have been state changes in the
@@ -65,8 +72,10 @@ pub fn api() -> WicketdApiDescription {
 }]
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
+    query_params: Query<ForceRefresh>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
-    match rqctx.context().mgs_handle.get_inventory().await {
+    let ForceRefresh { force_refresh } = query_params.into_inner();
+    match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
         Ok(response) => Ok(HttpResponseOk(response)),
         Err(_) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))

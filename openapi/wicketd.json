@@ -86,6 +86,17 @@
         "summary": "A status endpoint used to report high level information known to wicketd.",
         "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
         "operationId": "get_inventory",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "force_refresh",
+            "description": "If true, refresh inventory from MGS instead of returning cached data.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "successful operation",

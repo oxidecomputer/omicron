@@ -81,7 +81,15 @@ impl WicketdManager {
     /// * Translate any responses/errors into [`Event`]s
     ///   that can be utilized by the UI.
     pub async fn run(mut self) {
-        self.poll_inventory().await;
+        // When we perform operations that we expect to change the inventory, we
+        // want to be able to trigger a poll of the inventory immediately
+        // instead of waiting for the next tick. Create a depth-1 channel on
+        // which we can push requests to fetch the inventory; we only need depth
+        // 1 because if the channel already has a message in it, we've already
+        // queued a request to poll the inventory ASAP.
+        let (poll_interval_now_tx, poll_interval_now_rx) = mpsc::channel(1);
+
+        self.poll_inventory(poll_interval_now_rx).await;
         self.poll_update_log().await;
         self.poll_artifacts().await;
 
@@ -94,7 +102,11 @@ impl WicketdManager {
                             self.start_update(component_id);
                         }
                         Request::IgnitionCommand(component_id, command) => {
-                            self.start_ignition_command(component_id, command);
+                            self.start_ignition_command(
+                                component_id,
+                                command,
+                                poll_interval_now_tx.clone(),
+                            );
                         }
                     }
                 }
@@ -127,6 +139,7 @@ impl WicketdManager {
         &self,
         component_id: ComponentId,
         command: IgnitionCommand,
+        poll_inventory_now: mpsc::Sender<()>,
     ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
@@ -144,6 +157,10 @@ impl WicketdManager {
                 command,
                 res
             );
+            // Try to poll the inventory now; if this fails we don't care (it
+            // means either someone else has already queued up an inventory poll
+            // or the polling task has died).
+            _ = poll_inventory_now.try_send(());
         });
     }
 
@@ -203,7 +220,7 @@ impl WicketdManager {
         });
     }
 
-    async fn poll_inventory(&self) {
+    async fn poll_inventory(&self, mut poll_now: mpsc::Receiver<()>) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
@@ -213,9 +230,18 @@ impl WicketdManager {
             let mut ticker = interval(WICKETD_POLL_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
-                ticker.tick().await;
+                let force_refresh = tokio::select! {
+                    _ = ticker.tick() => false,
+                    Some(()) = poll_now.recv() => {
+                        // We want to poll immediately; do so and reset our
+                        // timer.
+                        ticker.reset();
+                        true
+                    }
+                };
+
                 // TODO: We should really be using ETAGs here
-                match client.get_inventory().await {
+                match client.get_inventory(force_refresh).await {
                     Ok(val) => match val.into_inner().into() {
                         GetInventoryResponse::Response {
                             inventory,
