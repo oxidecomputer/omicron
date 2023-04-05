@@ -37,7 +37,46 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::ImageKindEnum,
+        parent_id -> Uuid,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
+        digest -> Nullable<Text>,
+        block_size -> crate::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    project_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
+        digest -> Nullable<Text>,
+        block_size -> crate::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    silo_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
         volume_id -> Uuid,
         url -> Nullable<Text>,
         os -> Text,
@@ -799,6 +838,9 @@ joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
+    image,
+    project_image,
+    silo_image,
     instance,
     metric_producer,
     network_interface,

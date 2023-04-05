@@ -696,6 +696,8 @@ pub enum ResourceType {
     Dataset,
     Disk,
     Image,
+    SiloImage,
+    ProjectImage,
     Instance,
     IpPool,
     NetworkInterface,

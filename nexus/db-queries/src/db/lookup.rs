@@ -165,6 +165,9 @@ impl<'a> LookupPath<'a> {
         Disk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    // TODO: This needs a custom implementation of some sort I guess. Given a UUID we don't know if it's a silo or project image
+    // which is ultimately fine b/c its all stored in a single table anyway so the UUID is unique. But we need to be able to get
+    // it out of the shared table and coerced into the right format.
     /// Select a resource of type Image, identified by its id
     pub fn image_id(self, id: Uuid) -> Image<'a> {
         Image::PrimaryKey(Root { lookup_root: self }, id)
@@ -417,7 +420,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project" ],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -438,6 +441,15 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     children = [],
     lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloImage",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
@@ -487,7 +499,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "Image" ],
+    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -503,7 +515,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Image",
+    name = "ProjectImage",
     ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,

@@ -1,4 +1,5 @@
 use diesel::prelude::*;
+use nexus_db_model::ImageKind;
 use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -17,6 +18,9 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Image;
 use crate::db::model::Project;
+use crate::db::model::ProjectImage;
+use crate::db::model::Silo;
+use crate::db::model::SiloImage;
 use crate::db::pagination::paginated;
 
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -24,7 +28,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use super::DataStore;
 
 impl DataStore {
-    pub async fn image_list(
+    pub async fn project_image_list(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
@@ -44,23 +48,89 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
+        .filter(dsl::kind.eq(ImageKind::Project))
+        .filter(dsl::parent_id.eq(authz_project.id()))
         .select(Image::as_select())
         .load_async::<Image>(self.pool_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn image_create(
+    pub async fn silo_image_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<Image> {
+        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+
+        use db::schema::image::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::image, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::image,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::parent_id.eq(authz_silo.id()))
+        .select(Image::as_select())
+        .load_async::<Image>(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    pub async fn silo_image_create(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        silo_image: SiloImage,
+    ) -> CreateResult<Image> {
+        let image: Image = silo_image.into();
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        let name = image.name().clone();
+        let silo_id = image.parent_id;
+
+        use db::schema::image::dsl;
+        let image: Image = Silo::insert_resource(
+            silo_id,
+            diesel::insert_into(dsl::image)
+                .values(image)
+                .on_conflict(dsl::id)
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::ProjectImage,
+                        name.as_str(),
+                    ),
+                )
+            }
+        })?;
+        Ok(image)
+    }
+    pub async fn project_image_create(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        image: Image,
+        project_image: ProjectImage,
     ) -> CreateResult<Image> {
+        let image: Image = project_image.into();
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         let name = image.name().clone();
-        let project_id = image.project_id;
+        let project_id = image.parent_id;
 
         use db::schema::image::dsl;
         let image: Image = Project::insert_resource(
@@ -78,7 +148,10 @@ impl DataStore {
             AsyncInsertError::DatabaseError(e) => {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::Conflict(ResourceType::Image, name.as_str()),
+                    ErrorHandler::Conflict(
+                        ResourceType::ProjectImage,
+                        name.as_str(),
+                    ),
                 )
             }
         })?;
