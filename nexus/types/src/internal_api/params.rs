@@ -156,7 +156,6 @@ pub struct DatasetPutRequest {
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
-    // XXX-dap case of these
     InternalDNS,
     InternalDNSConfig,
     Nexus {

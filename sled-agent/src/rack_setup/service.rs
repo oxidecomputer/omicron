@@ -623,8 +623,22 @@ impl ServiceInner {
 
             for zone in &service_request.services {
                 for svc in &zone.services {
-                    // XXX-dap it would be better to plumb the ports from where
-                    // we really determined them rather than assume them here.
+                    // TODO-cleanup Here, we take the ServiceZoneRequests that
+                    // were constructed with the ServicePlan and turn them into
+                    // Nexus ServicePutRequest objects.  For Nexus, we need to
+                    // specify a SocketAddr -- both an IP address and a port on
+                    // which the service is listening.  The code here hardcodes
+                    // the default ports for each service.  This happens to be
+                    // correct because the ServicePlan uses the same hardcoded
+                    // ports when it sets up the DNS zone and the Sled Agent
+                    // uses the same hardcoded ports when configuring each of
+                    // these services.  It would be more robust to pick the
+                    // (hardcoded) port when constructing the ServicePlan and
+                    // plumb the SocketAddr (with port) everywhere that needs it
+                    // (including both here and DNS).  That way we don't bake
+                    // the port assumption into multiple places and we can also
+                    // more easily support things running on different ports
+                    // (which is useful in dev/test situations).
                     match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
                             // NOTE: Eventually, this IP pool will be entirely
@@ -721,9 +735,7 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::NTP,
                             });
                         }
-                        ServiceType::DnsClient { .. } => {
-                            // XXX-dap Do we need do anything here?
-                        }
+                        ServiceType::DnsClient { .. } => {}
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
