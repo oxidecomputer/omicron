@@ -277,9 +277,10 @@ impl super::Nexus {
         //   broadcast approach because one of the sides will exist already, but
         //   it is something to orchestrate with a more targeted approach.
         //
-        // TODO-correctness OPTE currently will block instances in different
-        // VPCs from connecting to each other. If it ever stops doing this, the
-        // broadcast approach will create V2P mappings that shouldn't exist.
+        // TODO-correctness Default firewall rules currently will block
+        // instances in different VPCs from connecting to each other. If it ever
+        // stops doing this, the broadcast approach will create V2P mappings
+        // that shouldn't exist.
 
         let (.., authz_instance, db_instance) =
             LookupPath::new(&opctx, &self.db_datastore)
