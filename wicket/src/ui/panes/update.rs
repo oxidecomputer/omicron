@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, Control};
 use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
-use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup};
+use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup, IgnitionPopup};
 use crate::{Action, Cmd, Frame, State};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use slog::{info, o, Logger};
@@ -23,6 +23,7 @@ enum PopupKind {
     MissingRepo,
     StartUpdate,
     Logs,
+    Ignition,
 }
 
 /// Overview of update status and ability to install updates
@@ -45,6 +46,8 @@ pub struct UpdatePane {
     contents_rect: Rect,
     help_rect: Rect,
     popup: Option<PopupKind>,
+
+    ignition: IgnitionPopup,
 }
 
 impl UpdatePane {
@@ -64,6 +67,7 @@ impl UpdatePane {
                 ("Collapse", "<c>"),
                 ("Move", "<Up/Down>"),
                 ("Details", "<d>"),
+                ("Ignition", "<i>"),
                 ("Update", "<Enter>"),
             ],
             rect: Rect::default(),
@@ -72,6 +76,7 @@ impl UpdatePane {
             contents_rect: Rect::default(),
             help_rect: Rect::default(),
             popup: None,
+            ignition: IgnitionPopup::default(),
         }
     }
 
@@ -93,6 +98,21 @@ impl UpdatePane {
                 ButtonText { instruction: "SCROLL", key: "UP/DOWN" },
             ],
         };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    pub fn draw_ignition_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = self.ignition.popup(state.rack_state.selected);
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
@@ -218,6 +238,24 @@ impl UpdatePane {
         match self.popup.as_ref().unwrap() {
             PopupKind::Logs => None,
             PopupKind::MissingRepo => None,
+            PopupKind::Ignition => match cmd {
+                Cmd::Up => {
+                    self.ignition.key_up();
+                    Some(Action::Redraw)
+                }
+                Cmd::Down => {
+                    self.ignition.key_down();
+                    Some(Action::Redraw)
+                }
+                Cmd::Enter => {
+                    let command = self.ignition.selected_command();
+                    let selected = state.rack_state.selected;
+                    info!(self.log, "Sending {command:?} to {selected}");
+                    self.popup = None;
+                    Some(Action::Ignition(selected, command))
+                }
+                _ => None,
+            },
             PopupKind::StartUpdate => {
                 match cmd {
                     Cmd::Yes => {
@@ -237,7 +275,7 @@ impl UpdatePane {
         }
     }
 
-    fn open_popup(&mut self, state: &mut State) {
+    fn open_update_popup(&mut self, state: &mut State) {
         if state.update_state.artifacts.is_empty() {
             self.popup = Some(PopupKind::MissingRepo);
         } else {
@@ -353,11 +391,16 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::Enter => {
-                self.open_popup(state);
+                self.open_update_popup(state);
                 Some(Action::Redraw)
             }
             Cmd::Details => {
                 self.popup = Some(PopupKind::Logs);
+                Some(Action::Redraw)
+            }
+            Cmd::Ignition => {
+                self.ignition.reset();
+                self.popup = Some(PopupKind::Ignition);
                 Some(Action::Redraw)
             }
             Cmd::GotoTop => {
@@ -449,6 +492,7 @@ impl Control for UpdatePane {
             Some(PopupKind::StartUpdate) => {
                 self.draw_start_update_popup(state, frame)
             }
+            Some(PopupKind::Ignition) => self.draw_ignition_popup(state, frame),
             None => (),
         }
     }

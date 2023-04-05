@@ -9,7 +9,7 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicketd_client::types::{SpIdentifier, SpType};
+use wicketd_client::types::{IgnitionCommand, SpIdentifier, SpType};
 use wicketd_client::GetInventoryResponse;
 
 use crate::state::ComponentId;
@@ -44,6 +44,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[derive(Debug)]
 pub enum Request {
     StartUpdate(ComponentId),
+    IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
 pub struct WicketdHandle {
@@ -88,8 +89,14 @@ impl WicketdManager {
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
-                    let Request::StartUpdate(component_id) = request;
-                    self.start_update(component_id).await;
+                    match request {
+                        Request::StartUpdate(component_id) => {
+                            self.start_update(component_id);
+                        }
+                        Request::IgnitionCommand(component_id, command) => {
+                            self.start_ignition_command(component_id, command);
+                        }
+                    }
                 }
                 else => {
                     slog::info!(self.log, "Request receiver closed. Process must be exiting.");
@@ -99,7 +106,7 @@ impl WicketdManager {
         }
     }
 
-    async fn start_update(&self, component_id: ComponentId) {
+    fn start_update(&self, component_id: ComponentId) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
@@ -113,6 +120,30 @@ impl WicketdManager {
             // report current status to users in a more detailed and holistic
             // fashion.
             slog::info!(log, "Update response for {}: {:?}", component_id, res);
+        });
+    }
+
+    fn start_ignition_command(
+        &self,
+        component_id: ComponentId,
+        command: IgnitionCommand,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let res =
+                client.post_ignition_command(sp.type_, sp.slot, command).await;
+            // We don't return errors or success values, as there's nobody to
+            // return them to. How do we relay this result to the user?
+            slog::info!(
+                log,
+                "Ignition response for {} ({:?}): {:?}",
+                component_id,
+                command,
+                res
+            );
         });
     }
 
