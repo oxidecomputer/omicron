@@ -115,8 +115,7 @@ CREATE TYPE omicron.public.service_kind AS ENUM (
   'dendrite',
   'tfport',
   'crucible_pantry',
-  'ntp',
-  'dns_client'
+  'ntp'
 );
 
 CREATE TABLE omicron.public.service (

@@ -6,8 +6,7 @@
 
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceRuntimeStateRequested,
-    InstanceStateRequested,
+    DiskStateRequested, InstanceHardware, InstanceStateRequested,
 };
 use crate::updates::UpdateManager;
 use futures::lock::Mutex;
@@ -28,7 +27,7 @@ use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
 use propolis_server::mock_server::Context as PropolisContext;
 
-use super::collection::SimCollection;
+use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
 use super::instance::SimInstance;
@@ -210,7 +209,7 @@ impl SledAgent {
         self: &Arc<Self>,
         instance_id: Uuid,
         mut initial_hardware: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
+        target: InstanceStateRequested,
     ) -> Result<InstanceRuntimeState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -230,7 +229,7 @@ impl SledAgent {
                 time_updated: chrono::Utc::now(),
             };
 
-            let target = match target.run_state {
+            let target = match target {
                 InstanceStateRequested::Running
                 | InstanceStateRequested::Reboot => {
                     DiskStateRequested::Attached(instance_id)
@@ -239,7 +238,6 @@ impl SledAgent {
                 | InstanceStateRequested::Destroyed => {
                     DiskStateRequested::Detached
                 }
-                _ => panic!("state {} not covered!", target.run_state),
             };
 
             let id = match disk.volume_construction_request {
@@ -292,7 +290,7 @@ impl SledAgent {
                 )?;
             }
 
-            let body = match target.run_state {
+            let body = match target {
                 InstanceStateRequested::Running => {
                     propolis_client::types::InstanceStateRequested::Run
                 }
@@ -302,9 +300,6 @@ impl SledAgent {
                 }
                 InstanceStateRequested::Reboot => {
                     propolis_client::types::InstanceStateRequested::Reboot
-                }
-                InstanceStateRequested::Migrating => {
-                    propolis_client::types::InstanceStateRequested::MigrateStart
                 }
             };
             client.instance_state_put().body(body).send().await.map_err(
@@ -360,11 +355,11 @@ impl SledAgent {
     }
 
     pub async fn instance_poke(&self, id: Uuid) {
-        self.instances.sim_poke(id).await;
+        self.instances.sim_poke(id, PokeMode::Drain).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
-        self.disks.sim_poke(id).await;
+        self.disks.sim_poke(id, PokeMode::SingleStep).await;
     }
 
     /// Adds a Zpool to the simulated sled agent.

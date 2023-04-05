@@ -804,7 +804,7 @@ lazy_static! {
     static ref ALLOWED_EXTENSIONS: HashSet<OsString> = HashSet::from(
         [
             "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf",
-            "txt", "woff", "woff2",
+            "txt", "webp", "woff", "woff2",
         ]
         .map(|s| OsString::from(s))
     );
