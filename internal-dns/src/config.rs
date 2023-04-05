@@ -268,8 +268,8 @@ impl DnsConfigBuilder {
         // DnsBuilder.
         ensure!(
             self.zones.contains_key(&zone),
-            "zone {:?} has not been defined",
-            zone
+            "zone {} has not been defined",
+            zone.id
         );
 
         let set = self
@@ -279,10 +279,10 @@ impl DnsConfigBuilder {
         match set.insert(zone.clone(), port) {
             None => Ok(()),
             Some(existing) => Err(anyhow!(
-                "service {}: zone {:?}: registered twice \
+                "service {}: zone {}: registered twice \
                 (previously port {}, now {})",
                 service.dns_name(),
-                zone,
+                zone.id,
                 existing,
                 port
             )),
