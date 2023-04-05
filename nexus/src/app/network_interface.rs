@@ -20,31 +20,31 @@ use crate::db;
 use crate::db::lookup::{self, LookupPath};
 
 impl super::Nexus {
-    pub fn network_interface_lookup<'a>(
+    pub fn instance_network_interface_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        network_interface_selector: &'a params::NetworkInterfaceSelector,
-    ) -> LookupResult<lookup::NetworkInterface<'a>> {
+        network_interface_selector: &'a params::InstanceNetworkInterfaceSelector,
+    ) -> LookupResult<lookup::InstanceNetworkInterface<'a>> {
         match network_interface_selector {
-            params::NetworkInterfaceSelector {
+            params::InstanceNetworkInterfaceSelector {
                 instance_selector: None,
                 network_interface: NameOrId::Id(id),
             } => {
                 let network_interface =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .network_interface_id(*id);
+                        .instance_network_interface_id(*id);
                 Ok(network_interface)
             }
-            params::NetworkInterfaceSelector {
+            params::InstanceNetworkInterfaceSelector {
                 instance_selector: Some(instance_selector),
                 network_interface: NameOrId::Name(name),
             } => {
                 let network_interface = self
                     .instance_lookup(opctx, instance_selector)?
-                    .network_interface_name(Name::ref_cast(name));
+                    .instance_network_interface_name(Name::ref_cast(name));
                 Ok(network_interface)
             }
-            params::NetworkInterfaceSelector {
+            params::InstanceNetworkInterfaceSelector {
               instance_selector: Some(_),
               network_interface: NameOrId::Id(_),
             } => {
@@ -68,8 +68,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::NetworkInterfaceCreate,
-    ) -> CreateResult<db::model::NetworkInterface> {
+        params: &params::InstanceNetworkInterfaceCreate,
+    ) -> CreateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -85,7 +85,7 @@ impl super::Nexus {
                 .fetch()
                 .await?;
         let interface_id = Uuid::new_v4();
-        let interface = db::model::IncompleteNetworkInterface::new(
+        let interface = db::model::IncompleteNetworkInterface::new_instance(
             interface_id,
             authz_instance.id(),
             authz_vpc.id(),
@@ -125,12 +125,12 @@ impl super::Nexus {
     }
 
     /// Lists network interfaces attached to the instance.
-    pub async fn network_interface_list(
+    pub async fn instance_network_interface_list(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::NetworkInterface> {
+    ) -> ListResultVec<db::model::InstanceNetworkInterface> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
@@ -139,12 +139,12 @@ impl super::Nexus {
     }
 
     /// Update a network interface for the given instance.
-    pub async fn network_interface_update(
+    pub async fn instance_network_interface_update(
         &self,
         opctx: &OpContext,
-        network_interface_lookup: &lookup::NetworkInterface<'_>,
-        updates: params::NetworkInterfaceUpdate,
-    ) -> UpdateResult<db::model::NetworkInterface> {
+        network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,
+        updates: params::InstanceNetworkInterfaceUpdate,
+    ) -> UpdateResult<db::model::InstanceNetworkInterface> {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
@@ -161,10 +161,10 @@ impl super::Nexus {
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
-    pub async fn network_interface_delete(
+    pub async fn instance_network_interface_delete(
         &self,
         opctx: &OpContext,
-        network_interface_lookup: &lookup::NetworkInterface<'_>,
+        network_interface_lookup: &lookup::InstanceNetworkInterface<'_>,
     ) -> DeleteResult {
         let (.., authz_instance, authz_interface) =
             network_interface_lookup.lookup_for(authz::Action::Delete).await?;
