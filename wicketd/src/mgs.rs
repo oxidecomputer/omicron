@@ -209,8 +209,9 @@ async fn update_inventory(
             let curr = inventory
                 .entry(id)
                 .and_modify(|curr| {
-                    if curr.state != state {
+                    if curr.state != state || curr.ignition != ignition {
                         // state has changed - discard cached details
+                        inventory_changed = true;
                         curr.components = None;
                         curr.caboose = None;
                         curr.rot.caboose = None;
