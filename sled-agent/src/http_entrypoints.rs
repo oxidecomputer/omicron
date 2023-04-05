@@ -238,49 +238,48 @@ async fn vpc_firewall_rules_put(
 }
 
 /// Path parameters for V2P mapping related requests (sled agent API)
+#[allow(dead_code)]
 #[derive(Deserialize, JsonSchema)]
 struct V2pPathParam {
     interface_id: Uuid,
 }
 
 /// Create a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
 #[endpoint {
     method = PUT,
     path = "/v2p/{interface_id}",
 }]
 async fn set_v2p(
     rqctx: RequestContext<SledAgent>,
-    path_params: Path<V2pPathParam>,
+    _path_params: Path<V2pPathParam>,
     body: TypedBody<SetVirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let interface_id = path_params.into_inner().interface_id;
     let body_args = body.into_inner();
 
-    sa.set_virtual_nic_host(interface_id, &body_args)
-        .await
-        .map_err(Error::from)?;
+    sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Delete a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
 #[endpoint {
     method = DELETE,
     path = "/v2p/{interface_id}",
 }]
 async fn del_v2p(
     rqctx: RequestContext<SledAgent>,
-    path_params: Path<V2pPathParam>,
+    _path_params: Path<V2pPathParam>,
     body: TypedBody<SetVirtualNetworkInterfaceHost>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-    let interface_id = path_params.into_inner().interface_id;
     let body_args = body.into_inner();
 
-    sa.unset_virtual_nic_host(interface_id, &body_args)
-        .await
-        .map_err(Error::from)?;
+    sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

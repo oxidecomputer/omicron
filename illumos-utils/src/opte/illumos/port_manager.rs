@@ -430,7 +430,6 @@ impl PortManager {
 
     pub fn set_virtual_nic_host(
         &self,
-        _interface_id: Uuid,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
@@ -451,7 +450,6 @@ impl PortManager {
 
     pub fn unset_virtual_nic_host(
         &self,
-        _interface_id: Uuid,
         _mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
