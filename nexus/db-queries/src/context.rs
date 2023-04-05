@@ -201,20 +201,21 @@ impl OpContext {
         }
     }
 
-    // XXX-dap TODO-doc
-    pub fn child(
-        &self,
-        log: slog::Logger,
-        new_metadata: BTreeMap<String, String>,
-    ) -> OpContext {
+    /// Creates a new `OpContext` with extra metadata (including log metadata)
+    ///
+    /// This is intended for cases where you want an OpContext that's
+    /// functionally the same as one that you already have, but where you want
+    /// to provide extra debugging information (in the form of key-value pairs)
+    /// in both the OpContext itself and its logger.
+    pub fn child(&self, new_metadata: BTreeMap<String, String>) -> OpContext {
         let created_instant = Instant::now();
         let created_walltime = SystemTime::now();
         let mut metadata = self.metadata.clone();
+        let mut log = self.log.clone();
 
         for (k, v) in new_metadata {
-            metadata.insert(k, v);
-            // XXX-dap
-            // log = log.new(o!(k => v));
+            metadata.insert(k.clone(), v.clone());
+            log = log.new(o!(k => v));
         }
 
         OpContext {

@@ -60,11 +60,10 @@ impl Driver {
             watch::channel(TaskStatus { current: None, last: None });
         let notify = Arc::new(Notify::new());
 
-        let log = opctx.log.new(o!("background_task" => name.clone()));
-        let opctx = opctx.child(
-            log,
-            BTreeMap::from([("background_task".to_string(), name.clone())]),
-        );
+        let opctx = opctx.child(BTreeMap::from([(
+            "background_task".to_string(),
+            name.clone(),
+        )]));
         let task_exec =
             TaskExec::new(period, imp, Arc::clone(&notify), opctx, status_tx);
         let tokio_task = tokio::task::spawn(task_exec.run(watchers));

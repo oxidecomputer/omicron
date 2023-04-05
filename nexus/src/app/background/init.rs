@@ -36,7 +36,6 @@ fn init_dns(
     dns_group: DnsGroup,
 ) {
     let dns_group_name = dns_group.to_string();
-    let log = opctx.log.new(o!("dns_group" => dns_group_name.clone()));
     let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
 
     // Background task: DNS config watcher
@@ -47,7 +46,7 @@ fn init_dns(
         format!("dns_config_{}", dns_group),
         Duration::from_secs(60),
         Box::new(dns_config),
-        opctx.child(log.clone(), metadata.clone()),
+        opctx.child(metadata.clone()),
         vec![],
     );
 
@@ -58,7 +57,7 @@ fn init_dns(
         format!("dns_servers_{}", dns_group),
         Duration::from_secs(60),
         Box::new(dns_servers),
-        opctx.child(log.clone(), metadata.clone()),
+        opctx.child(metadata.clone()),
         vec![],
     );
 
@@ -71,7 +70,7 @@ fn init_dns(
         format!("dns_propagation_{}", dns_group),
         Duration::from_secs(60),
         Box::new(dns_propagate),
-        opctx.child(log, metadata),
+        opctx.child(metadata),
         vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
     );
 }
