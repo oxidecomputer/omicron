@@ -47,6 +47,7 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -385,30 +386,37 @@ impl ServiceManager {
 
             drop(existing_zones);
 
-            // Wait for time synchronization
             info!(&self.inner.log, "Waiting for sled time synchronization");
-            loop {
-                let ts = self.timesync_get().await;
-                match ts {
-                    Ok(TimeSync { sync: true, .. }) => {
-                        info!(&self.inner.log, "Time is synchronized");
-                        break;
+
+            retry_notify(
+                retry_policy_local(),
+                || async {
+                    match self.timesync_get().await {
+                        Ok(TimeSync { sync: true, .. }) => {
+                            info!(&self.inner.log, "Time is synchronized");
+                            Ok(())
+                        }
+                        Ok(ts) => Err(BackoffError::transient(format!(
+                            "No sync {:?}",
+                            ts
+                        ))),
+                        Err(e) => Err(BackoffError::transient(format!(
+                            "Error checking for time synchronization: {}",
+                            e
+                        ))),
                     }
-                    Ok(ts) => {
-                        info!(
-                            &self.inner.log,
-                            "Time not yet synchronized {:?}", ts
-                        );
-                    }
-                    Err(e) => {
-                        info!(
-                            self.inner.log,
-                            "Error checking for time synchronization: {}", e
-                        );
-                    }
-                }
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            }
+                },
+                |error, delay| {
+                    warn!(
+                        self.inner.log,
+                        "Time not yet synchronised (retrying in {:?})",
+                        delay;
+                        "error" => ?error
+                    );
+                },
+            )
+            .await
+            .expect("Expected an infinite retry loop syncing time");
 
             let mut existing_zones = self.inner.zones.lock().await;
 
