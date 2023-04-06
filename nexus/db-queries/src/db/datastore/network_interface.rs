@@ -163,7 +163,7 @@ impl DataStore {
         Ok(())
     }
 
-    /// Delete an instance attached to a provided instance.
+    /// Delete an `InstanceNetworkInterface` attached to a provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
