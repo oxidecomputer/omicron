@@ -118,6 +118,8 @@ impl<S> StepHandleToken<S> {
 /// `StepHandleToken`, returned by:
 ///
 /// * [`StepContext::token`]
+/// * [`MetadataContext::token`]
+/// * [`CompletionContext::token`]
 ///
 /// It is important that `StepHandle`s never be awaited outside the context of a
 /// step that comes afterwards -- doing so will cause an immediate deadlock.

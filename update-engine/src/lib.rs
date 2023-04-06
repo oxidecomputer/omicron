@@ -7,7 +7,8 @@
 //! A framework to declare a series of steps to perform updates with.
 //!
 //! The general data flow of the engine is as a series of steps that is executed
-//! in a linear fashion. The closest analogue is to GitHub Actions.
+//! in a linear fashion, meant as a one-shot workflow. The closest analogue is
+//! to GitHub Actions.
 //!
 //! # Features
 //!
@@ -49,7 +50,7 @@
 //!
 //! # Future work
 //!
-//! 1. Support nested steps: steps that can generate other steps in a
+//! 1. Support nested engines: steps that can generate other steps in a
 //!    hierarchical fashion.
 //! 2. Receive an event stream from a source and turn it into nested events in
 //!    another source.
