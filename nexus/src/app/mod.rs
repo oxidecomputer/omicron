@@ -250,8 +250,11 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
-        let background_tasks =
-            background::init(&background_ctx, Arc::clone(&db_datastore));
+        let background_tasks = background::init(
+            &background_ctx,
+            Arc::clone(&db_datastore),
+            &config.pkg.background_tasks,
+        );
 
         let nexus = Nexus {
             id: config.deployment.id,

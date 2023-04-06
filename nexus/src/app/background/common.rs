@@ -341,9 +341,9 @@ impl TaskExec {
         let mut interval = tokio::time::interval(self.period);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        /// Wait for either the timeout to elapse, or an explicit activation
-        /// signal from the Driver, or for one of our dependencies ("watch"
-        /// channels) to trigger an activation.
+        // Wait for either the timeout to elapse, or an explicit activation
+        // signal from the Driver, or for one of our dependencies ("watch"
+        // channels) to trigger an activation.
         loop {
             let mut dependencies: FuturesUnordered<_> =
                 deps.iter_mut().map(|w| w.wait_for_change()).collect();

@@ -21,14 +21,16 @@ use tokio::sync::watch;
 pub struct DnsPropagator {
     rx_config: watch::Receiver<Option<DnsConfigParams>>,
     rx_servers: watch::Receiver<Option<DnsServersList>>,
+    max_concurrent_server_updates: usize,
 }
 
 impl DnsPropagator {
     pub fn new(
         rx_config: watch::Receiver<Option<DnsConfigParams>>,
         rx_servers: watch::Receiver<Option<DnsServersList>>,
+        max_concurrent_server_updates: usize,
     ) -> DnsPropagator {
-        DnsPropagator { rx_config, rx_servers }
+        DnsPropagator { rx_config, rx_servers, max_concurrent_server_updates }
     }
 }
 
@@ -92,7 +94,14 @@ impl BackgroundTask for DnsPropagator {
             ));
 
             // Propate the config to all of the DNS servers.
-            match dns_propagate(&log, &dns_config, &dns_servers).await {
+            match dns_propagate(
+                &log,
+                &dns_config,
+                &dns_servers,
+                self.max_concurrent_server_updates,
+            )
+            .await
+            {
                 Ok(_) => {
                     info!(&log, "DNS propagation: done");
                     // XXX-dap track this somewhere for visibility
@@ -114,14 +123,17 @@ async fn dns_propagate(
     log: &slog::Logger,
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
+    max_concurrent_server_updates: usize,
 ) -> anyhow::Result<()> {
-    let limit = Some(5); // XXX-dap
-                         // XXX-dap ideally would report all problems
+    // XXX-dap ideally would report all problems
     stream::iter(&servers.addresses)
         .map(Ok::<_, anyhow::Error>)
-        .try_for_each_concurrent(limit, |server_addr| async move {
-            dns_propagate_one(log, dns_config, server_addr).await
-        })
+        .try_for_each_concurrent(
+            max_concurrent_server_updates,
+            |server_addr| async move {
+                dns_propagate_one(log, dns_config, server_addr).await
+            },
+        )
         .await
 }
 

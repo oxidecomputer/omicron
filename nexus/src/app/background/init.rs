@@ -11,20 +11,36 @@ use super::dns_servers;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use slog::o;
+use omicron_common::nexus_config::BackgroundTaskConfig;
+use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// Kick off all background tasks
 ///
 /// Returns a `Driver` that can be used for inspecting background tasks and
 /// their state
-pub fn init(opctx: &OpContext, datastore: Arc<DataStore>) -> common::Driver {
+pub fn init(
+    opctx: &OpContext,
+    datastore: Arc<DataStore>,
+    config: &BackgroundTaskConfig,
+) -> common::Driver {
     let mut driver = common::Driver::new();
 
-    init_dns(&mut driver, opctx, datastore.clone(), DnsGroup::Internal);
-    init_dns(&mut driver, opctx, datastore, DnsGroup::External);
+    init_dns(
+        &mut driver,
+        opctx,
+        datastore.clone(),
+        DnsGroup::Internal,
+        &config.dns_internal,
+    );
+    init_dns(
+        &mut driver,
+        opctx,
+        datastore,
+        DnsGroup::External,
+        &config.dns_external,
+    );
 
     driver
 }
@@ -34,6 +50,7 @@ fn init_dns(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
+    config: &DnsTasksConfig,
 ) {
     let dns_group_name = dns_group.to_string();
     let metadata = BTreeMap::from([("dns_group".to_string(), dns_group_name)]);
@@ -44,7 +61,7 @@ fn init_dns(
     let dns_config_watcher = dns_config.watcher();
     driver.register(
         format!("dns_config_{}", dns_group),
-        Duration::from_secs(60), // XXX-dap (and below)
+        config.period_secs_config,
         Box::new(dns_config),
         opctx.child(metadata.clone()),
         vec![],
@@ -55,7 +72,7 @@ fn init_dns(
     let dns_servers_watcher = dns_servers.watcher();
     driver.register(
         format!("dns_servers_{}", dns_group),
-        Duration::from_secs(60),
+        config.period_secs_servers,
         Box::new(dns_servers),
         opctx.child(metadata.clone()),
         vec![],
@@ -65,10 +82,11 @@ fn init_dns(
     let dns_propagate = dns_propagation::DnsPropagator::new(
         dns_config_watcher.clone(),
         dns_servers_watcher.clone(),
+        config.max_concurrent_server_updates,
     );
     driver.register(
         format!("dns_propagation_{}", dns_group),
-        Duration::from_secs(60),
+        config.period_secs_propagation,
         Box::new(dns_propagate),
         opctx.child(metadata),
         vec![Box::new(dns_config_watcher), Box::new(dns_servers_watcher)],
