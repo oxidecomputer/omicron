@@ -7,7 +7,9 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, Control};
 use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
 use crate::ui::defaults::style;
-use crate::ui::widgets::{BoxConnector, BoxConnectorKind, ButtonText, Popup, IgnitionPopup};
+use crate::ui::widgets::{
+    BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
+};
 use crate::{Action, Cmd, Frame, State};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use slog::{info, o, Logger};

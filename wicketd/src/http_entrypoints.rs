@@ -6,13 +6,13 @@
 
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
-use dropshot::Query;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::UntypedBody;
 use gateway_client::types::IgnitionCommand;
