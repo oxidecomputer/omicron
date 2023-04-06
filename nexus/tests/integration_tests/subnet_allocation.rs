@@ -19,8 +19,8 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
-    NetworkInterface,
+    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+    InstanceNetworkInterface, Ipv4Net,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
@@ -37,7 +37,7 @@ async fn create_instance_expect_failure(
 ) -> HttpErrorResponseBody {
     let network_interfaces =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            params::NetworkInterfaceCreate {
+            params::InstanceNetworkInterfaceCreate {
                 identity: IdentityMetadataCreateParams {
                     // We're using the name of the instance purposefully, to
                     // avoid any naming conflicts on the interface.
@@ -116,7 +116,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
     let nic = params::InstanceNetworkInterfaceAttachment::Create(vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "eth0".parse().unwrap(),
                 description: String::from("some iface"),
@@ -161,7 +161,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         subnet_name, vpc_selector
     );
     let mut network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_ips)
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &url_ips)
             .await
             .items;
     assert_eq!(network_interfaces.len(), subnet_size);

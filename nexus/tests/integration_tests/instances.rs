@@ -31,10 +31,10 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
 use omicron_nexus::db::lookup::LookupPath;
@@ -260,7 +260,7 @@ async fn test_instances_create_reboot_halt(
         PROJECT_NAME
     );
     let network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &nics_url)
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
             .await
             .items;
     assert_eq!(network_interfaces.len(), 1);
@@ -437,10 +437,12 @@ async fn test_instances_create_reboot_halt(
         "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
         PROJECT_NAME,
     );
-    let interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     assert!(
         interfaces.is_empty(),
         "Expected all network interfaces for the instance to be deleted"
@@ -829,7 +831,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
     let requested_address = "172.30.0.10".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -902,7 +904,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // as-is. This would fail with a conflict on the instance name, if we don't
     // fully unwind the saga and delete the instance database record.
     let requested_address = "172.30.0.11".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -944,7 +946,7 @@ async fn test_instance_with_single_explicit_ip_address(
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
     let requested_address = "172.30.0.10".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -996,7 +998,7 @@ async fn test_instance_with_single_explicit_ip_address(
         .execute()
         .await
         .expect("Failed to get network interface for new instance")
-        .parsed_body::<NetworkInterface>()
+        .parsed_body::<InstanceNetworkInterface>()
         .expect("Failed to parse a network interface");
     assert_eq!(interface.instance_id, instance.identity.id);
     assert_eq!(interface.identity.name, if0_params.identity.name);
@@ -1047,7 +1049,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     // Create the parameters for the interfaces. These will be created during
     // the saga for instance creation.
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -1056,7 +1058,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         subnet_name: default_name.clone(),
         ip: None,
     };
-    let if1_params = params::NetworkInterfaceCreate {
+    let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -1106,11 +1108,10 @@ async fn test_instance_with_new_custom_network_interfaces(
     };
 
     // The first interface is in the default VPC Subnet
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        nics_url(&default_name).as_str(),
-        "",
-        Some(100),
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(
+        client, nics_url(&default_name).as_str(), "", Some(100)
     )
     .await
     .expect("Failed to get interfaces in default VPC Subnet");
@@ -1125,14 +1126,15 @@ async fn test_instance_with_new_custom_network_interfaces(
     assert_eq!(if0.instance_id, instance.identity.id);
     assert_eq!(if0.ip, std::net::IpAddr::V4("172.30.0.5".parse().unwrap()));
 
-    let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        nics_url(&non_default_subnet_name).as_str(),
-        "",
-        Some(100),
-    )
-    .await
-    .expect("Failed to get interfaces in non-default VPC Subnet");
+    let interfaces1 =
+        NexusRequest::iter_collection_authn::<InstanceNetworkInterface>(
+            client,
+            nics_url(&non_default_subnet_name).as_str(),
+            "",
+            Some(100),
+        )
+        .await
+        .expect("Failed to get interfaces in non-default VPC Subnet");
     assert_eq!(
         interfaces1.all_items.len(),
         1,
@@ -1215,12 +1217,9 @@ async fn test_instance_create_delete_network_interface(
         "/v1/network-interfaces?project={}&instance={}",
         PROJECT_NAME, instance.identity.name,
     );
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        url_interfaces.as_str(),
-        "",
-        Some(100),
-    )
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(client, url_interfaces.as_str(), "", Some(100))
     .await
     .expect("Failed to get interfaces for instance");
     assert!(
@@ -1230,7 +1229,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Parameters for the interfaces to create/attach
     let if_params = vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1239,7 +1238,7 @@ async fn test_instance_create_delete_network_interface(
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
         },
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1290,7 +1289,7 @@ async fn test_instance_create_delete_network_interface(
         .execute()
         .await
         .expect("Failed to create network interface on stopped instance");
-        let iface = response.parsed_body::<NetworkInterface>().unwrap();
+        let iface = response.parsed_body::<InstanceNetworkInterface>().unwrap();
         assert_eq!(iface.identity.name, params.identity.name);
         assert_eq!(iface.ip, params.ip.unwrap());
         assert_eq!(
@@ -1307,10 +1306,12 @@ async fn test_instance_create_delete_network_interface(
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Get all interfaces in one request.
-    let other_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let other_interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     for (iface0, iface1) in interfaces.iter().zip(other_interfaces) {
         assert_eq!(iface0.identity.id, iface1.identity.id);
         assert_eq!(iface0.vpc_id, iface1.vpc_id);
@@ -1367,7 +1368,7 @@ async fn test_instance_create_delete_network_interface(
     .expect("Failed to parse error response body");
     assert_eq!(
         err.message,
-        "The primary interface for an instance \
+        "The primary interface \
         may not be deleted while secondary interfaces \
         are still attached",
         "Expected an InvalidRequest response when detaching \
@@ -1457,7 +1458,7 @@ async fn test_instance_update_network_interfaces(
 
     // Parameters for each interface to try to modify.
     let if_params = vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1466,7 +1467,7 @@ async fn test_instance_update_network_interfaces(
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
         },
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1491,7 +1492,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert_eq!(primary_iface.identity.name, if_params[0].identity.name);
     assert_eq!(primary_iface.ip, if_params[0].ip.unwrap());
@@ -1506,7 +1507,7 @@ async fn test_instance_update_network_interfaces(
     // We'll change the interface's name and description
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
     let new_description = String::from("new description");
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(new_name.clone()),
             description: Some(new_description.clone()),
@@ -1549,7 +1550,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // Verify the modifications have taken effect, updating the name,
@@ -1562,7 +1563,8 @@ async fn test_instance_update_network_interfaces(
     // interface, and that the modification time for the new is later than the
     // old.
     let verify_unchanged_attributes =
-        |original_iface: &NetworkInterface, new_iface: &NetworkInterface| {
+        |original_iface: &InstanceNetworkInterface,
+         new_iface: &InstanceNetworkInterface| {
             assert_eq!(
                 original_iface.identity.time_created,
                 new_iface.identity.time_created
@@ -1581,7 +1583,7 @@ async fn test_instance_update_network_interfaces(
 
     // Try with the same request again, but this time only changing
     // `primary`. This should have no effect.
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -1600,7 +1602,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // Everything should still be the same, except the modification time.
@@ -1630,7 +1632,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert_eq!(secondary_iface.identity.name, if_params[1].identity.name);
     assert_eq!(secondary_iface.ip, if_params[1].ip.unwrap());
@@ -1675,7 +1677,7 @@ async fn test_instance_update_network_interfaces(
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -1691,7 +1693,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // It should now be the primary and have an updated modification time
@@ -1717,7 +1719,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to get the old primary / new secondary interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // The now-secondary interface should be, well, secondary
@@ -1746,10 +1748,12 @@ async fn test_instance_update_network_interfaces(
         .execute()
         .await
         .expect("Failed to delete original secondary interface");
-    let all_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let all_interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     assert_eq!(
         all_interfaces.len(),
         1,
@@ -1768,7 +1772,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert!(!iface.primary);
     assert_eq!(iface.identity.name, if_params[0].identity.name);
@@ -1790,7 +1794,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     // error on creation of the second NIC, and we'll make sure that both are
     // deleted.
     let default_name = "default".parse::<Name>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -1799,7 +1803,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         subnet_name: default_name.clone(),
         ip: Some("172.30.0.6".parse().unwrap()),
     };
-    let if1_params = params::NetworkInterfaceCreate {
+    let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -1845,9 +1849,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
         PROJECT_NAME,
     );
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client, &url_nics, "", None,
-    )
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(client, &url_nics, "", None)
     .await
     .expect("failed to list network interfaces")
     .all_items;
@@ -2969,9 +2973,10 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let nics_url =
         format!("/v1/network-interfaces?instance={}", instance.identity.id,);
 
-    let nics = objects_list_page_authz::<NetworkInterface>(client, &nics_url)
-        .await
-        .items;
+    let nics =
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
+            .await
+            .items;
 
     // The default config is one NIC
     assert_eq!(nics.len(), 1);

@@ -16,6 +16,7 @@ use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
@@ -683,7 +684,7 @@ async fn sic_create_network_interface_undo(
         .await
         .map_err(ActionError::action_failed)?;
     match LookupPath::new(&opctx, &datastore)
-        .network_interface_id(interface_id)
+        .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
     {
@@ -722,7 +723,7 @@ async fn create_custom_network_interface(
     saga_params: &Params,
     instance_id: Uuid,
     interface_id: Uuid,
-    interface_params: &params::NetworkInterfaceCreate,
+    interface_params: &params::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -757,7 +758,7 @@ async fn create_custom_network_interface(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-    let interface = db::model::IncompleteNetworkInterface::new(
+    let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         authz_vpc.id(),
@@ -778,7 +779,10 @@ async fn create_custom_network_interface(
         .or_else(|err| {
             match err {
                 // Necessary for idempotency
-                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                InsertNicError::InterfaceAlreadyExists(
+                    _,
+                    NetworkInterfaceKind::Instance,
+                ) => Ok(()),
                 _ => Err(err),
             }
         })
@@ -822,7 +826,7 @@ async fn create_default_primary_network_interface(
     let iface_name =
         Name::try_from(DEFAULT_PRIMARY_NIC_NAME.to_string()).unwrap();
 
-    let interface_params = params::NetworkInterfaceCreate {
+    let interface_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: iface_name.clone(),
             description: format!(
@@ -850,7 +854,7 @@ async fn create_default_primary_network_interface(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let interface = db::model::IncompleteNetworkInterface::new(
+    let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         authz_vpc.id(),
@@ -871,7 +875,10 @@ async fn create_default_primary_network_interface(
         .or_else(|err| {
             match err {
                 // Necessary for idempotency
-                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                InsertNicError::InterfaceAlreadyExists(
+                    _,
+                    NetworkInterfaceKind::Instance,
+                ) => Ok(()),
                 _ => Err(err),
             }
         })
