@@ -4,13 +4,12 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{borrow::Cow, pin::Pin, sync::Mutex, task::Poll};
+use std::{borrow::Cow, sync::Mutex};
 
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
 use futures::{future::BoxFuture, prelude::*};
 use linear_map::LinearMap;
-use pin_project_lite::pin_project;
 use tokio::{
     sync::{mpsc, oneshot},
     time::Instant,
@@ -23,7 +22,8 @@ use crate::{
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, StepSpec,
+    AsError, CompletionContext, MetadataContext, StepContext, StepHandle,
+    StepSpec,
 };
 
 #[derive_where(Debug)]
@@ -52,6 +52,17 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     }
 
     /// Adds a new step corresponding to the given component.
+    ///
+    /// # Notes
+    ///
+    /// The step will be considered to keep running until both the future
+    /// completes and the `StepContext` is dropped. In normal use, both happen
+    /// at the same time. However, it is technically possible to make the
+    /// `StepContext` escape the future.
+    ///
+    /// (Ideally, this would be prevented by making the function take a `&mut
+    /// StepContext`, but there are limitations in stable Rust which make this
+    /// impossible to achieve.)
     pub fn new_step<F, Fut, T>(
         &self,
         component: S::Component,
@@ -61,13 +72,17 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     ) -> NewStep<'_, 'a, S, T>
     where
         F: FnOnce(StepContext<S>) -> Fut + 'a,
-        Fut: Future<Output = Result<StepResult<S, T>, S::Error>> + Send + 'a,
+        Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
         self.for_component(component).new_step(id, description, step_fn)
     }
 
-    /// Creates a [`ComponentRegistrar`] that contains the component for a given.
+    /// Creates a [`ComponentRegistrar`] that defines steps within the context
+    /// of a component.
+    ///
+    /// It is often useful to define similar steps across multiple components. A
+    /// `ComponentRegistrar` provides an easy way to do so.
     pub fn for_component(
         &self,
         component: S::Component,
@@ -76,14 +91,20 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     }
 
     /// Executes the list of steps. The sender is a list of steps.
-    pub async fn execute(self) -> Result<(), ExecutionError<S>> {
+    pub async fn execute(
+        self,
+    ) -> Result<CompletionContext<S>, ExecutionError<S>> {
         let total_start = Instant::now();
 
         let steps = {
             let mut steps_lock = self.steps.lock().unwrap();
-            // Grab the steps and component counts from within steps_lock, then let
-            // steps_lock go. (Without this, clippy warns about steps_lock being
-            // held across await points.)
+            // Grab the steps and component counts from within steps_lock, then
+            // let steps_lock go. (Without this, clippy warns about steps_lock
+            // being held across await points.)
+            //
+            // There are no concurrency concerns here because `execute` consumes
+            // `self`, and is the only piece of code that has access to the
+            // mutex (`self.steps` is a `Mutex<T>`, not an `Arc<Mutex<T>>`!)
             std::mem::take(&mut *steps_lock)
         };
 
@@ -122,7 +143,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
-            return Ok(());
+            return Ok(CompletionContext::new());
         };
 
         let first_step_info = {
@@ -180,13 +201,19 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         // Finally, report the last step.
         reporter.last_step(step_res).await?;
 
-        Ok(())
+        Ok(CompletionContext::new())
     }
 }
 
 #[derive_where(Default, Debug)]
 struct Steps<'a, S: StepSpec> {
     steps: Vec<Step<'a, S>>,
+
+    // This is a `LinearMap` and not a `HashMap`/`BTreeMap` because we don't
+    // want to impose a `Hash` or `Ord` restriction on `S::Component`. In
+    // particular, we want to support `S::Component` being a generic
+    // `serde_json::Value`, which doesn't implement `Hash` or `Ord` but does
+    // implement `Eq`.
     component_counts: LinearMap<S::Component, usize>,
 }
 
@@ -195,7 +222,7 @@ struct Steps<'a, S: StepSpec> {
 // because 'a got mixed up with a covariant lifetime like 'engine.
 
 /// Provides component context against which a step can be registered.
-pub struct ComponentRegistrar<'engine, 'a: 'engine, S: StepSpec> {
+pub struct ComponentRegistrar<'engine, 'a, S: StepSpec> {
     steps: &'engine Mutex<Steps<'a, S>>,
     component: S::Component,
 }
@@ -207,7 +234,19 @@ impl<'engine, 'a, S: StepSpec> ComponentRegistrar<'engine, 'a, S> {
         &self.component
     }
 
-    /// Adds a new step corresponding to this component.
+    /// Adds a new step corresponding to the component associated with the
+    /// registrar.
+    ///
+    /// # Notes
+    ///
+    /// The step will be considered to keep running until both the future
+    /// completes and the `StepContext` is dropped. In normal use, both happen
+    /// at the same time. However, it is technically possible to make the
+    /// `StepContext` escape the future.
+    ///
+    /// (Ideally, this would be prevented by making the function take a `&mut
+    /// StepContext`, but there are limitations in stable Rust which make this
+    /// impossible to achieve.)
     pub fn new_step<F, Fut, T>(
         &self,
         id: S::StepId,
@@ -216,7 +255,7 @@ impl<'engine, 'a, S: StepSpec> ComponentRegistrar<'engine, 'a, S> {
     ) -> NewStep<'engine, 'a, S, T>
     where
         F: FnOnce(StepContext<S>) -> Fut + 'a,
-        Fut: Future<Output = Result<StepResult<S, T>, S::Error>> + Send + 'a,
+        Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
         let (sender, receiver) = oneshot::channel();
@@ -263,25 +302,26 @@ pub struct NewStep<'engine, 'a, S: StepSpec, T> {
     description: Cow<'static, str>,
     exec_fn: DebugIgnore<StepExecFn<'a, S>>,
     receiver: oneshot::Receiver<T>,
-    metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S::StepMetadata>>>,
+    metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
 impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
     /// Adds a metadata-generating function to the step.
     ///
-    /// This function is expected to produce [`S::StepMetadata`]. The metadata
-    /// function must be infallible, and will often just be synchronous code.
+    /// This function is expected to produce
+    /// [`S::StepMetadata`](StepSpec::StepMetadata). The metadata function must
+    /// be infallible, and will often just be synchronous code.
     pub fn with_metadata_fn<F, Fut>(mut self, f: F) -> Self
     where
-        F: FnOnce() -> Fut + 'a,
+        F: FnOnce(MetadataContext<S>) -> Fut + 'a,
         Fut: Future<Output = S::StepMetadata> + Send + 'a,
     {
-        self.metadata_fn = Some(DebugIgnore(Box::new(|| (f)().boxed())));
+        self.metadata_fn = Some(DebugIgnore(Box::new(|cx| (f)(cx).boxed())));
         self
     }
 
     /// Registers the step with the engine.
-    pub fn register(self) -> StepHandle<T> {
+    pub fn register(self) -> StepHandle<T, S> {
         let mut steps_lock = self.steps.lock().unwrap();
         let component_count = steps_lock
             .component_counts
@@ -301,51 +341,14 @@ impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
             exec: StepExec { exec_fn: self.exec_fn },
         };
         steps_lock.steps.push(step);
-        StepHandle { receiver: self.receiver }
-    }
-}
-
-pin_project! {
-    /// A future that resolves to a step's result.
-    ///
-    /// This handle can be used between steps to transfer data between steps.
-    ///
-    /// A `StepHandle` implements `Future`, so it can be awaited. To share the
-    /// result across several dependent futures, use
-    /// [`FutureExt::shared`](futures::FutureExt::shared).
-    ///
-    /// It is important that `StepHandle`s never be awaited outside the context
-    /// of a step that comes afterwards -- doing so will cause an immediate
-    /// deadlock.
-    ///
-    /// Dropping a `StepHandle` has no effect on whether the step itself runs.
-    #[derive(Debug)]
-    pub struct StepHandle<T> {
-        #[pin]
-        receiver: oneshot::Receiver<T>,
-    }
-}
-
-// TODO: maybe export other receive methods from receiver, depending on need
-
-impl<T> Future for StepHandle<T> {
-    type Output = T;
-
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<Self::Output> {
-        let this = self.project();
-        this.receiver
-            .poll(cx)
-            .map(|output| output.expect("update-engine never drops the sender"))
+        StepHandle::new(self.receiver)
     }
 }
 
 /// The result of a step.
 ///
 /// Returned by the callback passed to `register_step`.
-pub struct StepResult<S: StepSpec, T> {
+pub struct StepResult<T, S: StepSpec> {
     /// The output of the step.
     pub output: T,
 
@@ -355,14 +358,14 @@ pub struct StepResult<S: StepSpec, T> {
     pub outcome: StepOutcome<S>,
 }
 
-impl<S: StepSpec, T> StepResult<S, T> {
+impl<T, S: StepSpec> StepResult<T, S> {
     /// Creates a new `StepResult` corresponding to a successful output.
     pub fn success(output: T, metadata: S::CompletionMetadata) -> Self {
         Self { output, outcome: StepOutcome::Success { metadata } }
     }
 
     /// Creates a new `StepResult` corresponding to a successful output, with a
-    /// warning attached.
+    /// warning and metadata attached.
     pub fn warning(
         output: T,
         metadata: S::CompletionMetadata,
@@ -375,28 +378,16 @@ impl<S: StepSpec, T> StepResult<S, T> {
     }
 
     /// Creates a new `StepResult` corresponding to a skipped step, with a
-    /// message attached.
-    pub fn skipped(output: T, message: impl Into<Cow<'static, str>>) -> Self {
+    /// message and metadata attached.
+    pub fn skipped(
+        output: T,
+        metadata: S::SkippedMetadata,
+        message: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             output,
-            outcome: StepOutcome::Skipped { message: message.into() },
+            outcome: StepOutcome::Skipped { metadata, message: message.into() },
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct StepContext<S: StepSpec> {
-    progress_sender: mpsc::Sender<StepProgress<S>>,
-}
-
-impl<S: StepSpec> StepContext<S> {
-    /// Sends a progress update to the update engine.
-    #[inline]
-    pub async fn send_progress(&self, progress: StepProgress<S>) {
-        self.progress_sender
-            .send(progress)
-            .await
-            .expect("our code always keeps the receiver open")
     }
 }
 
@@ -404,7 +395,7 @@ impl<S: StepSpec> StepContext<S> {
 ///
 /// 1. Information about the step, including the component, ID, etc.
 /// 2. Metadata about the step, generated in an async function. For example, for
-///    a peer this can be the place it was downloaded from.
+///    this can be a hash of an artifact, or an address it was downloaded from.
 /// 3. The actual step function.
 ///
 /// 1 and 2 are in StepMetadataGen, while 3 is in exec.
@@ -420,7 +411,7 @@ struct StepMetadataGen<'a, S: StepSpec> {
     component: S::Component,
     component_index: usize,
     description: Cow<'static, str>,
-    metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S::StepMetadata>>>,
+    metadata_fn: Option<DebugIgnore<StepMetadataFn<'a, S>>>,
 }
 
 impl<'a, S: StepSpec> StepMetadataGen<'a, S> {
@@ -448,7 +439,8 @@ impl<'a, S: StepSpec> StepMetadataGen<'a, S> {
         let metadata = match self.metadata_fn {
             None => None,
             Some(DebugIgnore(metadata_fn)) => {
-                let metadata = (metadata_fn)().await;
+                let cx = MetadataContext::new();
+                let metadata = (metadata_fn)(cx).await;
                 Some(metadata)
             }
         };
@@ -480,7 +472,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
             "step id" => ?step_info.info.id,
         );
         let (progress_sender, mut progress_receiver) = mpsc::channel(16);
-        let cx = StepContext { progress_sender };
+        let cx = StepContext::new(progress_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
         let mut reporter =
@@ -507,6 +499,8 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                     }
                 }
 
+                // This branch matches if none of the preconditions expressed
+                // above are met.
                 else => break,
             }
         }
@@ -517,8 +511,20 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
     }
 }
 
-type StepMetadataFn<'a, M> = Box<dyn FnOnce() -> BoxFuture<'a, M> + 'a>;
+type StepMetadataFn<'a, S> = Box<
+    dyn FnOnce(
+            MetadataContext<S>,
+        ) -> BoxFuture<'a, <S as StepSpec>::StepMetadata>
+        + 'a,
+>;
 
+/// NOTE: Ideally this would take `&mut StepContext<S>`, so that it can't get
+/// squirreled away by a step's function. However, that quickly runs into [this
+/// issue in
+/// Rust](https://users.rust-lang.org/t/passing-self-to-callback-returning-future-vs-lifetimes/53352).
+///
+/// It is probably possible to use unsafe code here, though that opens up its
+/// own can of worms.
 type StepExecFn<'a, S> = Box<
     dyn FnOnce(
             StepContext<S>,

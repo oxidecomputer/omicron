@@ -14,11 +14,11 @@ use display::make_displayer;
 use omicron_test_utils::dev::test_setup_log;
 use spec::{
     ComponentRegistrar, ExampleCompletionMetadata, ExampleComponent,
-    ExampleStepId, StepProgress, StepResult, UpdateEngine,
+    ExampleStepId, ExampleStepMetadata, StepHandle, StepProgress, StepResult,
+    UpdateEngine,
 };
 use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
-use update_engine::StepHandle;
 
 mod display;
 mod spec;
@@ -39,6 +39,9 @@ async fn main() {
         "https://www.example.org".to_owned(),
         1_048_576,
     );
+
+    // An example of a skipped step for component 1.
+    context.register_skipped_step(&component_1);
 
     // Write component 1 out to disk.
     context.register_write_step(&component_1, download_handle_1, false);
@@ -77,9 +80,9 @@ impl ExampleContext {
         }
     }
 
-    fn register_download_step<'st, 'a: 'st>(
+    fn register_download_step<'a>(
         &'a self,
-        registrar: &ComponentRegistrar<'st, 'a>,
+        registrar: &ComponentRegistrar<'_, 'a>,
         url: String,
         num_bytes: u64,
     ) -> StepHandle<BufList> {
@@ -147,22 +150,27 @@ impl ExampleContext {
             .register()
     }
 
-    fn register_write_step<'st, 'a: 'st>(
+    fn register_write_step<'a>(
         &'a self,
-        registrar: &ComponentRegistrar<'st, 'a>,
+        registrar: &ComponentRegistrar<'_, 'a>,
         download_handle: StepHandle<BufList>,
         should_error: bool,
     ) {
         let component = *registrar.component();
+
+        // A `StepHandle`'s value can ordinarily only be used by one step. In
+        // this example we're going to share the output across multiple steps
+        // using into_shared.
+        let download_handle = download_handle.into_shared();
+        let download_handle_2 = download_handle.clone();
+
         registrar
             .new_step(
                 ExampleStepId::Write,
-                format!(
-                    "Writing artifact to {}",
-                    self.temp_dir.path().display()
-                ),
+                "Writing artifact",
                 move |cx| async move {
-                    let mut buf_list = download_handle.await;
+                    let mut buf_list =
+                        download_handle.into_value(cx.token()).await;
                     let num_bytes = buf_list.num_bytes() as u64;
 
                     let destination: Utf8PathBuf = self
@@ -210,6 +218,24 @@ impl ExampleContext {
                     ))
                 },
             )
+            .with_metadata_fn(move |cx| async move {
+                let buf_list = download_handle_2.into_value(cx.token()).await;
+                ExampleStepMetadata::Write {
+                    path: self.temp_dir.path().to_owned(),
+                    num_bytes: buf_list.num_bytes() as u64,
+                }
+            })
+            .register();
+    }
+
+    fn register_skipped_step<'a>(
+        &'a self,
+        registrar: &ComponentRegistrar<'_, 'a>,
+    ) {
+        registrar
+            .new_step(ExampleStepId::Skipped, "This step does nothing", |_cx| async move {
+                Ok(StepResult::skipped((), (), "Step skipped"))
+            })
             .register();
     }
 }

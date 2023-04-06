@@ -7,11 +7,11 @@
 use std::fmt;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 
-/// A specification for an [`UpdateEngine`].
+/// A specification for an [`UpdateEngine`](crate::UpdateEngine).
 ///
-/// This defines the set of types required to use an [`UpdateEngine`].
+/// This defines the set of types required to use an `UpdateEngine`.
 ///
 /// NOTE: `StepSpec` is only required to implement `JsonSchema` to obtain the
 /// name of the schema. This is an upstream limitation in `JsonSchema`.
@@ -19,7 +19,7 @@ pub trait StepSpec: JsonSchema {
     /// A component associated with each step.
     type Component: Clone
         + fmt::Debug
-        + for<'a> Deserialize<'a>
+        + DeserializeOwned
         + Serialize
         + Eq
         + JsonSchema;
@@ -27,7 +27,7 @@ pub trait StepSpec: JsonSchema {
     /// The step identifier.
     type StepId: Clone
         + fmt::Debug
-        + for<'a> Deserialize<'a>
+        + DeserializeOwned
         + Serialize
         + Eq
         + JsonSchema;
@@ -38,7 +38,7 @@ pub trait StepSpec: JsonSchema {
     /// `serde_json::Value` for freeform metadata.
     type StepMetadata: Clone
         + fmt::Debug
-        + for<'a> Deserialize<'a>
+        + DeserializeOwned
         + Serialize
         + Eq
         + JsonSchema;
@@ -49,7 +49,7 @@ pub trait StepSpec: JsonSchema {
     /// `serde_json::Value` for freeform metadata.
     type ProgressMetadata: Clone
         + fmt::Debug
-        + for<'a> Deserialize<'a>
+        + DeserializeOwned
         + Serialize
         + Eq
         + JsonSchema;
@@ -60,7 +60,18 @@ pub trait StepSpec: JsonSchema {
     /// `serde_json::Value` for freeform metadata.
     type CompletionMetadata: Clone
         + fmt::Debug
-        + for<'a> Deserialize<'a>
+        + DeserializeOwned
+        + Serialize
+        + Eq
+        + JsonSchema;
+
+    /// Metadata associated with a step being skipped.
+    ///
+    /// This can be `()` if there's no metadata associated with the step, or
+    /// `serde_json::Value` for freeform metadata.
+    type SkippedMetadata: Clone
+        + fmt::Debug
+        + DeserializeOwned
         + Serialize
         + Eq
         + JsonSchema;

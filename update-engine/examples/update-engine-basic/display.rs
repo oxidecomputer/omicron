@@ -15,8 +15,8 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use update_engine::events::ProgressCounter;
 
 use crate::spec::{
-    Event, ExampleComponent, ExampleStepId, ProgressEventKind, StepEventKind,
-    StepInfo, StepInfoWithMetadata, StepOutcome,
+    Event, ExampleComponent, ExampleStepId, ExampleStepMetadata,
+    ProgressEventKind, StepEventKind, StepInfoWithMetadata, StepOutcome,
 };
 
 /// An example that displays an event stream on the command line.
@@ -219,7 +219,7 @@ impl MessageDisplayState {
             Entry::Vacant(entry) => {
                 // Add the progress bar after the last one for this component.
                 entry.insert(ItemNode::new(
-                    step.info,
+                    step,
                     &self.mp,
                     component_node.pb.clone(),
                     self.sty_aux.clone(),
@@ -247,7 +247,7 @@ impl ComponentNode {
 
 #[derive(Debug)]
 struct ItemNode {
-    info: StepInfo,
+    info: StepInfoWithMetadata,
     mp: MultiProgress,
     component_pb: ProgressBar,
     pb: ProgressBar,
@@ -256,13 +256,18 @@ struct ItemNode {
 
 impl ItemNode {
     fn new(
-        info: StepInfo,
+        info: StepInfoWithMetadata,
         mp: &MultiProgress,
         component_pb: ProgressBar,
         style: ProgressStyle,
         insert_after: &ProgressBar,
     ) -> Self {
-        let pb = Self::new_item_pb(&style, 1, &info.description);
+        let pb = Self::new_item_pb(
+            &style,
+            1,
+            &info.info.description,
+            info.metadata.as_ref(),
+        );
         let pb = mp.insert_after(insert_after, pb);
         Self { info, mp: mp.clone(), component_pb, pb, style: style.into() }
     }
@@ -292,13 +297,14 @@ impl ItemNode {
             "{} {}{} ({attempt_elapsed:?}): {}",
             "✖".yellow(),
             format!("(attempt {}) ", next_attempt - 1).bold(),
-            self.info.description,
+            self.info.info.description,
             message.red(),
         ));
         let new_pb = Self::new_item_pb(
             &self.style,
             next_attempt,
-            &self.info.description,
+            &self.info.info.description,
+            self.info.metadata.as_ref(),
         );
         let new_pb = self.mp.insert_after(&self.pb, new_pb);
         self.pb = new_pb;
@@ -316,7 +322,7 @@ impl ItemNode {
                     "{} {}{} ({attempt_elapsed:?})",
                     "✔".green(),
                     Self::attempt_str(last_attempt).bold(),
-                    self.info.description,
+                    self.info.info.description,
                 ));
             }
             StepOutcome::Warning { message, .. } => {
@@ -324,15 +330,20 @@ impl ItemNode {
                     "{} {}{} ({attempt_elapsed:?}): {}",
                     "✔".yellow(),
                     Self::attempt_str(last_attempt).bold(),
-                    self.info.description,
+                    self.info.info.description,
                     message.yellow(),
                 ));
             }
-            StepOutcome::Skipped { message } => {
+            StepOutcome::Skipped { message, .. } => {
+                // Hide the progress bar for skipped steps: just show the
+                // message.
+                self.pb.set_style(
+                    ProgressStyle::with_template("{prefix}{msg}").unwrap(),
+                );
                 self.pb.finish_with_message(format!(
                     "* {}{}: skipped: {}",
                     Self::attempt_str(last_attempt).bold(),
-                    self.info.description,
+                    self.info.info.description,
                     message.yellow()
                 ));
             }
@@ -340,7 +351,7 @@ impl ItemNode {
 
         self.component_pb.inc(1);
         // Is this the last step in this component?
-        if self.info.is_last_step_in_component() {
+        if self.info.info.is_last_step_in_component() {
             self.component_pb.finish();
         }
     }
@@ -355,7 +366,7 @@ impl ItemNode {
             "{} {}{} ({attempt_elapsed:?}): {}",
             "✖".red(),
             Self::attempt_str(total_attempts).bold(),
-            self.info.description,
+            self.info.info.description,
             message.red(),
         ));
         self.component_pb.abandon();
@@ -373,13 +384,19 @@ impl ItemNode {
         style: &ProgressStyle,
         attempt: usize,
         description: &str,
+        metadata: Option<&ExampleStepMetadata>,
     ) -> ProgressBar {
+        let metadata_message = match metadata {
+            Some(ExampleStepMetadata::Write { path, num_bytes }) => {
+                format!(" to {} ({} bytes)", path.display(), num_bytes)
+            }
+            None => String::new(),
+        };
         let pb = ProgressBar::hidden();
         pb.set_style(style.clone());
         pb.set_message(format!(
-            "* {}{}",
+            "* {}{description}{metadata_message}",
             Self::attempt_str(attempt).bold(),
-            description,
         ));
         pb.set_prefix("    ");
         pb

@@ -17,5 +17,6 @@ impl StepSpec for TestSpec {
     type StepMetadata = serde_json::Value;
     type ProgressMetadata = serde_json::Value;
     type CompletionMetadata = serde_json::Value;
+    type SkippedMetadata = serde_json::Value;
     type Error = anyhow::Error;
 }

@@ -4,7 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{fmt, net::Ipv6Addr};
+use std::{fmt, path::PathBuf};
 
 use camino::Utf8PathBuf;
 use schemars::{
@@ -15,24 +15,7 @@ use schemars::{
 use serde::{Deserialize, Serialize};
 use update_engine::StepSpec;
 
-// ---
-// Type aliases to make the engine easy to use in the rest of the code.
-// ---
-
-pub(crate) type UpdateEngine<'a> = update_engine::UpdateEngine<'a, ExampleSpec>;
-pub(crate) type ComponentRegistrar<'exec, 'a> =
-    update_engine::ComponentRegistrar<'exec, 'a, ExampleSpec>;
-pub(crate) type Event = update_engine::events::Event<ExampleSpec>;
-pub(crate) type StepEventKind =
-    update_engine::events::StepEventKind<ExampleSpec>;
-pub(crate) type ProgressEventKind =
-    update_engine::events::ProgressEventKind<ExampleSpec>;
-pub(crate) type StepInfo = update_engine::events::StepInfo<ExampleSpec>;
-pub(crate) type StepInfoWithMetadata =
-    update_engine::events::StepInfoWithMetadata<ExampleSpec>;
-pub(crate) type StepProgress = update_engine::events::StepProgress<ExampleSpec>;
-pub(crate) type StepResult<T> = update_engine::StepResult<ExampleSpec, T>;
-pub(crate) type StepOutcome = update_engine::events::StepOutcome<ExampleSpec>;
+update_engine::define_update_engine!(pub(crate) ExampleSpec);
 
 /// Create a type to hang the engine specification off of. This is an empty enum
 /// (no possible values) because we never construct the type.
@@ -63,6 +46,12 @@ impl StepSpec for ExampleSpec {
     /// Metadata associated with a completion event.
     type CompletionMetadata = ExampleCompletionMetadata;
 
+    /// Metadata associated with a skipped event.
+    ///
+    /// In this example there is no metadata attached, so this is simply the
+    /// unit type.
+    type SkippedMetadata = ();
+
     type Error = anyhow::Error;
 }
 
@@ -91,14 +80,13 @@ impl fmt::Display for ExampleComponent {
 pub(crate) enum ExampleStepId {
     Download,
     Write,
+    Skipped,
 }
 
-#[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ExampleStepMetadata {
-    Address { peer: Ipv6Addr },
+    Write { path: PathBuf, num_bytes: u64 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]

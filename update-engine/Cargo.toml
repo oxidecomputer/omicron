@@ -10,7 +10,6 @@ debug-ignore.workspace = true
 derive-where.workspace = true
 futures.workspace = true
 linear-map.workspace = true
-pin-project-lite.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 schemars.workspace = true

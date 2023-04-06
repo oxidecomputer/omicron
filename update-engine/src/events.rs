@@ -205,12 +205,13 @@ impl<S: StepSpec> StepEventKind<S> {
 ///
 /// Some [`StepEvent`]s have a higher priority than others. For example, events
 /// related to step successes and failures must be delivered, while events
-/// related to retries can be dropped.
+/// related to retries can be trimmed down since they are overall less
+/// important.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum StepEventPriority {
     /// A low-priority event.
     ///
-    /// Includes retry and reset events.
+    /// Includes retry, reset, and unknown events.
     Low,
 
     /// A high-priority event.
@@ -235,11 +236,19 @@ pub enum StepOutcome<S: StepSpec> {
     Warning {
         /// Completion metadata associated with the step.
         metadata: S::CompletionMetadata,
+
+        /// A warning message.
         message: Cow<'static, str>,
     },
 
     /// The step was skipped with a message.
-    Skipped { message: Cow<'static, str> },
+    Skipped {
+        /// Skipped metadata associated with the step.
+        metadata: S::SkippedMetadata,
+
+        /// Metadata associated with the step.
+        message: Cow<'static, str>,
+    },
 }
 
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -279,7 +288,7 @@ pub enum ProgressEventKind<S: StepSpec> {
         /// attempts.
         step_elapsed: Duration,
 
-        /// Total time elapsed sinc ethe start of the attempt.
+        /// Total time elapsed since the start of the attempt.
         attempt_elapsed: Duration,
     },
 
@@ -304,7 +313,7 @@ pub struct StepInfo<S: StepSpec> {
     /// The description for this step.
     pub description: Cow<'static, str>,
 
-    /// The index of the step.
+    /// The index of the step within all steps to be executed.
     pub index: usize,
 
     /// The index of the step within the component.
@@ -448,12 +457,15 @@ impl<S: StepSpec> StepProgress<S> {
 
 #[cfg(test)]
 mod tests {
+    use omicron_test_utils::dev::test_setup_log;
+
     use crate::test_utils::TestSpec;
 
     use super::*;
 
     #[test]
     fn step_event_parse_unknown() {
+        let logctx = test_setup_log("step_event_parse_unknown");
         let tests = [
             (
                 r#"
@@ -559,8 +571,11 @@ mod tests {
         ];
 
         for (index, (input, expected)) in tests.into_iter().enumerate() {
-            // let serialized = serde_json::to_string_pretty(&expected).unwrap();
-            // println!("{serialized}");
+            let serialized = serde_json::to_string_pretty(&expected).unwrap();
+            slog::info!(
+                logctx.log,
+                "for index {index}, serialized: {serialized}"
+            );
 
             let actual: StepEvent<TestSpec> = serde_json::from_str(input)
                 .unwrap_or_else(|error| {
@@ -568,10 +583,13 @@ mod tests {
                 });
             assert_eq!(expected, actual, "input matches actual output");
         }
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn progress_event_parse_unknown() {
+        let logctx = test_setup_log("progress_event_parse_unknown");
         let tests = [
             (
                 r#"
@@ -678,11 +696,19 @@ mod tests {
         ];
 
         for (index, (input, expected)) in tests.into_iter().enumerate() {
+            let serialized = serde_json::to_string_pretty(&expected).unwrap();
+            slog::info!(
+                logctx.log,
+                "for index {index}, serialized: {serialized}"
+            );
+
             let actual: ProgressEvent<TestSpec> = serde_json::from_str(input)
                 .unwrap_or_else(|error| {
                     panic!("index {index}: unknown variant deserialized correctly: {error}")
                 });
             assert_eq!(expected, actual, "input matches actual output");
         }
+
+        logctx.cleanup_successful();
     }
 }
