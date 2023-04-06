@@ -132,9 +132,9 @@ async fn dns_propagate(
     servers: &DnsServersList,
     max_concurrent_server_updates: usize,
 ) -> Vec<anyhow::Result<()>> {
-    stream::iter(&servers.addresses)
+    stream::iter(servers.addresses.clone())
         .map(|server_addr| async move {
-            dns_propagate_one(log, dns_config, server_addr).await
+            dns_propagate_one(log, dns_config, &server_addr).await
         })
         .buffered(max_concurrent_server_updates)
         .collect()
