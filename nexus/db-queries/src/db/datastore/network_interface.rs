@@ -43,6 +43,7 @@ use sled_agent_client::types as sled_client_types;
 /// interface and VPC subnet tables.
 #[derive(Debug, diesel::Queryable)]
 struct NicInfo {
+    id: uuid::Uuid,
     name: db::model::Name,
     ip: ipnetwork::IpNetwork,
     mac: db::model::MacAddr,
@@ -61,6 +62,7 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
             external::IpNet::V6(nic.ipv6_block.0)
         };
         sled_client_types::NetworkInterface {
+            id: nic.id,
             name: sled_client_types::Name::from(&nic.name.0),
             ip: nic.ip.ip(),
             mac: sled_client_types::MacAddr::from(nic.mac.0),
@@ -219,6 +221,7 @@ impl DataStore {
             // ideal, but we can't derive `Selectable` since this is the result
             // of a JOIN and not from a single table. DRY this out if possible.
             .select((
+                network_interface::id,
                 network_interface::name,
                 network_interface::ip,
                 network_interface::mac,
