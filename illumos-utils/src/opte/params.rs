@@ -11,7 +11,18 @@ use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 /// The type of network interface
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum NetworkInterfaceKind {
     /// A vNIC attached to a guest instance

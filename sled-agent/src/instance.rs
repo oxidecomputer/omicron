@@ -729,7 +729,6 @@ impl Instance {
                 (None, None)
             };
             let (port, port_ticket) = inner.port_manager.create_port(
-                *inner.id(),
                 nic,
                 snat,
                 external_ips,

@@ -12,6 +12,9 @@ use crate::addrobj::AddrObject;
 pub enum Error {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
+
+    #[error("Tried to release non-existent port ({0}, {1:?})")]
+    ReleaseMissingPort(uuid::Uuid, super::params::NetworkInterfaceKind),
 }
 
 pub fn initialize_xde_driver(

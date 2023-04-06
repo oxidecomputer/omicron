@@ -7,6 +7,7 @@
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::NetworkInterface;
+use crate::opte::params::NetworkInterfaceKind;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
@@ -27,6 +28,7 @@ use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
+use slog::error;
 use slog::info;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -59,8 +61,9 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the instance Uuid and the port name.
-    ports: Mutex<BTreeMap<(Uuid, String), Port>>,
+    // Map of all ports, keyed on the interface Uuid and its kind
+    // (which includes the Uuid of the parent instance or service)
+    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
 }
 
 impl PortManagerInner {
@@ -80,8 +83,7 @@ pub struct PortManager {
 }
 
 impl PortManager {
-    /// Create a new manager, for creating OPTE ports for guest network
-    /// interfaces
+    /// Create a new manager, for creating OPTE ports
     pub fn new(
         log: Logger,
         underlay_ip: Ipv6Addr,
@@ -102,11 +104,10 @@ impl PortManager {
         &self.inner.underlay_ip
     }
 
-    /// Create an OPTE port for the given guest instance.
+    /// Create an OPTE port
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
-        instance_id: Uuid,
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
         external_ips: Option<Vec<IpAddr>>,
@@ -117,7 +118,7 @@ impl PortManager {
         let private_ip = match nic.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
+                "IPv6 is not yet supported for OPTE ports",
             ))),
         }?;
 
@@ -135,19 +136,19 @@ impl PortManager {
             ),
             IpNetwork::V6(_) => {
                 return Err(Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
+                    "IPv6 is not yet supported for OPTE ports",
                 )));
             }
         };
         let gateway_ip = match gateway.ip {
             IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
             IpAddr::V6(_) => Err(Error::InvalidArgument(String::from(
-                "IPv6 is not yet supported for guest interfaces",
+                "IPv6 is not yet supported for OPTE ports",
             ))),
         }?;
         let boundary_services = default_boundary_services();
 
-        // Describe the source NAT for this instance.
+        // Describe the source NAT for this port.
         let snat = match source_nat {
             Some(snat) => {
                 let external_ip = match snat.ip {
@@ -164,7 +165,7 @@ impl PortManager {
             None => None,
         };
 
-        // Describe the external IP addresses for this instance.
+        // Describe the external IP addresses for this port.
         //
         // Note that we're currently only taking the first address, which is all
         // that OPTE supports. The array is guaranteed to be limited by Nexus.
@@ -227,7 +228,7 @@ impl PortManager {
         };
         debug!(
             self.inner.log,
-            "Createing xde device for guest port";
+            "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
         );
@@ -309,11 +310,7 @@ impl PortManager {
 
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(
-                instance_id,
-                port_name.clone(),
-                self.inner.clone(),
-            );
+            let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(
                 port_name.clone(),
                 nic.ip,
@@ -328,13 +325,12 @@ impl PortManager {
                 boundary_services,
                 vnic,
             );
-            let old =
-                ports.insert((instance_id, port_name.clone()), port.clone());
+            let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
-                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-                instance_id,
-                &port_name,
+                "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
+                nic.id,
+                nic.kind,
             );
             (port, ticket)
         };
@@ -402,7 +398,7 @@ impl PortManager {
 
         info!(
             self.inner.log,
-            "Created OPTE port for guest";
+            "Created OPTE port";
             "port" => ?&port,
         );
         Ok((port, ticket))
@@ -415,9 +411,9 @@ impl PortManager {
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
+        for ((_, _), port) in self.inner.ports.lock().unwrap().iter() {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
-            let port_name = port_name.clone();
+            let port_name = port.name().to_string();
             info!(
                 self.inner.log,
                 "Setting OPTE firewall rules";
@@ -494,7 +490,7 @@ impl PortManager {
 
 pub struct PortTicket {
     id: Uuid,
-    port_name: String,
+    kind: NetworkInterfaceKind,
     manager: Option<Arc<PortManagerInner>>,
 }
 
@@ -503,10 +499,14 @@ impl std::fmt::Debug for PortTicket {
         if self.manager.is_some() {
             f.debug_struct("PortTicket")
                 .field("id", &self.id)
+                .field("kind", &self.kind)
                 .field("manager", &"{ .. }")
                 .finish()
         } else {
-            f.debug_struct("PortTicket").field("id", &self.id).finish()
+            f.debug_struct("PortTicket")
+                .field("id", &self.id)
+                .field("kind", &self.kind)
+                .finish()
         }
     }
 }
@@ -514,23 +514,31 @@ impl std::fmt::Debug for PortTicket {
 impl PortTicket {
     fn new(
         id: Uuid,
-        port_name: String,
+        kind: NetworkInterfaceKind,
         manager: Arc<PortManagerInner>,
     ) -> Self {
-        Self { id, port_name, manager: Some(manager) }
+        Self { id, kind, manager: Some(manager) }
     }
 
     pub fn release(&mut self) -> Result<(), Error> {
         if let Some(manager) = self.manager.take() {
             let mut ports = manager.ports.lock().unwrap();
-            ports.remove(&(self.id, self.port_name.clone()));
+            let Some(port) = ports.remove(&(self.id, self.kind)) else {
+                error!(
+                    manager.log,
+                    "Tried to release non-existent port";
+                    "id" => ?&self.id,
+                    "kind" => ?&self.kind,
+                );
+                return Err(Error::ReleaseMissingPort(self.id, self.kind));
+            };
             debug!(
                 manager.log,
                 "Removing OPTE port from manager";
-                "instance_id" => ?self.id,
-                "port_name" => &self.port_name,
+                "id" => ?&self.id,
+                "kind" => ?&self.kind,
+                "port" => ?&port,
             );
-            return Ok(());
         }
         Ok(())
     }
