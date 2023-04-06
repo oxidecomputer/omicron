@@ -16,12 +16,13 @@ async fn test_inventory() {
     let gateway =
         gateway_setup::test_setup("test_inventory", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
+    let force_refresh = false;
 
     let inventory_fut = async {
         loop {
             let response = wicketd_testctx
                 .wicketd_client
-                .get_inventory()
+                .get_inventory(force_refresh)
                 .await
                 .expect("get_inventory succeeded")
                 .into_inner();
