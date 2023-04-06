@@ -55,7 +55,7 @@ impl<T: Deletable> DestructorWorker<T> {
         let mut exit = false;
         loop {
             tokio::select! {
-                _ = self.futs.next() => {
+                Some(_) = self.futs.next() => {
                     if exit && self.futs.is_empty() {
                         return;
                     }
