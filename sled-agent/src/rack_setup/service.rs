@@ -655,9 +655,6 @@ impl ServiceInner {
                             NexusTypes::ServiceKind::CruciblePantry
                         }
                         ServiceType::Ntp { .. } => NexusTypes::ServiceKind::NTP,
-                        ServiceType::DnsClient { .. } => {
-                            NexusTypes::ServiceKind::DNSClient
-                        }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",

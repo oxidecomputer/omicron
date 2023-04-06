@@ -16,6 +16,7 @@ use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use chrono::Utc;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
@@ -27,7 +28,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use slog::warn;
 use std::convert::TryFrom;
@@ -114,6 +114,13 @@ declare_saga_actions! {
     CONFIGURE_ASIC -> "configure_asic" {
         + sic_add_network_config
         - sic_remove_network_config
+    }
+    V2P_ENSURE_UNDO -> "v2p_ensure_undo" {
+        + sic_noop
+        - sic_v2p_ensure_undo
+    }
+    V2P_ENSURE -> "v2p_ensure" {
+        + sic_v2p_ensure
     }
     INSTANCE_ENSURE -> "instance_ensure" {
         + sic_instance_ensure
@@ -335,7 +342,16 @@ impl NexusSaga for SagaInstanceCreate {
                 i,
             )?;
         }
+
+        // creating instance v2p mappings is not atomic - there are many calls
+        // to different sled agents that occur. for this to unwind correctly
+        // given a partial success of the ensure node, the undo node must be
+        // prior to the ensure node as a separate action.
+        builder.append(v2p_ensure_undo_action());
+        builder.append(v2p_ensure_action());
+
         builder.append(instance_ensure_action());
+
         Ok(builder.build()?)
     }
 }
@@ -668,7 +684,7 @@ async fn sic_create_network_interface_undo(
         .await
         .map_err(ActionError::action_failed)?;
     match LookupPath::new(&opctx, &datastore)
-        .network_interface_id(interface_id)
+        .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
     {
@@ -707,7 +723,7 @@ async fn create_custom_network_interface(
     saga_params: &Params,
     instance_id: Uuid,
     interface_id: Uuid,
-    interface_params: &params::NetworkInterfaceCreate,
+    interface_params: &params::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -742,7 +758,7 @@ async fn create_custom_network_interface(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
-    let interface = db::model::IncompleteNetworkInterface::new(
+    let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         authz_vpc.id(),
@@ -763,7 +779,10 @@ async fn create_custom_network_interface(
         .or_else(|err| {
             match err {
                 // Necessary for idempotency
-                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                InsertNicError::InterfaceAlreadyExists(
+                    _,
+                    NetworkInterfaceKind::Instance,
+                ) => Ok(()),
                 _ => Err(err),
             }
         })
@@ -807,7 +826,7 @@ async fn create_default_primary_network_interface(
     let iface_name =
         Name::try_from(DEFAULT_PRIMARY_NIC_NAME.to_string()).unwrap();
 
-    let interface_params = params::NetworkInterfaceCreate {
+    let interface_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: iface_name.clone(),
             description: format!(
@@ -835,7 +854,7 @@ async fn create_default_primary_network_interface(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let interface = db::model::IncompleteNetworkInterface::new(
+    let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         authz_vpc.id(),
@@ -856,7 +875,10 @@ async fn create_default_primary_network_interface(
         .or_else(|err| {
             match err {
                 // Necessary for idempotency
-                InsertNicError::InterfaceAlreadyExists(_) => Ok(()),
+                InsertNicError::InterfaceAlreadyExists(
+                    _,
+                    NetworkInterfaceKind::Instance,
+                ) => Ok(()),
                 _ => Err(err),
             }
         })
@@ -1241,10 +1263,6 @@ async fn sic_instance_ensure(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let runtime_params = InstanceRuntimeStateRequested {
-        run_state: InstanceStateRequested::Running,
-        migration_params: None,
-    };
 
     // TODO-correctness TODO-security It's not correct to re-resolve the
     // instance name now.  See oxidecomputer/omicron#1536.
@@ -1297,11 +1315,56 @@ async fn sic_instance_ensure(
                 &opctx,
                 &authz_instance,
                 &db_instance,
-                runtime_params,
+                InstanceStateRequested::Running,
             )
             .await
             .map_err(ActionError::action_failed)?;
     }
+
+    Ok(())
+}
+
+async fn sic_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+/// Ensure that the necessary v2p mappings exist for this instance
+async fn sic_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_v2p_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }
@@ -1558,6 +1621,11 @@ pub mod test {
         );
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+
+        let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
+        for (_nic_id, mappings) in v2p_mappings {
+            assert!(mappings.is_empty());
+        }
     }
 
     #[nexus_test(server = crate::Server)]

@@ -828,6 +828,20 @@
           "version"
         ]
       },
+      "RotInventory": {
+        "description": "RoT-related data that isn't already supplied in [`SpState`].",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          }
+        }
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -919,6 +933,29 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
+        ]
       },
       "SpComponentInfo": {
         "description": "Overview of a single SP component.",
@@ -1179,9 +1216,17 @@
         ]
       },
       "SpInventory": {
-        "description": "SP related data",
+        "description": "SP-related data",
         "type": "object",
         "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
           "components": {
             "nullable": true,
             "type": "array",
@@ -1195,6 +1240,9 @@
           "ignition": {
             "$ref": "#/components/schemas/SpIgnition"
           },
+          "rot": {
+            "$ref": "#/components/schemas/RotInventory"
+          },
           "state": {
             "$ref": "#/components/schemas/SpState"
           }
@@ -1202,6 +1250,7 @@
         "required": [
           "id",
           "ignition",
+          "rot",
           "state"
         ]
       },

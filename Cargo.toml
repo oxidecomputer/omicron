@@ -7,6 +7,7 @@ members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "end-to-end-tests",
@@ -63,6 +64,7 @@ default-members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "gateway",
@@ -201,12 +203,14 @@ nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 omicron-common = { path = "common" }
+omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.8.3"
+oxide-client = { path = "oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f36a283e91f228a542149ee9230126e9c4bb5e8b", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
@@ -233,8 +237,8 @@ percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
 pin-project-lite = "0.2.9"
-postgres-protocol = "0.6.4"
-predicates = "3.0.1"
+postgres-protocol = "0.6.5"
+predicates = "3.0.2"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -294,13 +298,13 @@ libsw = { version = "3.2.0", features = ["tokio"] }
 syn = { version = "2.0" }
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.4"
+tempfile = "3.5"
 term = "0.7"
 termios = "0.3"
 test-strategy = "0.2.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.26"
+tokio = "1.27"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
