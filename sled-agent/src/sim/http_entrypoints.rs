@@ -14,6 +14,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
@@ -36,6 +37,8 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
+        api.register(set_v2p)?;
+        api.register(del_v2p)?;
 
         Ok(())
     }
@@ -208,6 +211,54 @@ async fn vpc_firewall_rules_put(
     let _sa = rqctx.context();
     let _vpc_id = path_params.into_inner().vpc_id;
     let _body_args = body.into_inner();
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Path parameters for V2P mapping related requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+struct V2pPathParam {
+    interface_id: Uuid,
+}
+
+/// Create a mapping from a virtual NIC to a physical host
+#[endpoint {
+    method = PUT,
+    path = "/v2p/{interface_id}",
+}]
+async fn set_v2p(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let interface_id = path_params.into_inner().interface_id;
+    let body_args = body.into_inner();
+
+    sa.set_virtual_nic_host(interface_id, &body_args)
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Delete a mapping from a virtual NIC to a physical host
+#[endpoint {
+    method = DELETE,
+    path = "/v2p/{interface_id}",
+}]
+async fn del_v2p(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let interface_id = path_params.into_inner().interface_id;
+    let body_args = body.into_inner();
+
+    sa.unset_virtual_nic_host(interface_id, &body_args)
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
     Ok(HttpResponseUpdatedNoContent())
 }

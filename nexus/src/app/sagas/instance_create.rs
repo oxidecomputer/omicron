@@ -115,6 +115,13 @@ declare_saga_actions! {
         + sic_add_network_config
         - sic_remove_network_config
     }
+    V2P_ENSURE_UNDO -> "v2p_ensure_undo" {
+        + sic_noop
+        - sic_v2p_ensure_undo
+    }
+    V2P_ENSURE -> "v2p_ensure" {
+        + sic_v2p_ensure
+    }
     INSTANCE_ENSURE -> "instance_ensure" {
         + sic_instance_ensure
     }
@@ -335,7 +342,16 @@ impl NexusSaga for SagaInstanceCreate {
                 i,
             )?;
         }
+
+        // creating instance v2p mappings is not atomic - there are many calls
+        // to different sled agents that occur. for this to unwind correctly
+        // given a partial success of the ensure node, the undo node must be
+        // prior to the ensure node as a separate action.
+        builder.append(v2p_ensure_undo_action());
+        builder.append(v2p_ensure_action());
+
         builder.append(instance_ensure_action());
+
         Ok(builder.build()?)
     }
 }
@@ -1302,6 +1318,51 @@ async fn sic_instance_ensure(
     Ok(())
 }
 
+async fn sic_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+/// Ensure that the necessary v2p mappings exist for this instance
+async fn sic_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_v2p_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 pub mod test {
     use crate::{
@@ -1554,6 +1615,11 @@ pub mod test {
         );
         assert!(disk_is_detached(datastore).await);
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
+
+        let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
+        for (_nic_id, mappings) in v2p_mappings {
+            assert!(mappings.is_empty());
+        }
     }
 
     #[nexus_test(server = crate::Server)]

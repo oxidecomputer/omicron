@@ -124,8 +124,9 @@ fn test_nexus_openapi() {
 
     // Construct a string that helps us identify the organization of tags and
     // operations.
-    let mut ops_by_tag = BTreeMap::<String, Vec<(String, String)>>::new();
-    for (path, _, op) in spec.operations() {
+    let mut ops_by_tag =
+        BTreeMap::<String, Vec<(String, String, String)>>::new();
+    for (path, method, op) in spec.operations() {
         // Make sure each operation has exactly one tag. Note, we intentionally
         // do this before validating the OpenAPI output as fixing an error here
         // would necessitate refreshing the spec file again.
@@ -151,6 +152,7 @@ fn test_nexus_openapi() {
             .or_default()
             .push((
                 op.operation_id.as_ref().unwrap().to_string(),
+                method.to_string().to_uppercase(),
                 path.to_string(),
             ));
     }
@@ -159,9 +161,15 @@ fn test_nexus_openapi() {
     for (tag, mut ops) in ops_by_tag {
         ops.sort();
         tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
-        tags.push_str(&format!("\n{:40} {}\n", "OPERATION ID", "URL PATH"));
-        for (operation_id, path) in ops {
-            tags.push_str(&format!("{:40} {}\n", operation_id, path));
+        tags.push_str(&format!(
+            "\n{:40} {:8} {}\n",
+            "OPERATION ID", "METHOD", "URL PATH"
+        ));
+        for (operation_id, method, path) in ops {
+            tags.push_str(&format!(
+                "{:40} {:8} {}\n",
+                operation_id, method, path
+            ));
         }
         tags.push('\n');
     }
