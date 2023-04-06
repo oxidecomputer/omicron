@@ -26,6 +26,9 @@ pub struct DnsServersList {
     pub addresses: Vec<SocketAddr>,
 }
 
+// XXX-dap TODO-coverage make sure we test what happens when there are zero DNS
+// servers.  This is probably mainly a question for the DnsPropagator.
+
 /// Background task that keeps track of the latest list of DNS servers for a DNS
 /// group
 pub struct DnsServersWatcher {

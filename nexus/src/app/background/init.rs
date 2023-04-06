@@ -44,7 +44,7 @@ fn init_dns(
     let dns_config_watcher = dns_config.watcher();
     driver.register(
         format!("dns_config_{}", dns_group),
-        Duration::from_secs(60),
+        Duration::from_secs(60), // XXX-dap (and below)
         Box::new(dns_config),
         opctx.child(metadata.clone()),
         vec![],
