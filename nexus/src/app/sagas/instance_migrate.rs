@@ -39,6 +39,10 @@ declare_saga_actions! {
         // TODO robustness: This needs an undo action
         + sim_instance_migrate
     }
+    V2P_ENSURE -> "v2p_ensure" {
+        // TODO robustness: This needs an undo action
+        + sim_v2p_ensure
+    }
     CLEANUP_SOURCE -> "cleanup_source" {
         // TODO robustness: This needs an undo action. Is it even possible
         // to undo at this point?
@@ -77,6 +81,7 @@ impl NexusSaga for SagaInstanceMigrate {
         builder.append(allocate_propolis_ip_action());
         builder.append(migrate_prep_action());
         builder.append(instance_migrate_action());
+        builder.append(v2p_ensure_action());
         builder.append(cleanup_source_action());
 
         Ok(builder.build()?)
@@ -257,6 +262,43 @@ async fn sim_instance_migrate(
 
     Ok(())
         */
+}
+
+/// Add V2P mappings for the destination instance
+// Note this must run after sled_id of the instance is set to the destination
+// sled!
+async fn sim_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let (instance_id, _) =
+        sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
+
+    // TODO-performance the instance_put in sim_instance_migrate will *start* a
+    // migration, but the source and destination propolis servers will perform
+    // it asynchronously. If this step occurs before the source instance vCPUs
+    // are paused, updating the mappings here will briefly "disconnect" the
+    // source instance in the sense that it will be able to send packets out (as
+    // other instance's V2P mappings will be untouched) but will not be able to
+    // receive any packets (other instances will send packets to the destination
+    // propolis' sled but the destination instance vCPUs may not have started
+    // yet). Until the destination propolis takes over, there will be a inbound
+    // network outage for the instance.
+    //
+    // TODO-correctness if the migration fails, there's nothing that will unwind
+    // this and restore the original V2P mappings
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
 }
 
 async fn sim_cleanup_source(
