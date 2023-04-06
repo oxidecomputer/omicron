@@ -10,10 +10,10 @@ use anyhow::Context;
 use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::stream;
-use futures::stream::TryStreamExt;
 use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use serde_json::json;
 use std::net::SocketAddr;
 use tokio::sync::watch;
 
@@ -38,7 +38,7 @@ impl BackgroundTask for DnsPropagator {
     fn activate<'a, 'b, 'c>(
         &'a mut self,
         opctx: &'b OpContext,
-    ) -> BoxFuture<'c, ()>
+    ) -> BoxFuture<'c, serde_json::Value>
     where
         'a: 'c,
         'b: 'c,
@@ -66,7 +66,7 @@ impl BackgroundTask for DnsPropagator {
                         "DNS propagation: skipped";
                         "reason" => "no config nor servers"
                     );
-                    return;
+                    return json!({ "error": "no config nor servers" });
                 }
                 (None, Some(_)) => {
                     warn!(
@@ -74,7 +74,7 @@ impl BackgroundTask for DnsPropagator {
                         "DNS propagation: skipped";
                         "reason" => "no config"
                     );
-                    return;
+                    return json!({ "error": "no config" });
                 }
                 (Some(_), None) => {
                     warn!(
@@ -82,7 +82,7 @@ impl BackgroundTask for DnsPropagator {
                         "DNS propagation: skipped";
                         "reason" => "no servers"
                     );
-                    return;
+                    return json!({ "error": "no servers" });
                 }
             };
 
@@ -93,27 +93,34 @@ impl BackgroundTask for DnsPropagator {
                 "servers" => format!("{:?}", dns_servers),
             ));
 
-            // Propate the config to all of the DNS servers.
-            match dns_propagate(
+            // Propagate the config to all of the DNS servers.
+            let result = dns_propagate(
                 &log,
                 &dns_config,
                 &dns_servers,
                 self.max_concurrent_server_updates,
             )
-            .await
-            {
-                Ok(_) => {
-                    info!(&log, "DNS propagation: done");
-                    // XXX-dap track this somewhere for visibility
-                }
-                Err(error) => {
-                    info!(
-                        &log,
-                        "DNS propagation: failed";
-                        "error" => format!("{:#}", error)
-                    );
-                }
-            };
+            .await;
+
+            // Report results.
+            if result.iter().any(|r| r.is_err()) {
+                warn!(&log, "DNS propagation: failed");
+            } else {
+                info!(&log, "DNS propagation: done");
+            }
+
+            serde_json::to_value(
+                result
+                    .into_iter()
+                    .map(|r| r.map_err(|e| format!("{:#}", e)))
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|error| {
+                json!({
+                    "error":
+                        format!("failed to serialize final value: {:#}", error)
+                })
+            })
         }
         .boxed()
     }
@@ -124,16 +131,13 @@ async fn dns_propagate(
     dns_config: &DnsConfigParams,
     servers: &DnsServersList,
     max_concurrent_server_updates: usize,
-) -> anyhow::Result<()> {
-    // XXX-dap ideally would report all problems
+) -> Vec<anyhow::Result<()>> {
     stream::iter(&servers.addresses)
-        .map(Ok::<_, anyhow::Error>)
-        .try_for_each_concurrent(
-            max_concurrent_server_updates,
-            |server_addr| async move {
-                dns_propagate_one(log, dns_config, server_addr).await
-            },
-        )
+        .map(|server_addr| async move {
+            dns_propagate_one(log, dns_config, server_addr).await
+        })
+        .buffered(max_concurrent_server_updates)
+        .collect()
         .await
 }
 
@@ -146,8 +150,6 @@ async fn dns_propagate_one(
     let log = log.new(o!("dns_server_url" => url.clone()));
     let client = dns_service_client::Client::new(&url, log.clone());
 
-    // XXX-dap It might be useful to distinguish between permanent and transient
-    // errors only to control how hard we back off.
     let result = client.dns_config_put(dns_config).await.with_context(|| {
         format!(
             "failed to propagate DNS generation {} to server {}",

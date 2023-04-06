@@ -12,6 +12,8 @@ use nexus_db_model::ServiceKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::DataPageParams;
+use serde::Serialize;
+use serde_json::json;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -21,7 +23,7 @@ use tokio::sync::watch;
 // but we don't expect to have this many servers any time soon.
 const MAX_DNS_SERVERS: u32 = 10;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct DnsServersList {
     pub addresses: Vec<SocketAddr>,
 }
@@ -61,7 +63,7 @@ impl BackgroundTask for DnsServersWatcher {
     fn activate<'a, 'b, 'c>(
         &'a mut self,
         opctx: &'b OpContext,
-    ) -> BoxFuture<'c, ()>
+    ) -> BoxFuture<'c, serde_json::Value>
     where
         'a: 'c,
         'b: 'c,
@@ -104,7 +106,13 @@ impl BackgroundTask for DnsServersWatcher {
                     "failed to read list of DNS servers";
                     "error" => format!("{:#}", error)
                 );
-                return;
+                return json!({
+                    "error":
+                        format!(
+                            "failed to read list of DNS servers: {:#}",
+                            error
+                        )
+                });
             }
 
             let services = result.unwrap();
@@ -125,6 +133,16 @@ impl BackgroundTask for DnsServersWatcher {
                     .collect(),
             };
             let new_addrs_dbg = format!("{:?}", new_config);
+            let rv =
+                serde_json::to_value(&new_config).unwrap_or_else(|error| {
+                    json!({
+                        "error":
+                            format!(
+                                "failed to serialize final value: {:#}",
+                                error
+                            )
+                    })
+                });
 
             match &self.last {
                 None => {
@@ -134,7 +152,7 @@ impl BackgroundTask for DnsServersWatcher {
                         "addresses" => new_addrs_dbg,
                     );
                     self.last = Some(new_config.clone());
-                    self.tx.send_replace(Some(new_config));
+                    self.tx.send_replace(Some(new_config.clone()));
                 }
 
                 Some(old) => {
@@ -159,6 +177,8 @@ impl BackgroundTask for DnsServersWatcher {
                     }
                 }
             };
+
+            rv
         }
         .boxed()
     }

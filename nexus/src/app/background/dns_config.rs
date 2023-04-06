@@ -11,6 +11,7 @@ use futures::FutureExt;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -45,7 +46,7 @@ impl BackgroundTask for DnsConfigWatcher {
     fn activate<'a, 'b, 'c>(
         &'a mut self,
         opctx: &'b OpContext,
-    ) -> BoxFuture<'c, ()>
+    ) -> BoxFuture<'c, serde_json::Value>
     where
         'a: 'c,
         'b: 'c,
@@ -71,16 +72,22 @@ impl BackgroundTask for DnsConfigWatcher {
                     // We failed to read the DNS configuration.  There's nothing
                     // to do but log an error.  We'll retry when we're activated
                     // again.
+                    let message = format!("{:#}", error);
                     warn!(
                         &log,
                         "failed to read DNS config";
-                        "error" => format!("{:#}", error)
+                        "error" => &message,
                     );
+                    json!({
+                        "error":
+                            format!("failed to read DNS config: {}", message)
+                    })
                 }
 
                 (None, Ok(new_config)) => {
                     // We've found a DNS configuration for the first time.
                     // Save it and notify any watchers.
+                    let generation = new_config.generation;
                     info!(
                         &log,
                         "found latest generation (first find)";
@@ -88,6 +95,7 @@ impl BackgroundTask for DnsConfigWatcher {
                     );
                     self.last = Some(new_config.clone());
                     self.tx.send_replace(Some(new_config));
+                    json!({ "generation": generation })
                 }
 
                 (Some(old), Ok(new)) => {
@@ -95,26 +103,28 @@ impl BackgroundTask for DnsConfigWatcher {
                         // We previously had a generation that's newer than what
                         // we just read.  This should never happen because we
                         // never remove the latest generation.
-                        error!(
-                            &log,
+                        let message = format!(
                             "found latest DNS generation ({}) is older \
                             than the one we already know about ({})",
-                            new.generation,
-                            old.generation
+                            new.generation, old.generation
                         );
+
+                        error!(&log, "{}", message);
+                        json!({ "error": message })
                     } else if old.generation == new.generation {
                         if *old != new {
                             // We found the same generation _number_ as what we
                             // already had, but the contents were different.
                             // This should never happen because generations are
                             // immutable once created.
-                            error!(
-                                &log,
+                            let message = format!(
                                 "found DNS config at generation {} that does \
                                 not match the config that we already have for \
                                 the same generation",
                                 new.generation
                             );
+                            error!(&log, "{}", message);
+                            json!({ "error": message })
                         } else {
                             // We found a DNS configuration and it exactly
                             // matches what we already had.  This is the common
@@ -124,10 +134,12 @@ impl BackgroundTask for DnsConfigWatcher {
                                 "found latest DNS generation (unchanged)";
                                 "generation" => new.generation,
                             );
+                            json!({ "generation": new.generation })
                         }
                     } else {
                         // We found a DNS configuration that's newer than what
                         // we currently have.  Save it and notify any watchers.
+                        let generation = new.generation;
                         info!(
                             &log,
                             "found latest DNS generation (newer than we had)";
@@ -138,9 +150,10 @@ impl BackgroundTask for DnsConfigWatcher {
                         );
                         self.last = Some(new.clone());
                         self.tx.send_replace(Some(new));
+                        json!({ "generation": generation })
                     }
                 }
-            };
+            }
         }
         .boxed()
     }

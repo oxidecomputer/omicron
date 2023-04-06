@@ -148,7 +148,7 @@ pub trait BackgroundTask: Send + Sync {
     fn activate<'a, 'b, 'c>(
         &'a mut self,
         opctx: &'b OpContext,
-    ) -> BoxFuture<'c, ()>
+    ) -> BoxFuture<'c, serde_json::Value>
     where
         'a: 'c,
         'b: 'c;
@@ -394,7 +394,7 @@ impl TaskExec {
         });
 
         // Do it!
-        self.imp.activate(&self.opctx).await;
+        let value = self.imp.activate(&self.opctx).await;
 
         let elapsed = start_instant.elapsed();
 
@@ -409,7 +409,7 @@ impl TaskExec {
                     iteration,
                     start_time: current.start_time,
                     elapsed,
-                    value: serde_json::Value::Null,
+                    value,
                 }),
             };
         });
