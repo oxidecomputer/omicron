@@ -1553,7 +1553,7 @@
         "maxLength": 63
       },
       "NetworkInterface": {
-        "description": "Information required to construct a virtual network interface for a guest",
+        "description": "Information required to construct a virtual network interface",
         "type": "object",
         "properties": {
           "id": {
@@ -1563,6 +1563,9 @@
           "ip": {
             "type": "string",
             "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
           },
           "mac": {
             "$ref": "#/components/schemas/MacAddr"
@@ -1588,12 +1591,62 @@
         "required": [
           "id",
           "ip",
+          "kind",
           "mac",
           "name",
           "primary",
           "slot",
           "subnet",
           "vni"
+        ]
+      },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "instance": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            },
+            "required": [
+              "instance"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "service": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            },
+            "required": [
+              "service"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "SemverVersion": {
@@ -1925,7 +1978,7 @@
         "minimum": 0
       },
       "SourceNatConfig": {
-        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests.",
+        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
           "first_port": {
