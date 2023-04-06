@@ -383,14 +383,7 @@ async fn get_package(
         PackageSource::Local { .. } | PackageSource::Composite { .. } => {
             progress.set_message("bundle package".into());
 
-            let output_file = match package.output {
-                PackageOutput::Zone { .. } => {
-                    output_directory.join(format!("{}.tar.gz", package_name))
-                }
-                PackageOutput::Tarball => {
-                    package.get_output_path(package_name, output_directory)
-                }
-            };
+            let output_file = package.get_output_path(package_name, output_directory);
 
             let cache = BUILD_CACHE.lock().unwrap();
             let hash = cache.get(&output_file).map(ToOwned::to_owned);
