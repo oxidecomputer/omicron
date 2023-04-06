@@ -2973,9 +2973,10 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let nics_url =
         format!("/v1/network-interfaces?instance={}", instance.identity.id,);
 
-    let nics = objects_list_page_authz::<NetworkInterface>(client, &nics_url)
-        .await
-        .items;
+    let nics =
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
+            .await
+            .items;
 
     // The default config is one NIC
     assert_eq!(nics.len(), 1);
