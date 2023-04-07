@@ -134,8 +134,8 @@
     "/local/switch-id": {
       "get": {
         "summary": "Get the identifier for the switch this MGS instance is connected to.",
-        "description": "Note that most MGS endpoints behave identically regardless of which scrimlet the MGS instance is running on; this one, however, is intentionally different.",
-        "operationId": "sp_local",
+        "description": "Note that most MGS endpoints behave identically regardless of which scrimlet the MGS instance is running on; this one, however, is intentionally different. This endpoint is _probably_ only useful for clients communicating with MGS over localhost (i.e., other services in the switch zone) who need to know which sidecar they are connected to.",
+        "operationId": "sp_local_switch_id",
         "responses": {
           "200": {
             "description": "successful operation",

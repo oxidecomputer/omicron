@@ -1382,12 +1382,14 @@ async fn recovery_host_phase2_upload(
 ///
 /// Note that most MGS endpoints behave identically regardless of which scrimlet
 /// the MGS instance is running on; this one, however, is intentionally
-/// different.
+/// different. This endpoint is _probably_ only useful for clients communicating
+/// with MGS over localhost (i.e., other services in the switch zone) who need
+/// to know which sidecar they are connected to.
 #[endpoint {
     method = GET,
     path = "/local/switch-id",
 }]
-async fn sp_local(
+async fn sp_local_switch_id(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<SpIdentifier>, HttpError> {
     let apictx = rqctx.context();
@@ -1441,7 +1443,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_get)?;
         api.register(ignition_command)?;
         api.register(recovery_host_phase2_upload)?;
-        api.register(sp_local)?;
+        api.register(sp_local_switch_id)?;
         Ok(())
     }
 
