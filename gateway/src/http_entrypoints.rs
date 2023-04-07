@@ -1378,6 +1378,25 @@ async fn recovery_host_phase2_upload(
     Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
 }
 
+/// Get the identifier for the switch this MGS instance is connected to.
+///
+/// Note that most MGS endpoints behave identically regardless of which scrimlet
+/// the MGS instance is running on; this one, however, is intentionally
+/// different.
+#[endpoint {
+    method = GET,
+    path = "/local/switch-id",
+}]
+async fn sp_local(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<SpIdentifier>, HttpError> {
+    let apictx = rqctx.context();
+
+    let id = apictx.mgmt_switch.local_switch()?;
+
+    Ok(HttpResponseOk(id.into()))
+}
+
 // TODO
 // The gateway service will get asynchronous notifications both from directly
 // SPs over the management network and indirectly from Ignition via the Sidecar
@@ -1422,6 +1441,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_get)?;
         api.register(ignition_command)?;
         api.register(recovery_host_phase2_upload)?;
+        api.register(sp_local)?;
         Ok(())
     }
 
