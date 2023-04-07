@@ -250,6 +250,9 @@ impl UpdatePane {
                     Some(Action::Redraw)
                 }
                 Cmd::Enter => {
+                    // Note: If making changes here, consider making them to the
+                    // same arm of `InventoryView::handle_cmd_in_popup()` in the
+                    // `overview` pane.
                     let command = self.ignition.selected_command();
                     let selected = state.rack_state.selected;
                     info!(self.log, "Sending {command:?} to {selected}");
