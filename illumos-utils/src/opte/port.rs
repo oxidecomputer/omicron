@@ -4,14 +4,10 @@
 
 //! A single port on the OPTE virtual switch.
 
-use crate::opte::params::SourceNatConfig;
-use crate::opte::BoundaryServices;
 use crate::opte::Gateway;
 use crate::opte::Vni;
-use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 #[derive(Debug)]
@@ -20,24 +16,14 @@ struct PortInner {
     name: String,
     // IP address within the VPC Subnet
     _ip: IpAddr,
-    // VPC Subnet
-    _subnet: IpNetwork,
     // VPC-private MAC address
     mac: MacAddr6,
     // Emulated PCI slot for the guest NIC, passed to Propolis
     slot: u8,
     // Geneve VNI for the VPC
     vni: Vni,
-    // IP address of the hosting sled
-    _underlay_ip: Ipv6Addr,
-    // The external IP address and port range provided for this port, to allow
-    // outbound network connectivity.
-    _source_nat: Option<SourceNatConfig>,
     // Information about the virtual gateway, aka OPTE
     _gateway: Gateway,
-    // Information about Boundary Services, for forwarding traffic between sleds
-    // or off the rack.
-    _boundary_services: BoundaryServices,
     // TODO-correctness: Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
@@ -97,32 +83,23 @@ pub struct Port {
 }
 
 impl Port {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: String,
         ip: IpAddr,
-        subnet: IpNetwork,
         mac: MacAddr6,
         slot: u8,
         vni: Vni,
-        underlay_ip: Ipv6Addr,
-        source_nat: Option<SourceNatConfig>,
         gateway: Gateway,
-        boundary_services: BoundaryServices,
         vnic: String,
     ) -> Self {
         Self {
             inner: Arc::new(PortInner {
                 name,
                 _ip: ip,
-                _subnet: subnet,
                 mac,
                 slot,
-                vni: vni,
-                _underlay_ip: underlay_ip,
-                _source_nat: source_nat,
+                vni,
                 _gateway: gateway,
-                _boundary_services: boundary_services,
                 vnic,
             }),
         }

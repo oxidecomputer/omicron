@@ -336,14 +336,10 @@ impl PortManager {
             let port = Port::new(
                 port_name.clone(),
                 nic.ip,
-                subnet,
                 mac,
                 nic.slot,
                 vni,
-                self.inner.underlay_ip,
-                source_nat,
                 gateway,
-                boundary_services,
                 vnic,
             );
             let old = ports.insert((nic.id, nic.kind), port.clone());

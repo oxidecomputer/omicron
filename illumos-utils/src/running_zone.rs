@@ -7,7 +7,7 @@
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::Port;
+use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
@@ -368,8 +368,21 @@ impl RunningZone {
     }
 
     /// Return references to the OPTE ports for this zone.
-    pub fn opte_ports(&self) -> &[Port] {
-        &self.inner.opte_ports
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.inner.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Remove the OPTE ports on this zone from the port manager.
+    ///
+    /// Returns the last error, if any.
+    pub fn release_opte_ports(&mut self) -> Result<(), crate::opte::Error> {
+        let mut result = Ok(());
+        for (_, ticket) in &mut self.inner.opte_ports {
+            if let Err(e) = ticket.release() {
+                result = Err(e);
+            }
+        }
+        result
     }
 
     /// Halts and removes the zone, awaiting its termination.
@@ -443,7 +456,7 @@ pub struct InstalledZone {
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces
-    opte_ports: Vec<Port>,
+    opte_ports: Vec<(Port, PortTicket)>,
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
@@ -477,7 +490,7 @@ impl InstalledZone {
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
-        opte_ports: Vec<Port>,
+        opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
         links: Vec<Link>,
         limit_priv: Vec<String>,
@@ -496,7 +509,7 @@ impl InstalledZone {
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|port| port.vnic_name().to_string())
+            .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
