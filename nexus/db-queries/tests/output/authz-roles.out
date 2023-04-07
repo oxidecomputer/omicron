@@ -236,7 +236,7 @@ resource: Instance "silo1-proj1-instance1"
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo1-proj1-instance1-nic1"
+resource: InstanceNetworkInterface "silo1-proj1-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -348,7 +348,7 @@ resource: Instance "silo1-proj2-instance1"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo1-proj2-instance1-nic1"
+resource: InstanceNetworkInterface "silo1-proj2-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -572,7 +572,7 @@ resource: Instance "silo2-proj1-instance1"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: NetworkInterface "silo2-proj1-instance1-nic1"
+resource: InstanceNetworkInterface "silo2-proj1-instance1-nic1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

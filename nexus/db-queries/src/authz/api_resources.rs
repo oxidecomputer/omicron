@@ -708,7 +708,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "NetworkInterface",
+    name = "InstanceNetworkInterface",
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,

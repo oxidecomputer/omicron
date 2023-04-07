@@ -13,6 +13,7 @@ use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -36,6 +37,8 @@ pub fn api() -> SledApiDescription {
         api.register(update_artifact)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(vpc_firewall_rules_put)?;
+        api.register(set_v2p)?;
+        api.register(del_v2p)?;
         api.register(timesync_get)?;
 
         Ok(())
@@ -230,6 +233,53 @@ async fn vpc_firewall_rules_put(
     sa.firewall_rules_ensure(vpc_id, &body_args.rules[..])
         .await
         .map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Path parameters for V2P mapping related requests (sled agent API)
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema)]
+struct V2pPathParam {
+    interface_id: Uuid,
+}
+
+/// Create a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
+#[endpoint {
+    method = PUT,
+    path = "/v2p/{interface_id}",
+}]
+async fn set_v2p(
+    rqctx: RequestContext<SledAgent>,
+    _path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Delete a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
+#[endpoint {
+    method = DELETE,
+    path = "/v2p/{interface_id}",
+}]
+async fn del_v2p(
+    rqctx: RequestContext<SledAgent>,
+    _path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
