@@ -216,7 +216,24 @@ impl Populator for PopulateBuiltinSilos {
     where
         'a: 'b,
     {
-        async { datastore.load_builtin_silos(opctx).await.map(|_| ()) }.boxed()
+        async { datastore.load_builtin_silos(opctx).await }.boxed()
+    }
+}
+
+/// Populates the built-in projects
+#[derive(Debug)]
+struct PopulateBuiltinProjects;
+impl Populator for PopulateBuiltinProjects {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_projects(opctx).await }.boxed()
     }
 }
 
@@ -302,11 +319,12 @@ impl Populator for PopulateRack {
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 8] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 9] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
+        &PopulateBuiltinProjects,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
         &PopulateFleet,
@@ -332,12 +350,18 @@ mod test {
 
     #[tokio::test]
     async fn test_populators() {
-        for p in *ALL_POPULATORS {
-            do_test_populator_idempotent(p).await;
+        let pop_len = ALL_POPULATORS.len();
+        for idx in 0..pop_len {
+            let prev = &ALL_POPULATORS[..idx];
+            let p = ALL_POPULATORS[idx];
+            do_test_populator_idempotent(prev, p).await;
         }
     }
 
-    async fn do_test_populator_idempotent(p: &dyn Populator) {
+    async fn do_test_populator_idempotent(
+        prev: &[&dyn Populator],
+        p: &dyn Populator,
+    ) {
         let logctx = dev::test_setup_log("test_populator");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
@@ -352,6 +376,14 @@ mod test {
         let log = &logctx.log;
 
         let args = PopulateArgs::new(Uuid::new_v4());
+
+        // Satisfy any prerequisites by running the previous populators.
+        for p in prev {
+            p.populate(&opctx, &datastore, &args)
+                .await
+                .with_context(|| format!("prev populator {:?}", p))
+                .unwrap();
+        }
 
         // Running each populator once under normal conditions should work.
         info!(&log, "populator {:?}, run 1", p);

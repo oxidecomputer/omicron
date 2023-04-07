@@ -43,6 +43,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -500,13 +501,11 @@ impl DataStore {
         opctx: &OpContext,
         rack_id: Uuid,
     ) -> Result<(), Error> {
-        use nexus_types::external_api::params;
-        use omicron_common::api::external::IdentityMetadataCreateParams;
         use omicron_common::api::external::Name;
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let params = params::IpPoolCreate {
+        let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
@@ -520,7 +519,7 @@ impl DataStore {
                 _ => Err(e),
             })?;
 
-        let params = params::IpPoolCreate {
+        let params = external_params::IpPoolCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default".parse::<Name>().unwrap(),
                 description: String::from("default IP pool"),

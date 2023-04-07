@@ -202,11 +202,14 @@ mod test {
     }
 
     async fn no_projects_exist(datastore: &DataStore) -> bool {
+        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
         use crate::db::model::Project;
         use crate::db::schema::project::dsl;
 
         dsl::project
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services project
+            .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
             .select(Project::as_select())
             .first_async::<Project>(datastore.pool_for_tests().await.unwrap())
             .await
@@ -221,6 +224,7 @@ mod test {
     async fn no_virtual_provisioning_collection_records_for_projects(
         datastore: &DataStore,
     ) -> bool {
+        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
         use crate::db::model::VirtualProvisioningCollection;
         use crate::db::schema::virtual_provisioning_collection::dsl;
 
@@ -235,6 +239,8 @@ mod test {
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::collection_type.eq(crate::db::model::CollectionTypeProvisioned::Project.to_string()))
+                        // ignore built-in services project
+                        .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
 
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)

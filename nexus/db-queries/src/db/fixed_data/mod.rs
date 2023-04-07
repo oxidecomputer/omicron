@@ -27,9 +27,11 @@
 //    001de000-05e4   built-in users ("05e4" looks a bit like "user")
 //    001de000-1334   built-in fleet ("1334" looks like the "leet" in "fleet")
 //    001de000-5110   built-in silo ("5110" looks like "silo")
+//    001de000-4401   built-in services project
 
 use lazy_static::lazy_static;
 
+pub mod project;
 pub mod role_assignment;
 pub mod role_builtin;
 pub mod silo;
