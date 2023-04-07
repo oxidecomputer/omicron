@@ -41,7 +41,7 @@ enum MgsRequest {
         #[allow(dead_code)]
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
-        force_refresh: bool,
+        force_refresh: Vec<SpIdentifier>,
     },
 }
 
@@ -75,7 +75,7 @@ impl GetInventoryResponse {
 impl MgsHandle {
     pub async fn get_inventory(
         &self,
-        force_refresh: bool,
+        force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, ShutdownInProgress> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let etag = None;
@@ -171,7 +171,11 @@ impl MgsManager {
                 Some(request) = self.rx.recv() => {
                     match request {
                         MgsRequest::GetInventory {reply_tx, force_refresh, ..} => {
-                            if force_refresh {
+                            // For now, we ignore the specific contents of
+                            // `force_refresh` because we're hitting MGS's bulk
+                            // `/sp` state endpoint. If wicket wanted us to
+                            // refresh _any_ SPs, we therefore refresh them all.
+                            if !force_refresh.is_empty() {
                                 // Try to send; if the channel is full, we've
                                 // already requested a refresh and we can just
                                 // wait for a response.

@@ -12,8 +12,8 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
@@ -53,10 +53,11 @@ pub fn api() -> WicketdApiDescription {
     api
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct ForceRefresh {
-    /// If true, refresh inventory from MGS instead of returning cached data.
-    pub force_refresh: bool,
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GetInventoryParams {
+    /// If true, refresh the state of these SPs from MGS prior to returning
+    /// (instead of returning cached data).
+    pub force_refresh: Vec<SpIdentifier>,
 }
 
 /// A status endpoint used to report high level information known to wicketd.
@@ -72,9 +73,9 @@ pub struct ForceRefresh {
 }]
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
-    query_params: Query<ForceRefresh>,
+    body_params: TypedBody<GetInventoryParams>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
-    let ForceRefresh { force_refresh } = query_params.into_inner();
+    let GetInventoryParams { force_refresh } = body_params.into_inner();
     match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
         Ok(response) => Ok(HttpResponseOk(response)),
         Err(_) => {

@@ -9,7 +9,9 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicketd_client::types::{IgnitionCommand, SpIdentifier, SpType};
+use wicketd_client::types::{
+    GetInventoryParams, IgnitionCommand, SpIdentifier, SpType,
+};
 use wicketd_client::GetInventoryResponse;
 
 use crate::state::ComponentId;
@@ -139,7 +141,7 @@ impl WicketdManager {
         &self,
         component_id: ComponentId,
         command: IgnitionCommand,
-        poll_inventory_now: mpsc::Sender<()>,
+        poll_inventory_now: mpsc::Sender<SpIdentifier>,
     ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
@@ -160,7 +162,7 @@ impl WicketdManager {
             // Try to poll the inventory now; if this fails we don't care (it
             // means either someone else has already queued up an inventory poll
             // or the polling task has died).
-            _ = poll_inventory_now.try_send(());
+            _ = poll_inventory_now.try_send(sp);
         });
     }
 
@@ -220,7 +222,7 @@ impl WicketdManager {
         });
     }
 
-    async fn poll_inventory(&self, mut poll_now: mpsc::Receiver<()>) {
+    async fn poll_inventory(&self, mut poll_now: mpsc::Receiver<SpIdentifier>) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
@@ -231,17 +233,18 @@ impl WicketdManager {
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
                 let force_refresh = tokio::select! {
-                    _ = ticker.tick() => false,
-                    Some(()) = poll_now.recv() => {
+                    _ = ticker.tick() => Vec::new(),
+                    Some(sp) = poll_now.recv() => {
                         // We want to poll immediately; do so and reset our
                         // timer.
                         ticker.reset();
-                        true
+                        vec![sp]
                     }
                 };
 
+                let params = GetInventoryParams { force_refresh };
                 // TODO: We should really be using ETAGs here
-                match client.get_inventory(force_refresh).await {
+                match client.get_inventory(&params).await {
                     Ok(val) => match val.into_inner().into() {
                         GetInventoryResponse::Response {
                             inventory,
