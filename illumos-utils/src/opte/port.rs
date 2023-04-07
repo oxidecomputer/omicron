@@ -33,9 +33,6 @@ struct PortInner {
     // The external IP address and port range provided for this port, to allow
     // outbound network connectivity.
     _source_nat: Option<SourceNatConfig>,
-    // The external IP addresses provided to this port, to allow _inbound_
-    // network connectivity.
-    external_ips: Option<Vec<IpAddr>>,
     // Information about the virtual gateway, aka OPTE
     _gateway: Gateway,
     // Information about Boundary Services, for forwarding traffic between sleds
@@ -110,7 +107,6 @@ impl Port {
         vni: Vni,
         underlay_ip: Ipv6Addr,
         source_nat: Option<SourceNatConfig>,
-        external_ips: Option<Vec<IpAddr>>,
         gateway: Gateway,
         boundary_services: BoundaryServices,
         vnic: String,
@@ -125,7 +121,6 @@ impl Port {
                 vni: vni,
                 _underlay_ip: underlay_ip,
                 _source_nat: source_nat,
-                external_ips,
                 _gateway: gateway,
                 _boundary_services: boundary_services,
                 vnic,
@@ -135,11 +130,6 @@ impl Port {
 
     pub fn name(&self) -> &str {
         &self.inner.name
-    }
-
-    #[allow(dead_code)]
-    pub fn external_ips(&self) -> &Option<Vec<IpAddr>> {
-        &self.inner.external_ips
     }
 
     #[allow(dead_code)]

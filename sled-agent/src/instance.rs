@@ -724,9 +724,9 @@ impl Instance {
         let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), Some(inner.external_ips.clone()))
+                (Some(inner.source_nat), &inner.external_ips[..])
             } else {
-                (None, None)
+                (None, &[][..])
             };
             let (port, port_ticket) = inner.port_manager.create_port(
                 nic,

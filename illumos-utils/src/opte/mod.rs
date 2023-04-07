@@ -74,7 +74,7 @@ impl Gateway {
             ip: subnet
                 .iter()
                 .nth(1)
-                .expect("IP subnet must have at least 1 address"),
+                .expect("IP subnet must have at least 2 addresses"),
         }
     }
 }
