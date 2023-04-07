@@ -99,8 +99,6 @@ impl BackgroundTask for DnsServersWatcher {
                 .await;
 
             if let Err(error) = result {
-                // XXX-dap is this error reporting going to suck if it's an
-                // internal error?
                 warn!(
                     &log,
                     "failed to read list of DNS servers";
