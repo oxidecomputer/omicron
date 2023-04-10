@@ -18,15 +18,26 @@ pub struct MacAddr(pub external::MacAddr);
 impl MacAddr {
     // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
     // address are constrained to be in the virtual address range
-    // A8:40:24:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
+    // A8:40:25:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
     // reserved for customer-visible addresses (FF:00:00-FF:FF:FF is for
     // system MAC addresses). See RFD 174 for the discussion of the virtual
     // range, and
     // https://github.com/oxidecomputer/omicron/pull/955#discussion_r856432498
     // for an initial discussion of the customer/system address range split.
+    // The system range is further split between FF:00:00-FF:7F:FF for
+    // fixed addresses (e.g., the OPTE virtual gateway MAC) and
+    // FF:80:00-FF:FF:FF for dynamically allocated addresses (e.g., service
+    // vNICs).
+    //
+    // F0:00:00 - FF:FF:FF    Oxide Virtual Address Range
+    //     F0:00:00 - FE:FF:FF    Guest Addresses
+    //     FF:00:00 - FF:FF:FF    System Addresses
+    //         FF:00:00 - FF:7F:FF    Reserved Addresses
+    //         FF:80:00 - FF:FF:FF    Runtime allocatable
     pub const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
     pub const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
     pub const MIN_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_00_00;
+    pub const MAX_SYSTEM_RESV: i64 = 0xA8_40_25_FF_7F_FF;
     pub const MAX_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_FF_FF;
 
     /// Generate a random MAC address for a guest network interface
@@ -39,7 +50,7 @@ impl MacAddr {
     /// Generate a random MAC address in the system address range
     pub fn random_system() -> Self {
         let value = thread_rng()
-            .gen_range(Self::MIN_SYSTEM_ADDR..=Self::MAX_SYSTEM_ADDR);
+            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
