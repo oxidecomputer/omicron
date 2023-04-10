@@ -277,7 +277,7 @@ signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sled = "0.34"
 sled-agent-client = { path = "sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
-slog = { version = "2.7", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.7"
 slog-dtrace = "0.2"
 slog-envlogger = "2.2"
