@@ -35,11 +35,67 @@
         }
       }
     },
+    "/ignition/{type}/{slot}/{command}": {
+      "post": {
+        "summary": "Send an ignition command targeting a specific SP.",
+        "description": "This endpoint acts as a proxy to the MGS endpoint performing the same function, allowing wicket to communicate exclusively with wicketd (even though wicketd adds no meaningful functionality here beyond what MGS offers).",
+        "operationId": "post_ignition_command",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "command",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/IgnitionCommand"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "A status endpoint used to report high level information known to wicketd.",
         "description": "This endpoint can be polled to see if there have been state changes in the system that are useful to report to wicket.\nWicket, and possibly other callers, will retrieve the changed information, with follow up calls.",
         "operationId": "get_inventory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetInventoryParams"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -657,6 +713,21 @@
           "artifacts"
         ]
       },
+      "GetInventoryParams": {
+        "type": "object",
+        "properties": {
+          "force_refresh": {
+            "description": "If true, refresh the state of these SPs from MGS prior to returning (instead of returning cached data).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            }
+          }
+        },
+        "required": [
+          "force_refresh"
+        ]
+      },
       "GetInventoryResponse": {
         "description": "The response to a `get_inventory` call: the inventory known to wicketd, or a notification that data is unavailable.",
         "oneOf": [
@@ -828,6 +899,20 @@
           "version"
         ]
       },
+      "RotInventory": {
+        "description": "RoT-related data that isn't already supplied in [`SpState`].",
+        "type": "object",
+        "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          }
+        }
+      },
       "RotSlot": {
         "oneOf": [
           {
@@ -919,6 +1004,29 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
+        ]
       },
       "SpComponentInfo": {
         "description": "Overview of a single SP component.",
@@ -1179,9 +1287,17 @@
         ]
       },
       "SpInventory": {
-        "description": "SP related data",
+        "description": "SP-related data",
         "type": "object",
         "properties": {
+          "caboose": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
           "components": {
             "nullable": true,
             "type": "array",
@@ -1195,6 +1311,9 @@
           "ignition": {
             "$ref": "#/components/schemas/SpIgnition"
           },
+          "rot": {
+            "$ref": "#/components/schemas/RotInventory"
+          },
           "state": {
             "$ref": "#/components/schemas/SpState"
           }
@@ -1202,6 +1321,7 @@
         "required": [
           "id",
           "ignition",
+          "rot",
           "state"
         ]
       },
@@ -1897,6 +2017,15 @@
               "kind"
             ]
           }
+        ]
+      },
+      "IgnitionCommand": {
+        "description": "Ignition command.",
+        "type": "string",
+        "enum": [
+          "power_on",
+          "power_off",
+          "power_reset"
         ]
       }
     }

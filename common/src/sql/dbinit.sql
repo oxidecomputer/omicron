@@ -110,7 +110,6 @@ CREATE INDEX ON omicron.public.sled (
 CREATE TYPE omicron.public.service_kind AS ENUM (
   'crucible_pantry',
   'dendrite',
-  'dns_client',
   'external_dns_config',
   'external_dns',
   'internal_dns_config',
@@ -1047,6 +1046,15 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_subnet (
 ) WHERE
     time_deleted IS NULL;
 
+/* The kind of network interface. */
+CREATE TYPE omicron.public.network_interface_kind AS ENUM (
+    /* An interface attached to a guest instance. */
+    'instance',
+
+    /* An interface attached to a service. */
+    'service'
+);
+
 CREATE TABLE omicron.public.network_interface (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1057,11 +1065,14 @@ CREATE TABLE omicron.public.network_interface (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    /* FK into Instance table.
-     * Note that interfaces are always attached to a particular instance.
-     * IP addresses may be reserved, but this is a different resource.
+    /* The kind of network interface, e.g., instance */
+    kind omicron.public.network_interface_kind NOT NULL,
+
+    /*
+     * FK into the parent resource of this interface (e.g. Instance, Service)
+     * as determined by the `kind`.
      */
-    instance_id UUID NOT NULL,
+    parent_id UUID NOT NULL,
 
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
@@ -1076,20 +1087,64 @@ CREATE TABLE omicron.public.network_interface (
      */
     mac INT8 NOT NULL,
 
+    /* The private VPC IP address of the interface. */
     ip INET NOT NULL,
+
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
      * `crate::nexus::MAX_NICS_PER_INSTANCE`.
      */
     slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
 
-    /* True if this interface is the primary interface for the instance.
+    /* True if this interface is the primary interface.
      *
      * The primary interface appears in DNS and its address is used for external
-     * connectivity for the instance.
+     * connectivity.
      */
     is_primary BOOL NOT NULL
 );
+
+/* A view of the network_interface table for just instance-kind records. */
+CREATE VIEW omicron.public.instance_network_interface AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    parent_id AS instance_id,
+    vpc_id,
+    subnet_id,
+    mac,
+    ip,
+    slot,
+    is_primary
+FROM
+    omicron.public.network_interface
+WHERE
+    kind = 'instance';
+
+/* A view of the network_interface table for just service-kind records. */
+CREATE VIEW omicron.public.service_network_interface AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    parent_id AS service_id,
+    vpc_id,
+    subnet_id,
+    mac,
+    ip,
+    slot,
+    is_primary
+FROM
+    omicron.public.network_interface
+WHERE
+    kind = 'service';
 
 /* TODO-completeness
 
@@ -1116,17 +1171,18 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     time_deleted IS NULL;
 
 /*
- * Index used to verify that an Instance's networking is contained
- * within a single VPC, and that all interfaces are in unique VPC
- * Subnets.
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) are contained within a single VPC, and that all interfaces are
+ * in unique VPC Subnets.
  *
- * This is also used to quickly find the primary interface for an
- * instance, since we store the `is_primary` column. Such queries are
- * mostly used when setting a new primary interface for an instance.
+ * This is also used to quickly find the primary interface since
+ * we store the `is_primary` column. Such queries are mostly used
+ * when setting a new primary interface.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    instance_id,
-    name
+    parent_id,
+    name,
+    kind
 )
 STORING (vpc_id, subnet_id, is_primary)
 WHERE

@@ -252,16 +252,20 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn subnet_list_network_interfaces(
+    pub async fn subnet_list_instance_network_interfaces(
         &self,
         opctx: &OpContext,
         subnet_lookup: &lookup::VpcSubnet<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::NetworkInterface> {
+    ) -> ListResultVec<db::model::InstanceNetworkInterface> {
         let (.., authz_subnet) =
             subnet_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
-            .subnet_list_network_interfaces(opctx, &authz_subnet, pagparams)
+            .subnet_list_instance_network_interfaces(
+                opctx,
+                &authz_subnet,
+                pagparams,
+            )
             .await
     }
 }

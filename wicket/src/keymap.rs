@@ -46,6 +46,9 @@ pub enum Cmd {
     /// `Control`.
     Details,
 
+    /// Display ignition control for the given selection
+    Ignition,
+
     /// Move up or scroll up
     Up,
 
@@ -137,6 +140,7 @@ impl KeyHandler {
             KeyCode::Char('e') => Cmd::Expand,
             KeyCode::Char('c') => Cmd::Collapse,
             KeyCode::Char('d') => Cmd::Details,
+            KeyCode::Char('i') => Cmd::Ignition,
             KeyCode::Up => Cmd::Up,
             KeyCode::Down => Cmd::Down,
             KeyCode::Right => Cmd::Right,

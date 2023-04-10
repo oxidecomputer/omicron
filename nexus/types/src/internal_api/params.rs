@@ -170,7 +170,6 @@ pub enum ServiceKind {
     Tfport,
     CruciblePantry,
     NTP,
-    DNSClient,
 }
 
 impl fmt::Display for ServiceKind {
@@ -185,7 +184,6 @@ impl fmt::Display for ServiceKind {
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
             NTP => "ntp",
-            DNSClient => "dns_client",
         };
         write!(f, "{}", s)
     }

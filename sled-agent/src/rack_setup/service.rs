@@ -735,7 +735,6 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::NTP,
                             });
                         }
-                        ServiceType::DnsClient { .. } => {}
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",

@@ -99,6 +99,8 @@ use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -123,6 +125,7 @@ pub struct Store {
     db: Arc<sled::Db>,
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
+    poisoned: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -183,6 +186,7 @@ impl Store {
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
+            poisoned: Arc::new(AtomicBool::new(false)),
         };
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
@@ -298,6 +302,13 @@ impl Store {
         req_id: &'b str,
         generation: u64,
     ) -> Result<UpdateGuard<'a, 'b>, UpdateError> {
+        if self.poisoned.load(Ordering::SeqCst) {
+            panic!(
+                "store is poisoned (attempted update after previous \
+                UpdateGuard was dropped)"
+            );
+        }
+
         let mut update = self.updating.lock().await;
         if let Some(ref update) = *update {
             let elapsed =
@@ -701,6 +712,55 @@ impl<'a, 'b> UpdateGuard<'a, 'b> {
             _ => (),
         };
         self.finished = true;
+    }
+}
+
+impl<'a, 'b> Drop for UpdateGuard<'a, 'b> {
+    fn drop(&mut self) {
+        // UpdateGuard exists because we must enforce at most one Update is
+        // happening at a time, but we also want to catch the case where an
+        // errant code path begins an update and forgets to call
+        // UpdateGuard::finish().  Why?  If this happens, the DNS server will
+        // forever report "update in progress" errors, and nothing will ever fix
+        // it.  This is essentially a refcount leak, and it's very difficult to
+        // debug since we wouldn't know what code path caused the problem.  But
+        // we *do* know what code path caused the problem: it's whoever dropped
+        // the UpdateGuard without finishing it.  That's why this is the place
+        // to identify and report the problem.
+        //
+        // The first thing we'll do is poison the store so that any subsequent
+        // attempt to update it will fail explicitly.
+        if !self.finished {
+            self.store.poisoned.store(true, Ordering::SeqCst);
+
+            // Now, in the case above where a code path just forgot to finish
+            // the UpdateGuard, we want to panic right here.  That makes this
+            // problem maximally debuggable: it points precisely to where the
+            // missed call was.  But it's also possible that we got here because
+            // the current thread is panicking, causing the UpdateGuard to be
+            // dropped.  There's no point in panicking again because there's no
+            // bug here.  Plus, it's quite disruptive to panic while panicking.
+            // So we don't want to panic if we're already panicking.
+            //
+            // TODO-cleanup Better than all this would be to enforce at
+            // compile-time that the UpdateGuard gets finished before it gets
+            // dropped.  Maybe better than the above would be to have `drop` of
+            // the UpdateGuard do the same thing as `finish()`, similar to
+            // `MutexGuard`.  This is tricky because:
+            // - we cannot take the async lock from the synchronous Drop
+            //   function
+            // - it's risky to use a std Mutex since taking the lock could block
+            //   the executor; plus, if the lock were poisoned due to a panic,
+            //   we'd panic while panicking again
+            // - it doesn't seem like we can use `blocking_lock()` because we
+            //   _are_ in an async context (i.e., running as part of a task in
+            //   an async runtime), even if we're not in an async block
+            // - we could use a semaphore like tokio's MutexGuard does, but that
+            //   involves unsafe code
+            if !std::thread::panicking() {
+                panic!("dropped UpdateGuard without finishing update");
+            }
+        }
     }
 }
 
