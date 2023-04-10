@@ -6,9 +6,15 @@
 
 use std::path::Path;
 use std::process::Stdio;
+use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use tempfile::TempDir;
+use tokio::{
+    fs::File,
+    io::{AsyncBufReadExt, BufReader},
+    time::{sleep, Instant},
+};
 
 pub struct DendriteInstance {
     pub port: u16,
@@ -20,11 +26,6 @@ pub struct DendriteInstance {
 impl DendriteInstance {
     pub async fn start(port: u16) -> Result<Self, anyhow::Error> {
         let mut port = port;
-        if port == 0 {
-            port = portpicker::pick_unused_port()
-                .ok_or_else(|| anyhow!("no ports available for dendrite"))?
-        }
-
         let temp_dir = TempDir::new()?;
         let address_one = format!("[::1]:{port}");
         let current_dir = std::env::current_dir()?;
@@ -58,6 +59,13 @@ impl DendriteInstance {
             })?;
 
         let child = Some(child);
+
+        if port == 0 {
+            port = discover_port(
+                temp_dir.path().join("dendrite_stdout").display().to_string(),
+            )
+            .await?;
+        }
 
         Ok(Self { port, args, child, data_dir: Some(temp_dir) })
     }
@@ -106,4 +114,35 @@ fn redirect_file(
         .create_new(true)
         .open(&out_path)
         .with_context(|| format!("open \"{}\"", out_path.display()))
+}
+
+async fn discover_port(logfile: String) -> Result<u16, anyhow::Error> {
+    let timeout = Instant::now() + Duration::new(5, 0);
+    tokio::time::timeout_at(timeout, find_dendrite_port_in_log(logfile))
+        .await
+        .context("time out while discovering dendrite port number")?
+}
+
+async fn find_dendrite_port_in_log(
+    logfile: String,
+) -> Result<u16, anyhow::Error> {
+    let re = regex::Regex::new(r#""local_addr":"\[::1\]:?([0-9]+)""#).unwrap();
+    let reader = BufReader::new(File::open(logfile).await?);
+    let mut lines = reader.lines();
+    loop {
+        match lines.next_line().await? {
+            Some(line) => {
+                if let Some(cap) = re.captures(&line) {
+                    // unwrap on get(1) should be ok, since captures() returns `None`
+                    // if there are no matches found
+                    let port = cap.get(1).unwrap();
+                    let result = port.as_str().parse::<u16>()?;
+                    return Ok(result);
+                }
+            }
+            None => {
+                sleep(Duration::from_millis(10)).await;
+            }
+        }
+    }
 }

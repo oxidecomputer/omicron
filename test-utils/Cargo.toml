@@ -10,7 +10,6 @@ dropshot.workspace = true
 futures.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
-portpicker.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 tempfile.workspace = true
