@@ -394,7 +394,8 @@ mod test {
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::nexus_config::{
-        Database, DeploymentConfig, DpdConfig, LoadErrorKind,
+        BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
+        DpdConfig, LoadErrorKind,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -406,6 +407,7 @@ mod test {
     use std::path::Path;
     use std::path::PathBuf;
     use std::str::FromStr;
+    use std::time::Duration;
 
     /// Generates a temporary filesystem path unique for the given label.
     fn temp_path(label: &str) -> PathBuf {
@@ -527,6 +529,15 @@ mod test {
             type = "from_dns"
             [dendrite]
             address = "[::1]:12224"
+            [background_tasks]
+            dns_internal.period_secs_config = 1
+            dns_internal.period_secs_servers = 2
+            dns_internal.period_secs_propagation = 3
+            dns_internal.max_concurrent_server_updates = 4
+            dns_external.period_secs_config = 5
+            dns_external.period_secs_servers = 6
+            dns_external.period_secs_propagation = 7
+            dns_external.max_concurrent_server_updates = 8
             "##,
         )
         .unwrap();
@@ -579,6 +590,20 @@ mod test {
                     dendrite: DpdConfig {
                         address: SocketAddr::from_str("[::1]:12224").unwrap()
                     },
+                    background_tasks: BackgroundTaskConfig {
+                        dns_internal: DnsTasksConfig {
+                            period_secs_config: Duration::from_secs(1),
+                            period_secs_servers: Duration::from_secs(2),
+                            period_secs_propagation: Duration::from_secs(3),
+                            max_concurrent_server_updates: 4,
+                        },
+                        dns_external: DnsTasksConfig {
+                            period_secs_config: Duration::from_secs(5),
+                            period_secs_servers: Duration::from_secs(6),
+                            period_secs_propagation: Duration::from_secs(7),
+                            max_concurrent_server_updates: 8,
+                        },
+                    },
                 },
             }
         );
@@ -615,6 +640,15 @@ mod test {
             type = "from_dns"
             [dendrite]
             address = "[::1]:12224"
+            [background_tasks]
+            dns_internal.period_secs_config = 1
+            dns_internal.period_secs_servers = 2
+            dns_internal.period_secs_propagation = 3
+            dns_internal.max_concurrent_server_updates = 4
+            dns_external.period_secs_config = 5
+            dns_external.period_secs_servers = 6
+            dns_external.period_secs_propagation = 7
+            dns_external.max_concurrent_server_updates = 8
             "##,
         )
         .unwrap();
