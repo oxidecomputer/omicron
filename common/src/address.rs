@@ -235,6 +235,13 @@ impl IpRange {
             IpRange::V6(inner) => IpAddr::from(inner.last),
         }
     }
+
+    pub fn iter(&self) -> IpRangeIter {
+        match self {
+            IpRange::V4(ip4) => IpRangeIter::V4(ip4.iter()),
+            IpRange::V6(ip6) => IpRangeIter::V6(ip6.iter()),
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -288,6 +295,10 @@ impl Ipv4Range {
     pub fn last_address(&self) -> Ipv4Addr {
         self.last
     }
+
+    pub fn iter(&self) -> Ipv4RangeIter {
+        Ipv4RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
 }
 
 impl From<Ipv4Addr> for Ipv4Range {
@@ -336,6 +347,10 @@ impl Ipv6Range {
     pub fn last_address(&self) -> Ipv6Addr {
         self.last
     }
+
+    pub fn iter(&self) -> Ipv6RangeIter {
+        Ipv6RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
 }
 
 impl From<Ipv6Addr> for Ipv6Range {
@@ -355,6 +370,60 @@ impl TryFrom<AnyIpv6Range> for Ipv6Range {
     fn try_from(r: AnyIpv6Range) -> Result<Self, Self::Error> {
         Ipv6Range::new(r.first, r.last)
             .map_err(|msg| Error::invalid_request(msg.as_str()))
+    }
+}
+
+pub struct Ipv4RangeIter {
+    next: Option<u32>,
+    last: u32,
+}
+
+impl Iterator for Ipv4RangeIter {
+    type Item = Ipv4Addr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.next?;
+        if next < self.last {
+            self.next = Some(next + 1);
+        } else {
+            self.next = None;
+        }
+        Some(next.into())
+    }
+}
+
+pub struct Ipv6RangeIter {
+    next: Option<u128>,
+    last: u128,
+}
+
+impl Iterator for Ipv6RangeIter {
+    type Item = Ipv6Addr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.next?;
+        if next < self.last {
+            self.next = Some(next + 1);
+        } else {
+            self.next = None;
+        }
+        Some(next.into())
+    }
+}
+
+pub enum IpRangeIter {
+    V4(Ipv4RangeIter),
+    V6(Ipv6RangeIter),
+}
+
+impl Iterator for IpRangeIter {
+    type Item = IpAddr;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::V4(iter) => iter.next().map(IpAddr::V4),
+            Self::V6(iter) => iter.next().map(IpAddr::V6),
+        }
     }
 }
 
@@ -466,5 +535,34 @@ mod test {
         let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3);
         assert!(IpRange::try_from((lo, hi)).is_ok());
         assert!(IpRange::try_from((hi, lo)).is_err());
+    }
+
+    #[test]
+    fn test_ip_range_iter() {
+        let lo = Ipv4Addr::new(10, 0, 0, 1);
+        let hi = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        let ips = range.iter().collect::<Vec<_>>();
+        assert_eq!(
+            ips,
+            vec![
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                Ipv4Addr::new(10, 0, 0, 3),
+            ]
+        );
+
+        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        let ips = range.iter().collect::<Vec<_>>();
+        assert_eq!(
+            ips,
+            vec![
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 2),
+                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
+            ]
+        );
     }
 }
