@@ -763,8 +763,8 @@ mod test {
         assert_eq!(observed_services[1].kind, ServiceKind::Nexus);
         assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
         assert_eq!(*observed_services[1].ip, Ipv6Addr::LOCALHOST);
-        assert_eq!(*observed_services[0].port, 123);
-        assert_eq!(*observed_services[1].port, 456);
+        assert_eq!(*observed_services[0].port, services[0].address.port());
+        assert_eq!(*observed_services[1].port, services[1].address.port());
 
         // It should have a corresponding "Nexus service record"
         assert_eq!(observed_nexus_services.len(), 2);
