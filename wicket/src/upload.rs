@@ -4,11 +4,14 @@
 
 //! Support for uploading artifacts to wicketd.
 
-use std::{net::SocketAddrV6, time::Duration};
+use std::{convert::Infallible, net::SocketAddrV6, time::Duration};
 
 use anyhow::{Context, Result};
+use buf_list::BufList;
 use clap::Args;
-use tokio::io::AsyncReadExt;
+use futures::TryStreamExt;
+use reqwest::Body;
+use tokio_util::io::ReaderStream;
 
 use crate::wicketd::create_wicketd_client;
 
@@ -38,13 +41,12 @@ impl UploadArgs {
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
         // Read the entire repository from stdin into memory.
-        let mut repo_bytes = Vec::new();
-        tokio::io::stdin()
-            .read_to_end(&mut repo_bytes)
+        let repo_bytes: BufList = ReaderStream::new(tokio::io::stdin())
+            .try_collect()
             .await
             .context("error reading repository from stdin")?;
 
-        let repository_bytes_len = repo_bytes.len();
+        let repository_bytes_len = repo_bytes.num_bytes();
 
         slog::info!(
             log,
@@ -66,8 +68,11 @@ impl UploadArgs {
                 WICKETD_UPLOAD_TIMEOUT,
             );
 
+            let body = Body::wrap_stream(futures::stream::iter(
+                repo_bytes.into_iter().map(Ok::<_, Infallible>),
+            ));
             wicketd_client
-                .put_repository(repo_bytes)
+                .put_repository(body)
                 .await
                 .context("error uploading repository to wicketd")?;
 

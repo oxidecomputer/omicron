@@ -13,8 +13,9 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::StreamingBody;
 use dropshot::TypedBody;
-use dropshot::UntypedBody;
+use futures::TryStreamExt;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
@@ -94,15 +95,15 @@ async fn get_inventory(
 }]
 async fn put_repository(
     rqctx: RequestContext<ServerContext>,
-    body: UntypedBody,
+    body: StreamingBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
     // TODO: do we need to return more information with the response?
 
-    // TODO: `UntypedBody` is currently inefficient for large request bodies -- it does many copies
-    // and allocations. Replace this with a better solution once it's available in dropshot.
-    rqctx.artifact_store.put_repository(body.as_bytes())?;
+    rqctx
+        .artifact_store
+        .put_repository(body.into_stream().try_collect().await?)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
