@@ -284,12 +284,10 @@ impl ManagementSwitch {
             .map_err(|s| SpCommsError::DiscoveryFailed { reason: s.clone() })
     }
 
-    /// Get the name of our location.
-    ///
-    /// This matches one of the names specified as a possible location in the
-    /// configuration we were given.
-    pub fn location_name(&self) -> Result<&str, SpCommsError> {
-        self.location_map().map(|m| m.location_name())
+    /// Get the identifier of our local switch.
+    pub fn local_switch(&self) -> Result<SpIdentifier, SpCommsError> {
+        let location_map = self.location_map()?;
+        Ok(location_map.port_to_id(self.local_ignition_controller_port))
     }
 
     /// Get the handle for communicating with an SP by its switch port.
