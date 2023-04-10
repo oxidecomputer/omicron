@@ -4,8 +4,8 @@
 
 use super::{Generation, Project};
 use crate::collection::DatastoreCollectionConfig;
-use crate::schema::{image, project, silo, silo_image};
-use crate::{impl_enum_type, Image, SiloImage};
+use crate::schema::{image, project, silo};
+use crate::{impl_enum_type, Image};
 use db_macros::Resource;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views;
@@ -159,5 +159,5 @@ impl DatastoreCollectionConfig<Image> for Silo {
     type CollectionId = Uuid;
     type GenerationNumberColumn = silo::dsl::rcgen;
     type CollectionTimeDeletedColumn = silo::dsl::time_deleted;
-    type CollectionIdColumn = image::dsl::parent_id;
+    type CollectionIdColumn = image::dsl::silo_id;
 }

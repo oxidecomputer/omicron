@@ -875,6 +875,15 @@ authz_resource! {
     polar_snippet = InSilo,
 }
 
+// This resource is a collection of _all_ images in a silo, including project images.
+authz_resource! {
+    name = "Image",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InSilo,
+}
+
 authz_resource! {
     name = "IdentityProvider",
     parent = "Silo",

@@ -64,7 +64,7 @@ impl DatastoreCollectionConfig<Image> for Project {
     type CollectionId = Uuid;
     type GenerationNumberColumn = project::dsl::rcgen;
     type CollectionTimeDeletedColumn = project::dsl::time_deleted;
-    type CollectionIdColumn = image::dsl::parent_id;
+    type CollectionIdColumn = image::dsl::project_id;
 }
 
 impl DatastoreCollectionConfig<Snapshot> for Project {

@@ -167,7 +167,7 @@ impl DataStore {
 
     generate_fn_to_ensure_none_in_project!(instance, name, String);
     generate_fn_to_ensure_none_in_project!(disk, name, String);
-    generate_fn_to_ensure_none_in_project!(image, name, String);
+    generate_fn_to_ensure_none_in_project!(project_image, name, String);
     generate_fn_to_ensure_none_in_project!(snapshot, name, String);
     generate_fn_to_ensure_none_in_project!(vpc, name, String);
 
@@ -183,7 +183,7 @@ impl DataStore {
         // Verify that child resources do not exist.
         self.ensure_no_instances_in_project(opctx, authz_project).await?;
         self.ensure_no_disks_in_project(opctx, authz_project).await?;
-        self.ensure_no_images_in_project(opctx, authz_project).await?;
+        self.ensure_no_project_images_in_project(opctx, authz_project).await?;
         self.ensure_no_snapshots_in_project(opctx, authz_project).await?;
         self.ensure_no_vpcs_in_project(opctx, authz_project).await?;
 

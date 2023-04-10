@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{BlockSize, ByteCount, Digest};
-use crate::impl_enum_type;
 use crate::schema::{image, project_image, silo_image};
 use db_macros::Resource;
 use nexus_types::external_api::views;
@@ -11,19 +10,6 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-impl_enum_type! {
-    #[derive(SqlType, QueryId, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "image_kind"))]
-    pub struct ImageKindEnum;
-
-    #[derive(Clone, Copy, Serialize, Deserialize, Debug, AsExpression, FromSqlRow, PartialEq)]
-    #[diesel(sql_type = ImageKindEnum)]
-    pub enum ImageKind;
-
-    Silo => b"silo"
-    Project => b"project"
-}
 
 // Shared image definition
 #[derive(
@@ -41,8 +27,9 @@ pub struct Image {
     #[diesel(embed)]
     pub identity: ImageIdentity,
 
-    pub kind: ImageKind,
-    pub parent_id: Uuid,
+    pub silo_id: Uuid,
+    pub project_id: Option<Uuid>,
+
     pub volume_id: Uuid,
     pub url: Option<String>,
     pub os: String,
@@ -69,6 +56,7 @@ pub struct ProjectImage {
     #[diesel(embed)]
     pub identity: ProjectImageIdentity,
 
+    pub silo_id: Uuid,
     pub project_id: Uuid,
     pub volume_id: Uuid,
     pub url: Option<String>,
@@ -112,8 +100,8 @@ impl TryFrom<Image> for ProjectImage {
     type Error = Error;
 
     fn try_from(image: Image) -> Result<Self, Self::Error> {
-        match image.kind {
-            ImageKind::Project => Ok(Self {
+        match image.project_id {
+            Some(project_id) => Ok(Self {
                 identity: ProjectImageIdentity {
                     id: image.id(),
                     name: image.name().clone().into(),
@@ -122,7 +110,8 @@ impl TryFrom<Image> for ProjectImage {
                     time_modified: image.time_modified(),
                     time_deleted: image.time_deleted(),
                 },
-                project_id: image.parent_id,
+                silo_id: image.silo_id,
+                project_id,
                 volume_id: image.volume_id,
                 url: image.url,
                 os: image.os,
@@ -131,7 +120,7 @@ impl TryFrom<Image> for ProjectImage {
                 block_size: image.block_size,
                 size: image.size,
             }),
-            _ => Err(Error::internal_error(
+            None => Err(Error::internal_error(
                 "tried to convert non-project image to project image",
             )),
         }
@@ -142,8 +131,11 @@ impl TryFrom<Image> for SiloImage {
     type Error = Error;
 
     fn try_from(image: Image) -> Result<Self, Self::Error> {
-        match image.kind {
-            ImageKind::Silo => Ok(Self {
+        match image.project_id {
+            Some(_) => Err(Error::internal_error(
+                "tried to convert non-silo image to silo image",
+            )),
+            None => Ok(Self {
                 identity: SiloImageIdentity {
                     id: image.id(),
                     name: image.name().clone().into(),
@@ -152,7 +144,7 @@ impl TryFrom<Image> for SiloImage {
                     time_modified: image.time_modified(),
                     time_deleted: image.time_deleted(),
                 },
-                silo_id: image.parent_id,
+                silo_id: image.silo_id,
                 volume_id: image.volume_id,
                 url: image.url,
                 os: image.os,
@@ -161,9 +153,6 @@ impl TryFrom<Image> for SiloImage {
                 block_size: image.block_size,
                 size: image.size,
             }),
-            _ => Err(Error::internal_error(
-                "tried to convert non-silo image to silo image",
-            )),
         }
     }
 }
@@ -179,8 +168,8 @@ impl From<ProjectImage> for Image {
                 time_modified: image.time_modified(),
                 time_deleted: image.time_deleted(),
             },
-            kind: ImageKind::Project,
-            parent_id: image.project_id,
+            silo_id: image.silo_id,
+            project_id: Some(image.project_id),
             volume_id: image.volume_id,
             url: image.url,
             os: image.os,
@@ -203,8 +192,8 @@ impl From<SiloImage> for Image {
                 time_modified: image.time_modified(),
                 time_deleted: image.time_deleted(),
             },
-            kind: ImageKind::Silo,
-            parent_id: image.silo_id,
+            silo_id: image.silo_id,
+            project_id: None,
             volume_id: image.volume_id,
             url: image.url,
             os: image.os,
@@ -220,13 +209,9 @@ impl From<Image> for views::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),
-            parent_id: match image.kind {
-                ImageKind::Project => {
-                    views::SiloOrProjectId::ProjectId(image.parent_id)
-                }
-                ImageKind::Silo => {
-                    views::SiloOrProjectId::SiloId(image.parent_id)
-                }
+            parent_id: match image.project_id {
+                Some(id) => views::SiloOrProjectId::ProjectId(id),
+                None => views::SiloOrProjectId::SiloId(image.silo_id),
             },
             url: image.url,
             os: image.os,

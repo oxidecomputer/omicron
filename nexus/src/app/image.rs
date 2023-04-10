@@ -29,28 +29,53 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+pub enum ImageLookup<'a> {
+    ProjectImage(lookup::ProjectImage<'a>),
+    SiloImage(lookup::SiloImage<'a>),
+}
+
+pub enum ImageParentLookup<'a> {
+    Project(lookup::Project<'a>),
+    Silo(lookup::Silo<'a>),
+}
+
 impl super::Nexus {
-    pub fn image_lookup<'a>(
+    pub async fn image_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         image_selector: &'a params::ImageSelector,
-    ) -> LookupResult<lookup::Image<'a>> {
+    ) -> LookupResult<ImageLookup<'a>> {
         match image_selector {
             params::ImageSelector {
                 image: NameOrId::Id(id),
                 project_selector: None,
             } => {
-                let image = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*id);
-                Ok(image)
+                let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
+                    .image_id(*id).fetch().await?;
+                let lookup = match db_image.project_id {
+                    Some(id) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
+                        .project_id(id)),
+                    None => {
+                        ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
+                            .silo_image_id(db_image.silo_id))
+                    },
+                };
+                Ok(lookup)
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
                 project_selector: Some(project_selector),
             } => {
                 let image =
-                    self.project_lookup(opctx, project_selector)?.image_name(Name::ref_cast(name));
-                Ok(image)
+                    self.project_lookup(opctx, project_selector)?.project_image_name(Name::ref_cast(name));
+                Ok(ImageLookup::ProjectImage(image))
+            }
+            params::ImageSelector {
+                image: NameOrId::Name(name),
+                project_selector: None,
+            } => {
+                let image = self.silo_image_name(Name::ref_cast(name));
+                Ok(ImageLookup::SiloImage(image))
             }
             params::ImageSelector {
                 image: NameOrId::Id(_),
@@ -58,21 +83,28 @@ impl super::Nexus {
             } => Err(Error::invalid_request(
                 "when providing image as an ID, project should not be specified",
             )),
-            _ => Err(Error::invalid_request(
-                "image should either be UUID or project should be specified",
-            )),
             }
     }
 
-    /// Creates a project image
+    /// Creates an image
     pub async fn image_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        lookup_project: &lookup::Project<'_>,
+        lookup_parent: &ImageParentLookup<'_>,
         params: &params::ImageCreate,
     ) -> CreateResult<db::model::Image> {
-        let (.., authz_project) =
-            lookup_project.lookup_for(authz::Action::CreateChild).await?;
+        let (authz_silo, maybe_authz_project) = match lookup_parent {
+            ImageParentLookup::Project(project) => {
+                let (authz_silo, authz_project) =
+                    project.lookup_for(authz::Action::CreateChild).await?;
+                (authz_silo, Some(authz_project))
+            }
+            ImageParentLookup::Silo(silo) => {
+                let (.., authz_silo) =
+                    silo.lookup_for(authz::Action::CreateChild).await?;
+                (authz_silo, None)
+            }
+        };
         let new_image = match &params.source {
             params::ImageSource::Url { url } => {
                 let db_block_size = db::model::BlockSize::try_from(
@@ -179,7 +211,8 @@ impl super::Nexus {
                         image_id,
                         params.identity.clone(),
                     ),
-                    project_id: authz_project.id(),
+                    silo_id: authz_silo.id(),
+                    project_id: maybe_authz_project.map(|p| p.id()),
                     volume_id: volume.id(),
                     url: Some(url.clone()),
                     os: params.os.clone(),
@@ -216,7 +249,8 @@ impl super::Nexus {
                         image_id,
                         params.identity.clone(),
                     ),
-                    project_id: authz_project.id(),
+                    silo_id: authz_silo.id(),
+                    project_id: maybe_authz_project.map(|p| p.id()),
                     volume_id: image_volume.id(),
                     url: None,
                     os: params.os.clone(),
@@ -269,7 +303,8 @@ impl super::Nexus {
                         global_image_id,
                         params.identity.clone(),
                     ),
-                    project_id: authz_project.id(),
+                    silo_id: authz_silo.id(),
+                    project_id: maybe_authz_project.map(|p| p.id()),
                     volume_id: volume.id(),
                     url: None,
                     os: "alpine".into(),
@@ -281,29 +316,61 @@ impl super::Nexus {
             }
         };
 
-        self.db_datastore.image_create(opctx, &authz_project, new_image).await
+        match maybe_authz_project {
+            Some(authz_project) => {
+                self.db_datastore
+                    .project_image_create(opctx, &authz_project, new_image.into())
+                    .await
+            }
+            None => {
+                self.db_datastore
+                    .silo_image_create(opctx, &authz_silo, new_image.into())
+                    .await
+            }
+        }
     }
 
     pub async fn image_list(
         &self,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
+        parent_lookup: &ImageParentLookup<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Image> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.image_list(opctx, &authz_project, pagparams).await
+        match parent_lookup {
+            ImageParentLookup::Project(project) => {
+                let (.., authz_project) =
+                    project.lookup_for(authz::Action::ListChildren).await?;
+                self.db_datastore
+                    .project_image_list(opctx, &authz_project, pagparams)
+                    .await
+            }
+            ImageParentLookup::Silo(silo) => {
+                let (.., authz_silo) =
+                    silo.lookup_for(authz::Action::ListChildren).await?;
+                self.db_datastore
+                    .silo_image_list(opctx, &authz_silo, pagparams)
+                    .await
+            }
+        }
     }
 
-    // TODO-MVP: Implement
     pub async fn image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
-        image_lookup: &lookup::Image<'_>,
+        image_lookup: &ImageLookup<'_>,
     ) -> DeleteResult {
-        let (.., authz_image) =
-            image_lookup.lookup_for(authz::Action::Delete).await?;
-        let lookup_type = LookupType::ById(authz_image.id());
+        let lookup_type = match image_lookup {
+            ImageLookup::ProjectImage(lookup) => {
+                let (.., authz_image) =
+                    lookup.lookup_for(authz::Action::Delete).await?;
+                LookupType::ById(authz_image.id())
+            }
+            ImageLookup::SiloImage(lookup) => {
+                let (.., authz_image) =
+                    lookup.lookup_for(authz::Action::Delete).await?;
+                LookupType::ById(authz_image.id())
+            }
+        };
         let error = lookup_type.into_not_found(ResourceType::Image);
         Err(self
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))

@@ -2397,7 +2397,7 @@ async fn system_image_delete(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2407,10 +2407,23 @@ async fn image_list(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, &scan_params.selector)?;
+        let parent_lookup = match scan_params.selector.project_selector {
+            Some(selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+                ImageParentLookup::Project(project_lookup)
+            }
+            None => {
+                let silo = self
+                    .opctx
+                    .authn
+                    .silo_required()
+                    .internal_context("looking up Organization by name");
+                let silo_lookup = nexus.silo_lookup(&opctx, &silo.id)?;
+                ImageParentLookup::Silo(silo_lookup)
+            }
+        };
         let images = nexus
-            .image_list(&opctx, &project_lookup, &paginated_by)
+            .image_list(&opctx, &parent_lookup, &paginated_by)
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -2434,7 +2447,7 @@ async fn image_list(
 }]
 async fn image_create(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<params::ProjectSelector>,
+    query_params: Query<params::OptionalProjectSelector>,
     new_image: TypedBody<params::ImageCreate>,
 ) -> Result<HttpResponseCreated<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -2443,9 +2456,23 @@ async fn image_create(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let params = &new_image.into_inner();
-        let project_lookup = nexus.project_lookup(&opctx, &query)?;
+        let parent_lookup = match query.project_selector {
+            Some(project_selector) => {
+                let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
+                ImageParentLookup::Project(project_lookup)
+            }
+            None => {
+                let silo = self
+                    .opctx
+                    .authn
+                    .silo_required()
+                    .internal_context("looking up Organization by name");
+                let silo_lookup = nexus.silo_lookup(&opctx, &silo.id)?;
+                ImageParentLookup::Silo(silo_lookup)
+            }
+        };
         let image =
-            nexus.image_create(&opctx, &project_lookup, &params).await?;
+            nexus.image_create(&opctx, &parent_lookup, &params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2475,7 +2502,7 @@ async fn image_view(
             project_selector: query.project_selector,
         };
         let (.., image) =
-            nexus.image_lookup(&opctx, &image_selector)?.fetch().await?;
+            nexus.image_lookup(&opctx, &image_selector).await?.fetch().await?;
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2506,7 +2533,7 @@ async fn image_delete(
             image: path.image,
             project_selector: query.project_selector,
         };
-        let image_lookup = nexus.image_lookup(&opctx, &image_selector)?;
+        let image_lookup = nexus.image_lookup(&opctx, &image_selector).await?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
     };

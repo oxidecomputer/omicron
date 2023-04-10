@@ -837,12 +837,6 @@ CREATE INDEX ON omicron.public.disk (
 ) WHERE
     time_deleted IS NULL AND attach_instance_id IS NOT NULL;
 
-/* The kind of the image */
-CREATE TYPE omicron.public.image_kind AS ENUM (
-    'project',
-    'silo'
-);
-
 CREATE TABLE omicron.public.image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -853,10 +847,8 @@ CREATE TABLE omicron.public.image (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    kind omicron.public.image_kind NOT NULL,
-
-    /* Reference to the parent resource whose type is determined by kind */
-    parent_id UUID NOT NULL,
+    silo_id UUID NOT NULL,
+    project_id UUID,
 
     volume_id UUID NOT NULL,
 
@@ -876,7 +868,8 @@ SELECT
     time_created,
     time_modified,
     time_deleted,
-    parent_id AS project_id,
+    silo_id,
+    project_id,
     volume_id,
     url,
     os,
@@ -887,7 +880,7 @@ SELECT
 FROM 
     omicron.public.image
 WHERE 
-    kind = 'project';
+    project_id IS NOT NULL;
 
 CREATE VIEW omicron.public.silo_image AS
 SELECT
@@ -897,7 +890,7 @@ SELECT
     time_created,
     time_modified,
     time_deleted,
-    parent_id AS silo_id,
+    silo_id,
     volume_id,
     url,
     os,
@@ -908,12 +901,12 @@ SELECT
 FROM 
     omicron.public.image
 WHERE 
-    kind = 'silo';
+    project_id IS NULL;
 
 CREATE UNIQUE INDEX on omicron.public.image (
-    parent_id,
-    name,
-    kind
+    silo_id,
+    project_id,
+    name
 ) WHERE
     time_deleted is NULL;
 
