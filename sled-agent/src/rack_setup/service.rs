@@ -728,7 +728,8 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::Ntp { .. } => {
+                        ServiceType::BoundaryNtp { .. }
+                        | ServiceType::InternalNtp { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,

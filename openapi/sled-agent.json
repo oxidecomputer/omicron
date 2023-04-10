@@ -1922,9 +1922,6 @@
           {
             "type": "object",
             "properties": {
-              "boundary": {
-                "type": "boolean"
-              },
               "dns_servers": {
                 "type": "array",
                 "items": {
@@ -1944,12 +1941,43 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "boundary_ntp"
                 ]
               }
             },
             "required": [
-              "boundary",
+              "dns_servers",
+              "ntp_servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
               "dns_servers",
               "ntp_servers",
               "type"

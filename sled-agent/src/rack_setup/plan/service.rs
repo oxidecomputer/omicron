@@ -489,11 +489,8 @@ impl Plan {
                     boundary_ntp_servers
                         .push(format!("{}.host.{}", id, DNS_ZONE));
                     (
-                        // XXXNTP - these boundary servers need a path to the
-                        // external network via OPTE.
-                        vec![ServiceType::Ntp {
+                        vec![ServiceType::BoundaryNtp {
                             ntp_servers: config.ntp_servers.clone(),
-                            boundary: true,
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
                         }],
@@ -501,9 +498,8 @@ impl Plan {
                     )
                 } else {
                     (
-                        vec![ServiceType::Ntp {
+                        vec![ServiceType::InternalNtp {
                             ntp_servers: boundary_ntp_servers.clone(),
-                            boundary: false,
                             dns_servers: rack_dns_servers.clone(),
                             domain: None,
                         }],

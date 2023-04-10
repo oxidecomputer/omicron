@@ -568,7 +568,7 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
-                | ServiceType::Ntp { boundary: true, .. }
+                | ServiceType::BoundaryNtp { .. }
                 | ServiceType::ExternalDns { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
@@ -640,7 +640,8 @@ impl ServiceManager {
                     needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
-                ServiceType::Ntp { .. } => {
+                ServiceType::BoundaryNtp { .. }
+                | ServiceType::InternalNtp { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_time".to_string());
                     needed.push("proc_priocntl".to_string());
@@ -1233,12 +1234,18 @@ impl ServiceManager {
                 ServiceType::CruciblePantry => {
                     panic!("CruciblePantry is self-assembling now")
                 }
-                ServiceType::Ntp {
+                ServiceType::BoundaryNtp {
                     ntp_servers,
-                    boundary,
+                    dns_servers,
+                    domain,
+                }
+                | ServiceType::InternalNtp {
+                    ntp_servers,
                     dns_servers,
                     domain,
                 } => {
+                    let boundary =
+                        matches!(service, ServiceType::BoundaryNtp { .. });
                     info!(
                         self.inner.log,
                         "Set up NTP service boundary={}, Servers={:?}",
@@ -1261,7 +1268,7 @@ impl ServiceManager {
                     smfh.setprop("config/allow", &format!("{}", rack_net))?;
                     smfh.setprop(
                         "config/boundary",
-                        if *boundary { "true" } else { "false" },
+                        if boundary { "true" } else { "false" },
                     )?;
 
                     smfh.delpropvalue("config/server", "*")?;

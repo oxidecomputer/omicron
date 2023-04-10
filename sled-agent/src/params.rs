@@ -307,9 +307,13 @@ pub enum ServiceType {
         pkt_source: String,
     },
     CruciblePantry,
-    Ntp {
+    BoundaryNtp {
         ntp_servers: Vec<String>,
-        boundary: bool,
+        dns_servers: Vec<String>,
+        domain: Option<String>,
+    },
+    InternalNtp {
+        ntp_servers: Vec<String>,
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
@@ -330,7 +334,8 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible/pantry"),
-            ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::BoundaryNtp { .. }
+            | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
     }
@@ -391,8 +396,11 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
-            St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
-                AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
+            St::BoundaryNtp { ntp_servers, dns_servers, domain } => {
+                AutoSt::BoundaryNtp { ntp_servers, dns_servers, domain }
+            }
+            St::InternalNtp { ntp_servers, dns_servers, domain } => {
+                AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
             }
             St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }
