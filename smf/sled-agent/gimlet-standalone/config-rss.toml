@@ -11,11 +11,16 @@ rack_subnet = "fd00:1122:3344:0100::"
 # For values less than 2, no rack secret will be generated.
 rack_secret_threshold = 1
 
-# NOTE: In the lab, use "172.20.15.226"
-nexus_external_address = "192.168.1.20"
-
 ntp_servers = [ "ntp.eng.oxide.computer" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+
+# The IP ranges configured as part of the services IP Pool.
+# e.g., Nexus will be configured to use an address from this
+# pool as its external IP.
+# NOTE: In the lab, use "172.20.15.226"
+[[internal_services_ip_pool_ranges]]
+first = "192.168.1.20"
+last = "192.168.1.20"
 
 [gateway]
 
