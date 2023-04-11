@@ -165,11 +165,11 @@ impl<'a> LookupPath<'a> {
         Disk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    // TODO: This needs a custom implementation of some sort I guess. Given a UUID we don't know if it's a silo or project image
-    // which is ultimately fine b/c its all stored in a single table anyway so the UUID is unique. But we need to be able to get
-    // it out of the shared table and coerced into the right format.
-    /// Select a resource of type Image, identified by its id
     pub fn image_id(self, id: Uuid) -> Image<'a> {
+        Image::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn project_image_id(self, id: Uuid) -> Image<'a> {
         Image::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -755,6 +755,18 @@ lookup_resource! {
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+// Helpers for unifying the interfaces around images
+
+pub enum ImageLookup<'a> {
+    ProjectImage(ProjectImage<'a>),
+    SiloImage(SiloImage<'a>),
+}
+
+pub enum ImageParentLookup<'a> {
+    Project(Project<'a>),
+    Silo(Silo<'a>),
 }
 
 #[cfg(test)]

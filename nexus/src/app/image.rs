@@ -8,11 +8,12 @@ use super::Unimpl;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
-use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::ImageLookup;
+use nexus_db_queries::db::lookup::ImageParentLookup;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
@@ -29,16 +30,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub enum ImageLookup<'a> {
-    ProjectImage(lookup::ProjectImage<'a>),
-    SiloImage(lookup::SiloImage<'a>),
-}
-
-pub enum ImageParentLookup<'a> {
-    Project(lookup::Project<'a>),
-    Silo(lookup::Silo<'a>),
-}
-
 impl super::Nexus {
     pub async fn image_lookup<'a>(
         &'a self,
@@ -54,7 +45,7 @@ impl super::Nexus {
                     .image_id(*id).fetch().await?;
                 let lookup = match db_image.project_id {
                     Some(id) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
-                        .project_id(id)),
+                        .project_image_id(id)),
                     None => {
                         ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
                             .silo_image_id(db_image.silo_id))
@@ -74,7 +65,7 @@ impl super::Nexus {
                 image: NameOrId::Name(name),
                 project_selector: None,
             } => {
-                let image = self.silo_image_name(Name::ref_cast(name));
+                let image = self.current_silo_lookup(opctx)?.silo_image_name(Name::ref_cast(name));
                 Ok(ImageLookup::SiloImage(image))
             }
             params::ImageSelector {
@@ -319,7 +310,11 @@ impl super::Nexus {
         match maybe_authz_project {
             Some(authz_project) => {
                 self.db_datastore
-                    .project_image_create(opctx, &authz_project, new_image.into())
+                    .project_image_create(
+                        opctx,
+                        &authz_project,
+                        new_image.into(),
+                    )
                     .await
             }
             None => {
