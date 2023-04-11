@@ -39,6 +39,8 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::db::lookup::ImageLookup;
+use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
@@ -2407,18 +2409,13 @@ async fn image_list(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let parent_lookup = match scan_params.selector.project_selector {
+        let parent_lookup = match &scan_params.selector.project_selector {
             Some(selector) => {
                 let project_lookup = nexus.project_lookup(&opctx, &selector)?;
                 ImageParentLookup::Project(project_lookup)
             }
             None => {
-                let silo = self
-                    .opctx
-                    .authn
-                    .silo_required()
-                    .internal_context("looking up Organization by name");
-                let silo_lookup = nexus.silo_lookup(&opctx, &silo.id)?;
+                let silo_lookup = nexus.current_silo_lookup(&opctx)?;
                 ImageParentLookup::Silo(silo_lookup)
             }
         };
@@ -2456,23 +2453,18 @@ async fn image_create(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let params = &new_image.into_inner();
-        let parent_lookup = match query.project_selector {
+        let parent_lookup = match &query.project_selector {
             Some(project_selector) => {
-                let project_lookup = nexus.project_lookup(&opctx, &project_selector)?;
+                let project_lookup =
+                    nexus.project_lookup(&opctx, project_selector)?;
                 ImageParentLookup::Project(project_lookup)
             }
             None => {
-                let silo = self
-                    .opctx
-                    .authn
-                    .silo_required()
-                    .internal_context("looking up Organization by name");
-                let silo_lookup = nexus.silo_lookup(&opctx, &silo.id)?;
+                let silo_lookup = nexus.current_silo_lookup(&opctx)?;
                 ImageParentLookup::Silo(silo_lookup)
             }
         };
-        let image =
-            nexus.image_create(&opctx, &parent_lookup, &params).await?;
+        let image = nexus.image_create(&opctx, &parent_lookup, &params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2501,8 +2493,17 @@ async fn image_view(
             image: path.image,
             project_selector: query.project_selector,
         };
-        let (.., image) =
-            nexus.image_lookup(&opctx, &image_selector).await?.fetch().await?;
+        let image: nexus_db_model::Image =
+            match nexus.image_lookup(&opctx, &image_selector).await? {
+                ImageLookup::ProjectImage(image) => {
+                    let (.., db_image) = image.fetch().await?;
+                    db_image.into()
+                }
+                ImageLookup::SiloImage(image) => {
+                    let (.., db_image) = image.fetch().await?;
+                    db_image.into()
+                }
+            };
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

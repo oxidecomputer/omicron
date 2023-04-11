@@ -203,7 +203,7 @@ impl super::Nexus {
                         params.identity.clone(),
                     ),
                     silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.map(|p| p.id()),
+                    project_id: maybe_authz_project.clone().map(|p| p.id()),
                     volume_id: volume.id(),
                     url: Some(url.clone()),
                     os: params.os.clone(),
@@ -241,7 +241,7 @@ impl super::Nexus {
                         params.identity.clone(),
                     ),
                     silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.map(|p| p.id()),
+                    project_id: maybe_authz_project.clone().map(|p| p.id()),
                     volume_id: image_volume.id(),
                     url: None,
                     os: params.os.clone(),
@@ -295,7 +295,7 @@ impl super::Nexus {
                         params.identity.clone(),
                     ),
                     silo_id: authz_silo.id(),
-                    project_id: maybe_authz_project.map(|p| p.id()),
+                    project_id: maybe_authz_project.clone().map(|p| p.id()),
                     volume_id: volume.id(),
                     url: None,
                     os: "alpine".into(),
@@ -313,13 +313,17 @@ impl super::Nexus {
                     .project_image_create(
                         opctx,
                         &authz_project,
-                        new_image.into(),
+                        new_image.try_into()?,
                     )
                     .await
             }
             None => {
                 self.db_datastore
-                    .silo_image_create(opctx, &authz_silo, new_image.into())
+                    .silo_image_create(
+                        opctx,
+                        &authz_silo,
+                        new_image.try_into()?,
+                    )
                     .await
             }
         }

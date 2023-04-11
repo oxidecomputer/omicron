@@ -169,8 +169,8 @@ impl<'a> LookupPath<'a> {
         Image::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    pub fn project_image_id(self, id: Uuid) -> Image<'a> {
-        Image::PrimaryKey(Root { lookup_root: self }, id)
+    pub fn project_image_id(self, id: Uuid) -> ProjectImage<'a> {
+        ProjectImage::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Snapshot, identified by its id

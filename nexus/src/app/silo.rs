@@ -31,10 +31,10 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
-    pub fn current_silo_lookup(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<lookup::Silo<'_>> {
+    pub fn current_silo_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+    ) -> LookupResult<lookup::Silo<'a>> {
         let silo = opctx
             .authn
             .silo_required()
