@@ -311,6 +311,9 @@ pub enum ServiceType {
         ntp_servers: Vec<String>,
         dns_servers: Vec<String>,
         domain: Option<String>,
+        snat_ip: IpAddr,
+        first_port: u16,
+        last_port: u16,
     },
     InternalNtp {
         ntp_servers: Vec<String>,
@@ -396,9 +399,21 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
-            St::BoundaryNtp { ntp_servers, dns_servers, domain } => {
-                AutoSt::BoundaryNtp { ntp_servers, dns_servers, domain }
-            }
+            St::BoundaryNtp {
+                ntp_servers,
+                dns_servers,
+                domain,
+                snat_ip,
+                first_port,
+                last_port,
+            } => AutoSt::BoundaryNtp {
+                ntp_servers,
+                dns_servers,
+                domain,
+                snat_ip,
+                first_port,
+                last_port,
+            },
             St::InternalNtp { ntp_servers, dns_servers, domain } => {
                 AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
             }

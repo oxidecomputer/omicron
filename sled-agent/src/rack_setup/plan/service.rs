@@ -13,8 +13,8 @@ use dns_service_client::types::DnsConfigParams;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, RSS_RESERVED_ADDRESSES,
-    SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
@@ -26,6 +26,7 @@ use sled_agent_client::{
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::num::Wrapping;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
@@ -77,6 +78,9 @@ pub enum PlanError {
 
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
+
+    #[error("Failed to allocate service IP for service: {0}")]
+    ServiceIp(&'static str),
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
@@ -235,8 +239,30 @@ impl Plan {
             .iter()
             .flat_map(|range| range.iter());
 
-        let mut boundary_ntp_servers = vec![];
         let mut seen_any_scrimlet = false;
+
+        let mut boundary_ntp_servers = vec![];
+        let mut boundary_ntp_snat_ip = services_ip_pool
+            .next()
+            .ok_or_else(|| PlanError::ServiceIp("Boundary NTP"))?;
+        let mut boundary_ntp_snat_first_port = Wrapping(0u16);
+        let mut boundary_ntp_snat_config =
+            |services_ip_pool: &mut dyn Iterator<Item = _>| {
+                // Grab the next available values
+                let snat_ip = boundary_ntp_snat_ip;
+                let first_port = boundary_ntp_snat_first_port.0;
+                let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+
+                boundary_ntp_snat_first_port += NUM_SOURCE_NAT_PORTS;
+                if boundary_ntp_snat_first_port.0 == 0 {
+                    // Grab another IP if we wrapped around
+                    boundary_ntp_snat_ip = services_ip_pool
+                        .next()
+                        .ok_or_else(|| PlanError::ServiceIp("Boundary NTP"))?;
+                }
+
+                Ok::<_, PlanError>((snat_ip, first_port, last_port))
+            };
 
         for (idx, (_bootstrap_address, sled_request)) in
             sleds.iter().enumerate()
@@ -316,12 +342,9 @@ impl Plan {
                         omicron_common::address::NEXUS_INTERNAL_PORT,
                     )
                     .unwrap();
-                let external_ip = services_ip_pool.next().ok_or_else(|| {
-                    PlanError::SledInitialization(
-                        "no IP available in services IP pool for Nexus"
-                            .to_string(),
-                    )
-                })?;
+                let external_ip = services_ip_pool
+                    .next()
+                    .ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::Nexus,
@@ -488,11 +511,16 @@ impl Plan {
                 let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
                     boundary_ntp_servers
                         .push(format!("{}.host.{}", id, DNS_ZONE));
+                    let (snat_ip, first_port, last_port) =
+                        boundary_ntp_snat_config(&mut services_ip_pool)?;
                     (
                         vec![ServiceType::BoundaryNtp {
                             ntp_servers: config.ntp_servers.clone(),
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
+                            snat_ip,
+                            first_port,
+                            last_port,
                         }],
                         ServiceName::BoundaryNtp,
                     )
@@ -516,7 +544,7 @@ impl Plan {
                     zone_type: ZoneType::Ntp,
                     addresses: vec![address],
                     gz_addresses: vec![],
-                    services: services,
+                    services,
                 });
             }
 

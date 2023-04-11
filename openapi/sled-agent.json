@@ -1932,11 +1932,25 @@
                 "nullable": true,
                 "type": "string"
               },
+              "first_port": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
+              "last_port": {
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              },
               "ntp_servers": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
+              },
+              "snat_ip": {
+                "type": "string",
+                "format": "ip"
               },
               "type": {
                 "type": "string",
@@ -1947,7 +1961,10 @@
             },
             "required": [
               "dns_servers",
+              "first_port",
+              "last_port",
               "ntp_servers",
+              "snat_ip",
               "type"
             ]
           },

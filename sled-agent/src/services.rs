@@ -1238,6 +1238,7 @@ impl ServiceManager {
                     ntp_servers,
                     dns_servers,
                     domain,
+                    ..
                 }
                 | ServiceType::InternalNtp {
                     ntp_servers,
