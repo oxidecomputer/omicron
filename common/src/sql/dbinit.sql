@@ -122,14 +122,25 @@ CREATE TABLE omicron.public.sled_resource (
     -- Should match the UUID of the corresponding service
     id UUID PRIMARY KEY,
 
+    -- The sled where resources are being consumed
+    sled_id UUID NOT NULL,
+
     -- Identifies the type of the resource
     kind omicron.public.sled_resource_kind NOT NULL,
 
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
 
-    -- The maximum amount of RAM provisioned to this resource
-    physical_ram INT8 NOT NULL
+    -- The maximum amount of RSS RAM provisioned to this resource
+    rss_ram INT8 NOT NULL,
+
+    -- The maximum amount of Reservoir RAM provisioned to this resource
+    reservoir_ram INT8 NOT NULL
+);
+
+-- Allow looking up all resources which reside on a sled
+CREATE INDEX ON omicron.public.sled_resource (
+    sled_id
 );
 
 /*

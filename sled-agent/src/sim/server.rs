@@ -95,8 +95,13 @@ impl Server {
                             model: String::from("Unknown"),
                             revision: 0,
                         },
-                        usable_hardware_threads: 4,
-                        usable_physical_ram: NexusTypes::ByteCount(1 << 30),
+                        usable_hardware_threads: config
+                            .hardware
+                            .hardware_threads,
+                        usable_physical_ram: NexusTypes::ByteCount::try_from(
+                            config.hardware.physical_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)

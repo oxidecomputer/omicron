@@ -395,9 +395,11 @@ table! {
 table! {
     sled_resource (id) {
         id -> Uuid,
+        sled_id -> Uuid,
         kind -> crate::SledResourceKindEnum,
         hardware_threads -> Int8,
-        physical_ram -> Int8,
+        rss_ram -> Int8,
+        reservoir_ram -> Int8,
     }
 }
 
@@ -823,6 +825,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     service,
     sled,
+    sled_resource,
     router_route,
     volume,
     vpc,
