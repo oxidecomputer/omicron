@@ -589,7 +589,7 @@ mod test {
         let services = vec![internal_params::ServicePutRequest {
             service_id: Uuid::new_v4(),
             sled_id: sled.id(),
-            address: Ipv6Addr::LOCALHOST,
+            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
             },
@@ -625,6 +625,8 @@ mod test {
         assert_eq!(observed_services.len(), 1);
         assert_eq!(observed_services[0].sled_id, sled.id());
         assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
+        assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*observed_services[0].port, 123);
 
         // It should have a corresponding "Nexus service record"
         assert_eq!(observed_nexus_services.len(), 1);
@@ -682,7 +684,7 @@ mod test {
             internal_params::ServicePutRequest {
                 service_id: Uuid::new_v4(),
                 sled_id: sled.id(),
-                address: Ipv6Addr::LOCALHOST,
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_start),
                 },
@@ -690,7 +692,7 @@ mod test {
             internal_params::ServicePutRequest {
                 service_id: Uuid::new_v4(),
                 sled_id: sled.id(),
-                address: Ipv6Addr::LOCALHOST,
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_end),
                 },
@@ -759,6 +761,10 @@ mod test {
         assert_eq!(observed_services[1].sled_id, sled.id());
         assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
         assert_eq!(observed_services[1].kind, ServiceKind::Nexus);
+        assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*observed_services[1].ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*observed_services[0].port, services[0].address.port());
+        assert_eq!(*observed_services[1].port, services[1].address.port());
 
         // It should have a corresponding "Nexus service record"
         assert_eq!(observed_nexus_services.len(), 2);
@@ -863,7 +869,7 @@ mod test {
         let services = vec![internal_params::ServicePutRequest {
             service_id: Uuid::new_v4(),
             sled_id: sled.id(),
-            address: Ipv6Addr::LOCALHOST,
+            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
             },
@@ -918,7 +924,7 @@ mod test {
             internal_params::ServicePutRequest {
                 service_id: Uuid::new_v4(),
                 sled_id: sled.id(),
-                address: Ipv6Addr::LOCALHOST,
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
                 },
@@ -926,7 +932,7 @@ mod test {
             internal_params::ServicePutRequest {
                 service_id: Uuid::new_v4(),
                 sled_id: sled.id(),
-                address: Ipv6Addr::LOCALHOST,
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
                 },

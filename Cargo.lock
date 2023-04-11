@@ -649,11 +649,12 @@ dependencies = [
 
 [[package]]
 name = "buf-list"
-version = "1.0.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f462e45b27db47403356859af1cb4bfbbd0021cb7b7d10db6ea40958bb4e2c48"
+checksum = "f56bd1685d994a3e2a3ed802eb1ecee8cb500b0ad4df48cb4d5d1a2f04749c3a"
 dependencies = [
  "bytes",
+ "tokio",
 ]
 
 [[package]]
@@ -3019,7 +3020,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 
 [[package]]
 name = "illumos-utils"
@@ -3335,7 +3336,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -4657,7 +4658,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 dependencies = [
  "cfg-if 0.1.10",
  "dyn-clone",
@@ -4674,7 +4675,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -4687,7 +4688,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 dependencies = [
  "libc",
  "libnet",
@@ -4755,7 +4756,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=f36a283e91f228a542149ee9230126e9c4bb5e8b#f36a283e91f228a542149ee9230126e9c4bb5e8b"
+source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
 dependencies = [
  "cfg-if 0.1.10",
  "illumos-sys-hdrs",
@@ -8699,6 +8700,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
+ "buf-list",
  "camino",
  "ciborium",
  "clap 4.2.1",
@@ -8724,6 +8726,7 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml 0.7.3",
  "tui",
  "tui-tree-widget",

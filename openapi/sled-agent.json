@@ -1722,14 +1722,17 @@
         "type": "object",
         "properties": {
           "correction": {
+            "description": "The current offset between the NTP clock and system clock.",
             "type": "number",
             "format": "double"
           },
           "skew": {
+            "description": "The estimated error bound on the frequency.",
             "type": "number",
             "format": "double"
           },
           "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
             "type": "boolean"
           }
         },
