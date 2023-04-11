@@ -49,7 +49,7 @@ progenitor::generate_api!(
     Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, received_ago: Duration },
+    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
     Unavailable,
 }
 
@@ -58,11 +58,11 @@ impl From<types::GetInventoryResponse> for GetInventoryResponse {
         match response {
             types::GetInventoryResponse::Response {
                 inventory,
-                received_ago,
+                mgs_last_seen,
             } => {
-                let received_ago =
-                    Duration::new(received_ago.secs, received_ago.nanos);
-                Self::Response { inventory, received_ago }
+                let mgs_last_seen =
+                    Duration::new(mgs_last_seen.secs, mgs_last_seen.nanos);
+                Self::Response { inventory, mgs_last_seen }
             }
             types::GetInventoryResponse::Unavailable => Self::Unavailable,
         }

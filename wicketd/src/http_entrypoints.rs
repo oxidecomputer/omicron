@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for wicketd
 
+use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
 use dropshot::endpoint;
@@ -78,7 +79,13 @@ async fn get_inventory(
     let GetInventoryParams { force_refresh } = body_params.into_inner();
     match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
         Ok(response) => Ok(HttpResponseOk(response)),
-        Err(_) => {
+        Err(GetInventoryError::InvalidSpIdentifier) => {
+            Err(HttpError::for_unavail(
+                None,
+                "Invalid SP identifier in request".into(),
+            ))
+        }
+        Err(GetInventoryError::ShutdownInProgress) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
     }

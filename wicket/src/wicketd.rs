@@ -248,11 +248,11 @@ impl WicketdManager {
                     Ok(val) => match val.into_inner().into() {
                         GetInventoryResponse::Response {
                             inventory,
-                            received_ago,
+                            mgs_last_seen,
                         } => {
                             let _ = tx.send(Event::Inventory {
                                 inventory,
-                                mgs_last_seen: received_ago,
+                                mgs_last_seen,
                             });
                         }
                         GetInventoryResponse::Unavailable => {
@@ -261,8 +261,11 @@ impl WicketdManager {
                             // ticks in the runner;
                         }
                     },
-                    Err(e) => {
-                        warn!(log, "{e}");
+                    Err(err) => {
+                        warn!(
+                            log, "Getting inventory from wicketd failed";
+                            "err" => %err,
+                        );
                     }
                 }
             }
