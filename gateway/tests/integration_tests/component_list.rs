@@ -10,7 +10,6 @@ use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
-use gateway_test_utils::SpStateExt;
 use omicron_gateway::http_entrypoints::SpComponentInfo;
 use omicron_gateway::http_entrypoints::SpComponentList;
 use omicron_gateway::http_entrypoints::SpComponentPresence;
@@ -26,11 +25,14 @@ async fn component_list() {
     // SPs are enabled.
     let sim_state = current_simulator_state(simrack).await;
     assert!(
-        sim_state.iter().filter(|sp| sp.info.id.typ == SpType::Sled).count()
+        sim_state
+            .iter()
+            .filter(|sp| sp.ignition.id.typ == SpType::Sled)
+            .count()
             >= 2
     );
-    assert!(sim_state.iter().any(|sp| sp.info.id.typ == SpType::Switch));
-    assert!(sim_state.iter().all(|sp| sp.details.is_enabled()));
+    assert!(sim_state.iter().any(|sp| sp.ignition.id.typ == SpType::Switch));
+    assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // Get the component list for sled 0.
     let url = format!("{}", client.url("/sp/sled/0/component"));

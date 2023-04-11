@@ -298,8 +298,7 @@ async fn sp_fetching_task(
         }
 
         let state = match mgs_client.sp_get(id.type_, id.slot).await {
-            // TODO Can we remove the ignition info from MGS's sp_get?
-            Ok(response) => response.into_inner().details,
+            Ok(response) => response.into_inner(),
             Err(err) => {
                 warn!(
                     log, "Failed to get state for SP";

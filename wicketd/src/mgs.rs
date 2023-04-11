@@ -339,8 +339,6 @@ impl MgsManager {
                         sp_handle
                             .set_ignition_presence(IgnitionPresence::Present);
                     }
-                    // TODO can we remove this case from MGS too?
-                    SpIgnition::Error { .. } => (),
                 }
             }
 

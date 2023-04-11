@@ -1198,24 +1198,6 @@
               "power",
               "present"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "present": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "present"
-            ]
           }
         ]
       },
@@ -1334,78 +1316,49 @@
         ]
       },
       "SpState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "base_mac_address": {
-                "type": "array",
-                "items": {
-                  "type": "integer",
-                  "format": "uint8",
-                  "minimum": 0
-                }
-              },
-              "hubris_archive_id": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "power_state": {
-                "$ref": "#/components/schemas/PowerState"
-              },
-              "revision": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "rot": {
-                "$ref": "#/components/schemas/RotState"
-              },
-              "serial_number": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "enabled"
-                ]
-              },
-              "version": {
-                "$ref": "#/components/schemas/ImageVersion"
-              }
-            },
-            "required": [
-              "base_mac_address",
-              "hubris_archive_id",
-              "model",
-              "power_state",
-              "revision",
-              "rot",
-              "serial_number",
-              "state",
-              "version"
-            ]
+        "type": "object",
+        "properties": {
+          "base_mac_address": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
           },
-          {
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "communication_failed"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "state"
-            ]
+          "hubris_archive_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "power_state": {
+            "$ref": "#/components/schemas/PowerState"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotState"
+          },
+          "serial_number": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ImageVersion"
           }
+        },
+        "required": [
+          "base_mac_address",
+          "hubris_archive_id",
+          "model",
+          "power_state",
+          "revision",
+          "rot",
+          "serial_number",
+          "version"
         ]
       },
       "SpType": {

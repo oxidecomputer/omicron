@@ -7,7 +7,6 @@
 use dropshot::test_util;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup;
-use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
 use omicron_gateway::http_entrypoints::SpType;
 use omicron_gateway::SpIdentifier;
@@ -40,13 +39,8 @@ async fn discovery_both_locations() {
             let url =
                 format!("{}", client0.url(&format!("/sp/switch/{}", switch)));
 
-            let resp: SpInfo = test_util::object_get(client, &url).await;
-            match resp.details {
-                SpState::Enabled { serial_number, .. } => {
-                    assert_eq!(serial_number, expected_serial)
-                }
-                other => panic!("unexpected state {:?}", other),
-            }
+            let state: SpState = test_util::object_get(client, &url).await;
+            assert_eq!(state.serial_number, expected_serial);
         }
     }
 
