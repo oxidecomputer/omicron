@@ -275,8 +275,8 @@ impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(try_from = "AnyIpv4Range")]
 pub struct Ipv4Range {
-    first: Ipv4Addr,
-    last: Ipv4Addr,
+    pub first: Ipv4Addr,
+    pub last: Ipv4Addr,
 }
 
 impl Ipv4Range {
@@ -327,8 +327,8 @@ impl TryFrom<AnyIpv4Range> for Ipv4Range {
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(try_from = "AnyIpv6Range")]
 pub struct Ipv6Range {
-    first: Ipv6Addr,
-    last: Ipv6Addr,
+    pub first: Ipv6Addr,
+    pub last: Ipv6Addr,
 }
 
 impl Ipv6Range {
