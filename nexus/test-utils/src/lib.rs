@@ -168,9 +168,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address = match sled_agent.dns_server.local_address() {
+    let dns_server_address = match sled_agent.dns_dropshot_server.local_addr() {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
-        SocketAddr::V6(addr) => *addr,
+        SocketAddr::V6(addr) => addr,
     };
     let dns_service = ServicePutRequest {
         service_id: Uuid::new_v4(),

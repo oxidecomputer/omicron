@@ -29,6 +29,7 @@ pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use internal_dns::DnsConfigBuilder;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
@@ -36,7 +37,6 @@ use uuid::Uuid;
 
 // These modules used to be within nexus, but have been moved to
 // nexus-db-queries. Keeping these around temporarily for migration reasons.
-use internal_dns::DnsConfigBuilder;
 pub use nexus_db_queries::{authn, authz, db};
 
 #[macro_use]
@@ -66,22 +66,22 @@ pub fn run_openapi_internal() -> Result<(), String> {
 
 /// A partially-initialized Nexus server, which exposes an internal interface,
 /// but is not ready to receive external requests.
-pub struct InternalServer<'a> {
+pub struct InternalServer {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
-    config: &'a Config,
+    config: Config,
     log: Logger,
 }
 
-impl<'a> InternalServer<'a> {
+impl InternalServer {
     /// Start a nexus server.
     pub async fn start(
-        config: &'a Config,
+        config: &Config,
         log: &Logger,
-    ) -> Result<InternalServer<'a>, String> {
+    ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
@@ -101,7 +101,7 @@ impl<'a> InternalServer<'a> {
         .map_err(|error| format!("initializing internal server: {}", error))?;
         let http_server_internal = server_starter_internal.start();
 
-        Ok(Self { apictx, http_server_internal, config, log })
+        Ok(Self { apictx, http_server_internal, config: config.clone(), log })
     }
 }
 
@@ -115,7 +115,7 @@ pub struct Server {
 }
 
 impl Server {
-    async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+    async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
         let log = internal.log;
@@ -188,15 +188,12 @@ impl Server {
 
 #[async_trait::async_trait]
 impl nexus_test_interface::NexusServer for Server {
-    type InternalServer<'a> = InternalServer<'a>;
+    type InternalServer = InternalServer;
 
-    async fn start_internal<'a>(
-        config: &'a Config,
-        log: &'_ Logger,
-    ) -> (InternalServer<'a>, SocketAddr)
-    where
-        'a: 'async_trait
-    {
+    async fn start_internal(
+        config: &Config,
+        log: &Logger,
+    ) -> (InternalServer, SocketAddr) {
         let internal_server =
             InternalServer::start(config, &log).await.unwrap();
         internal_server.apictx.nexus.wait_for_populate().await.unwrap();

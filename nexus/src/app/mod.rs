@@ -168,12 +168,16 @@ pub struct Nexus {
     dpd_client: Arc<dpd_client::Client>,
 
     /// Background tasks
-    // This field is not currently used, but will be when we start activating
-    // background tasks from elsewhere in Nexus.
-    _background_tasks: background::Driver,
+    background_tasks: background::Driver,
 
     /// task handle for the internal DNS config background task
-    _task_internal_dns_config: background::TaskHandle,
+    task_internal_dns_config: background::TaskHandle,
+
+    /// task handle for the internal DNS servers background task
+    task_internal_dns_servers: background::TaskHandle,
+
+    /// task handle for the external DNS servers background task
+    task_external_dns_servers: background::TaskHandle,
 }
 
 impl Nexus {
@@ -253,7 +257,12 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
-        let (background_tasks, task_internal_dns_config) = background::init(
+        let (
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
+        ) = background::init(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
@@ -291,8 +300,10 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
             dpd_client,
-            _background_tasks: background_tasks,
-            _task_internal_dns_config: task_internal_dns_config,
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -318,6 +329,31 @@ impl Nexus {
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+
+        // Kick all background tasks once the populate step finishes.  Among
+        // other things, the populate step installs role assignments for
+        // internal identities that are used by the background tasks.  If we
+        // don't do this here, those tasks might fail spuriously on startup and
+        // not be retried for a while.
+        let task_nexus = nexus.clone();
+        let task_log = nexus.log.clone();
+        tokio::spawn(async move {
+            match task_nexus.wait_for_populate().await {
+                Ok(_) => {
+                    info!(
+                        task_log,
+                        "populate complete; activating background tasks"
+                    );
+                    for task in task_nexus.background_tasks.tasks() {
+                        task_nexus.background_tasks.activate(task);
+                    }
+                }
+                Err(_) => {
+                    error!(task_log, "populate failed");
+                }
+            }
+        });
+
         nexus
     }
 

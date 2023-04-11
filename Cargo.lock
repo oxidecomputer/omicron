@@ -4335,6 +4335,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
+ "dns-server",
  "dns-service-client",
  "dpd-client",
  "dropshot",

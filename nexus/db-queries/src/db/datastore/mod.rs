@@ -1041,8 +1041,9 @@ mod test {
         // Create a sled on which the service should exist.
         let sled_id = create_test_sled(&datastore).await;
 
-        // Create a new service to exist on this sled.
-        let service_id = Uuid::new_v4();
+        // Create a few new service to exist on this sled.
+        let service1_id =
+            "ab7bd7fd-7c37-48ab-a84a-9c09a90c4c7f".parse().unwrap();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         let kind = ServiceKind::Nexus;
 
@@ -1053,7 +1054,8 @@ mod test {
         assert_eq!(service1.ip, result.ip);
         assert_eq!(service1.kind, result.kind);
 
-        let service2_id = Uuid::new_v4();
+        let service2_id =
+            "fe5b6e3d-dfee-47b4-8719-c54f78912c0b".parse().unwrap();
         let service2 = Service::new(service2_id, sled_id, addr, kind);
         let result =
             datastore.service_upsert(&opctx, service2.clone()).await.unwrap();
