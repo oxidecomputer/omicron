@@ -27,6 +27,13 @@ pub struct Params {
 
 declare_saga_actions! {
     instance_delete;
+    V2P_ENSURE_UNDO -> "v2p_ensure_undo" {
+        + sid_noop
+        - sid_v2p_ensure_undo
+    }
+    V2P_ENSURE -> "v2p_ensure" {
+        + sid_v2p_ensure
+    }
     INSTANCE_DELETE_RECORD -> "no_result1" {
         + sid_delete_instance_record
     }
@@ -60,6 +67,8 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(v2p_ensure_undo_action());
+        builder.append(v2p_ensure_action());
         builder.append(delete_asic_configuration_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
@@ -70,6 +79,50 @@ impl NexusSaga for SagaInstanceDelete {
 }
 
 // instance delete saga: action implementations
+
+async fn sid_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+/// Ensure that the v2p mappings for this instance are deleted
+async fn sid_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+/// During unwind, ensure that v2p mappings are created again
+async fn sid_v2p_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
 
 async fn sid_delete_network_config(
     sagactx: NexusActionContext,

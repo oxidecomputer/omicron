@@ -199,9 +199,12 @@ impl<'a> LookupPath<'a> {
         Snapshot::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type NetworkInterface, identified by its id
-    pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
-        NetworkInterface::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type InstanceNetworkInterface, identified by its id
+    pub fn instance_network_interface_id(
+        self,
+        id: Uuid,
+    ) -> InstanceNetworkInterface<'a> {
+        InstanceNetworkInterface::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Vpc, identified by its id
@@ -556,14 +559,14 @@ lookup_resource! {
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Silo", "Project" ],
-    children = [ "NetworkInterface" ],
+    children = [ "InstanceNetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
-    name = "NetworkInterface",
+    name = "InstanceNetworkInterface",
     ancestors = [ "Silo", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,

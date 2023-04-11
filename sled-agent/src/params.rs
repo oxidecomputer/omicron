@@ -249,16 +249,30 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
-    Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
-    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Nexus {
+        internal_ip: Ipv6Addr,
+        external_ip: IpAddr,
+    },
+    InternalDns {
+        server_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    },
     Oximeter,
     ManagementGatewayService,
     Wicketd,
-    Dendrite { asic: DendriteAsic },
-    Tfport { pkt_source: String },
+    Dendrite {
+        asic: DendriteAsic,
+    },
+    Tfport {
+        pkt_source: String,
+    },
     CruciblePantry,
-    Ntp { servers: Vec<String>, boundary: bool },
-    DnsClient { servers: Vec<String>, domain: Option<String> },
+    Ntp {
+        ntp_servers: Vec<String>,
+        boundary: bool,
+        dns_servers: Vec<String>,
+        domain: Option<String>,
+    },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -273,8 +287,19 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
             ServiceType::Ntp { .. } => write!(f, "ntp"),
-            ServiceType::DnsClient { .. } => write!(f, "dns_client"),
         }
+    }
+}
+
+impl crate::smf_helper::Service for ServiceType {
+    fn service_name(&self) -> String {
+        self.to_string()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/system/illumos/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
     }
 }
 
@@ -307,9 +332,8 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
-            St::Ntp { servers, boundary } => AutoSt::Ntp { servers, boundary },
-            St::DnsClient { servers, domain } => {
-                AutoSt::DnsClient { servers, domain }
+            St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
+                AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
             }
         }
     }
@@ -415,11 +439,15 @@ pub struct ServiceEnsureBody {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TimeSync {
+    /// The synchronization state of the sled, true when the system clock
+    /// and the NTP clock are in sync (to within a small window).
     pub sync: bool,
     // These could both be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating
     // the client.
+    /// The estimated error bound on the frequency.
     pub skew: f64,
+    /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }

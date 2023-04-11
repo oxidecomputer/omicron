@@ -298,8 +298,8 @@ lazy_static! {
         nexus_defaults::DEFAULT_PRIMARY_NIC_NAME.parse().unwrap();
     pub static ref DEMO_INSTANCE_NIC_URL: String =
         format!("/v1/network-interfaces/{}?project={}&instance={}", *DEMO_INSTANCE_NIC_NAME, *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
-    pub static ref DEMO_INSTANCE_NIC_CREATE: params::NetworkInterfaceCreate =
-        params::NetworkInterfaceCreate {
+    pub static ref DEMO_INSTANCE_NIC_CREATE: params::InstanceNetworkInterfaceCreate =
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_INSTANCE_NIC_NAME.clone(),
                 description: String::from(""),
@@ -308,8 +308,8 @@ lazy_static! {
             subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
             ip: None,
         };
-    pub static ref DEMO_INSTANCE_NIC_PUT: params::NetworkInterfaceUpdate = {
-        params::NetworkInterfaceUpdate {
+    pub static ref DEMO_INSTANCE_NIC_PUT: params::InstanceNetworkInterfaceUpdate = {
+        params::InstanceNetworkInterfaceUpdate {
             identity: IdentityMetadataUpdateParams {
                 name: None,
                 description: Some(String::from("an updated description")),

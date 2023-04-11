@@ -70,8 +70,8 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     .unwrap();
     assert_eq!(
         err.message,
-        "VPC Subnet cannot be deleted while instances \
-        with network interfaces in the subnet exist",
+        "VPC Subnet cannot be deleted while \
+        network interfaces in the subnet exist",
     );
 
     // Stop and then delete the instance

@@ -140,7 +140,7 @@ pub struct OptionalInstanceSelector {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct NetworkInterfaceSelector {
+pub struct InstanceNetworkInterfaceSelector {
     /// Name or ID of the project, only required if `instance` is provided as a `Name`
     pub project: Option<NameOrId>,
     /// Name or ID of the instance, only required if `network_interface` is provided as a `Name`
@@ -616,10 +616,10 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
-/// Create-time parameters for a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
+/// Create-time parameters for an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceCreate {
+pub struct InstanceNetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// The VPC in which to create the interface.
@@ -630,13 +630,13 @@ pub struct NetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
-/// Parameters for updating a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface).
+/// Parameters for updating an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceUpdate {
+pub struct InstanceNetworkInterfaceUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 
@@ -706,8 +706,8 @@ pub struct IpPoolUpdate {
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
-/// Describes an attachment of a `NetworkInterface` to an `Instance`, at the
-/// time the instance is created.
+/// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
+/// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
 // instances. It's true that all networking resources for an instance must
 // belong to a single VPC, but we don't consider instances to be "scoped" to a
@@ -725,11 +725,11 @@ pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `NetworkInterface`s for the `Instance`.
+    /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
     /// If more than one interface is provided, then the first will be
     /// designated the primary interface for the instance.
-    Create(Vec<NetworkInterfaceCreate>),
+    Create(Vec<InstanceNetworkInterfaceCreate>),
 
     /// The default networking configuration for an instance is to create a
     /// single primary interface with an automatically-assigned IP address. The

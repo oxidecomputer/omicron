@@ -41,6 +41,7 @@ enum MgsRequest {
         #[allow(dead_code)]
         etag: Option<String>,
         reply_tx: oneshot::Sender<GetInventoryResponse>,
+        force_refresh: Vec<SpIdentifier>,
     },
 }
 
@@ -74,11 +75,12 @@ impl GetInventoryResponse {
 impl MgsHandle {
     pub async fn get_inventory(
         &self,
+        force_refresh: Vec<SpIdentifier>,
     ) -> Result<GetInventoryResponse, ShutdownInProgress> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let etag = None;
         self.tx
-            .send(MgsRequest::GetInventory { etag, reply_tx })
+            .send(MgsRequest::GetInventory { etag, reply_tx, force_refresh })
             .await
             .map_err(|_| ShutdownInProgress)?;
         reply_rx.await.map_err(|_| ShutdownInProgress)
@@ -141,26 +143,58 @@ impl MgsManager {
 
     pub async fn run(mut self) {
         let mgs_client = self.mgs_client;
-        let mut inventory_rx = poll_sps(&self.log, mgs_client).await;
+        let (poll_inventory_now_tx, poll_inventory_now_rx) = mpsc::channel(1);
+        let mut inventory_rx =
+            poll_sps(&self.log, mgs_client, poll_inventory_now_rx).await;
+        let mut waiting_for_inventory: Vec<
+            oneshot::Sender<GetInventoryResponse>,
+        > = Vec::new();
 
         loop {
             tokio::select! {
                 // Poll MGS inventory
                 Some(PollSps { changed_inventory, mgs_received }) = inventory_rx.recv() => {
-                    let inventory = match (changed_inventory, self.inventory.take()) {
+                    let inventory = match (changed_inventory, self.inventory.take())
+                    {
                         (Some(inventory), _) => inventory,
                         (None, Some((inventory, _))) => inventory,
-                        (None, None) => continue,
+                        (None, None) => return,
                     };
                     self.inventory = Some((inventory, mgs_received));
+                    for reply_tx in waiting_for_inventory.drain(..) {
+                        let response = GetInventoryResponse::new(self.inventory.clone());
+                        let _ = reply_tx.send(response);
+                    }
                 }
 
                 // Handle requests from clients
                 Some(request) = self.rx.recv() => {
                     match request {
-                        MgsRequest::GetInventory {reply_tx, ..} => {
-                            let response = GetInventoryResponse::new(self.inventory.clone());
-                            let _ = reply_tx.send(response);
+                        MgsRequest::GetInventory {reply_tx, force_refresh, ..} => {
+                            // For now, we ignore the specific contents of
+                            // `force_refresh` because we're hitting MGS's bulk
+                            // `/sp` state endpoint. If wicket wanted us to
+                            // refresh _any_ SPs, we therefore refresh them all.
+                            if !force_refresh.is_empty() {
+                                // Try to send; if the channel is full, we've
+                                // already requested a refresh and we can just
+                                // wait for a response.
+                                _ = poll_inventory_now_tx.try_send(());
+
+                                // We don't want to respond on `reply_tx` until
+                                // we get a new inventory, but we don't want to
+                                // `inventory_rx.recv().await` here because that
+                                // would block non-force-refresh requests.
+                                // Instead, we'll push `reply_tx` onto a queue
+                                // of waiters and respond as soon as we get our
+                                // next inventory update from our polling task
+                                // (which should come soon since we just told it
+                                // to refresh).
+                                waiting_for_inventory.push(reply_tx);
+                            } else {
+                                let response = GetInventoryResponse::new(self.inventory.clone());
+                                let _ = reply_tx.send(response);
+                            }
                         }
                     }
                 }
@@ -209,8 +243,9 @@ async fn update_inventory(
             let curr = inventory
                 .entry(id)
                 .and_modify(|curr| {
-                    if curr.state != state {
+                    if curr.state != state || curr.ignition != ignition {
                         // state has changed - discard cached details
+                        inventory_changed = true;
                         curr.components = None;
                         curr.caboose = None;
                         curr.rot.caboose = None;
@@ -347,6 +382,7 @@ struct SpDetails {
 async fn poll_sps(
     log: &Logger,
     client: gateway_client::Client,
+    mut poll_now: mpsc::Receiver<()>,
 ) -> mpsc::Receiver<PollSps> {
     let log = log.clone();
 
@@ -361,7 +397,16 @@ async fn poll_sps(
         let mut ticker = interval(MGS_POLL_INTERVAL);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
-            ticker.tick().await;
+            // Wait until either our tick interval _or_ we get an explicit
+            // request to update our inventory (in which case we reset our
+            // ticker).
+            tokio::select! {
+                _ = ticker.tick() => (),
+                Some(()) = poll_now.recv() => {
+                    ticker.reset();
+                }
+            }
+
             match client.sp_list().await {
                 Ok(val) => {
                     let changed_inventory = update_inventory(

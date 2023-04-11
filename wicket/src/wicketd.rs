@@ -9,7 +9,9 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use wicketd_client::types::{SpIdentifier, SpType};
+use wicketd_client::types::{
+    GetInventoryParams, IgnitionCommand, SpIdentifier, SpType,
+};
 use wicketd_client::GetInventoryResponse;
 
 use crate::state::ComponentId;
@@ -44,6 +46,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[derive(Debug)]
 pub enum Request {
     StartUpdate(ComponentId),
+    IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
 pub struct WicketdHandle {
@@ -80,7 +83,15 @@ impl WicketdManager {
     /// * Translate any responses/errors into [`Event`]s
     ///   that can be utilized by the UI.
     pub async fn run(mut self) {
-        self.poll_inventory().await;
+        // When we perform operations that we expect to change the inventory, we
+        // want to be able to trigger a poll of the inventory immediately
+        // instead of waiting for the next tick. Create a depth-1 channel on
+        // which we can push requests to fetch the inventory; we only need depth
+        // 1 because if the channel already has a message in it, we've already
+        // queued a request to poll the inventory ASAP.
+        let (poll_interval_now_tx, poll_interval_now_rx) = mpsc::channel(1);
+
+        self.poll_inventory(poll_interval_now_rx).await;
         self.poll_update_log().await;
         self.poll_artifacts().await;
 
@@ -88,8 +99,18 @@ impl WicketdManager {
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
-                    let Request::StartUpdate(component_id) = request;
-                    self.start_update(component_id).await;
+                    match request {
+                        Request::StartUpdate(component_id) => {
+                            self.start_update(component_id);
+                        }
+                        Request::IgnitionCommand(component_id, command) => {
+                            self.start_ignition_command(
+                                component_id,
+                                command,
+                                poll_interval_now_tx.clone(),
+                            );
+                        }
+                    }
                 }
                 else => {
                     slog::info!(self.log, "Request receiver closed. Process must be exiting.");
@@ -99,7 +120,7 @@ impl WicketdManager {
         }
     }
 
-    async fn start_update(&self, component_id: ComponentId) {
+    fn start_update(&self, component_id: ComponentId) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
@@ -113,6 +134,35 @@ impl WicketdManager {
             // report current status to users in a more detailed and holistic
             // fashion.
             slog::info!(log, "Update response for {}: {:?}", component_id, res);
+        });
+    }
+
+    fn start_ignition_command(
+        &self,
+        component_id: ComponentId,
+        command: IgnitionCommand,
+        poll_inventory_now: mpsc::Sender<SpIdentifier>,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let res =
+                client.post_ignition_command(sp.type_, sp.slot, command).await;
+            // We don't return errors or success values, as there's nobody to
+            // return them to. How do we relay this result to the user?
+            slog::info!(
+                log,
+                "Ignition response for {} ({:?}): {:?}",
+                component_id,
+                command,
+                res
+            );
+            // Try to poll the inventory now; if this fails we don't care (it
+            // means either someone else has already queued up an inventory poll
+            // or the polling task has died).
+            _ = poll_inventory_now.try_send(sp);
         });
     }
 
@@ -172,7 +222,7 @@ impl WicketdManager {
         });
     }
 
-    async fn poll_inventory(&self) {
+    async fn poll_inventory(&self, mut poll_now: mpsc::Receiver<SpIdentifier>) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
@@ -182,9 +232,19 @@ impl WicketdManager {
             let mut ticker = interval(WICKETD_POLL_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
             loop {
-                ticker.tick().await;
+                let force_refresh = tokio::select! {
+                    _ = ticker.tick() => Vec::new(),
+                    Some(sp) = poll_now.recv() => {
+                        // We want to poll immediately; do so and reset our
+                        // timer.
+                        ticker.reset();
+                        vec![sp]
+                    }
+                };
+
+                let params = GetInventoryParams { force_refresh };
                 // TODO: We should really be using ETAGs here
-                match client.get_inventory().await {
+                match client.get_inventory(&params).await {
                     Ok(val) => match val.into_inner().into() {
                         GetInventoryResponse::Response {
                             inventory,

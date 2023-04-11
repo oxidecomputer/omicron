@@ -126,8 +126,11 @@ impl WicketdArtifactStore {
         Self { log, artifacts_with_plan: Default::default() }
     }
 
-    pub(crate) fn put_repository(&self, bytes: &[u8]) -> Result<(), HttpError> {
-        slog::debug!(self.log, "adding repository"; "size" => bytes.len());
+    pub(crate) fn put_repository(
+        &self,
+        bytes: BufList,
+    ) -> Result<(), HttpError> {
+        slog::debug!(self.log, "adding repository"; "size" => bytes.num_bytes());
 
         let new_artifacts = ArtifactsWithPlan::from_zip(bytes, &self.log)
             .map_err(|error| error.to_http_error())?;
@@ -183,10 +186,10 @@ impl WicketdArtifactStore {
 
 impl ArtifactsWithPlan {
     fn from_zip(
-        zip_bytes: &[u8],
+        zip_bytes: BufList,
         log: &Logger,
     ) -> Result<Self, RepositoryError> {
-        let mut extractor = ArchiveExtractor::from_borrowed_bytes(zip_bytes)
+        let mut extractor = ArchiveExtractor::from_owned_buf_list(zip_bytes)
             .map_err(RepositoryError::OpenArchive)?;
 
         // Create a temporary directory to hold artifacts in (we'll read them
@@ -734,8 +737,8 @@ mod tests {
         args.exec(&logctx.log).context("error executing assemble command")?;
 
         // Now check that it can be read by the archive extractor.
-        let zip_bytes = fs_err::read(&archive_path)?;
-        let plan = ArtifactsWithPlan::from_zip(&zip_bytes, &logctx.log)
+        let zip_bytes = fs_err::read(&archive_path)?.into();
+        let plan = ArtifactsWithPlan::from_zip(zip_bytes, &logctx.log)
             .context("error reading archive.zip")?;
         // Check that all known artifact kinds are present in the map.
         let by_id_kinds: BTreeSet<_> =
