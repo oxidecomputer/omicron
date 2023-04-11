@@ -318,6 +318,33 @@ impl<'a> LookupPath<'a> {
         PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
+        SiloImage::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn silo_image_name<'b, 'c>(self, name: &'b Name) -> SiloImage<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                SiloImage::Name(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                SiloImage::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type UpdateAvailableArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_available_artifact_tuple(
