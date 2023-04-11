@@ -304,6 +304,7 @@ impl RunningZone {
     /// address on the zone.
     pub async fn get(
         log: &Logger,
+        vnic_allocator: &VnicAllocator<Etherstub>,
         zone_prefix: &str,
         addrtype: AddressRequest,
     ) -> Result<Self, GetZoneError> {
@@ -344,7 +345,8 @@ impl RunningZone {
             },
         )?;
 
-        let control_vnic = Link::wrap_existing(vnic_name)
+        let control_vnic = vnic_allocator
+            .wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
         // The bootstrap address for a running zone never changes,
@@ -356,7 +358,8 @@ impl RunningZone {
                 err,
             })?
             .map(|name| {
-                Link::wrap_existing(name)
+                vnic_allocator
+                    .wrap_existing(name)
                     .expect("Failed to wrap valid bootstrap VNIC")
             });
 

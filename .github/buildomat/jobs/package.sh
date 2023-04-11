@@ -62,36 +62,8 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
 
-# Assemble global zone files in a temporary directory.
-if ! tmp_gz=$(mktemp -d); then
-  exit 1
-fi
-trap 'cd /; rm -rf "$tmp_gz"' EXIT
-
-# Header file, identifying this is intended to be layered in the global zone.
-# Within the ramdisk, this means that all files under "root/foo" should appear
-# in the global zone as "/foo".
-echo '{"v":"1","t":"layer"}' > "$tmp_gz/oxide.json"
-
-# Extract the sled-agent tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp_gz/root/opt/oxide/sled-agent"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/omicron-sled-agent.tar"
-# Ensure that the manifest for the sled agent exists in a location where it may
-# be automatically initialized.
-mkdir -p "$tmp_gz/root/lib/svc/manifest/site/"
-mv pkg/manifest.xml "$tmp_gz/root/lib/svc/manifest/site/sled-agent.xml"
-cd -
-# Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp_gz/root/opt/oxide/mg-ddm"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
-cd -
-
-cd "$tmp_gz" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
-cd -
+# Create global zone package @ /work/global-zone-packages.tar.gz
+ptime -m ./tools/build-global-zone-packages.sh $tarball_src_dir /work
 
 # Non-Global Zones
 
@@ -114,7 +86,7 @@ zones=(
 cp "${zones[@]}" /work/zones/
 
 #
-# Global Zone files for for Trampoline image
+# Global Zone files for Trampoline image
 #
 
 # Build necessary for the trampoline image
@@ -123,32 +95,6 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t recovery package
 
-if ! tmp_trampoline=$(mktemp -d); then
-  exit 1
-fi
-trap 'cd /; rm -rf "$tmp_trampoline"' EXIT
-
-echo '{"v":"1","t":"layer"}' > "$tmp_trampoline/oxide.json"
-
-# Extract the installinator tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp_trampoline/root/opt/oxide/installinator"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/installinator.tar"
-# Ensure that the manifest for the installinator exists in a location where it may
-# be automatically initialized.
-mkdir -p "$tmp_trampoline/root/lib/svc/manifest/site/"
-mv pkg/manifest.xml "$tmp_trampoline/root/lib/svc/manifest/site/installinator.xml"
-cd -
-# Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp_trampoline/root/opt/oxide/mg-ddm"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
-cd -
-
-mkdir -p /work
-cd "$tmp_trampoline" && tar cvfz /work/trampoline-global-zone-packages.tar.gz oxide.json root
-cd -
-
+# Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
+ptime -m ./tools/build-trampoline-global-zone-packages.sh $tarball_src_dir /work
 

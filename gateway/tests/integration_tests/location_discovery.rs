@@ -9,6 +9,8 @@ use gateway_messages::SpPort;
 use gateway_test_utils::setup;
 use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
+use omicron_gateway::http_entrypoints::SpType;
+use omicron_gateway::SpIdentifier;
 
 #[tokio::test]
 async fn discovery_both_locations() {
@@ -23,12 +25,12 @@ async fn discovery_both_locations() {
     // the two instances should've discovered that they were switch0 and
     // switch1, respectively
     assert_eq!(
-        testctx0.server.management_switch().location_name().unwrap(),
-        "switch0"
+        testctx0.server.management_switch().local_switch().unwrap(),
+        SpIdentifier { typ: SpType::Switch.into(), slot: 0 },
     );
     assert_eq!(
-        testctx1.server.management_switch().location_name().unwrap(),
-        "switch1"
+        testctx1.server.management_switch().local_switch().unwrap(),
+        SpIdentifier { typ: SpType::Switch.into(), slot: 1 },
     );
 
     // both instances should report the same serial number for switch 0 and

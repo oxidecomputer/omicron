@@ -368,7 +368,11 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
-                    .service_backend_zone(ServiceName::InternalDNS, &zone, port)
+                    .service_backend_zone(
+                        ServiceName::CruciblePantry,
+                        &zone,
+                        port,
+                    )
                     .unwrap();
                 request.services.push(ServiceZoneRequest {
                     id,
@@ -395,30 +399,22 @@ impl Plan {
                     (
                         // XXXNTP - these boundary servers need a path to the
                         // external network via OPTE.
-                        vec![
-                            ServiceType::Ntp {
-                                servers: config.ntp_servers.clone(),
-                                boundary: true,
-                            },
-                            ServiceType::DnsClient {
-                                servers: config.dns_servers.clone(),
-                                domain: None,
-                            },
-                        ],
+                        vec![ServiceType::Ntp {
+                            ntp_servers: config.ntp_servers.clone(),
+                            boundary: true,
+                            dns_servers: config.dns_servers.clone(),
+                            domain: None,
+                        }],
                         ServiceName::BoundaryNTP,
                     )
                 } else {
                     (
-                        vec![
-                            ServiceType::Ntp {
-                                servers: boundary_ntp_servers.clone(),
-                                boundary: false,
-                            },
-                            ServiceType::DnsClient {
-                                servers: rack_dns_servers.clone(),
-                                domain: None,
-                            },
-                        ],
+                        vec![ServiceType::Ntp {
+                            ntp_servers: boundary_ntp_servers.clone(),
+                            boundary: false,
+                            dns_servers: rack_dns_servers.clone(),
+                            domain: None,
+                        }],
                         ServiceName::InternalNTP,
                     )
                 };

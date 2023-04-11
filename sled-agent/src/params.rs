@@ -72,13 +72,13 @@ pub struct InstanceEnsureBody {
     /// has never seen this Instance before).
     pub initial: InstanceHardware,
     /// requested runtime state of the Instance
-    pub target: InstanceRuntimeStateRequested,
+    pub target: InstanceStateRequested,
     /// If we're migrating this instance, the details needed to drive the migration
-    pub migrate: Option<InstanceMigrateParams>,
+    pub migrate: Option<InstanceMigrationTargetParams>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrateParams {
+pub struct InstanceMigrationTargetParams {
     pub src_propolis_id: Uuid,
     pub src_propolis_addr: SocketAddr,
 }
@@ -107,8 +107,6 @@ pub enum InstanceStateRequested {
     /// Issue a reset command to the instance, such that it should
     /// stop and then immediately become running.
     Reboot,
-    /// Migrate the instance to another node.
-    Migrating,
     /// Stop the instance and delete it.
     Destroyed,
 }
@@ -125,7 +123,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Migrating => "migrating",
             InstanceStateRequested::Destroyed => "destroyed",
         }
     }
@@ -136,7 +133,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Migrating => false,
             InstanceStateRequested::Destroyed => true,
         }
     }
@@ -144,20 +140,9 @@ impl InstanceStateRequested {
 
 /// Instance runtime state to update for a migration.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateMigrateParams {
+pub struct InstanceMigrationSourceParams {
     pub migration_id: Uuid,
     pub dst_propolis_id: Uuid,
-}
-
-/// Used to request an Instance state change from a sled agent
-///
-/// Right now, it's only the run state and migration id that can
-/// be changed, though we might want to support changing properties
-/// like "ncpus" here.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateRequested {
-    pub run_state: InstanceStateRequested,
-    pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -264,17 +249,37 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
-    Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
-    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Nexus {
+        internal_ip: Ipv6Addr,
+        external_ip: IpAddr,
+    },
+    InternalDns {
+        server_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    },
     Oximeter,
     ManagementGatewayService,
     Wicketd,
-    Dendrite { asic: DendriteAsic },
-    Tfport { pkt_source: String },
+    Dendrite {
+        asic: DendriteAsic,
+    },
+    Tfport {
+        pkt_source: String,
+    },
     CruciblePantry,
-    Ntp { servers: Vec<String>, boundary: bool },
-    DnsClient { servers: Vec<String>, domain: Option<String> },
-    Maghemite { mode: String },
+    Ntp {
+        ntp_servers: Vec<String>,
+        boundary: bool,
+        dns_servers: Vec<String>,
+        domain: Option<String>,
+    },
+    DnsClient {
+        servers: Vec<String>,
+        domain: Option<String>,
+    },
+    Maghemite {
+        mode: String,
+    },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -292,6 +297,18 @@ impl std::fmt::Display for ServiceType {
             ServiceType::DnsClient { .. } => write!(f, "dns_client"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
+    }
+}
+
+impl crate::smf_helper::Service for ServiceType {
+    fn service_name(&self) -> String {
+        self.to_string()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/system/illumos/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
     }
 }
 
@@ -324,7 +341,9 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
-            St::Ntp { servers, boundary } => AutoSt::Ntp { servers, boundary },
+            St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
+                AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
+            }
             St::DnsClient { servers, domain } => {
                 AutoSt::DnsClient { servers, domain }
             }
@@ -439,11 +458,15 @@ pub struct ServiceEnsureBody {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TimeSync {
+    /// The synchronization state of the sled, true when the system clock
+    /// and the NTP clock are in sync (to within a small window).
     pub sync: bool,
     // These could both be f32, but there is a problem with progenitor/typify
     // where, although the f32 correctly becomes "float" (and not "double") in
     // the API spec, that "float" gets converted back to f64 when generating
     // the client.
+    /// The estimated error bound on the frequency.
     pub skew: f64,
+    /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }

@@ -7,10 +7,11 @@
 use crate::nexus::LazyNexusClient;
 use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrateParams, InstanceRuntimeStateRequested,
+    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -93,8 +94,8 @@ impl InstanceManager {
         &self,
         instance_id: Uuid,
         initial_hardware: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
-        migrate: Option<InstanceMigrateParams>,
+        target: InstanceStateRequested,
+        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         info!(
             &self.inner.log,
@@ -209,6 +210,32 @@ impl InstanceManager {
             "rules" => ?&rules,
         );
         self.inner.port_manager.firewall_rules_ensure(rules)?;
+        Ok(())
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            &self.inner.log,
+            "Mapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        self.inner.port_manager.set_virtual_nic_host(mapping)?;
+        Ok(())
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(
+            &self.inner.log,
+            "Unmapping virtual NIC to physical host";
+            "mapping" => ?&mapping,
+        );
+        self.inner.port_manager.unset_virtual_nic_host(mapping)?;
         Ok(())
     }
 }
@@ -363,10 +390,7 @@ mod test {
             .ensure(
                 test_uuid(),
                 new_initial_instance(),
-                InstanceRuntimeStateRequested {
-                    run_state: InstanceStateRequested::Running,
-                    migration_params: None,
-                },
+                InstanceStateRequested::Running,
                 None,
             )
             .await
@@ -453,15 +477,12 @@ mod test {
 
         let id = test_uuid();
         let rt = new_initial_instance();
-        let target = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
-        };
+        let target = InstanceStateRequested::Running;
 
         // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target, None).await.unwrap();
         // Transition only.
-        im.ensure(id, rt.clone(), target.clone(), None).await.unwrap();
+        im.ensure(id, rt.clone(), target, None).await.unwrap();
         // Transition only.
         im.ensure(id, rt, target, None).await.unwrap();
 

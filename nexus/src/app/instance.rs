@@ -37,8 +37,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
 use ref_cast::RefCast;
-use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
@@ -293,11 +291,14 @@ impl super::Nexus {
     /// Idempotently place the instance in a 'Migrating' state.
     pub async fn instance_start_migrate(
         &self,
-        opctx: &OpContext,
-        instance_id: Uuid,
-        migration_id: Uuid,
-        dst_propolis_id: Uuid,
+        _opctx: &OpContext,
+        _instance_id: Uuid,
+        _migration_id: Uuid,
+        _dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
+        todo!("Migration endpoint not yet implemented in sled agent");
+
+        /*
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .instance_id(instance_id)
@@ -319,6 +320,7 @@ impl super::Nexus {
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        */
     }
 
     /// Reboot the specified instance.
@@ -339,15 +341,11 @@ impl super::Nexus {
         // never lose track of the fact that this Instance was supposed to be
         // running.
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Reboot,
-            migration_params: None,
-        };
         self.instance_set_runtime(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Reboot,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
@@ -360,15 +358,11 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
-        };
         self.instance_set_runtime(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Running,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
@@ -381,15 +375,11 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Stopped,
-            migration_params: None,
-        };
         self.instance_set_runtime(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Stopped,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
@@ -407,15 +397,13 @@ impl super::Nexus {
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
-        requested: &InstanceRuntimeStateRequested,
     ) -> Result<(), Error> {
         // Users are allowed to request a start or stop even if the instance is
         // already in the desired state (or moving to it), and we will issue a
         // request to the SA to make the state change in these cases in case the
         // runtime state we saw here was stale.  However, users are not allowed
         // to change the state of an instance that's migrating, failed or
-        // destroyed.  But if we're already migrating, requesting a migration is
-        // allowed to allow for idempotency.
+        // destroyed.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
             InstanceState::Starting => true,
@@ -423,10 +411,7 @@ impl super::Nexus {
             InstanceState::Stopping => true,
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
-
-            InstanceState::Migrating => {
-                requested.run_state == InstanceStateRequested::Migrating
-            }
+            InstanceState::Migrating => false,
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
             InstanceState::Destroyed => false,
@@ -451,13 +436,12 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
-        requested: InstanceRuntimeStateRequested,
+        requested: InstanceStateRequested,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         self.check_runtime_change_allowed(
             &db_instance.runtime().clone().into(),
-            &requested,
         )?;
 
         // Gather disk information and turn that into DiskRequests
@@ -610,7 +594,7 @@ impl super::Nexus {
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested.clone(),
+                    target: requested,
                     migrate: None,
                 },
             )

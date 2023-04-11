@@ -236,7 +236,7 @@ async fn make_project(
         LookupType::ByName(disk_name.clone()),
     ));
     builder.new_resource(instance.clone());
-    builder.new_resource(authz::NetworkInterface::new(
+    builder.new_resource(authz::InstanceNetworkInterface::new(
         instance,
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-nic1", instance_name)),

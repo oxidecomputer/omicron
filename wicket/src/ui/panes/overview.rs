@@ -10,12 +10,17 @@ use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::panes::compute_scroll_offset;
+use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
+
+enum PopupKind {
+    Ignition,
+}
 
 /// The OverviewPane shows a rendering of the rack.
 ///
@@ -56,7 +61,7 @@ impl Control for OverviewPane {
                     self.rack_view_selected = false;
                     Some(Action::Redraw)
                 } else {
-                    None
+                    self.inventory_view.on(state, cmd)
                 }
             }
             Cmd::Exit => {
@@ -66,7 +71,7 @@ impl Control for OverviewPane {
                     self.rack_view_selected = true;
                     Some(Action::Redraw)
                 } else {
-                    None
+                    self.inventory_view.on(state, cmd)
                 }
             }
             _ => self.dispatch(state, cmd),
@@ -194,20 +199,73 @@ pub struct InventoryView {
     help: Vec<(&'static str, &'static str)>,
     // Vertical offset used for scrolling
     scroll_offsets: BTreeMap<ComponentId, usize>,
+    ignition: IgnitionPopup,
+    popup: Option<PopupKind>,
 }
 
 impl InventoryView {
     pub fn new() -> InventoryView {
         InventoryView {
             help: vec![
-                ("RACK VIEW", "<ENTER>"),
-                ("SWITCH COMPONENT", "<LEFT/RIGHT>"),
-                ("SCROLL", "<UP/DOWN>"),
+                ("Rack View", "<ENTER>"),
+                ("Switch Component", "<LEFT/RIGHT>"),
+                ("Scroll", "<UP/DOWN>"),
+                ("Ignition", "<I>"),
             ],
             scroll_offsets: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, 0))
                 .collect(),
+            ignition: IgnitionPopup::default(),
+            popup: None,
+        }
+    }
+
+    pub fn draw_ignition_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = self.ignition.popup(state.rack_state.selected);
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn handle_cmd_in_popup(
+        &mut self,
+        state: &mut State,
+        cmd: Cmd,
+    ) -> Option<Action> {
+        if cmd == Cmd::Exit {
+            self.popup = None;
+            return Some(Action::Redraw);
+        }
+        match self.popup.as_ref().unwrap() {
+            PopupKind::Ignition => match cmd {
+                Cmd::Up => {
+                    self.ignition.key_up();
+                    Some(Action::Redraw)
+                }
+                Cmd::Down => {
+                    self.ignition.key_down();
+                    Some(Action::Redraw)
+                }
+                Cmd::Enter => {
+                    // Note: If making changes here, consider making them to the
+                    // same arm of `UpdatePane::handle_cmd_in_popup()` in the
+                    // `update` pane.
+                    let command = self.ignition.selected_command();
+                    let selected = state.rack_state.selected;
+                    self.popup = None;
+                    Some(Action::Ignition(selected, command))
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -289,9 +347,17 @@ impl Control for InventoryView {
             BoxConnector::new(BoxConnectorKind::Bottom),
             chunks[1],
         );
+
+        match self.popup {
+            Some(PopupKind::Ignition) => self.draw_ignition_popup(state, frame),
+            None => (),
+        }
     }
 
     fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        if self.popup.is_some() {
+            return self.handle_cmd_in_popup(state, cmd);
+        }
         match cmd {
             Cmd::Left => {
                 state.rack_state.prev();
@@ -346,6 +412,11 @@ impl Control for InventoryView {
                 } else {
                     None
                 }
+            }
+            Cmd::Ignition => {
+                self.ignition.reset();
+                self.popup = Some(PopupKind::Ignition);
+                Some(Action::Redraw)
             }
             _ => None,
         }

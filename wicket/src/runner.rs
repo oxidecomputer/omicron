@@ -146,6 +146,16 @@ impl RunnerCore {
                     ))?;
                 }
             }
+            Action::Ignition(component_id, ignition_command) => {
+                if let Some(wicketd) = wicketd {
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::IgnitionCommand(
+                            component_id,
+                            ignition_command,
+                        ),
+                    )?;
+                }
+            }
         }
         Ok(())
     }
