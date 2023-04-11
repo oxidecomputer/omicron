@@ -494,7 +494,7 @@ impl Plan {
                             dns_servers: config.dns_servers.clone(),
                             domain: None,
                         }],
-                        ServiceName::BoundaryNTP,
+                        ServiceName::BoundaryNtp,
                     )
                 } else {
                     (
@@ -503,7 +503,7 @@ impl Plan {
                             dns_servers: rack_dns_servers.clone(),
                             domain: None,
                         }],
-                        ServiceName::InternalNTP,
+                        ServiceName::InternalNtp,
                     )
                 };
 
