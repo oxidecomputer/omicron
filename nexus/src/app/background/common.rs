@@ -170,7 +170,7 @@ pub struct Driver {
 /// This is returned by [`Driver::register()`] to identify the corresponding
 /// background task.  It's then accepted by functions like
 /// [`Driver::activate()`] and [`Driver::status()`] to identify the task.
-#[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct TaskHandle(String);
 
 /// Driver-side state of a background task

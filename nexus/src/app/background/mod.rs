@@ -11,4 +11,5 @@ mod dns_servers;
 mod init;
 
 pub use common::Driver;
+pub use common::TaskHandle;
 pub use init::init;

@@ -3909,6 +3909,7 @@ dependencies = [
  "async-trait",
  "dropshot",
  "internal-dns",
+ "nexus-types",
  "omicron-common 0.1.0",
  "slog",
  "uuid",

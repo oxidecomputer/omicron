@@ -188,11 +188,27 @@ impl Server {
 
 #[async_trait::async_trait]
 impl nexus_test_interface::NexusServer for Server {
-    async fn start_and_populate(config: &Config, log: &Logger) -> Self {
+    type InternalServer<'a> = InternalServer<'a>;
+
+    async fn start_internal<'a>(
+        config: &'a Config,
+        log: &'_ Logger,
+    ) -> (InternalServer<'a>, SocketAddr)
+    where
+        'a: 'async_trait
+    {
         let internal_server =
             InternalServer::start(config, &log).await.unwrap();
         internal_server.apictx.nexus.wait_for_populate().await.unwrap();
+        let addr = internal_server.http_server_internal.local_addr();
+        (internal_server, addr)
+    }
 
+    async fn start(
+        internal_server: InternalServer,
+        config: &Config,
+        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+    ) -> Self {
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
@@ -203,11 +219,8 @@ impl nexus_test_interface::NexusServer for Server {
             .rack_initialize(
                 &opctx,
                 config.deployment.rack_id,
-                // NOTE: In the context of this test utility, we arguably do have an
-                // instance of CRDB and Nexus running. However, as this info isn't
-                // necessary for most tests, we pass no information here.
                 internal_api::params::RackInitializationRequest {
-                    services: vec![],
+                    services,
                     datasets: vec![],
                     internal_services_ip_pool_ranges: vec![],
                     certs: vec![],

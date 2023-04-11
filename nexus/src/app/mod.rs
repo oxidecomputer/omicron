@@ -171,6 +171,9 @@ pub struct Nexus {
     // This field is not currently used, but will be when we start activating
     // background tasks from elsewhere in Nexus.
     _background_tasks: background::Driver,
+
+    /// task handle for the internal DNS config background task
+    _task_internal_dns_config: background::TaskHandle,
 }
 
 impl Nexus {
@@ -250,7 +253,7 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
-        let background_tasks = background::init(
+        let (background_tasks, task_internal_dns_config) = background::init(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
@@ -289,6 +292,7 @@ impl Nexus {
             resolver,
             dpd_client,
             _background_tasks: background_tasks,
+            _task_internal_dns_config: task_internal_dns_config,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
