@@ -39,7 +39,7 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("looking up current silo")?;
-        let silo = self.silo_lookup(opctx, &NameOrId::Id(silo.id()))?;
+        let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
         Ok(silo)
     }
     pub fn silo_lookup<'a>(

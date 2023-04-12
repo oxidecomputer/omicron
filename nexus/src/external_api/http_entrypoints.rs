@@ -2399,9 +2399,12 @@ async fn image_list(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let parent_lookup = match &scan_params.selector.project_selector {
-            Some(selector) => {
-                let project_lookup = nexus.project_lookup(&opctx, &selector)?;
+        let parent_lookup = match scan_params.selector.project.clone() {
+            Some(project) => {
+                let project_lookup = nexus.project_lookup(
+                    &opctx,
+                    params::ProjectSelector { project },
+                )?;
                 ImageParentLookup::Project(project_lookup)
             }
             None => {
@@ -2443,10 +2446,12 @@ async fn image_create(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let params = &new_image.into_inner();
-        let parent_lookup = match &query.project_selector {
-            Some(project_selector) => {
-                let project_lookup =
-                    nexus.project_lookup(&opctx, project_selector)?;
+        let parent_lookup = match query.project.clone() {
+            Some(project) => {
+                let project_lookup = nexus.project_lookup(
+                    &opctx,
+                    params::ProjectSelector { project },
+                )?;
                 ImageParentLookup::Project(project_lookup)
             }
             None => {
@@ -2479,21 +2484,25 @@ async fn image_view(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let image_selector = params::ImageSelector {
-            image: path.image,
-            project_selector: query.project_selector,
+        let image: nexus_db_model::Image = match nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?
+        {
+            ImageLookup::ProjectImage(image) => {
+                let (.., db_image) = image.fetch().await?;
+                db_image.into()
+            }
+            ImageLookup::SiloImage(image) => {
+                let (.., db_image) = image.fetch().await?;
+                db_image.into()
+            }
         };
-        let image: nexus_db_model::Image =
-            match nexus.image_lookup(&opctx, &image_selector).await? {
-                ImageLookup::ProjectImage(image) => {
-                    let (.., db_image) = image.fetch().await?;
-                    db_image.into()
-                }
-                ImageLookup::SiloImage(image) => {
-                    let (.., db_image) = image.fetch().await?;
-                    db_image.into()
-                }
-            };
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2520,11 +2529,15 @@ async fn image_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let image_selector = params::ImageSelector {
-            image: path.image,
-            project_selector: query.project_selector,
-        };
-        let image_lookup = nexus.image_lookup(&opctx, &image_selector).await?;
+        let image_lookup = nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
     };

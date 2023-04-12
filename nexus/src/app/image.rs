@@ -41,7 +41,7 @@ impl super::Nexus {
                 project: None,
             } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(*id).fetch().await?;
+                    .image_id(id).fetch().await?;
                 let lookup = match db_image.project_id {
                     Some(id) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
                         .project_image_id(id)),
@@ -57,14 +57,14 @@ impl super::Nexus {
                 project: Some(project),
             } => {
                 let image =
-                    self.project_lookup(opctx, project_selector)?.project_image_name(Name::ref_cast(name));
+                    self.project_lookup(opctx, params::ProjectSelector { project })?.project_image_name_owned(name.into());
                 Ok(ImageLookup::ProjectImage(image))
             }
             params::ImageSelector {
                 image: NameOrId::Name(name),
-                project_selector: None,
+                project: None,
             } => {
-                let image = self.current_silo_lookup(opctx)?.silo_image_name(Name::ref_cast(name));
+                let image = self.current_silo_lookup(opctx)?.silo_image_name_owned(name.into());
                 Ok(ImageLookup::SiloImage(image))
             }
             params::ImageSelector {
