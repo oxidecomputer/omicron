@@ -77,7 +77,10 @@ async fn do_run() -> Result<(), CmdError> {
             ip: (*args.sled_agent_addr.ip()).into(),
         },
         updates: ConfigUpdates { zone_artifact_path: tmp.path().to_path_buf() },
-        hardware: ConfigHardware { hardware_threads: 4, physical_ram: 1 << 30 },
+        hardware: ConfigHardware {
+            hardware_threads: 32,
+            physical_ram: 64 * (1 << 30),
+        },
     };
 
     run_server(&config).await.map_err(CmdError::Failure)
