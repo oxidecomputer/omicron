@@ -2948,11 +2948,24 @@ checksum = "1788965e61b367cd03a62950836d5cd41560c3577d90e40e0819373194d1661c"
 dependencies = [
  "http",
  "hyper",
- "log",
  "rustls 0.20.8",
- "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.23.4",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0646026eb1b3eea4cd9ba47912ea5ce9cc07713d105b1a14698f4e6433d348b7"
+dependencies = [
+ "http",
+ "hyper",
+ "log",
+ "rustls 0.21.0",
+ "rustls-native-certs",
+ "tokio",
+ "tokio-rustls 0.24.0",
 ]
 
 [[package]]
@@ -3822,7 +3835,7 @@ dependencies = [
  "hex",
  "http",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.24.0",
  "internal-dns",
  "ipnetwork",
  "itertools",
@@ -4345,7 +4358,7 @@ dependencies = [
  "http",
  "httptest",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.24.0",
  "internal-dns",
  "ipnetwork",
  "itertools",
@@ -6043,7 +6056,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.23.2",
  "ipnet",
  "js-sys",
  "log",

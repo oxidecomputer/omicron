@@ -170,7 +170,7 @@ hex = "0.4.3"
 hex-literal = "0.3.4"
 http = "0.2.9"
 httptest = "0.15.4"
-hyper-rustls = "0.23.2"
+hyper-rustls = "0.24.0"
 hyper = "0.14"
 humantime = "2.1.0"
 illumos-utils = { path = "illumos-utils" }
