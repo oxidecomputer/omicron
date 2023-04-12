@@ -1246,7 +1246,7 @@ impl ServiceManager {
             ]);
             match execute(cmd) {
                 Err(e) => {
-                    info!(self.inner.log, "Updating {} failed: {}", &file, e);
+                    warn!(self.inner.log, "Updating {} failed: {}", &file, e);
                 }
                 Ok(_) => {
                     info!(self.inner.log, "Updated {}", &file);
