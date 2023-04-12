@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{
     ArtifactId, SemverVersion, UpdateEventKind, UpdateLog, UpdateLogAll,
-    UpdateNormalEventKind, UpdateStateKind, UpdateTerminalEventKind, HostPhase2Progress,
+    UpdateNormalEventKind, UpdateStateKind, UpdateTerminalEventKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,11 +29,8 @@ pub struct RackUpdateState {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpdateState {
     Waiting,
-    Preparing(Option<UpdateProgress>),
-    Downloading(Option<UpdateProgress>),
-    Updating(Option<UpdateProgress>),
-    Resetting,
     Updated,
+    Updating,
     Failed,
 }
 
@@ -42,30 +39,7 @@ impl Display for UpdateState {
         match self {
             UpdateState::Waiting => write!(f, "WAITING"),
             UpdateState::Updated => write!(f, "UPDATED"),
-            UpdateState::Preparing(progress) => {
-                if let Some(progress) = progress {
-                    write!(f, "PREPARING ({progress})")
-                } else {
-                    write!(f, "PREPARING")
-                }
-            }
-            UpdateState::Downloading(progress) => {
-                if let Some(progress) = progress {
-                    write!(f, "DOWNLOADING ({progress})")
-                } else {
-                    write!(f, "DOWNLOADING")
-                }
-            }
-            UpdateState::Updating(progress) => {
-                if let Some(progress) = progress {
-                    write!(f, "UPDATING ({progress})")
-                } else {
-                    write!(f, "UPDATING")
-                }
-            }
-            UpdateState::Resetting => {
-                write!(f, "RESETTING")
-            }
+            UpdateState::Updating => write!(f, "UPDATING"),
             UpdateState::Failed => write!(f, "FAILED"),
         }
     }
@@ -76,42 +50,9 @@ impl UpdateState {
         match self {
             UpdateState::Waiting => style::deselected(),
             UpdateState::Updated => style::successful_update(),
-            UpdateState::Preparing(_)
-            | UpdateState::Downloading(_)
-            | UpdateState::Updating(_)
-            | UpdateState::Resetting => style::start_update(),
+            UpdateState::Updating => style::start_update(),
             UpdateState::Failed => style::failed_update(),
         }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct UpdateProgress {
-    current: u64,
-    total: u64,
-}
-
-impl UpdateProgress {
-    fn new(current: u64, total: u64) -> Option<Self> {
-        // The total should never be zero, but if it is, don't fail -- hide the
-        // percentage instead.
-        if total == 0 {
-            None
-        } else {
-            // Current should never be higher than total. If it is, clamp it to 100%.
-            Some(Self { current: current.min(total), total })
-        }
-    }
-}
-
-impl Display for UpdateProgress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Show progress as a percentage.
-        write!(
-            f,
-            "{}%",
-            ((self.current as f64 / self.total as f64) * 100f64) as u64
-        )
     }
 }
 
@@ -269,65 +210,28 @@ impl RackUpdateState {
             return;
         };
         use UpdateStateKind::*;
-        match &state.kind {
+        let known = match &state.kind {
             WaitingForProgress { .. } => {
                 // Nothing to do here
+                None
             }
-            ResettingSp => {
-                update_artifact_state(
-                    items,
-                    Some(id.sp_known_artifact_kind()),
-                    UpdateState::Resetting,
-                );
+            ResettingSp => Some(id.sp_known_artifact_kind()),
+            SendingArtifactToMgs { artifact } => {
+                artifact_to_known_artifact_kind(&artifact)
             }
-            SendingArtifactToMgs { artifact }
-            | WaitingForStatus { artifact } => update_artifact_state(
-                items,
-                artifact_to_known_artifact_kind(&artifact),
-                UpdateState::Updating(None),
-            ),
-
-            PreparingForArtifact { artifact, progress } => {
-                let progress = progress.as_ref().and_then(|p| {
-                    UpdateProgress::new(p.current as u64, p.total as u64)
-                });
-                update_artifact_state(
-                    items,
-                    artifact_to_known_artifact_kind(&artifact),
-                    UpdateState::Preparing(progress),
-                )
+            PreparingForArtifact { artifact, .. } => {
+                artifact_to_known_artifact_kind(&artifact)
             }
-            ArtifactDownloadProgress {
-                kind,
-                downloaded_bytes,
-                total_bytes,
-                ..
-            } => {
-                if let Some(KnownArtifactKind::Host) = artifact_kind_to_known_kind(kind) {
-                    // This is a host artifact -- it is produced by 
-                }
-                update_artifact_state(
-                    items,
-                    artifact_kind_to_known_kind(kind),
-                    UpdateState::Downloading(UpdateProgress::new(
-                        *downloaded_bytes,
-                        *total_bytes,
-                    )));
+            ArtifactDownloadProgress { kind, .. } => {
+                artifact_kind_to_known_kind(kind)
             }
-            ArtifactWriteProgress {
-                kind, written_bytes, total_bytes, ..
-            } => update_artifact_state(
-                items,
-                artifact_kind_to_known_kind(kind),
-                UpdateState::Updating(UpdateProgress::new(
-                    *written_bytes,
-                    *total_bytes,
-                )),
-            ),
-            WaitingForTrampolineImageDelivery { artifact, progress } => {
-                match progress {
-                    HostPhase2Progress::Available { offset, total_size, .. }
-                }
+            ArtifactWriteProgress { kind, .. } => {
+                artifact_kind_to_known_kind(kind)
+            }
+            WaitingForStatus { artifact } => {
+                artifact_to_known_artifact_kind(&artifact)
+            }
+            WaitingForTrampolineImageDelivery { artifact, .. } => {
                 artifact_to_known_artifact_kind(&artifact)
             }
             SettingHostPowerState { .. }
