@@ -67,6 +67,19 @@ use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
+/// Zones that can be referenced within the internal DNS system.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ZoneVariant {
+    /// This non-global zone runs an instance of Dendrite.
+    ///
+    /// This implies that the Sled is a scrimlet.
+    // When this variant is used, the UUID in the record should match the sled
+    // itself.
+    Dendrite,
+    /// All other non-global zones.
+    Other,
+}
+
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 enum Host {
@@ -74,7 +87,7 @@ enum Host {
     Sled(Uuid),
 
     /// Used to construct an AAAA record for a zone on a sled.
-    Zone(Uuid),
+    Zone { id: Uuid, variant: ZoneVariant },
 }
 
 impl Host {
@@ -83,7 +96,12 @@ impl Host {
     pub(crate) fn dns_name(&self) -> String {
         match &self {
             Host::Sled(id) => format!("{}.sled", id),
-            Host::Zone(id) => format!("{}.host", id),
+            Host::Zone { id, variant: ZoneVariant::Dendrite } => {
+                format!("dendrite-{}.host", id)
+            }
+            Host::Zone { id, variant: ZoneVariant::Other } => {
+                format!("{}.host", id)
+            }
         }
     }
 }
@@ -115,32 +133,35 @@ pub struct DnsConfigBuilder {
     /// set of hosts of type "sled" that have been configured so far, mapping
     /// each sled's unique uuid to its sole IPv6 address on the control plane
     /// network
-    sleds: BTreeMap<Uuid, Ipv6Addr>,
+    sleds: BTreeMap<Sled, Ipv6Addr>,
 
     /// set of hosts of type "zone" that have been configured so far, mapping
     /// each zone's unique uuid to its sole IPv6 address on the control plane
     /// network
-    zones: BTreeMap<Uuid, Ipv6Addr>,
+    zones: BTreeMap<Zone, Ipv6Addr>,
 
     /// set of services (see module-level comment) that have been configured so
     /// far, mapping the name of the service (encapsulated in a [`ServiceName`])
     /// to the backends configured for that service.  The set of backends is
     /// represented as a mapping from the zone's uuid to the port on which it's
     /// running the service.
-    service_instances_zones: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
+    service_instances_zones: BTreeMap<ServiceName, BTreeMap<Zone, u16>>,
 
     /// similar to service_instances_zones, but for services that run on sleds
-    service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Uuid, u16>>,
+    service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
-#[derive(Debug)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Sled(Uuid);
 
 /// Describes a host of type "zone" (an illumos zone) in the control plane DNS
 /// zone
-#[derive(Debug)]
-pub struct Zone(Uuid);
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Zone {
+    id: Uuid,
+    variant: ZoneVariant,
+}
 
 impl DnsConfigBuilder {
     pub fn new() -> Self {
@@ -166,7 +187,7 @@ impl DnsConfigBuilder {
         sled_id: Uuid,
         addr: Ipv6Addr,
     ) -> anyhow::Result<Sled> {
-        match self.sleds.insert(sled_id, addr) {
+        match self.sleds.insert(Sled(sled_id), addr) {
             None => Ok(Sled(sled_id)),
             Some(existing) => Err(anyhow!(
                 "multiple definitions for sled {} (previously {}, now {})",
@@ -175,6 +196,23 @@ impl DnsConfigBuilder {
                 addr,
             )),
         }
+    }
+
+    /// Add a new dendrite host of type "zone" to the configuration
+    ///
+    /// Returns a [`Zone`] that can be used with [`Self::service_backend_zone()`] to
+    /// specify that this zone is a backend for some higher-level service.
+    ///
+    /// # Errors
+    ///
+    /// This function fails only if the given zone has already been added to the
+    /// configuration.
+    pub fn host_dendrite(
+        &mut self,
+        sled_id: Uuid,
+        addr: Ipv6Addr,
+    ) -> anyhow::Result<Zone> {
+        self.host_zone_internal(sled_id, ZoneVariant::Dendrite, addr)
     }
 
     /// Add a new host of type "zone" to the configuration
@@ -191,11 +229,21 @@ impl DnsConfigBuilder {
         zone_id: Uuid,
         addr: Ipv6Addr,
     ) -> anyhow::Result<Zone> {
-        match self.zones.insert(zone_id, addr) {
-            None => Ok(Zone(zone_id)),
+        self.host_zone_internal(zone_id, ZoneVariant::Other, addr)
+    }
+
+    fn host_zone_internal(
+        &mut self,
+        id: Uuid,
+        variant: ZoneVariant,
+        addr: Ipv6Addr,
+    ) -> anyhow::Result<Zone> {
+        let zone = Zone { id, variant };
+        match self.zones.insert(zone.clone(), addr) {
+            None => Ok(zone),
             Some(existing) => Err(anyhow!(
                 "multiple definitions for zone {} (previously {}, now {})",
-                zone_id,
+                id,
                 existing,
                 addr
             )),
@@ -219,23 +267,22 @@ impl DnsConfigBuilder {
         // `DnsConfigBuilder`, it's possible that it was added to a different
         // DnsBuilder.
         ensure!(
-            self.zones.contains_key(&zone.0),
-            "zone {:?} has not been defined",
-            zone.0
+            self.zones.contains_key(&zone),
+            "zone {} has not been defined",
+            zone.id
         );
 
         let set = self
             .service_instances_zones
             .entry(service.clone())
             .or_insert_with(BTreeMap::new);
-        let zone_id = zone.0;
-        match set.insert(zone_id, port) {
+        match set.insert(zone.clone(), port) {
             None => Ok(()),
             Some(existing) => Err(anyhow!(
                 "service {}: zone {}: registered twice \
                 (previously port {}, now {})",
                 service.dns_name(),
-                zone_id,
+                zone.id,
                 existing,
                 port
             )),
@@ -259,7 +306,7 @@ impl DnsConfigBuilder {
         // `DnsConfigBuilder`, it's possible that it was added to a different
         // DnsBuilder.
         ensure!(
-            self.sleds.contains_key(&sled.0),
+            self.sleds.contains_key(&sled),
             "sled {:?} has not been defined",
             sled.0
         );
@@ -269,7 +316,7 @@ impl DnsConfigBuilder {
             .entry(service.clone())
             .or_insert_with(BTreeMap::new);
         let sled_id = sled.0;
-        match set.insert(sled_id, port) {
+        match set.insert(sled.clone(), port) {
             None => Ok(()),
             Some(existing) => Err(anyhow!(
                 "service {}: sled {}: registered twice \
@@ -287,14 +334,15 @@ impl DnsConfigBuilder {
     /// point
     pub fn build(self) -> DnsConfigParams {
         // Assemble the set of "AAAA" records for sleds.
-        let sled_records = self.sleds.into_iter().map(|(sled_id, sled_ip)| {
-            let name = Host::Sled(sled_id).dns_name();
+        let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
+            let name = Host::Sled(sled.0).dns_name();
             (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
         // Assemble the set of AAAA records for zones.
-        let zone_records = self.zones.into_iter().map(|(zone_id, zone_ip)| {
-            let name = Host::Zone(zone_id).dns_name();
+        let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
+            let name =
+                Host::Zone { id: zone.id, variant: zone.variant }.dns_name();
             (name, vec![DnsRecord::Aaaa(zone_ip)])
         });
 
@@ -305,14 +353,18 @@ impl DnsConfigBuilder {
                 let name = service_name.dns_name();
                 let records = zone2port
                     .into_iter()
-                    .map(|(zone_id, port)| {
+                    .map(|(zone, port)| {
                         DnsRecord::Srv(dns_service_client::types::Srv {
                             prio: 0,
                             weight: 0,
                             port,
                             target: format!(
                                 "{}.{}",
-                                Host::Zone(zone_id).dns_name(),
+                                Host::Zone {
+                                    id: zone.id,
+                                    variant: zone.variant
+                                }
+                                .dns_name(),
                                 DNS_ZONE
                             ),
                         })
@@ -328,14 +380,14 @@ impl DnsConfigBuilder {
                 let name = service_name.dns_name();
                 let records = sled2port
                     .into_iter()
-                    .map(|(sled_id, port)| {
+                    .map(|(sled, port)| {
                         DnsRecord::Srv(dns_service_client::types::Srv {
                             prio: 0,
                             weight: 0,
                             port,
                             target: format!(
                                 "{}.{}",
-                                Host::Sled(sled_id).dns_name(),
+                                Host::Sled(sled.0).dns_name(),
                                 DNS_ZONE
                             ),
                         })
@@ -365,7 +417,7 @@ impl DnsConfigBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::{DnsConfigBuilder, Host, ServiceName};
+    use super::{DnsConfigBuilder, Host, ServiceName, ZoneVariant};
     use crate::DNS_ZONE;
     use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
     use uuid::Uuid;
@@ -401,8 +453,12 @@ mod test {
             "00000000-0000-0000-0000-000000000000.sled",
         );
         assert_eq!(
-            Host::Zone(uuid).dns_name(),
+            Host::Zone { id: uuid, variant: ZoneVariant::Other }.dns_name(),
             "00000000-0000-0000-0000-000000000000.host",
+        );
+        assert_eq!(
+            Host::Zone { id: uuid, variant: ZoneVariant::Dendrite }.dns_name(),
+            "dendrite-00000000-0000-0000-0000-000000000000.host",
         );
     }
 
