@@ -276,6 +276,80 @@
         }
       }
     },
+    "/v2p/{interface_id}": {
+      "put": {
+        "summary": "Create a mapping from a virtual NIC to a physical host",
+        "operationId": "set_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/vpc/{vpc_id}/firewall/rules": {
       "put": {
         "operationId": "vpc_firewall_rules_put",
@@ -1329,6 +1403,10 @@
         "description": "Information required to construct a virtual network interface for a guest",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "type": "string",
             "format": "ip"
@@ -1355,6 +1433,7 @@
           }
         },
         "required": [
+          "id",
           "ip",
           "mac",
           "name",
@@ -1530,7 +1609,17 @@
               "boundary": {
                 "type": "boolean"
               },
-              "servers": {
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -1545,32 +1634,8 @@
             },
             "required": [
               "boundary",
-              "servers",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dns_client"
-                ]
-              }
-            },
-            "required": [
-              "servers",
+              "dns_servers",
+              "ntp_servers",
               "type"
             ]
           }
@@ -1614,6 +1679,32 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "SetVirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
         ]
       },
       "SledRole": {
@@ -1672,14 +1763,17 @@
         "type": "object",
         "properties": {
           "correction": {
+            "description": "The current offset between the NTP clock and system clock.",
             "type": "number",
             "format": "double"
           },
           "skew": {
+            "description": "The estimated error bound on the frequency.",
             "type": "number",
             "format": "double"
           },
           "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
             "type": "boolean"
           }
         },

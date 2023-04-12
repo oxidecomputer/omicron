@@ -16,8 +16,8 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Resource;
 use crate::db::model::IncompleteVpc;
+use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
-use crate::db::model::NetworkInterface;
 use crate::db::model::Project;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteUpdate;
@@ -352,18 +352,35 @@ impl DataStore {
     ) -> Result<Vec<Sled>, Error> {
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
-        use db::schema::{instance, network_interface, sled};
-        network_interface::table
+        use db::schema::{
+            instance, instance_network_interface, service,
+            service_network_interface, sled,
+        };
+
+        let instance_query = instance_network_interface::table
             .inner_join(
                 instance::table
-                    .on(instance::id.eq(network_interface::instance_id)),
+                    .on(instance::id
+                        .eq(instance_network_interface::instance_id)),
             )
             .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
-            .filter(network_interface::vpc_id.eq(vpc_id))
-            .filter(network_interface::time_deleted.is_null())
+            .filter(instance_network_interface::vpc_id.eq(vpc_id))
+            .filter(instance_network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
-            .select(Sled::as_select())
-            .distinct()
+            .select(Sled::as_select());
+
+        let service_query = service_network_interface::table
+            .inner_join(
+                service::table
+                    .on(service::id.eq(service_network_interface::service_id)),
+            )
+            .inner_join(sled::table.on(sled::id.eq(service::sled_id)))
+            .filter(service_network_interface::vpc_id.eq(vpc_id))
+            .filter(service_network_interface::time_deleted.is_null())
+            .select(Sled::as_select());
+
+        instance_query
+            .union(service_query)
             .get_results_async(self.pool())
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
@@ -460,8 +477,8 @@ impl DataStore {
         {
             return Err(Error::InvalidRequest {
                 message: String::from(
-                    "VPC Subnet cannot be deleted while instances \
-                    with network interfaces in the subnet exist",
+                    "VPC Subnet cannot be deleted while \
+                    network interfaces in the subnet exist",
                 ),
             });
         }
@@ -516,30 +533,30 @@ impl DataStore {
             })
     }
 
-    pub async fn subnet_list_network_interfaces(
+    pub async fn subnet_list_instance_network_interfaces(
         &self,
         opctx: &OpContext,
         authz_subnet: &authz::VpcSubnet,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<NetworkInterface> {
+    ) -> ListResultVec<InstanceNetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_subnet).await?;
 
-        use db::schema::network_interface::dsl;
+        use db::schema::instance_network_interface::dsl;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::network_interface, dsl::id, &pagparams)
+                paginated(dsl::instance_network_interface, dsl::id, &pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
-                dsl::network_interface,
+                dsl::instance_network_interface,
                 dsl::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::subnet_id.eq(authz_subnet.id()))
-        .select(NetworkInterface::as_select())
-        .load_async::<db::model::NetworkInterface>(
+        .select(InstanceNetworkInterface::as_select())
+        .load_async::<InstanceNetworkInterface>(
             self.pool_authorized(opctx).await?,
         )
         .await

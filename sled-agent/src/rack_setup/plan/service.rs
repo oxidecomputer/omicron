@@ -222,6 +222,11 @@ impl Plan {
             .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
             .collect::<Vec<String>>();
 
+        let mut services_ip_pool = config
+            .internal_services_ip_pool_ranges
+            .iter()
+            .flat_map(|range| range.iter());
+
         let mut boundary_ntp_servers = vec![];
         let mut seen_any_scrimlet = false;
 
@@ -266,6 +271,12 @@ impl Plan {
                         omicron_common::address::NEXUS_INTERNAL_PORT,
                     )
                     .unwrap();
+                let external_ip = services_ip_pool.next().ok_or_else(|| {
+                    PlanError::SledInitialization(
+                        "no IP available in services IP pool for Nexus"
+                            .to_string(),
+                    )
+                })?;
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::Nexus,
@@ -273,7 +284,7 @@ impl Plan {
                     gz_addresses: vec![],
                     services: vec![ServiceType::Nexus {
                         internal_ip: address,
-                        external_ip: config.nexus_external_address,
+                        external_ip,
                     }],
                 })
             }
@@ -435,30 +446,22 @@ impl Plan {
                     (
                         // XXXNTP - these boundary servers need a path to the
                         // external network via OPTE.
-                        vec![
-                            ServiceType::Ntp {
-                                servers: config.ntp_servers.clone(),
-                                boundary: true,
-                            },
-                            ServiceType::DnsClient {
-                                servers: config.dns_servers.clone(),
-                                domain: None,
-                            },
-                        ],
+                        vec![ServiceType::Ntp {
+                            ntp_servers: config.ntp_servers.clone(),
+                            boundary: true,
+                            dns_servers: config.dns_servers.clone(),
+                            domain: None,
+                        }],
                         ServiceName::BoundaryNTP,
                     )
                 } else {
                     (
-                        vec![
-                            ServiceType::Ntp {
-                                servers: boundary_ntp_servers.clone(),
-                                boundary: false,
-                            },
-                            ServiceType::DnsClient {
-                                servers: rack_dns_servers.clone(),
-                                domain: None,
-                            },
-                        ],
+                        vec![ServiceType::Ntp {
+                            ntp_servers: boundary_ntp_servers.clone(),
+                            boundary: false,
+                            dns_servers: rack_dns_servers.clone(),
+                            domain: None,
+                        }],
                         ServiceName::InternalNTP,
                     )
                 };
