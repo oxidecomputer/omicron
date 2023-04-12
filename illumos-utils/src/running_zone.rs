@@ -281,18 +281,6 @@ impl RunningZone {
         Ok(())
     }
 
-    pub fn enable_ipv6_forwarding(&self) -> Result<(), RunCommandError> {
-        self.run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-forwarding", "-u"])?;
-
-        Ok(())
-    }
-
-    pub fn enable_ipv6_routing(&self) -> Result<(), RunCommandError> {
-        self.run_cmd(&["/usr/sbin/routeadm", "-e", "ipv6-routing", "-u"])?;
-
-        Ok(())
-    }
-
     /// Looks up a running zone based on the `zone_prefix`, if one already exists.
     ///
     /// - If the zone was found, is running, and has a network interface, it is

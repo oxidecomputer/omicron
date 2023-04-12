@@ -421,10 +421,6 @@ pub struct ServiceZoneRequest {
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
     pub services: Vec<ServiceType>,
-    // Enable ipv6 forwarding in the zone
-    pub enable_ipv6_forwarding: bool,
-    // Enable ipv6 routing in the zone
-    pub enable_ipv6_routing: bool,
 }
 
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
@@ -440,8 +436,6 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
             addresses: s.addresses,
             gz_addresses: s.gz_addresses,
             services,
-            enable_ipv6_forwarding: s.enable_ipv6_forwarding,
-            enable_ipv6_routing: s.enable_ipv6_routing,
         }
     }
 }

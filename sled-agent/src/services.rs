@@ -1198,30 +1198,6 @@ impl ServiceManager {
             smfh.enable()?;
         }
 
-        if request.enable_ipv6_forwarding {
-            running_zone.enable_ipv6_forwarding().map_err(|e| {
-                Error::ZoneCommand {
-                    intent: format!(
-                        "enable ipv6-forwarding in zone {}",
-                        running_zone.name()
-                    ),
-                    err: e,
-                }
-            })?;
-        }
-
-        if request.enable_ipv6_routing {
-            running_zone.enable_ipv6_routing().map_err(|e| {
-                Error::ZoneCommand {
-                    intent: format!(
-                        "enable ipv6-routing in zone {}",
-                        running_zone.name()
-                    ),
-                    err: e,
-                }
-            })?;
-        }
-
         Ok(running_zone)
     }
 
@@ -1451,8 +1427,6 @@ impl ServiceManager {
             addresses,
             gz_addresses: vec![],
             services,
-            enable_ipv6_forwarding: true,
-            enable_ipv6_routing: true,
         };
 
         self.ensure_zone(
@@ -1788,8 +1762,6 @@ mod test {
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
-                enable_ipv6_forwarding: false,
-                enable_ipv6_routing: false,
             }],
         })
         .await
@@ -1806,8 +1778,6 @@ mod test {
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
-                enable_ipv6_forwarding: false,
-                enable_ipv6_routing: false,
             }],
         })
         .await

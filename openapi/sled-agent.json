@@ -1672,12 +1672,6 @@
               "format": "ipv6"
             }
           },
-          "enable_ipv6_forwarding": {
-            "type": "boolean"
-          },
-          "enable_ipv6_routing": {
-            "type": "boolean"
-          },
           "gz_addresses": {
             "default": [],
             "type": "array",
@@ -1702,8 +1696,6 @@
         },
         "required": [
           "addresses",
-          "enable_ipv6_forwarding",
-          "enable_ipv6_routing",
           "id",
           "services",
           "zone_type"

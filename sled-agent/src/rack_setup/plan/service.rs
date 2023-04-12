@@ -231,8 +231,6 @@ impl Plan {
                         internal_ip: address,
                         external_ip: config.nexus_external_address,
                     }],
-                    enable_ipv6_forwarding: false,
-                    enable_ipv6_routing: false,
                 })
             }
 
@@ -254,8 +252,6 @@ impl Plan {
                     addresses: vec![address],
                     gz_addresses: vec![],
                     services: vec![ServiceType::Oximeter],
-                    enable_ipv6_forwarding: false,
-                    enable_ipv6_routing: false,
                 })
             }
 
@@ -356,8 +352,6 @@ impl Plan {
                             dns_addr, DNS_PORT, 0, 0,
                         ),
                     }],
-                    enable_ipv6_forwarding: false,
-                    enable_ipv6_routing: false,
                 });
             }
 
@@ -380,8 +374,6 @@ impl Plan {
                     addresses: vec![address],
                     gz_addresses: vec![],
                     services: vec![ServiceType::CruciblePantry],
-                    enable_ipv6_forwarding: false,
-                    enable_ipv6_routing: false,
                 })
             }
 
@@ -429,8 +421,6 @@ impl Plan {
                     addresses: vec![address],
                     gz_addresses: vec![],
                     services: services,
-                    enable_ipv6_forwarding: false,
-                    enable_ipv6_routing: false,
                 });
             }
 
