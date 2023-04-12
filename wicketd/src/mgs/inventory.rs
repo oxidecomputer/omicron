@@ -23,99 +23,102 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::inventory::RotInventory;
 
-// Frequency at which we poll our local ignition controller (via our local
-// sidecar SP) for the ignition state of all ignition targets in the rack.
-const POLL_FREQ_IGNITION: Duration = Duration::from_secs(5);
+// Frequency at which we fetch state from our local ignition controller (via our
+// local sidecar SP) for the ignition state of all ignition targets in the rack.
+const FETCH_FREQ_IGNITION: Duration = Duration::from_secs(5);
 
-// Frequency at which we poll SPs we believe to be present based on ignition
-// results.
-const POLL_FREQ_PRESENT_SP: Duration = Duration::from_secs(10);
+// Frequency at which we fetch state from SPs we believe to be present based on
+// ignition results.
+const FETCH_FREQ_PRESENT_SP: Duration = Duration::from_secs(10);
 
-// Frequency at which we poll SPs we believe are _not_ present based on ignition
-// results. We still poll these SPs (albeit less frequently) to account for
-// problems with ignition (either incorrect results, which should be extremely
-// rare, or problems getting the state, which should also be rare).
-const POLL_FREQ_MISSING_SP: Duration = Duration::from_secs(30);
+// Frequency at which we fetch state from SPs we believe are _not_ present based
+// on ignition results. We still attempt to fetch state from these SPs (albeit
+// less frequently) to account for problems with ignition (either incorrect
+// results, which should be extremely rare, or problems getting the state, which
+// should also be rare).
+const FETCH_FREQ_MISSING_SP: Duration = Duration::from_secs(30);
 
-pub(super) struct PollIgnition {
+pub(super) struct FetchedIgnitionState {
     pub(super) sps: BTreeMap<SpIdentifier, SpIgnition>,
     pub(super) mgs_received: Instant,
 }
 
-// Handle to the tokio task responsible for polling MGS for ignition state. When
-// dropped, the polling task is cancelled.
-pub(super) struct IgnitionPoller {
+// Handle to the tokio task responsible for fetching ignition state from MGS.
+// When dropped, the task created by is `IgnitionStateFetcher::spawn()` is
+// cancelled.
+pub(super) struct IgnitionStateFetcher {
     task: task::JoinHandle<()>,
-    rx: mpsc::Receiver<PollIgnition>,
-    poll_now_tx: mpsc::Sender<()>,
+    rx: mpsc::Receiver<FetchedIgnitionState>,
+    fetch_now_tx: mpsc::Sender<()>,
 }
 
-impl Drop for IgnitionPoller {
+impl Drop for IgnitionStateFetcher {
     fn drop(&mut self) {
         self.task.abort();
     }
 }
 
-impl IgnitionPoller {
-    /// Spawn the ignition polling task.
+impl IgnitionStateFetcher {
+    /// Spawn the ignition state-fetching task.
     pub(super) fn spawn(
         mgs_client: gateway_client::Client,
         log: Logger,
     ) -> Self {
         // We only want one outstanding ignition request at a time; if our
-        // consumer is behind, we don't need to poll MGS until they can handle
+        // consumer is behind, we don't need to hit MGS until they can handle
         // our results.
         let (tx, rx) = mpsc::channel(1);
 
-        // "Poll immediately" also only needs a channel depth of 1: if there is
-        // already a message in this channel, we're already trying to poll ASAP.
-        let (poll_now_tx, poll_now_rx) = mpsc::channel(1);
+        // "Fetch immediately" also only needs a channel depth of 1: if there is
+        // already a message in this channel, we're already trying to fetch
+        // ASAP.
+        let (fetch_now_tx, fetch_now_rx) = mpsc::channel(1);
 
-        let task = tokio::spawn(ignition_poller_task(
+        let task = tokio::spawn(ignition_fetching_task(
             tx,
-            poll_now_rx,
+            fetch_now_rx,
             mgs_client,
             log,
         ));
 
-        Self { task, rx, poll_now_tx }
+        Self { task, rx, fetch_now_tx }
     }
 
-    /// Receive the next result from the ignition polling task.
-    pub(super) async fn recv(&mut self) -> PollIgnition {
+    /// Receive the next result from the ignition state-fetching task.
+    pub(super) async fn recv(&mut self) -> FetchedIgnitionState {
         // The task we spawned holds `tx` either until `rx` is dropped (which it
         // obviously is not here, since we're using it!) or it panics, so we can
         // unwrap here. The only way we panic is if our inner task already did.
-        self.rx.recv().await.expect("ignition polling task panicked")
+        self.rx.recv().await.expect("ignition state-fetching task panicked")
     }
 
-    pub(super) fn poll_now(&self) {
-        match self.poll_now_tx.try_send(()) {
-            // If we succeeded or there's already a "poll now" request sitting
+    pub(super) fn fetch_now(&self) {
+        match self.fetch_now_tx.try_send(()) {
+            // If we succeeded or there's already a "fetch now" request sitting
             // in the channel, we're done.
             Ok(()) | Err(mpsc::error::TrySendError::Full(())) => (),
             // If the channel is closed, that means our task has panicked -
             // propogate that panic.
             Err(mpsc::error::TrySendError::Closed(())) => {
-                panic!("ignition polling task panicked")
+                panic!("ignition state-fetching task panicked")
             }
         }
     }
 }
 
-async fn ignition_poller_task(
-    tx: mpsc::Sender<PollIgnition>,
-    mut poll_now_rx: mpsc::Receiver<()>,
+async fn ignition_fetching_task(
+    tx: mpsc::Sender<FetchedIgnitionState>,
+    mut fetch_now_rx: mpsc::Receiver<()>,
     mgs_client: gateway_client::Client,
     log: Logger,
 ) {
-    let mut ticker = interval(POLL_FREQ_IGNITION);
+    let mut ticker = interval(FETCH_FREQ_IGNITION);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
             _ = ticker.tick() => (),
-            _ = poll_now_rx.recv() => {
+            _ = fetch_now_rx.recv() => {
                 ticker.reset();
             }
         }
@@ -124,7 +127,7 @@ async fn ignition_poller_task(
             Ok(response) => response.into_inner(),
             Err(err) => {
                 warn!(
-                    log, "Failed to poll MGS for ignition";
+                    log, "Failed to get ignition state from MGS";
                     "err" => %err,
                 );
                 continue;
@@ -137,18 +140,18 @@ async fn ignition_poller_task(
             sps.insert(result.id, result.details);
         }
 
-        let emit = PollIgnition { sps, mgs_received };
+        let emit = FetchedIgnitionState { sps, mgs_received };
 
         // If our receiver is gone, we'll exit - there's no one left for
         // us to send results to!
         if tx.send(emit).await.is_err() {
-            warn!(log, "Receiver for ignition polling task is gone");
+            warn!(log, "Receiver for ignition state-fetching task is gone");
             break;
         }
     }
 }
 
-pub(super) struct PollSp {
+pub(super) struct FetchedSpData {
     pub(super) id: SpIdentifier,
     pub(super) state: SpState,
     pub(super) components: Option<Vec<SpComponentInfo>>,
@@ -158,104 +161,106 @@ pub(super) struct PollSp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum IgnitionState {
+pub(super) enum IgnitionPresence {
     Present,
     Absent,
 }
 
-impl IgnitionState {
-    fn poll_frequency(self) -> Duration {
+impl IgnitionPresence {
+    fn fetch_frequency(self) -> Duration {
         match self {
-            IgnitionState::Present => POLL_FREQ_PRESENT_SP,
-            IgnitionState::Absent => POLL_FREQ_MISSING_SP,
+            IgnitionPresence::Present => FETCH_FREQ_PRESENT_SP,
+            IgnitionPresence::Absent => FETCH_FREQ_MISSING_SP,
         }
     }
 }
 
-pub(super) struct SpPoller {
+pub(super) struct SpStateFetcher {
     task: task::JoinHandle<()>,
-    ignition_state_tx: watch::Sender<Option<IgnitionState>>,
-    poll_now_tx: mpsc::Sender<()>,
+    ignition_presence_tx: watch::Sender<Option<IgnitionPresence>>,
+    fetch_now_tx: mpsc::Sender<()>,
 }
 
-impl Drop for SpPoller {
+impl Drop for SpStateFetcher {
     fn drop(&mut self) {
         self.task.abort();
     }
 }
 
-impl SpPoller {
-    /// Spawn a polling task for a single SP.
+impl SpStateFetcher {
+    /// Spawn a task responsible for fetching state for a single SP from MGS.
     ///
     /// Returns a handle for interacting with the task and a stream that emits
-    /// polling results.
+    /// fetched data.
     pub(super) fn spawn(
         id: SpIdentifier,
         mgs_client: gateway_client::Client,
         log: Logger,
-    ) -> (Self, ReceiverStream<PollSp>) {
+    ) -> (Self, ReceiverStream<FetchedSpData>) {
         // We only want one outstanding request at a time; if our consumer is
-        // behind, we don't need to poll MGS until they can handle our results.
-        let (poll_tx, poll_rx) = mpsc::channel(1);
+        // behind, we don't need to request new state MGS until they can handle
+        // our results.
+        let (data_tx, data_rx) = mpsc::channel(1);
 
-        // "Poll immediately" also only needs a channel depth of 1: if there is
-        // already a message in this channel, we're already trying to poll ASAP.
-        let (poll_now_tx, poll_now_rx) = mpsc::channel(1);
+        // "Fetch immediately" also only needs a channel depth of 1: if there is
+        // already a message in this channel, we're already trying to fetch
+        // ASAP.
+        let (fetch_now_tx, fetch_now_rx) = mpsc::channel(1);
 
-        let (ignition_state_tx, ignition_state_rx) = watch::channel(None);
+        let (ignition_presence_tx, ignition_presence_rx) = watch::channel(None);
 
-        let task = tokio::spawn(sp_poller_task(
+        let task = tokio::spawn(sp_fetching_task(
             id,
-            poll_tx,
-            poll_now_rx,
-            ignition_state_rx,
+            data_tx,
+            fetch_now_rx,
+            ignition_presence_rx,
             mgs_client,
             log,
         ));
 
         (
-            Self { task, ignition_state_tx, poll_now_tx },
-            ReceiverStream::new(poll_rx),
+            Self { task, ignition_presence_tx, fetch_now_tx },
+            ReceiverStream::new(data_rx),
         )
     }
 
-    pub(super) fn set_ignition_state(&self, state: IgnitionState) {
+    pub(super) fn set_ignition_presence(&self, presence: IgnitionPresence) {
         // `tokio::watch::Sender` doesn't check for equality: only send an
-        // update if this state is actually different.
-        if *self.ignition_state_tx.borrow() != Some(state) {
-            match self.ignition_state_tx.send(Some(state)) {
+        // update if this presence is actually different.
+        if *self.ignition_presence_tx.borrow() != Some(presence) {
+            match self.ignition_presence_tx.send(Some(presence)) {
                 Ok(()) => (),
-                Err(_) => panic!("SP polling task panicked"),
+                Err(_) => panic!("SP state-fetching task panicked"),
             }
         }
     }
 
-    pub(super) fn poll_now(&self) {
-        match self.poll_now_tx.try_send(()) {
-            // If we succeeded or there's already a "poll now" request sitting
+    pub(super) fn fetch_now(&self) {
+        match self.fetch_now_tx.try_send(()) {
+            // If we succeeded or there's already a "fetch now" request sitting
             // in the channel, we're done.
             Ok(()) | Err(mpsc::error::TrySendError::Full(())) => (),
             // If the channel is closed, that means our task has panicked -
             // propogate that panic.
             Err(mpsc::error::TrySendError::Closed(())) => {
-                panic!("SP polling task panicked")
+                panic!("SP state-fetching task panicked")
             }
         }
     }
 }
 
-async fn sp_poller_task(
+async fn sp_fetching_task(
     id: SpIdentifier,
-    tx: mpsc::Sender<PollSp>,
-    mut poll_now: mpsc::Receiver<()>,
-    mut ignition_state: watch::Receiver<Option<IgnitionState>>,
+    tx: mpsc::Sender<FetchedSpData>,
+    mut fetch_now: mpsc::Receiver<()>,
+    mut ignition_presence: watch::Receiver<Option<IgnitionPresence>>,
     mgs_client: gateway_client::Client,
     log: Logger,
 ) {
     let mut ticker = interval(
-        ignition_state
+        ignition_presence
             .borrow()
-            .map_or(POLL_FREQ_PRESENT_SP, IgnitionState::poll_frequency),
+            .map_or(FETCH_FREQ_PRESENT_SP, IgnitionPresence::fetch_frequency),
     );
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -267,10 +272,10 @@ async fn sp_poller_task(
     loop {
         tokio::select! {
             _ = ticker.tick() => (),
-            _ = poll_now.recv() => {
+            _ = fetch_now.recv() => {
                 ticker.reset();
             }
-            _ = ignition_state.changed() => {
+            _ = ignition_presence.changed() => {
                 // When our ignition state changes, clear out all cached data
                 // and recreate `ticker`.
                 prev_state = None;
@@ -279,11 +284,11 @@ async fn sp_poller_task(
                 rot = RotInventory { caboose: None };
 
                 ticker = interval(
-                    ignition_state
+                    ignition_presence
                         .borrow()
                         .map_or(
-                            POLL_FREQ_PRESENT_SP,
-                            IgnitionState::poll_frequency,
+                            FETCH_FREQ_PRESENT_SP,
+                            IgnitionPresence::fetch_frequency,
                         ),
                 );
                 ticker.set_missed_tick_behavior(
@@ -377,7 +382,7 @@ async fn sp_poller_task(
             };
         }
 
-        let emit = PollSp {
+        let emit = FetchedSpData {
             id,
             state,
             components: components.clone(),
@@ -390,7 +395,7 @@ async fn sp_poller_task(
         // us to send results to!
         if tx.send(emit).await.is_err() {
             warn!(
-                log, "Receiver for ignition polling task is gone";
+                log, "Receiver for SP state-fetching task is gone";
                 "sp" => ?id,
             );
             break;

@@ -18,7 +18,8 @@ use tokio::time::{Duration, Instant};
 use tokio_stream::StreamMap;
 
 use self::inventory::{
-    IgnitionPoller, IgnitionState, PollIgnition, PollSp, SpPoller,
+    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
+    IgnitionStateFetcher, SpStateFetcher,
 };
 
 mod inventory;
@@ -125,8 +126,8 @@ pub struct MgsManager {
     // When they do, we don't want to reply to them until we get updates for
     // those SPs, so we hold the set of reply channels along with the list of
     // SPs they're waiting for in this vector. We expect this vec to be small
-    // (almost always empty); whenever we get a poll update for an SP, we scan
-    // this vec and check if any reply channels can now be satisfied.
+    // (almost always empty); whenever we get an update for an SP, we scan this
+    // vec and check if any reply channels can now be satisfied.
     waiting_for_update: Vec<WaitingForRefresh>,
 }
 
@@ -151,11 +152,11 @@ impl MgsManager {
 
     pub async fn run(mut self) {
         // First, wait until we get a list of SP identifiers that MGS knows how
-        // to talk to. We use this to know how many (and which) SP polling tasks
-        // to create. This does not induce any management network traffic, and
-        // if we can't get a response from this endpoint we're not going to get
-        // responses from any other endpoint anyway, so it's fine to wait until
-        // this succeeds.
+        // to talk to. We use this to know how many (and which) SP data-fetching
+        // tasks to create. This does not induce any management network traffic,
+        // and if we can't get a response from this endpoint we're not going to
+        // get responses from any other endpoint anyway, so it's fine to wait
+        // until this succeeds.
         let all_sp_ids = loop {
             match self.mgs_client.sp_all_ids().await {
                 Ok(response) => break response.into_inner(),
@@ -173,38 +174,43 @@ impl MgsManager {
         };
 
         // We just fetched all SP IDs from MGS. We'll update this timestamp
-        // below as we get results from the polling tasks we're about to spawn.
+        // below as we get results from the tasks we're about to spawn.
         let mut last_successful_mgs_response = Instant::now();
 
-        let mut ignition_poller =
-            IgnitionPoller::spawn(self.mgs_client.clone(), self.log.clone());
+        let mut ignition_task_handle = IgnitionStateFetcher::spawn(
+            self.mgs_client.clone(),
+            self.log.clone(),
+        );
 
         // We build two maps, both with the same keys (i.e., all SP IDs MGS
-        // knows about): one map to the poller handles, and the other is a
+        // knows about): one map to the task handles, and the other is a
         // `StreamMap` that allows us to poll the merged receiver streams
         // concurrently.
-        let mut sp_poller_handles = BTreeMap::new();
-        let mut sp_poller_streams = StreamMap::with_capacity(all_sp_ids.len());
+        let mut sp_task_handles = BTreeMap::new();
+        let mut sp_data_streams = StreamMap::with_capacity(all_sp_ids.len());
         for id in all_sp_ids {
-            let (handle, stream) =
-                SpPoller::spawn(id, self.mgs_client.clone(), self.log.clone());
-            sp_poller_handles.insert(id, handle);
-            sp_poller_streams.insert(id, stream);
+            let (handle, stream) = SpStateFetcher::spawn(
+                id,
+                self.mgs_client.clone(),
+                self.log.clone(),
+            );
+            sp_task_handles.insert(id, handle);
+            sp_data_streams.insert(id, stream);
         }
 
         loop {
             tokio::select! {
-                ignition = ignition_poller.recv() => {
+                ignition = ignition_task_handle.recv() => {
                     last_successful_mgs_response =
                         last_successful_mgs_response.max(ignition.mgs_received);
                     self.update_inventory_with_ignition(
                         ignition,
-                        &sp_poller_handles,
+                        &sp_task_handles,
                         last_successful_mgs_response,
                     );
                 }
 
-                Some((_, sp)) = sp_poller_streams.next() => {
+                Some((_, sp)) = sp_data_streams.next() => {
                     last_successful_mgs_response =
                         last_successful_mgs_response.max(sp.mgs_received);
                     self.update_inventory_with_sp(
@@ -217,8 +223,8 @@ impl MgsManager {
                     match request {
                         MgsRequest::GetInventory { reply_tx, force_refresh, .. } => {
                             self.handle_get_inventory_request(
-                                &ignition_poller,
-                                &sp_poller_handles,
+                                &ignition_task_handle,
+                                &sp_task_handles,
                                 last_successful_mgs_response,
                                 reply_tx,
                                 force_refresh,
@@ -269,8 +275,8 @@ impl MgsManager {
 
     fn handle_get_inventory_request(
         &mut self,
-        ignition_handle: &IgnitionPoller,
-        sp_poller_handles: &BTreeMap<SpIdentifier, SpPoller>,
+        ignition_handle: &IgnitionStateFetcher,
+        sp_handles: &BTreeMap<SpIdentifier, SpStateFetcher>,
         mgs_last_seen: Instant,
         reply_tx: oneshot::Sender<
             Result<GetInventoryResponse, GetInventoryError>,
@@ -283,25 +289,25 @@ impl MgsManager {
             return;
         }
 
-        // Trigger immediate polls for all SPs listed in `force_refresh`.
+        // Trigger immediate refreshes for all SPs listed in `force_refresh`.
         for &id in &force_refresh {
-            let Some(handle) = sp_poller_handles.get(&id) else {
+            let Some(handle) = sp_handles.get(&id) else {
                 _ = reply_tx.send(Err(GetInventoryError::InvalidSpIdentifier));
                 return;
             };
 
-            handle.poll_now();
+            handle.fetch_now();
         }
 
-        // Also poll ignition for any force refresh request; this is only
-        // called once and covers all SPs simultaneously.
-        ignition_handle.poll_now();
+        // Also fetch new data from ignition for any force refresh request; this
+        // is only called once and covers all SPs simultaneously.
+        ignition_handle.fetch_now();
 
-        // We don't want to respond on `reply_tx` until we get a response to
-        // the polls we just triggered, so push `reply_tx` onto our queue of
-        // waiters. We'll respond as soon as we get updates for all SPs
-        // listen in `force_refresh` (which should come soon since we just
-        // told their polling tasks to refresh ASAP).
+        // We don't want to respond on `reply_tx` until we get a response to the
+        // requests we just triggered, so push `reply_tx` onto our queue of
+        // waiters. We'll respond as soon as we get updates for all SPs listen
+        // in `force_refresh` (which should come soon since we just told their
+        // tasks to refresh ASAP).
         self.waiting_for_update.push(WaitingForRefresh {
             reply_tx,
             sps_to_refresh: force_refresh.into_iter().collect(),
@@ -311,8 +317,8 @@ impl MgsManager {
 
     fn update_inventory_with_ignition(
         &mut self,
-        ignition: PollIgnition,
-        sp_poller_handles: &BTreeMap<SpIdentifier, SpPoller>,
+        ignition: FetchedIgnitionState,
+        sp_handles: &BTreeMap<SpIdentifier, SpStateFetcher>,
         mgs_last_seen: Instant,
     ) {
         for (id, ignition) in ignition.sps {
@@ -321,15 +327,17 @@ impl MgsManager {
                 .entry(id)
                 .or_insert_with(|| SpInventory::new(id));
 
-            // Update our poller with the current ignition state so it can
+            // Update our handle with the current ignition state so it can
             // (potentially) adjust its polling frequency.
-            if let Some(sp_poller) = sp_poller_handles.get(&id) {
+            if let Some(sp_handle) = sp_handles.get(&id) {
                 match &ignition {
                     SpIgnition::No => {
-                        sp_poller.set_ignition_state(IgnitionState::Absent);
+                        sp_handle
+                            .set_ignition_presence(IgnitionPresence::Absent);
                     }
                     SpIgnition::Yes { .. } => {
-                        sp_poller.set_ignition_state(IgnitionState::Present);
+                        sp_handle
+                            .set_ignition_presence(IgnitionPresence::Present);
                     }
                     // TODO can we remove this case from MGS too?
                     SpIgnition::Error { .. } => (),
@@ -348,7 +356,11 @@ impl MgsManager {
         self.check_completed_waiters(mgs_last_seen);
     }
 
-    fn update_inventory_with_sp(&mut self, sp: PollSp, mgs_last_seen: Instant) {
+    fn update_inventory_with_sp(
+        &mut self,
+        sp: FetchedSpData,
+        mgs_last_seen: Instant,
+    ) {
         let entry = self
             .inventory
             .entry(sp.id)
