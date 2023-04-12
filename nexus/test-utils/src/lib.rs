@@ -50,6 +50,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
+    pub dendrite: dev::dendrite::DendriteInstance,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -60,6 +61,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
+        self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
 
@@ -138,6 +140,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Start ClickHouse database server.
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
+    // Set up a stub instance of dendrite
+    let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
+
     // Store actual address/port information for the databases after they start.
     config.deployment.database =
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
@@ -148,6 +153,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .as_mut()
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
+
+    config.pkg.dendrite.address.set_port(dendrite.port);
 
     let server = N::start_and_populate(&config, &logctx.log).await;
 
@@ -219,6 +226,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         oximeter,
         producer,
         logctx,
+        dendrite,
     }
 }
 

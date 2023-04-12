@@ -148,17 +148,6 @@ async fn sid_delete_network_config(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    //
-    // currently if we have this environment variable set, we want to
-    // bypass all calls to DPD. This is mainly to facilitate some tests where
-    // we don't have dpd running. In the future we should probably have these
-    // testing environments running dpd-stub so that the full path can be tested.
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
-
     let mut errors: Vec<ActionError> = vec![];
 
     // Here we are attempting to delete every existing NAT entry while deferring

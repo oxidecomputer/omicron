@@ -4552,6 +4552,7 @@ dependencies = [
  "futures",
  "libc",
  "omicron-common 0.1.0",
+ "regex",
  "slog",
  "subprocess",
  "tempfile",
