@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use std::borrow::Cow;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Configuration for the "rack setup service".
@@ -39,10 +39,10 @@ pub struct RackInitializeRequest {
     /// The external DNS server addresses.
     pub dns_servers: Vec<String>,
 
-    /// The address on which Nexus should serve an external interface.
+    /// Ranges of the service IP pool which may be used for internal services.
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
-    // this should be pulled from a pool of addresses.
-    pub nexus_external_address: IpAddr,
+    // we want to configure multiple pools.
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
 }
 
 /// Information about the internet gateway used for externally-facing services.

@@ -505,7 +505,7 @@ pub(crate) mod test {
             params::ProjectSelector { project: NameOrId::Id(project_id) };
         let opctx = test_opctx(&cptestctx);
         let (.., authz_project) = nexus
-            .project_lookup(&opctx, &project_selector)
+            .project_lookup(&opctx, project_selector)
             .expect("Invalid parameters constructing project lookup")
             .lookup_for(action)
             .await

@@ -326,6 +326,7 @@ async fn finalize_import(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &finalize_url)
+            .raw_body(Some("{}".to_string()))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -338,13 +339,12 @@ async fn finalize_import_take_snapshot(
     client: &ClientTestContext,
     expected_status: StatusCode,
 ) {
-    let finalize_url = format!(
-        "/v1/disks/{}/finalize?project={}&snapshot_name=a-snapshot",
-        DISK_NAME, PROJECT_NAME,
-    );
+    let finalize_url =
+        format!("/v1/disks/{}/finalize?project={}", DISK_NAME, PROJECT_NAME,);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &finalize_url)
+            .raw_body(Some("{ \"snapshot_name\": \"a-snapshot\" }".to_string()))
             .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser)

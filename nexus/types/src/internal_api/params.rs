@@ -158,13 +158,7 @@ pub struct DatasetPutRequest {
 pub enum ServiceKind {
     InternalDNS,
     InternalDNSConfig,
-    Nexus {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
-        // While it's true that Nexus will only run with a single address,
-        // we want to convey information about the available pool of addresses
-        // when handing off from RSS -> Nexus.
-        external_address: IpAddr,
-    },
+    Nexus { external_address: IpAddr },
     Oximeter,
     Dendrite,
     Tfport,
