@@ -10,13 +10,17 @@ use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
+use nexus_db_model::DnsGroup;
+use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::RackInit;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -107,14 +111,47 @@ impl super::Nexus {
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
 
+        let dns_zone = request
+            .internal_dns_zone_config
+            .zones
+            .into_iter()
+            .find(|z| z.zone_name == internal_dns::DNS_ZONE)
+            .ok_or_else(|| {
+                Error::invalid_request(
+                    "expected initial DNS config to include control plane zone",
+                )
+            })?;
+
+        let internal_dns = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            &dns_zone.zone_name,
+            &self.id.to_string(),
+            "rack setup",
+            dns_zone.records,
+        );
+
+        // TODO the initial external DNS zone name and potentially record
+        // name(s) need to come in with the rack initialization request.
+        let external_dns = InitialDnsGroup::new(
+            DnsGroup::External,
+            "oxide-dev.test",
+            &self.id.to_string(),
+            "rack setup",
+            HashMap::new(),
+        );
+
         self.db_datastore
             .rack_set_initialized(
                 opctx,
-                rack_id,
-                request.services,
-                datasets,
-                service_ip_pool_ranges,
-                certificates,
+                RackInit {
+                    rack_id,
+                    services: request.services,
+                    datasets,
+                    service_ip_pool_ranges,
+                    certificates,
+                    internal_dns,
+                    external_dns,
+                },
             )
             .await?;
 

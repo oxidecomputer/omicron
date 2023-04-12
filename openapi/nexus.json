@@ -539,6 +539,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -581,6 +582,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -628,6 +630,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -636,6 +639,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -670,6 +674,7 @@
           {
             "in": "path",
             "name": "disk",
+            "description": "Name or ID of the disk",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -678,6 +683,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -686,6 +692,230 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/bulk-write": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Import blocks into a disk",
+        "operationId": "disk_bulk_write_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "Name or ID of the disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBlocksBulkWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/bulk-write-start": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Start the process of importing blocks into a disk",
+        "operationId": "disk_bulk_write_import_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "Name or ID of the disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/bulk-write-stop": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Stop the process of importing blocks into a disk",
+        "operationId": "disk_bulk_write_import_stop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "Name or ID of the disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/finalize": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Finalize disk when imports are done",
+        "operationId": "disk_finalize_import",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "Name or ID of the disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "snapshot_name",
+            "description": "an optional snapshot name",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/disks/{disk}/import": {
+      "post": {
+        "tags": [
+          "disks"
+        ],
+        "summary": "Send request to import blocks from URL",
+        "operationId": "disk_import_blocks_from_url",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk",
+            "description": "Name or ID of the disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportBlocksFromUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -761,6 +991,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -855,6 +1086,7 @@
           {
             "in": "path",
             "name": "group",
+            "description": "ID of the group",
             "required": true,
             "schema": {
               "type": "string",
@@ -914,6 +1146,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -957,6 +1190,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1005,6 +1239,7 @@
           {
             "in": "path",
             "name": "image",
+            "description": "Name or ID of the image",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1013,6 +1248,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1048,6 +1284,7 @@
           {
             "in": "path",
             "name": "image",
+            "description": "Name or ID of the image",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1056,6 +1293,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1105,6 +1343,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1147,6 +1386,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1194,6 +1434,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1201,6 +1442,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1236,6 +1478,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1243,6 +1486,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1293,6 +1537,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1307,6 +1552,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1345,6 +1591,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1353,6 +1600,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1399,6 +1647,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1407,6 +1656,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1453,6 +1703,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1460,6 +1711,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1497,6 +1749,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1504,6 +1757,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1551,6 +1805,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1558,6 +1813,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1595,6 +1851,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1636,6 +1893,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1672,6 +1930,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1713,6 +1972,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1742,6 +2002,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1749,6 +2010,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1786,6 +2048,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1793,6 +2056,7 @@
           {
             "in": "path",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -1832,7 +2096,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/User"
+                  "$ref": "#/components/schemas/CurrentUser"
                 }
               }
             }
@@ -2009,6 +2273,7 @@
           {
             "in": "path",
             "name": "ssh_key",
+            "description": "Name or ID of the SSH key",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2045,6 +2310,7 @@
           {
             "in": "path",
             "name": "ssh_key",
+            "description": "Name or ID of the SSH key",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2075,6 +2341,7 @@
           {
             "in": "query",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2102,6 +2369,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2120,7 +2388,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceResultsPage"
                 }
               }
             }
@@ -2144,6 +2412,7 @@
           {
             "in": "query",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2152,6 +2421,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2161,7 +2431,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NetworkInterfaceCreate"
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
               }
             }
           },
@@ -2173,7 +2443,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2198,6 +2468,7 @@
           {
             "in": "path",
             "name": "interface",
+            "description": "Name or ID of the network interface",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2206,6 +2477,7 @@
           {
             "in": "query",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2213,6 +2485,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2224,7 +2497,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2247,6 +2520,7 @@
           {
             "in": "path",
             "name": "interface",
+            "description": "Name or ID of the network interface",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2255,6 +2529,7 @@
           {
             "in": "query",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2262,6 +2537,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2271,7 +2547,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NetworkInterfaceUpdate"
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceUpdate"
               }
             }
           },
@@ -2283,7 +2559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2307,6 +2583,7 @@
           {
             "in": "path",
             "name": "interface",
+            "description": "Name or ID of the network interface",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2315,6 +2592,7 @@
           {
             "in": "query",
             "name": "instance",
+            "description": "Name or ID of the instance",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2322,6 +2600,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2505,6 +2784,7 @@
           {
             "in": "path",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2540,6 +2820,7 @@
           {
             "in": "path",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2585,6 +2866,7 @@
           {
             "in": "path",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2615,6 +2897,7 @@
           {
             "in": "path",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2650,6 +2933,7 @@
           {
             "in": "path",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2717,6 +3001,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2760,6 +3045,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2807,6 +3093,7 @@
           {
             "in": "path",
             "name": "snapshot",
+            "description": "Name or ID of the snapshot",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2815,6 +3102,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2849,6 +3137,7 @@
           {
             "in": "path",
             "name": "snapshot",
+            "description": "Name or ID of the snapshot",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -2857,6 +3146,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3383,6 +3673,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3428,6 +3719,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3485,6 +3777,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3526,6 +3819,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3566,6 +3860,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3613,6 +3908,7 @@
           {
             "in": "path",
             "name": "provider",
+            "description": "Name or ID of the SAML identity provider",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3621,6 +3917,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3750,6 +4047,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3785,6 +4083,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3830,6 +4129,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3861,6 +4161,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3919,6 +4220,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -3966,6 +4268,7 @@
           {
             "in": "path",
             "name": "pool",
+            "description": "Name or ID of the IP pool",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4576,6 +4879,7 @@
           {
             "in": "path",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4612,6 +4916,7 @@
           {
             "in": "path",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4642,6 +4947,7 @@
           {
             "in": "path",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4677,6 +4983,7 @@
           {
             "in": "path",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5132,6 +5439,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5186,6 +5494,7 @@
           {
             "in": "query",
             "name": "silo",
+            "description": "Name or ID of the silo",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5383,6 +5692,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5390,6 +5700,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5425,6 +5736,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5432,6 +5744,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5500,6 +5813,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5507,6 +5821,7 @@
           {
             "in": "query",
             "name": "router",
+            "description": "Name or ID of the router",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5521,6 +5836,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5556,6 +5872,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5563,6 +5880,7 @@
           {
             "in": "query",
             "name": "router",
+            "description": "Name or ID of the router",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5571,6 +5889,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5617,6 +5936,7 @@
           {
             "in": "path",
             "name": "route",
+            "description": "Name or ID of the route",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5625,6 +5945,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5632,6 +5953,7 @@
           {
             "in": "query",
             "name": "router",
+            "description": "Name or ID of the router",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5640,6 +5962,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5674,6 +5997,7 @@
           {
             "in": "path",
             "name": "route",
+            "description": "Name or ID of the route",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5682,6 +6006,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5689,6 +6014,7 @@
           {
             "in": "query",
             "name": "router",
+            "description": "Name or ID of the router",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5696,6 +6022,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5740,6 +6067,7 @@
           {
             "in": "path",
             "name": "route",
+            "description": "Name or ID of the route",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5748,6 +6076,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5755,6 +6084,7 @@
           {
             "in": "query",
             "name": "router",
+            "description": "Name or ID of the router",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5762,6 +6092,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5811,6 +6142,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5825,6 +6157,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5860,6 +6193,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5867,6 +6201,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5914,6 +6249,7 @@
           {
             "in": "path",
             "name": "router",
+            "description": "Name or ID of the router",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5922,6 +6258,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5929,6 +6266,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5963,6 +6301,7 @@
           {
             "in": "path",
             "name": "router",
+            "description": "Name or ID of the router",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -5971,6 +6310,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5978,6 +6318,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6022,6 +6363,7 @@
           {
             "in": "path",
             "name": "router",
+            "description": "Name or ID of the router",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6030,6 +6372,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6037,6 +6380,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6086,6 +6430,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6100,6 +6445,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6135,6 +6481,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6142,6 +6489,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6189,6 +6537,7 @@
           {
             "in": "path",
             "name": "subnet",
+            "description": "Name or ID of the subnet",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6197,6 +6546,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6204,6 +6554,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6238,6 +6589,7 @@
           {
             "in": "path",
             "name": "subnet",
+            "description": "Name or ID of the subnet",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6246,6 +6598,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6253,6 +6606,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6297,6 +6651,7 @@
           {
             "in": "path",
             "name": "subnet",
+            "description": "Name or ID of the subnet",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6305,6 +6660,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6312,6 +6668,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6341,6 +6698,7 @@
           {
             "in": "path",
             "name": "subnet",
+            "description": "Name or ID of the subnet",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6369,6 +6727,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6383,6 +6742,7 @@
           {
             "in": "query",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6394,7 +6754,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceResultsPage"
                 }
               }
             }
@@ -6440,6 +6800,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6482,6 +6843,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6529,6 +6891,7 @@
           {
             "in": "path",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6537,6 +6900,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6571,6 +6935,7 @@
           {
             "in": "path",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6579,6 +6944,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6623,6 +6989,7 @@
           {
             "in": "path",
             "name": "vpc",
+            "description": "Name or ID of the VPC",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6631,6 +6998,7 @@
           {
             "in": "query",
             "name": "project",
+            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -7089,6 +7457,39 @@
           "value"
         ]
       },
+      "CurrentUser": {
+        "description": "Info about the current user",
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "description": "Human-readable name that can identify the user",
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_id": {
+            "description": "Uuid of the silo to which this user belongs",
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_name": {
+            "description": "Name of the silo to which this user belongs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "display_name",
+          "id",
+          "silo_id",
+          "silo_name"
+        ]
+      },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",
         "oneOf": [
@@ -7454,7 +7855,12 @@
         "type": "object",
         "properties": {
           "disk": {
-            "$ref": "#/components/schemas/NameOrId"
+            "description": "Name or ID of the disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
           }
         },
         "required": [
@@ -7568,6 +7974,25 @@
               "image_id",
               "type"
             ]
+          },
+          {
+            "description": "Create a blank disk that will accept bulk writes or pull blocks from an external source.",
+            "type": "object",
+            "properties": {
+              "block_size": {
+                "$ref": "#/components/schemas/BlockSize"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "importing_blocks"
+                ]
+              }
+            },
+            "required": [
+              "block_size",
+              "type"
+            ]
           }
         ]
       },
@@ -7597,6 +8022,66 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready to receive blocks from an external source",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "import_ready"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from a URL",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_url"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from bulk writes",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_bulk_writes"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being finalized to state Detached",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "finalizing"
                 ]
               }
             },
@@ -7750,6 +8235,22 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ExpectedDigest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
         ]
       },
       "ExternalIp": {
@@ -8444,6 +8945,46 @@
           }
         ]
       },
+      "ImportBlocksBulkWrite": {
+        "description": "Parameters for importing blocks with a bulk write",
+        "type": "object",
+        "properties": {
+          "base64_encoded_data": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "base64_encoded_data",
+          "offset"
+        ]
+      },
+      "ImportBlocksFromUrl": {
+        "description": "Parameters for importing blocks from a URL to a disk",
+        "type": "object",
+        "properties": {
+          "expected_digest": {
+            "nullable": true,
+            "description": "Expected digest of all blocks when importing from a URL",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExpectedDigest"
+              }
+            ]
+          },
+          "url": {
+            "description": "the source to pull blocks from",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ]
+      },
       "Instance": {
         "description": "Client view of an [`Instance`]",
         "type": "object",
@@ -8677,17 +9218,95 @@
           "dst_sled_id"
         ]
       },
+      "InstanceNetworkInterface": {
+        "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "description": "The IP address assigned to this interface.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "description": "The MAC address assigned to this interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "primary": {
+            "description": "True if this interface is the primary for the instance to which it's attached.",
+            "type": "boolean"
+          },
+          "subnet_id": {
+            "description": "The subnet to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "instance_id",
+          "ip",
+          "mac",
+          "name",
+          "primary",
+          "subnet_id",
+          "time_created",
+          "time_modified",
+          "vpc_id"
+        ]
+      },
       "InstanceNetworkInterfaceAttachment": {
-        "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
+        "description": "Describes an attachment of an `InstanceNetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create one or more `NetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
+            "description": "Create one or more `InstanceNetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
             "type": "object",
             "properties": {
               "params": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/NetworkInterfaceCreate"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
                 }
               },
               "type": {
@@ -8733,6 +9352,90 @@
             ]
           }
         ]
+      },
+      "InstanceNetworkInterfaceCreate": {
+        "description": "Create-time parameters for an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
+            "nullable": true,
+            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "subnet_name": {
+            "description": "The VPC Subnet in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "vpc_name": {
+            "description": "The VPC in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "subnet_name",
+          "vpc_name"
+        ]
+      },
+      "InstanceNetworkInterfaceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceNetworkInterface"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InstanceNetworkInterfaceUpdate": {
+        "description": "Parameters for updating an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
+          }
+        }
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -9174,168 +9877,6 @@
             ]
           }
         ]
-      },
-      "NetworkInterface": {
-        "description": "A `NetworkInterface` represents a virtual network interface device.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "instance_id": {
-            "description": "The Instance to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "ip": {
-            "description": "The IP address assigned to this interface.",
-            "type": "string",
-            "format": "ip"
-          },
-          "mac": {
-            "description": "The MAC address assigned to this interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MacAddr"
-              }
-            ]
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "primary": {
-            "description": "True if this interface is the primary for the instance to which it's attached.",
-            "type": "boolean"
-          },
-          "subnet_id": {
-            "description": "The subnet to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "vpc_id": {
-            "description": "The VPC to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "instance_id",
-          "ip",
-          "mac",
-          "name",
-          "primary",
-          "subnet_id",
-          "time_created",
-          "time_modified",
-          "vpc_id"
-        ]
-      },
-      "NetworkInterfaceCreate": {
-        "description": "Create-time parameters for a [`NetworkInterface`](omicron_common::api::external::NetworkInterface)",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "ip": {
-            "nullable": true,
-            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
-            "type": "string",
-            "format": "ip"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "subnet_name": {
-            "description": "The VPC Subnet in which to create the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "vpc_name": {
-            "description": "The VPC in which to create the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "description",
-          "name",
-          "subnet_name",
-          "vpc_name"
-        ]
-      },
-      "NetworkInterfaceResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "NetworkInterfaceUpdate": {
-        "description": "Parameters for updating a [`NetworkInterface`](omicron_common::api::external::NetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "primary": {
-            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
-            "default": false,
-            "type": "boolean"
-          }
-        }
       },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
@@ -10288,7 +10829,7 @@
           },
           "signing_keypair": {
             "nullable": true,
-            "description": "optional request signing key pair",
+            "description": "request signing key pair",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"

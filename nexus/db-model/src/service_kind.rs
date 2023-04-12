@@ -17,12 +17,16 @@ impl_enum_type!(
     pub enum ServiceKind;
 
     // Enum values
+    CruciblePantry => b"crucible_pantry"
+    Dendrite => b"dendrite"
+    ExternalDNS => b"external_dns"
+    ExternalDNSConfig => b"external_dns_config"
     InternalDNS => b"internal_dns"
+    InternalDNSConfig => b"internal_dns_config"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
-    Dendrite => b"dendrite"
     Tfport => b"tfport"
-    CruciblePantry => b"crucible_pantry"
+    NTP => b"ntp"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -49,6 +53,9 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::InternalDNS => {
                 ServiceKind::InternalDNS
             }
+            internal_api::params::ServiceKind::InternalDNSConfig => {
+                ServiceKind::InternalDNSConfig
+            }
             internal_api::params::ServiceKind::Nexus { .. } => {
                 ServiceKind::Nexus
             }
@@ -62,6 +69,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::CruciblePantry => {
                 ServiceKind::CruciblePantry
             }
+            internal_api::params::ServiceKind::NTP => ServiceKind::NTP,
         }
     }
 }

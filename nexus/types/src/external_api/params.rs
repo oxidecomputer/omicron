@@ -21,28 +21,30 @@ use std::{net::IpAddr, str::FromStr};
 use uuid::Uuid;
 
 macro_rules! path_param {
-    ($struct:ident, $param:ident) => {
+    ($struct:ident, $param:ident, $name:tt) => {
         #[derive(Serialize, Deserialize, JsonSchema)]
         pub struct $struct {
+            #[doc = "Name or ID of the "]
+            #[doc = $name]
             pub $param: NameOrId,
         }
     };
 }
 
-path_param!(ProjectPath, project);
-path_param!(InstancePath, instance);
-path_param!(NetworkInterfacePath, interface);
-path_param!(VpcPath, vpc);
-path_param!(SubnetPath, subnet);
-path_param!(RouterPath, router);
-path_param!(RoutePath, route);
-path_param!(DiskPath, disk);
-path_param!(SnapshotPath, snapshot);
-path_param!(ImagePath, image);
-path_param!(SiloPath, silo);
-path_param!(ProviderPath, provider);
-path_param!(IpPoolPath, pool);
-path_param!(SshKeyPath, ssh_key);
+path_param!(ProjectPath, project, "project");
+path_param!(InstancePath, instance, "instance");
+path_param!(NetworkInterfacePath, interface, "network interface");
+path_param!(VpcPath, vpc, "VPC");
+path_param!(SubnetPath, subnet, "subnet");
+path_param!(RouterPath, router, "router");
+path_param!(RoutePath, route, "route");
+path_param!(DiskPath, disk, "disk");
+path_param!(SnapshotPath, snapshot, "snapshot");
+path_param!(ImagePath, image, "image");
+path_param!(SiloPath, silo, "silo");
+path_param!(ProviderPath, provider, "SAML identity provider");
+path_param!(IpPoolPath, pool, "IP pool");
+path_param!(SshKeyPath, ssh_key, "SSH key");
 
 // Only by ID because groups have an `external_id` instead of a name and
 // therefore don't implement `ObjectIdentity`, which makes lookup by name
@@ -50,11 +52,13 @@ path_param!(SshKeyPath, ssh_key);
 // resources like this.
 #[derive(Deserialize, JsonSchema)]
 pub struct GroupPath {
+    /// ID of the group
     pub group: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SiloSelector {
+    /// Name or ID of the silo
     pub silo: NameOrId,
 }
 
@@ -68,6 +72,7 @@ impl From<Name> for SiloSelector {
 pub struct SamlIdentityProviderSelector {
     #[serde(flatten)]
     pub silo_selector: Option<SiloSelector>,
+    /// Name or ID of the SAML identity provider
     pub saml_identity_provider: NameOrId,
 }
 
@@ -76,12 +81,15 @@ pub struct SamlIdentityProviderSelector {
 // the environment the user is authetnicated in
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SshKeySelector {
+    /// ID of the silo user
     pub silo_user_id: Uuid,
+    /// Name or ID of the SSH key
     pub ssh_key: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ProjectSelector {
+    /// Name or ID of the project
     pub project: NameOrId,
 }
 
@@ -95,6 +103,7 @@ pub struct OptionalProjectSelector {
 pub struct DiskSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the disk
     pub disk: NameOrId,
 }
 
@@ -102,6 +111,7 @@ pub struct DiskSelector {
 pub struct SnapshotSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the snapshot
     pub snapshot: NameOrId,
 }
 
@@ -109,6 +119,7 @@ pub struct SnapshotSelector {
 pub struct ImageSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the image
     pub image: NameOrId,
 }
 
@@ -116,19 +127,22 @@ pub struct ImageSelector {
 pub struct InstanceSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the instance
     pub instance: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
     #[serde(flatten)]
+    /// Name or ID of the instance
     pub instance_selector: Option<InstanceSelector>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct NetworkInterfaceSelector {
+pub struct InstanceNetworkInterfaceSelector {
     #[serde(flatten)]
     pub instance_selector: Option<InstanceSelector>,
+    /// Name or ID of the network interface
     pub network_interface: NameOrId,
 }
 
@@ -136,12 +150,14 @@ pub struct NetworkInterfaceSelector {
 pub struct VpcSelector {
     #[serde(flatten)]
     pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the VPC
     pub vpc: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
     #[serde(flatten)]
+    /// Name or ID of the VPC
     pub vpc_selector: Option<VpcSelector>,
 }
 
@@ -149,6 +165,7 @@ pub struct OptionalVpcSelector {
 pub struct SubnetSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the subnet
     pub subnet: NameOrId,
 }
 
@@ -156,19 +173,23 @@ pub struct SubnetSelector {
 pub struct RouterSelector {
     #[serde(flatten)]
     pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the router
     pub router: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OptionalRouterSelector {
     #[serde(flatten)]
+    /// Name or ID of the router
     pub router_selector: Option<RouterSelector>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RouteSelector {
     #[serde(flatten)]
+    /// Name or ID of the router
     pub router_selector: Option<RouterSelector>,
+    /// Name or ID of the route
     pub route: NameOrId,
 }
 
@@ -490,7 +511,7 @@ pub struct SamlIdentityProviderCreate {
     /// customer's technical contact for saml configuration
     pub technical_contact_email: String,
 
-    /// optional request signing key pair
+    /// request signing key pair
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
 
@@ -581,10 +602,10 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
-/// Create-time parameters for a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
+/// Create-time parameters for an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceCreate {
+pub struct InstanceNetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// The VPC in which to create the interface.
@@ -595,13 +616,13 @@ pub struct NetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
-/// Parameters for updating a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface).
+/// Parameters for updating an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceUpdate {
+pub struct InstanceNetworkInterfaceUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 
@@ -671,8 +692,8 @@ pub struct IpPoolUpdate {
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
-/// Describes an attachment of a `NetworkInterface` to an `Instance`, at the
-/// time the instance is created.
+/// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
+/// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
 // instances. It's true that all networking resources for an instance must
 // belong to a single VPC, but we don't consider instances to be "scoped" to a
@@ -690,11 +711,11 @@ pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `NetworkInterface`s for the `Instance`.
+    /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
     /// If more than one interface is provided, then the first will be
     /// designated the primary interface for the instance.
-    Create(Vec<NetworkInterfaceCreate>),
+    Create(Vec<InstanceNetworkInterfaceCreate>),
 
     /// The default networking configuration for an instance is to create a
     /// single primary interface with an automatically-assigned IP address. The
@@ -1052,6 +1073,9 @@ pub enum DiskSource {
     Image { image_id: Uuid },
     /// Create a disk from a global image
     GlobalImage { image_id: Uuid },
+    /// Create a blank disk that will accept bulk writes or pull blocks from an
+    /// external source.
+    ImportingBlocks { block_size: BlockSize },
 }
 
 /// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
@@ -1064,6 +1088,40 @@ pub struct DiskCreate {
     pub disk_source: DiskSource,
     /// total size of the Disk in bytes
     pub size: ByteCount,
+}
+
+// equivalent to crucible_pantry_client::types::ExpectedDigest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExpectedDigest {
+    Sha256(String),
+}
+
+/// Parameters for importing blocks from a URL to a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImportBlocksFromUrl {
+    /// the source to pull blocks from
+    pub url: String,
+    /// Expected digest of all blocks when importing from a URL
+    pub expected_digest: Option<ExpectedDigest>,
+}
+
+/// Parameters for importing blocks with a bulk write
+// equivalent to crucible_pantry_client::types::BulkWriteRequest
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImportBlocksBulkWrite {
+    pub offset: u64,
+    pub base64_encoded_data: String,
+}
+
+/// Parameters for finalizing a disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FinalizeDisk {
+    #[serde(flatten)]
+    pub project_selector: Option<ProjectSelector>,
+
+    /// an optional snapshot name
+    pub snapshot_name: Option<String>,
 }
 
 // IMAGES

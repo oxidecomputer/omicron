@@ -394,7 +394,7 @@ impl JsonSchema for NameOrId {
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {
-    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
+    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self(semver::Version::new(major, minor, patch))
     }
 
@@ -698,7 +698,7 @@ pub enum ResourceType {
     Image,
     Instance,
     IpPool,
-    NetworkInterface,
+    InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
     Service,
@@ -972,6 +972,14 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is ready to receive blocks from an external source
+    ImportReady,
+    /// Disk is importing blocks from a URL
+    ImportingFromUrl,
+    /// Disk is importing blocks from bulk writes
+    ImportingFromBulkWrites,
+    /// Disk is being finalized to state Detached
+    Finalizing,
     /// Disk is undergoing maintenance
     Maintenance,
     /// Disk is being attached to the given Instance
@@ -1001,6 +1009,12 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("import_ready", None) => Ok(DiskState::ImportReady),
+            ("importing_from_url", None) => Ok(DiskState::ImportingFromUrl),
+            ("importing_from_bulk_writes", None) => {
+                Ok(DiskState::ImportingFromBulkWrites)
+            }
+            ("finalizing", None) => Ok(DiskState::Finalizing),
             ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
@@ -1021,6 +1035,10 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::ImportReady => "import_ready",
+            DiskState::ImportingFromUrl => "importing_from_url",
+            DiskState::ImportingFromBulkWrites => "importing_from_bulk_writes",
+            DiskState::Finalizing => "finalizing",
             DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
@@ -1046,6 +1064,10 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::ImportReady => None,
+            DiskState::ImportingFromUrl => None,
+            DiskState::ImportingFromBulkWrites => None,
+            DiskState::Finalizing => None,
             DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
@@ -2022,9 +2044,10 @@ impl TryFrom<i32> for Vni {
     }
 }
 
-/// A `NetworkInterface` represents a virtual network interface device.
+/// An `InstanceNetworkInterface` represents a virtual network interface device
+/// attached to an instance.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct NetworkInterface {
+pub struct InstanceNetworkInterface {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -2042,9 +2065,9 @@ pub struct NetworkInterface {
     pub mac: MacAddr,
 
     /// The IP address assigned to this interface.
-    pub ip: IpAddr,
     // TODO-correctness: We need to split this into an optional V4 and optional
     // V6 address, at least one of which must be specified.
+    pub ip: IpAddr,
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,

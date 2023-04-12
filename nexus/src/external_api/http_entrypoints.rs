@@ -14,6 +14,7 @@ use super::{
 };
 use crate::authz;
 use crate::db;
+use crate::db::identity::Resource;
 use crate::db::model::Name;
 use crate::external_api::shared;
 use crate::ServerContext;
@@ -55,9 +56,9 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::Saga;
@@ -114,6 +115,12 @@ pub fn external_api() -> NexusApiDescription {
         api.register(disk_view)?;
         api.register(disk_delete)?;
         api.register(disk_metrics_list)?;
+
+        api.register(disk_bulk_write_import_start)?;
+        api.register(disk_bulk_write_import)?;
+        api.register(disk_bulk_write_import_stop)?;
+        api.register(disk_import_blocks_from_url)?;
+        api.register(disk_finalize_import)?;
 
         api.register(instance_list)?;
         api.register(instance_view)?;
@@ -1516,6 +1523,7 @@ async fn disk_metrics_list(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
+
         let selector = selector_params.into_inner();
         let limit = rqctx.page_limit(&query)?;
         let disk_selector = params::DiskSelector {
@@ -1538,6 +1546,162 @@ async fn disk_metrics_list(
             .await?;
 
         Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Start the process of importing blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-start",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import_start(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import_start(&opctx, &disk_selector).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Import blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    import_params: TypedBody<params::ImportBlocksBulkWrite>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let params = import_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import(&opctx, &disk_selector, params).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Stop the process of importing blocks into a disk
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-stop",
+    tags = ["disks"],
+}]
+async fn disk_bulk_write_import_stop(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_manual_import_stop(&opctx, &disk_selector).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Send request to import blocks from URL
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/import",
+    tags = ["disks"],
+}]
+async fn disk_import_blocks_from_url(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    import_params: TypedBody<params::ImportBlocksFromUrl>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let params = import_params.into_inner();
+
+        let disk_selector = params::DiskSelector {
+            disk: path.disk,
+            project_selector: query.project_selector,
+        };
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus
+            .import_blocks_from_url_for_disk(&opctx, &disk_selector, params)
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Finalize disk when imports are done
+#[endpoint {
+    method = POST,
+    path = "/v1/disks/{disk}/finalize",
+    tags = ["disks"],
+}]
+async fn disk_finalize_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::DiskPath>,
+    query_params: Query<params::FinalizeDisk>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus.disk_finalize_import(&opctx, path.disk, query).await?;
+
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2358,7 +2522,7 @@ async fn image_delete(
 async fn instance_network_interface_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2370,7 +2534,11 @@ async fn instance_network_interface_list(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &scan_params.selector)?;
         let interfaces = nexus
-            .network_interface_list(&opctx, &instance_lookup, &paginated_by)
+            .instance_network_interface_list(
+                &opctx,
+                &instance_lookup,
+                &paginated_by,
+            )
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -2393,8 +2561,8 @@ async fn instance_network_interface_list(
 async fn instance_network_interface_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::InstanceSelector>,
-    interface_params: TypedBody<params::NetworkInterfaceCreate>,
-) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
+    interface_params: TypedBody<params::InstanceNetworkInterfaceCreate>,
+) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2435,13 +2603,15 @@ async fn instance_network_interface_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector {
+        let interface_selector = params::InstanceNetworkInterfaceSelector {
             instance_selector: query.instance_selector,
             network_interface: path.interface,
         };
-        let interface_lookup =
-            nexus.network_interface_lookup(&opctx, &interface_selector)?;
-        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
+        let interface_lookup = nexus
+            .instance_network_interface_lookup(&opctx, &interface_selector)?;
+        nexus
+            .instance_network_interface_delete(&opctx, &interface_lookup)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2457,19 +2627,19 @@ async fn instance_network_interface_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector {
+        let interface_selector = params::InstanceNetworkInterfaceSelector {
             instance_selector: query.instance_selector,
             network_interface: path.interface,
         };
         let (.., interface) = nexus
-            .network_interface_lookup(&opctx, &interface_selector)?
+            .instance_network_interface_lookup(&opctx, &interface_selector)?
             .fetch()
             .await?;
         Ok(HttpResponseOk(interface.into()))
@@ -2487,8 +2657,8 @@ async fn instance_network_interface_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
-    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2496,20 +2666,24 @@ async fn instance_network_interface_update(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let updated_iface = updated_iface.into_inner();
-        let network_interface_selector = params::NetworkInterfaceSelector {
-            instance_selector: query.instance_selector,
-            network_interface: path.interface,
-        };
+        let network_interface_selector =
+            params::InstanceNetworkInterfaceSelector {
+                instance_selector: query.instance_selector,
+                network_interface: path.interface,
+            };
         let network_interface_lookup = nexus
-            .network_interface_lookup(&opctx, &network_interface_selector)?;
+            .instance_network_interface_lookup(
+                &opctx,
+                &network_interface_selector,
+            )?;
         let interface = nexus
-            .network_interface_update(
+            .instance_network_interface_update(
                 &opctx,
                 &network_interface_lookup,
                 updated_iface,
             )
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(InstanceNetworkInterface::from(interface)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -2983,7 +3157,7 @@ async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -3000,7 +3174,7 @@ async fn vpc_subnet_list_network_interfaces(
         let subnet_lookup =
             nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let interfaces = nexus
-            .subnet_list_network_interfaces(
+            .subnet_list_instance_network_interfaces(
                 &opctx,
                 &subnet_lookup,
                 &paginated_by,
@@ -4253,13 +4427,17 @@ async fn role_view(
 }]
 pub async fn current_user_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
+) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
+        let silo = nexus.silo_user_fetch_silo(&opctx).await?;
+        Ok(HttpResponseOk(views::CurrentUser {
+            user: user.into(),
+            silo_name: silo.name().clone(),
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

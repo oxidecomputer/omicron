@@ -10,6 +10,7 @@ use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::context::OpContext;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -22,6 +23,7 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::start_sled_agent;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -29,12 +31,13 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
-use omicron_common::api::external::NetworkInterface;
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::SILO_ID;
+use omicron_nexus::db::lookup::LookupPath;
 use omicron_nexus::external_api::shared::IpKind;
 use omicron_nexus::external_api::shared::IpRange;
 use omicron_nexus::external_api::shared::Ipv4Range;
@@ -42,6 +45,7 @@ use omicron_nexus::external_api::shared::SiloIdentityMode;
 use omicron_nexus::external_api::views;
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
+use omicron_sled_agent::sim::SledAgent;
 use sled_agent_client::TestInterfaces as _;
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -167,18 +171,6 @@ async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(fetched_instance.identity.id, instance.identity.id);
 
-    // Fetch instance by name, project_name, and organization_id
-    let fetched_instance = instance_get(
-        &client,
-        format!(
-            "/v1/instances/{}?project={}",
-            instance.identity.name, project.identity.name
-        )
-        .as_str(),
-    )
-    .await;
-    assert_eq!(fetched_instance.identity.id, instance.identity.id);
-
     // Fetch instance by name and project_name
     let fetched_instance = instance_get(
         &client,
@@ -268,7 +260,7 @@ async fn test_instances_create_reboot_halt(
         PROJECT_NAME
     );
     let network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &nics_url)
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
             .await
             .items;
     assert_eq!(network_interfaces.len(), 1);
@@ -302,15 +294,6 @@ async fn test_instances_create_reboot_halt(
     let instance_next =
         instance_post(&client, instance_name, InstanceOp::Reboot).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Rebooting);
-    assert!(
-        instance_next.runtime.time_run_state_updated
-            > instance.runtime.time_run_state_updated
-    );
-
-    let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -399,15 +382,6 @@ async fn test_instances_create_reboot_halt(
     let instance = instance_next;
     instance_simulate(nexus, &instance.identity.id).await;
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Starting);
-    assert!(
-        instance_next.runtime.time_run_state_updated
-            > instance.runtime.time_run_state_updated
-    );
-
-    let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
@@ -463,10 +437,12 @@ async fn test_instances_create_reboot_halt(
         "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
         PROJECT_NAME,
     );
-    let interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     assert!(
         interfaces.is_empty(),
         "Expected all network interfaces for the instance to be deleted"
@@ -855,7 +831,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
     let requested_address = "172.30.0.10".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -928,7 +904,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     // as-is. This would fail with a conflict on the instance name, if we don't
     // fully unwind the saga and delete the instance database record.
     let requested_address = "172.30.0.11".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -970,7 +946,7 @@ async fn test_instance_with_single_explicit_ip_address(
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
     let requested_address = "172.30.0.10".parse::<std::net::IpAddr>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -1022,7 +998,7 @@ async fn test_instance_with_single_explicit_ip_address(
         .execute()
         .await
         .expect("Failed to get network interface for new instance")
-        .parsed_body::<NetworkInterface>()
+        .parsed_body::<InstanceNetworkInterface>()
         .expect("Failed to parse a network interface");
     assert_eq!(interface.instance_id, instance.identity.id);
     assert_eq!(interface.identity.name, if0_params.identity.name);
@@ -1073,7 +1049,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 
     // Create the parameters for the interfaces. These will be created during
     // the saga for instance creation.
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -1082,7 +1058,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         subnet_name: default_name.clone(),
         ip: None,
     };
-    let if1_params = params::NetworkInterfaceCreate {
+    let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -1132,11 +1108,10 @@ async fn test_instance_with_new_custom_network_interfaces(
     };
 
     // The first interface is in the default VPC Subnet
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        nics_url(&default_name).as_str(),
-        "",
-        Some(100),
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(
+        client, nics_url(&default_name).as_str(), "", Some(100)
     )
     .await
     .expect("Failed to get interfaces in default VPC Subnet");
@@ -1151,14 +1126,15 @@ async fn test_instance_with_new_custom_network_interfaces(
     assert_eq!(if0.instance_id, instance.identity.id);
     assert_eq!(if0.ip, std::net::IpAddr::V4("172.30.0.5".parse().unwrap()));
 
-    let interfaces1 = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        nics_url(&non_default_subnet_name).as_str(),
-        "",
-        Some(100),
-    )
-    .await
-    .expect("Failed to get interfaces in non-default VPC Subnet");
+    let interfaces1 =
+        NexusRequest::iter_collection_authn::<InstanceNetworkInterface>(
+            client,
+            nics_url(&non_default_subnet_name).as_str(),
+            "",
+            Some(100),
+        )
+        .await
+        .expect("Failed to get interfaces in non-default VPC Subnet");
     assert_eq!(
         interfaces1.all_items.len(),
         1,
@@ -1241,12 +1217,9 @@ async fn test_instance_create_delete_network_interface(
         "/v1/network-interfaces?project={}&instance={}",
         PROJECT_NAME, instance.identity.name,
     );
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client,
-        url_interfaces.as_str(),
-        "",
-        Some(100),
-    )
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(client, url_interfaces.as_str(), "", Some(100))
     .await
     .expect("Failed to get interfaces for instance");
     assert!(
@@ -1256,7 +1229,7 @@ async fn test_instance_create_delete_network_interface(
 
     // Parameters for the interfaces to create/attach
     let if_params = vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1265,7 +1238,7 @@ async fn test_instance_create_delete_network_interface(
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
         },
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1316,7 +1289,7 @@ async fn test_instance_create_delete_network_interface(
         .execute()
         .await
         .expect("Failed to create network interface on stopped instance");
-        let iface = response.parsed_body::<NetworkInterface>().unwrap();
+        let iface = response.parsed_body::<InstanceNetworkInterface>().unwrap();
         assert_eq!(iface.identity.name, params.identity.name);
         assert_eq!(iface.ip, params.ip.unwrap());
         assert_eq!(
@@ -1333,10 +1306,12 @@ async fn test_instance_create_delete_network_interface(
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Get all interfaces in one request.
-    let other_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let other_interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     for (iface0, iface1) in interfaces.iter().zip(other_interfaces) {
         assert_eq!(iface0.identity.id, iface1.identity.id);
         assert_eq!(iface0.vpc_id, iface1.vpc_id);
@@ -1393,7 +1368,7 @@ async fn test_instance_create_delete_network_interface(
     .expect("Failed to parse error response body");
     assert_eq!(
         err.message,
-        "The primary interface for an instance \
+        "The primary interface \
         may not be deleted while secondary interfaces \
         are still attached",
         "Expected an InvalidRequest response when detaching \
@@ -1483,7 +1458,7 @@ async fn test_instance_update_network_interfaces(
 
     // Parameters for each interface to try to modify.
     let if_params = vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if0".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1492,7 +1467,7 @@ async fn test_instance_update_network_interfaces(
             subnet_name: "default".parse().unwrap(),
             ip: Some("172.30.0.10".parse().unwrap()),
         },
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "if1".parse().unwrap(),
                 description: String::from("a new nic"),
@@ -1517,7 +1492,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert_eq!(primary_iface.identity.name, if_params[0].identity.name);
     assert_eq!(primary_iface.ip, if_params[0].ip.unwrap());
@@ -1532,7 +1507,7 @@ async fn test_instance_update_network_interfaces(
     // We'll change the interface's name and description
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
     let new_description = String::from("new description");
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(new_name.clone()),
             description: Some(new_description.clone()),
@@ -1575,7 +1550,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // Verify the modifications have taken effect, updating the name,
@@ -1588,7 +1563,8 @@ async fn test_instance_update_network_interfaces(
     // interface, and that the modification time for the new is later than the
     // old.
     let verify_unchanged_attributes =
-        |original_iface: &NetworkInterface, new_iface: &NetworkInterface| {
+        |original_iface: &InstanceNetworkInterface,
+         new_iface: &InstanceNetworkInterface| {
             assert_eq!(
                 original_iface.identity.time_created,
                 new_iface.identity.time_created
@@ -1607,7 +1583,7 @@ async fn test_instance_update_network_interfaces(
 
     // Try with the same request again, but this time only changing
     // `primary`. This should have no effect.
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -1626,7 +1602,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // Everything should still be the same, except the modification time.
@@ -1656,7 +1632,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert_eq!(secondary_iface.identity.name, if_params[1].identity.name);
     assert_eq!(secondary_iface.ip, if_params[1].ip.unwrap());
@@ -1701,7 +1677,7 @@ async fn test_instance_update_network_interfaces(
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
-    let updates = params::NetworkInterfaceUpdate {
+    let updates = params::InstanceNetworkInterfaceUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
             description: None,
@@ -1717,7 +1693,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to update an interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // It should now be the primary and have an updated modification time
@@ -1743,7 +1719,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to get the old primary / new secondary interface")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
 
     // The now-secondary interface should be, well, secondary
@@ -1772,10 +1748,12 @@ async fn test_instance_update_network_interfaces(
         .execute()
         .await
         .expect("Failed to delete original secondary interface");
-    let all_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_interfaces)
-            .await
-            .items;
+    let all_interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
+        client,
+        &url_interfaces,
+    )
+    .await
+    .items;
     assert_eq!(
         all_interfaces.len(),
         1,
@@ -1794,7 +1772,7 @@ async fn test_instance_update_network_interfaces(
     .execute()
     .await
     .expect("Failed to create network interface on stopped instance")
-    .parsed_body::<NetworkInterface>()
+    .parsed_body::<InstanceNetworkInterface>()
     .unwrap();
     assert!(!iface.primary);
     assert_eq!(iface.identity.name, if_params[0].identity.name);
@@ -1816,7 +1794,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
     // error on creation of the second NIC, and we'll make sure that both are
     // deleted.
     let default_name = "default".parse::<Name>().unwrap();
-    let if0_params = params::NetworkInterfaceCreate {
+    let if0_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if0")).unwrap(),
             description: String::from("first custom interface"),
@@ -1825,7 +1803,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         subnet_name: default_name.clone(),
         ip: Some("172.30.0.6".parse().unwrap()),
     };
-    let if1_params = params::NetworkInterfaceCreate {
+    let if1_params = params::InstanceNetworkInterfaceCreate {
         identity: IdentityMetadataCreateParams {
             name: Name::try_from(String::from("if1")).unwrap(),
             description: String::from("second custom interface"),
@@ -1871,9 +1849,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         "/v1/vpc-subnets/default/network-interfaces?project={}&vpc=default",
         PROJECT_NAME,
     );
-    let interfaces = NexusRequest::iter_collection_authn::<NetworkInterface>(
-        client, &url_nics, "", None,
-    )
+    let interfaces = NexusRequest::iter_collection_authn::<
+        InstanceNetworkInterface,
+    >(client, &url_nics, "", None)
     .await
     .expect("failed to list network interfaces")
     .all_items;
@@ -2522,11 +2500,15 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Stop and delete instance
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
-
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
+
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
+
+    // Store the sled agent for this instance for later disk simulation
+    let sa = nexus.instance_sled_by_id(&instance.identity.id).await.unwrap();
+
     instance_simulate(nexus, &instance.identity.id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
@@ -2547,6 +2529,57 @@ async fn test_disks_detached_when_instance_destroyed(
     assert_eq!(disks.len(), 8);
     for disk in &disks {
         assert_eq!(disk.state, DiskState::Detached);
+
+        // Simulate each one of the disks to move from "Detaching" to "Detached"
+        sa.disk_finish_transition(disk.identity.id).await;
+    }
+
+    // Ensure that the disks can be attached to another instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nfsv2".parse().unwrap(),
+            description: String::from("probably serving data too!"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("nfsv2"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: (0..8)
+            .map(|i| {
+                params::InstanceDiskAttachment::Attach(
+                    params::InstanceDiskAttach {
+                        name: Name::try_from(format!("probablydata{}", i))
+                            .unwrap(),
+                    },
+                )
+            })
+            .collect(),
+        start: true,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let _response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance creation!");
+
+    // Assert disks are attached to this new instance
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+
+    assert_eq!(disks.len(), 8);
+    for disk in &disks {
+        assert!(matches!(disk.state, DiskState::Attached(_)));
     }
 }
 
@@ -2907,6 +2940,113 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .expect("Failed to create instance")
         .parsed_body::<Instance>()
         .expect("Failed to parse instance");
+}
+
+/// Test that appropriate OPTE V2P mappings are created and deleted.
+#[nexus_test]
+async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+    create_project(client, PROJECT_NAME).await;
+
+    // Add a few more sleds
+    let nsleds = 3;
+    let mut additional_sleds = Vec::with_capacity(nsleds);
+    for _ in 0..nsleds {
+        let sa_id = Uuid::new_v4();
+        let log =
+            cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
+        let addr = cptestctx.server.get_http_server_internal_address().await;
+        let update_directory = std::path::Path::new("/should/not/be/used");
+        additional_sleds.push(
+            start_sled_agent(log, addr, sa_id, &update_directory)
+                .await
+                .unwrap(),
+        );
+    }
+
+    // Create an instance.
+    let instance_name = "test-instance";
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+
+    let nics_url =
+        format!("/v1/network-interfaces?instance={}", instance.identity.id,);
+
+    let nics =
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &nics_url)
+            .await
+            .items;
+
+    // The default config is one NIC
+    assert_eq!(nics.len(), 1);
+
+    // Validate that every sled (except the instance's sled) now has a V2P
+    // mapping for this instance
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance.identity.id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let guest_nics = datastore
+        .derive_guest_network_interface_info(&opctx, &authz_instance)
+        .await
+        .unwrap();
+    assert_eq!(guest_nics.len(), 1);
+
+    let mut sled_agents: Vec<&Arc<SledAgent>> =
+        additional_sleds.iter().map(|x| &x.sled_agent).collect();
+    sled_agents.push(&cptestctx.sled_agent.sled_agent);
+
+    for sled_agent in &sled_agents {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        if sled_agent.id != db_instance.runtime().sled_id {
+            assert!(!v2p_mappings.is_empty());
+            assert_eq!(
+                v2p_mappings.get(&nics[0].identity.id).unwrap().len(),
+                1
+            );
+
+            // Confirm that OPTE was passed the correct information
+            let mapping = &v2p_mappings.get(&nics[0].identity.id).unwrap()[0];
+            assert_eq!(mapping.virtual_ip, nics[0].ip);
+            assert_eq!(mapping.virtual_mac, nics[0].mac);
+            assert_eq!(mapping.physical_host_ip, sled_agent.ip);
+            assert_eq!(mapping.vni, guest_nics[0].vni.clone().into());
+        } else {
+            assert!(v2p_mappings.is_empty());
+        }
+    }
+
+    // Delete the instance
+    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance.identity.id).await;
+
+    let instance_url = get_instance_url(instance_name);
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Validate that every sled no longer has the V2P mapping for this instance
+    for sled_agent in &sled_agents {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        if sled_agent.id != db_instance.runtime().sled_id {
+            assert!(!v2p_mappings.is_empty());
+            assert!(v2p_mappings.get(&nics[0].identity.id).unwrap().is_empty());
+        } else {
+            assert!(v2p_mappings.is_empty());
+        }
+    }
 }
 
 async fn instance_get(

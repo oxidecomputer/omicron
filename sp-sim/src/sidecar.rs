@@ -124,7 +124,7 @@ impl Sidecar {
         sidecar: &SidecarConfig,
         log: Logger,
     ) -> Result<Self> {
-        info!(log, "setting up simualted sidecar");
+        info!(log, "setting up simulated sidecar");
 
         let (commands, commands_rx) = mpsc::unbounded_channel();
 
@@ -560,6 +560,20 @@ impl SpHandler for Handler {
         Err(SpError::RequestUnsupportedForSp)
     }
 
+    fn serial_console_keepalive(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log,
+            "received serial console keepalive; unsupported by sidecar";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+        Err(SpError::RequestUnsupportedForSp)
+    }
+
     fn serial_console_detach(
         &mut self,
         sender: SocketAddrV6,
@@ -935,12 +949,18 @@ impl SpHandler for Handler {
         &mut self,
         key: [u8; 4],
     ) -> std::result::Result<&'static [u8], SpError> {
-        warn!(
-            &self.log,
-            "received request for caboose key; not supported by simulated sidecar";
-            "key" => ?key,
-        );
-        Err(SpError::RequestUnsupportedForSp)
+        static GITC: &[u8] = b"ffffffff";
+        static BORD: &[u8] = b"SimSidecarSp";
+        static NAME: &[u8] = b"SimSidecar";
+        static VERS: &[u8] = b"0.0.1";
+
+        match &key {
+            b"GITC" => Ok(GITC),
+            b"BORD" => Ok(BORD),
+            b"NAME" => Ok(NAME),
+            b"VERS" => Ok(VERS),
+            _ => Err(SpError::NoSuchCabooseKey(key)),
+        }
     }
 }
 

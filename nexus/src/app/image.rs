@@ -83,11 +83,11 @@ impl super::Nexus {
                     message: format!("block_size is invalid: {}", e),
                 })?;
 
-                let global_image_id = Uuid::new_v4();
+                let image_id = Uuid::new_v4();
 
                 let volume_construction_request =
                     sled_agent_client::types::VolumeConstructionRequest::Url {
-                        id: global_image_id,
+                        id: image_id,
                         block_size: db_block_size.to_bytes().into(),
                         url: url.clone(),
                     };
@@ -176,7 +176,7 @@ impl super::Nexus {
 
                 db::model::Image {
                     identity: db::model::ImageIdentity::new(
-                        global_image_id,
+                        image_id,
                         params.identity.clone(),
                     ),
                     project_id: authz_project.id(),
@@ -190,10 +190,41 @@ impl super::Nexus {
                 }
             }
 
-            params::ImageSource::Snapshot { id: _id } => {
-                return Err(Error::unavail(
-                    &"creating images from snapshots not supported",
-                ));
+            params::ImageSource::Snapshot { id } => {
+                let image_id = Uuid::new_v4();
+
+                // Grab the snapshot to get block size
+                let (.., db_snapshot) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .snapshot_id(*id)
+                        .fetch()
+                        .await?;
+
+                // Copy the Volume data for this snapshot with randomized ids -
+                // this is safe because the snapshot is read-only, and even
+                // though volume_checkout will bump the gen numbers multiple
+                // Upstairs can connect to read-only downstairs without kicking
+                // each other out.
+
+                let image_volume = self
+                    .db_datastore
+                    .volume_checkout_randomize_ids(db_snapshot.volume_id)
+                    .await?;
+
+                db::model::Image {
+                    identity: db::model::ImageIdentity::new(
+                        image_id,
+                        params.identity.clone(),
+                    ),
+                    project_id: authz_project.id(),
+                    volume_id: image_volume.id(),
+                    url: None,
+                    os: params.os.clone(),
+                    version: params.version.clone(),
+                    digest: None, // TODO
+                    block_size: db_snapshot.block_size,
+                    size: db_snapshot.size,
+                }
             }
 
             params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {
@@ -403,10 +434,40 @@ impl super::Nexus {
                 }
             }
 
-            params::ImageSource::Snapshot { id: _id } => {
-                return Err(Error::unavail(
-                    &"creating images from snapshots not supported",
-                ));
+            params::ImageSource::Snapshot { id } => {
+                let global_image_id = Uuid::new_v4();
+
+                // Grab the snapshot to get block size
+                let (.., db_snapshot) =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .snapshot_id(*id)
+                        .fetch()
+                        .await?;
+
+                // Copy the Volume data for this snapshot with randomized ids -
+                // this is safe because the snapshot is read-only, and even
+                // though volume_checkout will bump the gen numbers multiple
+                // Upstairs can connect to read-only downstairs without kicking
+                // each other out.
+
+                let image_volume = self
+                    .db_datastore
+                    .volume_checkout_randomize_ids(db_snapshot.volume_id)
+                    .await?;
+
+                db::model::GlobalImage {
+                    identity: db::model::GlobalImageIdentity::new(
+                        global_image_id,
+                        params.identity.clone(),
+                    ),
+                    volume_id: image_volume.id(),
+                    url: None,
+                    distribution: params.distribution.name.to_string(),
+                    version: params.distribution.version,
+                    digest: None, // TODO
+                    block_size: db_snapshot.block_size,
+                    size: db_snapshot.size,
+                }
             }
 
             params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine => {

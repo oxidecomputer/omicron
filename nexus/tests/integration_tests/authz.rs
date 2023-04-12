@@ -327,14 +327,11 @@ async fn test_session_me_for_unpriv(cptestctx: &ControlPlaneTestContext) {
     .await
     .id;
 
-    let _session_user: views::User =
-        NexusRequest::object_get(client, &"/v1/me")
-            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
-            .execute()
-            .await
-            .expect("failed to make GET request")
-            .parsed_body()
-            .unwrap();
+    let _session_user = NexusRequest::object_get(client, &"/v1/me")
+        .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+        .execute()
+        .await
+        .expect("failed to make GET request");
 }
 
 // Test that an authenticated, unprivileged user can access their own silo

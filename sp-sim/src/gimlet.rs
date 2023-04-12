@@ -112,7 +112,7 @@ impl SimulatedSp for Gimlet {
 
 impl Gimlet {
     pub async fn spawn(gimlet: &GimletConfig, log: Logger) -> Result<Self> {
-        info!(log, "setting up simualted gimlet");
+        info!(log, "setting up simulated gimlet");
 
         let attached_mgs = Arc::new(Mutex::new(None));
 
@@ -754,6 +754,33 @@ impl SpHandler for Handler {
         Ok(offset + data.len() as u64)
     }
 
+    fn serial_console_keepalive(
+        &mut self,
+        sender: SocketAddrV6,
+        port: SpPort,
+    ) -> std::result::Result<(), SpError> {
+        debug!(
+            &self.log,
+            "received serial console keepalive";
+            "sender" => %sender,
+            "port" => ?port,
+        );
+
+        let component = self
+            .attached_mgs
+            .lock()
+            .unwrap()
+            .map(|(component, _port, _addr)| component)
+            .ok_or(SpError::SerialConsoleNotAttached)?;
+
+        let _incoming_serial_console = self
+            .incoming_serial_console
+            .get(&component)
+            .ok_or(SpError::RequestUnsupportedForComponent)?;
+
+        Ok(())
+    }
+
     fn serial_console_detach(
         &mut self,
         sender: SocketAddrV6,
@@ -1203,12 +1230,18 @@ impl SpHandler for Handler {
         &mut self,
         key: [u8; 4],
     ) -> std::result::Result<&'static [u8], SpError> {
-        warn!(
-            &self.log,
-            "received request for caboose key; not supported by simulated gimlet";
-            "key" => ?key,
-        );
-        Err(SpError::RequestUnsupportedForSp)
+        static GITC: &[u8] = b"ffffffff";
+        static BORD: &[u8] = b"SimGimletSp";
+        static NAME: &[u8] = b"SimGimlet";
+        static VERS: &[u8] = b"0.0.1";
+
+        match &key {
+            b"GITC" => Ok(GITC),
+            b"BORD" => Ok(BORD),
+            b"NAME" => Ok(NAME),
+            b"VERS" => Ok(VERS),
+            _ => Err(SpError::NoSuchCabooseKey(key)),
+        }
     }
 }
 

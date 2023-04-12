@@ -59,8 +59,9 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::nexus::d2n_params;
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
@@ -69,11 +70,14 @@ use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::{ServiceName, SRV};
+use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
-use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
+use omicron_common::address::{
+    get_sled_address, CRUCIBLE_PANTRY_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
+    OXIMETER_PORT,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -430,7 +434,7 @@ impl ServiceInner {
     }
 
     // Waits for sufficient neighbors to exist so the initial set of requests
-    // can be send out.
+    // can be sent out.
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
@@ -485,13 +489,90 @@ impl ServiceInner {
                 );
             },
         )
-        // `retry_policy_internal_service_aggressive()` retries indefinitely on transient errors
-        // (the only kind we produce), allowing us to `.unwrap()` without
-        // panicking
+        // `retry_policy_internal_service_aggressive()` retries indefinitely on
+        // transient errors (the only kind we produce), allowing us to
+        // `.unwrap()` without panicking
         .await
         .unwrap();
 
         Ok(addrs)
+    }
+
+    async fn sled_timesync(
+        &self,
+        sled_address: &SocketAddrV6,
+    ) -> Result<TimeSync, SetupServiceError> {
+        let dur = std::time::Duration::from_secs(60);
+
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
+        );
+
+        info!(
+            self.log,
+            "Checking time synchronization for {}...", sled_address
+        );
+
+        let ts = client.timesync_get().await?.into_inner();
+        Ok(TimeSync { sync: ts.sync, skew: ts.skew, correction: ts.correction })
+    }
+
+    async fn wait_for_timesync(
+        &self,
+        sled_addresses: &Vec<SocketAddrV6>,
+    ) -> Result<(), SetupServiceError> {
+        info!(self.log, "Waiting for rack time synchronization");
+
+        let timesync_wait = || async {
+            let mut synced_peers = 0;
+            let mut sync = true;
+
+            for sled_address in sled_addresses {
+                if let Ok(ts) = self.sled_timesync(sled_address).await {
+                    info!(self.log, "Timesync for {} {:?}", sled_address, ts);
+                    if !ts.sync {
+                        sync = false;
+                    } else {
+                        synced_peers += 1;
+                    }
+                } else {
+                    sync = false;
+                }
+            }
+
+            if sync {
+                Ok(())
+            } else {
+                Err(BackoffError::transient(format!(
+                    "Time is synchronized on {}/{} sleds",
+                    synced_peers,
+                    sled_addresses.len()
+                )))
+            }
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "Time is not yet synchronized"; "error" => ?error);
+        };
+
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            timesync_wait,
+            log_failure,
+        )
+        // `retry_policy_internal_service_aggressive()` retries indefinitely on
+        // transient errors (the only kind we produce), allowing us to
+        // `.unwrap()` without panicking
+        .await
+        .unwrap();
+
+        Ok(())
     }
 
     async fn handoff_to_nexus(
@@ -508,7 +589,7 @@ impl ServiceInner {
         )
         .expect("Failed to create DNS resolver");
         let ip = resolver
-            .lookup_ip(SRV::Service(ServiceName::Nexus))
+            .lookup_ip(ServiceName::Nexus)
             .await
             .expect("Failed to lookup IP");
         let nexus_address = SocketAddr::new(ip, NEXUS_INTERNAL_PORT);
@@ -542,7 +623,23 @@ impl ServiceInner {
 
             for zone in &service_request.services {
                 for svc in &zone.services {
-                    let kind = match svc {
+                    // TODO-cleanup Here, we take the ServiceZoneRequests that
+                    // were constructed with the ServicePlan and turn them into
+                    // Nexus ServicePutRequest objects.  For Nexus, we need to
+                    // specify a SocketAddr -- both an IP address and a port on
+                    // which the service is listening.  The code here hardcodes
+                    // the default ports for each service.  This happens to be
+                    // correct because the ServicePlan uses the same hardcoded
+                    // ports when it sets up the DNS zone and the Sled Agent
+                    // uses the same hardcoded ports when configuring each of
+                    // these services.  It would be more robust to pick the
+                    // (hardcoded) port when constructing the ServicePlan and
+                    // plumb the SocketAddr (with port) everywhere that needs it
+                    // (including both here and DNS).  That way we don't bake
+                    // the port assumption into multiple places and we can also
+                    // more easily support things running on different ports
+                    // (which is useful in dev/test situations).
+                    match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
                             // NOTE: Eventually, this IP pool will be entirely
                             // user-supplied. For now, however, it's inferred
@@ -563,18 +660,80 @@ impl ServiceInner {
                             };
                             internal_services_ip_pool_ranges.push(range);
 
-                            NexusTypes::ServiceKind::Nexus {
-                                external_address: *external_ip,
-                            }
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NEXUS_INTERNAL_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Nexus {
+                                    external_address: *external_ip,
+                                },
+                            });
                         }
-                        ServiceType::InternalDns { .. } => {
-                            NexusTypes::ServiceKind::InternalDNS
+                        ServiceType::InternalDns {
+                            server_address,
+                            dns_address,
+                        } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: server_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::InternalDNSConfig,
+                            });
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: dns_address.to_string(),
+                                kind: NexusTypes::ServiceKind::InternalDNS,
+                            });
                         }
                         ServiceType::Oximeter => {
-                            NexusTypes::ServiceKind::Oximeter
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    OXIMETER_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Oximeter,
+                            });
                         }
                         ServiceType::CruciblePantry => {
-                            NexusTypes::ServiceKind::CruciblePantry
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CRUCIBLE_PANTRY_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::CruciblePantry,
+                            });
+                        }
+                        ServiceType::Ntp { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NTP_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::NTP,
+                            });
                         }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
@@ -582,15 +741,7 @@ impl ServiceInner {
                                 svc
                             )));
                         }
-                    };
-
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id: zone.id,
-                        sled_id,
-                        // TODO: Should this be a vec, or a single value?
-                        address: zone.addresses[0],
-                        kind,
-                    })
+                    }
                 }
             }
 
@@ -623,6 +774,7 @@ impl ServiceInner {
             // should be bootstrapped during the rack setup process to avoid
             // the need for unencrypted communication.
             certs: vec![],
+            internal_dns_zone_config: d2n_params(&service_plan.dns_config),
         };
 
         let notify_nexus = || async {
@@ -819,23 +971,25 @@ impl ServiceInner {
                 ServicePlan::create(&self.log, &config, &sled_addresses).await?
             };
 
-        // Set up internal DNS services.
+        // Set up internal DNS and NTP services.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
-                let dns_services: Vec<_> = services_request
+                let services: Vec<_> = services_request
                     .services
                     .iter()
                     .filter_map(|svc| {
-                        if matches!(svc.zone_type, ZoneType::InternalDNS) {
+                        if matches!(
+                            svc.zone_type,
+                            ZoneType::InternalDNS | ZoneType::NTP
+                        ) {
                             Some(svc.clone())
                         } else {
                             None
                         }
                     })
                     .collect();
-                if !dns_services.is_empty() {
-                    self.initialize_services(*sled_address, &dns_services)
-                        .await?;
+                if !services.is_empty() {
+                    self.initialize_services(*sled_address, &services).await?;
                 }
                 Ok(())
             },
@@ -846,6 +1000,9 @@ impl ServiceInner {
 
         // Write the initial DNS configuration to the internal DNS servers.
         self.initialize_dns(&service_plan).await?;
+
+        // Wait until time is synchronized on all sleds before proceeding.
+        self.wait_for_timesync(&sled_addresses).await?;
 
         // Issue the dataset initialization requests to all sleds.
         futures::future::join_all(service_plan.services.iter().map(
@@ -878,9 +1035,10 @@ impl ServiceInner {
                 // we must provide the set of *all* services that should be
                 // executing on a sled.
                 //
-                // This means re-requesting the DNS service, even if it is
-                // already running - this is fine, however, as the receiving
-                // sled agent doesn't modify the already-running service.
+                // This means re-requesting the DNS and NTP services, even if
+                // they are already running - this is fine, however, as the
+                // receiving sled agent doesn't modify the already-running
+                // service.
                 self.initialize_services(
                     *sled_address,
                     &services_request.services,

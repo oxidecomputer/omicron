@@ -36,10 +36,8 @@ pub fn align_by(
 ) -> Text {
     rect.x += left_margin;
     rect.width -= left_margin;
-    let constraints: Vec<_> = (0..spans.len())
-        .into_iter()
-        .map(|_| Constraint::Max(column_width))
-        .collect();
+    let constraints: Vec<_> =
+        (0..spans.len()).map(|_| Constraint::Max(column_width)).collect();
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(constraints)

@@ -7,10 +7,12 @@ use omicron_common::api::internal::nexus::HostIdentifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 
 /// Information required to construct a virtual network interface for a guest
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterface {
+    pub id: uuid::Uuid,
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
@@ -49,4 +51,13 @@ pub struct VpcFirewallRule {
     pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
     pub action: external::VpcFirewallRuleAction,
     pub priority: external::VpcFirewallRulePriority,
+}
+
+/// A mapping from a virtual NIC to a physical host
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct SetVirtualNetworkInterfaceHost {
+    pub virtual_ip: IpAddr,
+    pub virtual_mac: external::MacAddr,
+    pub physical_host_ip: Ipv6Addr,
+    pub vni: external::Vni,
 }

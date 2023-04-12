@@ -1061,6 +1061,66 @@
             ]
           },
           {
+            "description": "Disk is ready to receive blocks from an external source",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "import_ready"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from a URL",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_url"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from bulk writes",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_bulk_writes"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being finalized to state Detached",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "finalizing"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
             "description": "Disk is undergoing maintenance",
             "type": "object",
             "properties": {
@@ -1163,6 +1223,93 @@
             },
             "required": [
               "state"
+            ]
+          }
+        ]
+      },
+      "DnsConfigParams": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "time_created",
+          "zones"
+        ]
+      },
+      "DnsConfigZone": {
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DnsRecord"
+              }
+            }
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "records",
+          "zone_name"
+        ]
+      },
+      "DnsRecord": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AAAA"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/Srv"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
             ]
           }
         ]
@@ -2038,6 +2185,14 @@
               "$ref": "#/components/schemas/DatasetCreateRequest"
             }
           },
+          "internal_dns_zone_config": {
+            "description": "initial internal DNS config",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DnsConfigParams"
+              }
+            ]
+          },
           "internal_services_ip_pool_ranges": {
             "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
             "type": "array",
@@ -2056,6 +2211,7 @@
         "required": [
           "certs",
           "datasets",
+          "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
           "services"
         ]
@@ -2100,6 +2256,20 @@
                 "type": "string",
                 "enum": [
                   "internal_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_d_n_s_config"
                 ]
               }
             },
@@ -2189,6 +2359,20 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "n_t_p"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -2198,8 +2382,7 @@
         "properties": {
           "address": {
             "description": "Address on which a service is responding to requests.",
-            "type": "string",
-            "format": "ipv6"
+            "type": "string"
           },
           "kind": {
             "description": "Type of service being inserted.",
@@ -2289,6 +2472,35 @@
               "scrimlet"
             ]
           }
+        ]
+      },
+      "Srv": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "prio": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "port",
+          "prio",
+          "target",
+          "weight"
         ]
       },
       "ZpoolPutRequest": {

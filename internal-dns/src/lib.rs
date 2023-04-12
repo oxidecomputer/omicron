@@ -10,7 +10,5 @@ pub mod resolver;
 
 // We export these names out to the root for compatibility.
 pub use config::DnsConfigBuilder;
-pub use config::SRV;
-pub use names::BackendName;
 pub use names::ServiceName;
 pub use names::DNS_ZONE;

@@ -9,15 +9,19 @@ use crate::artifacts::UpdatePlan;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
+use crate::update_events::ComponentRegistrar;
+use crate::update_events::SpComponentUpdateStage;
+use crate::update_events::StepContext;
+use crate::update_events::StepProgress;
+use crate::update_events::StepResult;
+use crate::update_events::UpdateComponent;
+use crate::update_events::UpdateEngine;
 use crate::update_events::UpdateEventKind;
 use crate::update_events::UpdateNormalEventKind;
 use crate::update_events::UpdateStateKind;
-use crate::update_events::UpdateTerminalEventKind;
-use crate::update_executor::MajorComponent;
-use crate::update_executor::StepProgress;
-use crate::update_executor::StepRegistrar;
-use crate::update_executor::UpdateExecContext;
-use crate::update_executor::UpdateExecutor;
+use crate::update_events::UpdateStepId;
+use crate::update_events::UpdateTerminalError;
+use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
@@ -379,7 +383,7 @@ impl UpdateDriver {
         self.push_update_events(events.into_iter(), new_current);
     }
 
-    fn push_update_terminal_failure(&self, kind: UpdateTerminalEventKind) {
+    fn push_update_terminal_failure(&self, kind: UpdateTerminalError) {
         self.push_update_event_now(UpdateEventKind::Terminal(kind), None);
     }
 
@@ -388,7 +392,7 @@ impl UpdateDriver {
         plan: UpdatePlan,
         update_cx: &UpdateContext,
         ipr_start_receiver: IprStartReceiver,
-    ) -> Result<(), UpdateTerminalEventKind> {
+    ) -> Result<(), UpdateTerminalError> {
         // TODO: We currently do updates in the order RoT -> SP -> host. This is
         // generally the correct order, but in some cases there might be a bug
         // which forces us to update components in the order SP -> RoT -> host.
@@ -406,7 +410,8 @@ impl UpdateDriver {
         //    the newest components for the SP and RoT, and one without.
 
         // Build the update executor.
-        let mut executor = UpdateExecutor::new(&update_cx.log);
+        let (sender, receiver) = mpsc::channel(128);
+        let mut engine = UpdateEngine::new(&update_cx.log, sender);
 
         let (rot_artifact, sp_artifact) = match update_cx.sp.type_ {
             SpType::Sled => (&plan.gimlet_rot, &plan.gimlet_sp),
@@ -414,7 +419,7 @@ impl UpdateDriver {
             SpType::Switch => (&plan.sidecar_rot, &plan.sidecar_sp),
         };
 
-        let mut rot_registrar = executor.new_component(MajorComponent::Rot);
+        let mut rot_registrar = engine.for_component(UpdateComponent::Rot);
         // The SP only has one updateable firmware slot ("the inactive bank") -
         // we always pass 0.
         let firmware_slot = 0;
@@ -428,7 +433,7 @@ impl UpdateDriver {
             Default::default(),
         );
 
-        let mut sp_registrar = executor.new_component(MajorComponent::Sp);
+        let mut sp_registrar = engine.for_component(UpdateComponent::Sp);
         self.register_sp_component_steps(
             update_cx,
             &mut sp_registrar,
@@ -437,18 +442,23 @@ impl UpdateDriver {
             firmware_slot,
             Default::default(),
         );
-        sp_registrar.register_step("Resetting SP", |_cx| async move {
-            update_cx.reset_sp().await.map_err(|err| {
-                UpdateTerminalEventKind::SpResetFailed {
-                    reason: format!("{err:#}"),
-                }
-            })
-        });
+        sp_registrar
+            .new_step(
+                UpdateStepId::ResettingSp,
+                "Resetting SP",
+                |_cx| async move {
+                    update_cx.reset_sp().await.map_err(|error| {
+                        UpdateTerminalError::SpResetFailed { error }
+                    })?;
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
         if update_cx.sp.type_ == SpType::Sled {
             self.register_sled_steps(
                 update_cx,
-                &mut executor,
+                &mut engine,
                 &plan,
                 ipr_start_receiver,
             );
@@ -459,10 +469,10 @@ impl UpdateDriver {
         Ok(())
     }
 
-    fn register_sp_component_steps<'exec, 'a: 'exec>(
+    fn register_sp_component_steps<'engine, 'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut StepRegistrar<'exec, 'a>,
+        registrar: &mut ComponentRegistrar<'engine, 'a>,
         artifact: &'a ArtifactIdData,
         component_name: &'static str,
         firmware_slot: u16,
@@ -470,42 +480,38 @@ impl UpdateDriver {
     ) {
         let update_id = Uuid::new_v4();
 
-        registrar.register_step(
-            step_names.sending.clone(),
-            move |_cx| async move {
-                // TODO: we should be able to report some sort of progress here.
-                update_cx
-                    .mgs_client
-                    .sp_component_update(
-                        update_cx.sp.type_,
-                        update_cx.sp.slot,
-                        component_name,
-                        firmware_slot,
-                        &update_id,
-                        reqwest::Body::wrap_stream(buf_list_to_try_stream(
-                            BufList::from_iter([artifact.data.0.clone()]),
-                        )),
-                    )
-                    .await
-                    .map_err(|error| {
-                        UpdateTerminalEventKind::ArtifactUpdateFailed {
-                            artifact: artifact.id.clone(),
-                            // This is an HTTP error, which currently prints out the
-                            // entire cause chain. This doesn't obey the usual Rust
-                            // rules about printing out the chain in the Display
-                            // section, but just accept this for now.
-                            //
-                            // Other places where this is an HTTP error are marked
-                            // HTTP-ERROR-FULL-CAUSE-CHAIN for easy searchability.
-                            //
-                            // Ideally we'd be able to return a list of causes next
-                            // to the reason. TODO: do that.
-                            reason: format!("failed to send artifact: {error}"),
-                        }
-                    })?;
-                Ok(())
-            },
-        );
+        registrar
+            .new_step(
+                UpdateStepId::SpComponentUpdate {
+                    stage: SpComponentUpdateStage::Sending,
+                },
+                step_names.sending.clone(),
+                move |_cx| async move {
+                    // TODO: we should be able to report some sort of progress here.
+                    update_cx
+                        .mgs_client
+                        .sp_component_update(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            component_name,
+                            firmware_slot,
+                            &update_id,
+                            reqwest::Body::wrap_stream(buf_list_to_try_stream(
+                                BufList::from_iter([artifact.data.0.clone()]),
+                            )),
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SpComponentUpdateFailed {
+                                stage: SpComponentUpdateStage::Sending,
+                                artifact: artifact.id.clone(),
+                                error: anyhow!(error),
+                            }
+                        })?;
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
         self.register_component_update_completion_steps(
             update_cx,
@@ -517,10 +523,10 @@ impl UpdateDriver {
         );
     }
 
-    fn register_component_update_completion_steps<'exec, 'a: 'exec>(
+    fn register_component_update_completion_steps<'engine, 'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut StepRegistrar<'exec, 'a>,
+        registrar: &mut ComponentRegistrar<'engine, 'a>,
         artifact: &'a ArtifactId,
         update_id: Uuid,
         component: &'static str,
@@ -529,51 +535,69 @@ impl UpdateDriver {
         // How often we poll MGS for the progress of an update once it starts.
         const STATUS_POLL_FREQ: Duration = Duration::from_millis(300);
 
-        registrar.register_step(step_names.preparing, move |cx| async move {
-            update_cx
-                .poll_component_update(
-                    cx,
-                    ComponentUpdateStage::Preparing,
-                    update_id,
-                    component,
-                )
-                .await
-                .map_err(|error| {
-                    UpdateTerminalEventKind::ArtifactUpdateFailed {
-                        artifact: artifact.clone(),
-                        reason: format!("failed to prepare update: {error:?}"),
-                    }
-                })?;
+        registrar
+            .new_step(
+                UpdateStepId::SpComponentUpdate {
+                    stage: SpComponentUpdateStage::Preparing,
+                },
+                step_names.preparing,
+                move |cx| async move {
+                    update_cx
+                        .poll_component_update(
+                            cx,
+                            ComponentUpdateStage::Preparing,
+                            update_id,
+                            component,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SpComponentUpdateFailed {
+                                stage: SpComponentUpdateStage::Preparing,
+                                artifact: artifact.clone(),
+                                error,
+                            }
+                        })?;
 
-            Ok(())
-        });
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
-        registrar.register_step(step_names.writing, move |cx| async move {
-            update_cx
-                .poll_component_update(
-                    cx,
-                    ComponentUpdateStage::InProgress,
-                    update_id,
-                    component,
-                )
-                .await
-                .map_err(|error| {
-                    UpdateTerminalEventKind::ArtifactUpdateFailed {
-                        artifact: artifact.clone(),
-                        reason: format!("failed to write update: {error:?}"),
-                    }
-                })
-        });
+        registrar.new_step(
+            UpdateStepId::SpComponentUpdate {
+                stage: SpComponentUpdateStage::Writing,
+            },
+            step_names.writing,
+            move |cx| async move {
+                update_cx
+                    .poll_component_update(
+                        cx,
+                        ComponentUpdateStage::InProgress,
+                        update_id,
+                        component,
+                    )
+                    .await
+                    .map_err(|error| {
+                        UpdateTerminalError::SpComponentUpdateFailed {
+                            stage: SpComponentUpdateStage::Writing,
+                            artifact: artifact.clone(),
+                            error,
+                        }
+                    })?;
+
+                StepResult::success((), Default::default())
+            },
+        );
     }
 
     fn register_sled_steps<'a>(
         &self,
         update_cx: &'a UpdateContext,
-        executor: &mut UpdateExecutor<'a>,
+        engine: &mut UpdateEngine<'a>,
         plan: &'a UpdatePlan,
         ipr_start_receiver: IprStartReceiver,
     ) {
-        let mut host_registrar = executor.new_component(MajorComponent::Host);
+        let mut host_registrar = engine.for_component(UpdateComponent::Host);
         let image_id_receiver = self.register_trampoline_phase1_steps(
             update_cx,
             &mut host_registrar,
@@ -582,42 +606,49 @@ impl UpdateDriver {
 
         let (sender_1, receiver_1) = oneshot::channel();
 
-        host_registrar.register_step(
-            "Downloading installinator, waiting for it to start",
-            move |cx| async move {
-                // The previous step should send this value in.
-                let report_receiver = update_cx
-                    .wait_for_first_installinator_progress(
-                        &cx,
-                        ipr_start_receiver,
-                        image_id_receiver,
-                    )
-                    .await
-                    .map_err(|error| {
-                        UpdateTerminalEventKind::ArtifactUpdateFailed {
-                            artifact: plan.trampoline_phase_2.id.clone(),
-                            reason: format!("{error:?}"),
+        host_registrar
+            .new_step(
+                UpdateStepId::DownloadingInstallinator,
+                "Downloading installinator, waiting for it to start",
+                move |cx| async move {
+                    // The previous step should send this value in.
+                    let report_receiver = update_cx
+                        .wait_for_first_installinator_progress(
+                            &cx,
+                            ipr_start_receiver,
+                            image_id_receiver,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::DownloadingInstallinatorFailed { error }
+                        })?;
+
+                    sender_1.send(report_receiver);
+
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
+
+        // TODO: this should most likely use nested steps.
+        host_registrar
+            .new_step(
+                UpdateStepId::RunningInstallinator,
+                "Running installinator",
+                move |cx| async move {
+                    update_cx
+                        .process_installinator_reports(receiver_1)
+                        .await
+                        .map_err(|error| {
+                        UpdateTerminalError::RunningInstallinatorFailed {
+                            error,
                         }
                     })?;
 
-                sender_1.send(report_receiver);
-
-                Ok(())
-            },
-        );
-
-        // TODO: break up into several steps.
-        host_registrar.register_step("Installinating", move |cx| async move {
-            update_cx.process_installinator_reports(receiver_1).await.map_err(
-                |error| {
-                    // TODO: get actual artifact that failed
-                    UpdateTerminalEventKind::ArtifactUpdateFailed {
-                        artifact: plan.host_phase_1.id.clone(),
-                        reason: format!("{error:?}"),
-                    }
+                    StepResult::success((), Default::default())
                 },
             )
-        });
+            .register();
 
         // Installinator is done: install the host phase 1 that matches the host
         // phase 2 it installed, and boot our newly-recovered sled.
@@ -626,10 +657,10 @@ impl UpdateDriver {
     // Installs the trampoline phase 1 and configures the host to fetch phase
     // 2 from MGS on boot, returning the image ID of that phase 2 image for use
     // when querying MGS for progress on its delivery to the SP.
-    fn register_trampoline_phase1_steps<'exec, 'a: 'exec>(
+    fn register_trampoline_phase1_steps<'engine, 'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut StepRegistrar<'exec, 'a>,
+        registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
     ) -> oneshot::Receiver<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
@@ -648,20 +679,16 @@ impl UpdateDriver {
         // complete. We started a task to do this the first time a sled update
         // was started with this plan.
         let (image_id_sender, image_id_receiver) = oneshot::channel();
-        registrar.register_step(
+        registrar.new_step(
+            UpdateStepId::WaitingForTrampolinePhase2Upload,
             "Waiting for trampoline phase 2 upload to MGS",
             move |_cx| async move {
                 // We expect this loop to run just once, but iterate just in
                 // case the image ID doesn't get populated the first time.
                 loop {
                     update_cx.upload_trampoline_phase_2_to_mgs.changed().await.map_err(
-                        |_recv_err| UpdateTerminalEventKind::ArtifactUpdateFailed {
-                            artifact: plan.trampoline_phase_2.id.clone(),
-                            reason: "failed to upload trampoline phase 2 to MGS \
-                                    (was a new TUF repo uploaded?)"
-                                .to_owned(),
-                        },
-                    );
+                        |_recv_err| UpdateTerminalError::TrampolinePhase2UploadFailed
+                    )?;
 
                     if let Some(image_id) = update_cx.upload_trampoline_phase_2_to_mgs.borrow().uploaded_image_id.as_ref() {
                         image_id_sender.send(image_id.clone());
@@ -669,101 +696,110 @@ impl UpdateDriver {
                     }
                 }
 
-                Ok(())
+                StepResult::success((), Default::default())
             },
-        );
+        ).register();
 
-        registrar.register_step(
-            "Setting installinator image ID",
-            move |_cx| async move {
-                let installinator_image_id = InstallinatorImageId {
-                    control_plane: plan.control_plane_hash.to_string(),
-                    host_phase_2: plan.host_phase_2_hash.to_string(),
-                    update_id: update_cx.update_id,
-                };
-                update_cx
-                    .mgs_client
-                    .sp_installinator_image_id_set(
-                        update_cx.sp.type_,
-                        update_cx.sp.slot,
-                        &installinator_image_id,
-                    )
-                    .await
-                    .map_err(|error| {
-                        // HTTP-ERROR-FULL-CAUSE-CHAIN
-                        UpdateTerminalEventKind::SetInstallinatorImageIdFailed {
-                            reason: format!(
-                                "failed to set installinator image ID: {error}"
-                            ),
-                        }
-                    })?;
-                Ok(())
-            },
-        );
+        registrar
+            .new_step(
+                UpdateStepId::SettingInstallinatorImageId,
+                "Setting installinator image ID",
+                move |_cx| async move {
+                    let installinator_image_id = InstallinatorImageId {
+                        control_plane: plan.control_plane_hash.to_string(),
+                        host_phase_2: plan.host_phase_2_hash.to_string(),
+                        update_id: update_cx.update_id,
+                    };
+                    update_cx
+                        .mgs_client
+                        .sp_installinator_image_id_set(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            &installinator_image_id,
+                        )
+                        .await
+                        .map_err(|error| {
+                            // HTTP-ERROR-FULL-CAUSE-CHAIN
+                            UpdateTerminalError::SetInstallinatorImageIdFailed {
+                                error,
+                            }
+                        })?;
 
-        registrar.register_step("Setting host startup options", move |_cx| async move {
-            update_cx.mgs_client
-                .sp_component_active_slot_set(
-                    update_cx.sp.type_,
-                    update_cx.sp.slot,
-                    SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                    &SpComponentFirmwareSlot {
-                        slot: trampoline_phase_1_boot_slot,
-                    },
-                )
-                .await
-                .map_err(|error| {
-                    // HTTP-ERROR-FULL-CAUSE-CHAIN
-                    UpdateTerminalEventKind::SetHostStartupOptionsFailed {
-                        reason: format!(
-                            "failed to set host boot flash slot: {error}"
-                        ),
-                    }
-                })?;
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
-                update_cx.mgs_client
-                .sp_startup_options_set(
-                    update_cx.sp.type_,
-                    update_cx.sp.slot,
-                    &HostStartupOptions {
-                        boot_net: false,
-                        boot_ramdisk: false,
-                        bootrd: false,
-                        kbm: false,
-                        kmdb: false,
-                        kmdb_boot: false,
-                        phase2_recovery_mode: true,
-                        prom: false,
-                        verbose: false,
-                    },
-                )
-                .await
-                .map_err(|error| {
-                    UpdateTerminalEventKind::SetHostStartupOptionsFailed {
-                        reason: format!(
-                            "failed to set host startup options for recovery mode: {error}"
-                        ),
-                    }
-                })?;
+        registrar
+            .new_step(
+                UpdateStepId::SettingHostStartupOptions,
+                "Setting host startup options",
+                move |_cx| async move {
+                    update_cx
+                        .mgs_client
+                        .sp_component_active_slot_set(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                            &SpComponentFirmwareSlot {
+                                slot: trampoline_phase_1_boot_slot,
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SetHostBootFlashSlotFailed {
+                                error,
+                            }
+                        })?;
 
-            Ok(())
-        });
+                    update_cx
+                        .mgs_client
+                        .sp_startup_options_set(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            &HostStartupOptions {
+                                boot_net: false,
+                                boot_ramdisk: false,
+                                bootrd: false,
+                                kbm: false,
+                                kmdb: false,
+                                kmdb_boot: false,
+                                phase2_recovery_mode: true,
+                                prom: false,
+                                verbose: false,
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SetHostStartupOptionsFailed {
+                                description: "recovery mode",
+                                error,
+                            }
+                        })?;
+
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
         // All set - boot the host and let installinator do its thing!
-        registrar.register_step(
-            "Setting host power state to A0",
-            move |_cx| async move {
-                update_cx.set_host_power_state(PowerState::A0).await
-            },
-        );
+        registrar
+            .new_step(
+                UpdateStepId::SetHostPowerState { state: PowerState::A0 },
+                "Setting host power state to A0",
+                move |_cx| async move {
+                    update_cx.set_host_power_state(PowerState::A0).await
+                },
+            )
+            .register();
 
         image_id_receiver
     }
 
-    fn register_install_host_phase1_and_boot_steps<'exec, 'a: 'exec>(
+    fn register_install_host_phase1_and_boot_steps<'engine, 'a: 'engine>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut StepRegistrar<'exec, 'a>,
+        registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
     ) {
         // Installinator is done - set the stage for the real host to boot.
@@ -791,7 +827,7 @@ impl UpdateDriver {
         // Clear the installinator image ID; failing to do this is _not_ fatal,
         // because any future update will set its own installinator ID anyway;
         // this is for cleanliness more than anything.
-        registrar.register_step("Clearing installinator image ID", move |_cx| async move {
+        registrar.new_step(UpdateStepId::ClearingInstallinatorImageId, "Clearing installinator image ID", move |_cx| async move {
             if let Err(err) = update_cx
                 .mgs_client
                 .sp_installinator_image_id_delete(update_cx.sp.type_, update_cx.sp.slot)
@@ -804,10 +840,11 @@ impl UpdateDriver {
                 );
             }
 
-            Ok(())
-        });
+            StepResult::success((), Default::default())
+        }).register();
 
-        registrar.register_step(
+        registrar.new_step(
+            UpdateStepId::SettingHostStartupOptions,
             "Setting startup options for standard boot",
             move |_cx| async move {
                 update_cx
@@ -830,28 +867,32 @@ impl UpdateDriver {
                     .await
                     .map_err(|error| {
                         // HTTP-ERROR-FULL-CAUSE-CHAIN
-                        UpdateTerminalEventKind::SetHostStartupOptionsFailed {
-                            reason: format!(
-                                "failed to set host startup options \
-                                 for recovery mode: {error}"
-                            ),
+                        UpdateTerminalError::SetHostStartupOptionsFailed {
+                            description: "standard boot",
+                            error,
                         }
                     })?;
 
-                Ok(())
+                StepResult::success((), Default::default())
             },
         );
 
         // Boot the host.
-        registrar.register_step("Booting the host", |_cx| async {
-            update_cx.set_host_power_state(PowerState::A0).await
-        });
+        registrar
+            .new_step(
+                UpdateStepId::SetHostPowerState { state: PowerState::A0 },
+                "Booting the host",
+                |_cx| async {
+                    update_cx.set_host_power_state(PowerState::A0).await
+                },
+            )
+            .register();
     }
 
-    fn register_deliver_host_phase1_steps<'exec, 'a: 'exec>(
+    fn register_deliver_host_phase1_steps<'engine, 'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut StepRegistrar<'exec, 'a>,
+        registrar: &mut ComponentRegistrar<'engine, 'a>,
         artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         boot_slot: u16,
@@ -859,12 +900,15 @@ impl UpdateDriver {
         const HOST_BOOT_FLASH: &str =
             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str();
 
-        registrar.register_step(
-            "Setting host power state to A2",
-            move |_cx| async move {
-                update_cx.set_host_power_state(PowerState::A2).await
-            },
-        );
+        registrar
+            .new_step(
+                UpdateStepId::SetHostPowerState { state: PowerState::A2 },
+                "Setting host power state to A2",
+                move |_cx| async move {
+                    update_cx.set_host_power_state(PowerState::A2).await
+                },
+            )
+            .register();
 
         let step_names = SpComponentUpdateStepNames::for_host_phase_1(kind);
 
@@ -889,7 +933,7 @@ struct UpdateContext {
 }
 
 impl UpdateContext {
-    async fn process_installinator_reports<'exec>(
+    async fn process_installinator_reports<'engine>(
         &self,
         receiver: IprStartReceiver,
     ) -> anyhow::Result<()> {
@@ -901,7 +945,8 @@ impl UpdateContext {
             receiver.await.context("installinator sender died")?;
 
         while let Some(report) = ipr_receiver.recv().await {
-            // TODO: we don't use the installinator reports anywhere yet.
+            // NOTE: This needs to bubble up errors returned by the
+            // installinator!
             self.process_installinator_report(report).await;
         }
 
@@ -912,7 +957,7 @@ impl UpdateContext {
 
     async fn wait_for_first_installinator_progress(
         &self,
-        cx: &UpdateExecContext,
+        cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id_receiver: oneshot::Receiver<HostPhase2RecoveryImageId>,
     ) -> anyhow::Result<mpsc::Receiver<ProgressReport>> {
@@ -983,7 +1028,7 @@ impl UpdateContext {
     /// update flow it is only activated for trampoline images.
     async fn poll_trampoline_phase2_progress(
         &self,
-        cx: &UpdateExecContext,
+        cx: &StepContext,
         uploaded_trampoline_phase2_id: &HostPhase2RecoveryImageId,
     ) {
         match self
@@ -1003,13 +1048,12 @@ impl UpdateContext {
                 // stale data from a past update, and we have no progress
                 // information.
                 if &image_id == uploaded_trampoline_phase2_id {
-                    cx.sender
-                        .send(StepProgress::Progress {
-                            attempt: 1,
-                            current: offset,
-                            total: total_size,
-                        })
-                        .await;
+                    cx.send_progress(StepProgress::with_current_and_total(
+                        offset,
+                        total_size,
+                        Default::default(),
+                    ))
+                    .await;
                 }
             }
             Ok(HostPhase2Progress::None) => {
@@ -1026,6 +1070,10 @@ impl UpdateContext {
     }
 
     async fn process_installinator_report(&self, mut report: ProgressReport) {
+        // XXX This needs to be rewritten once the installinator switches to the
+        // update engine. Note that errors returned by the installinator are not
+        // currently bubbled up!
+
         let now = Instant::now();
 
         // Currently, progress reports have zero or one progress events. Don't
@@ -1091,7 +1139,7 @@ impl UpdateContext {
                 }
             };
 
-        let _events = report.completion_events.into_iter().map(|event| {
+        let events = report.completion_events.into_iter().map(|event| {
             let event_kind =
                 UpdateNormalEventKind::InstallinatorEvent(event.kind);
 
@@ -1111,20 +1159,16 @@ impl UpdateContext {
     async fn set_host_power_state(
         &self,
         power_state: PowerState,
-    ) -> Result<(), UpdateTerminalEventKind> {
+    ) -> Result<StepResult<()>, UpdateTerminalError> {
         info!(self.log, "moving host to {power_state:?}");
         self.mgs_client
             .sp_power_state_set(self.sp.type_, self.sp.slot, power_state)
             .await
             .map(|response| response.into_inner())
-            .map_err(|error| {
-                // HTTP-ERROR-FULL-CAUSE-CHAIN
-                UpdateTerminalEventKind::UpdatePowerStateFailed {
-                    reason: format!(
-                        "failed to put sled into {power_state:?}: {error}"
-                    ),
-                }
-            })
+            .map_err(|error| UpdateTerminalError::UpdatePowerStateFailed {
+                error,
+            })?;
+        StepResult::success((), Default::default())
     }
 
     async fn reset_sp(&self) -> anyhow::Result<()> {
@@ -1137,7 +1181,7 @@ impl UpdateContext {
 
     async fn poll_component_update(
         &self,
-        cx: UpdateExecContext,
+        cx: StepContext,
         stage: ComponentUpdateStage,
         update_id: Uuid,
         component: &str,
@@ -1164,15 +1208,14 @@ impl UpdateContext {
                     ensure!(id == update_id, "SP processing different update");
                     if stage == ComponentUpdateStage::Preparing {
                         if let Some(progress) = progress {
-                            _ = cx
-                                .sender
-                                .send(StepProgress::Progress {
-                                    // We don't retry this, so use attempt 1 here.
-                                    attempt: 1,
-                                    current: progress.current as u64,
-                                    total: progress.total as u64,
-                                })
-                                .await;
+                            cx.send_progress(
+                                StepProgress::with_current_and_total(
+                                    progress.current as u64,
+                                    progress.total as u64,
+                                    Default::default(),
+                                ),
+                            )
+                            .await;
                         }
                     } else {
                         warn!(
@@ -1195,15 +1238,14 @@ impl UpdateContext {
                             return Ok(());
                         }
                         ComponentUpdateStage::InProgress => {
-                            _ = cx
-                                .sender
-                                .send(StepProgress::Progress {
-                                    // No retries here.
-                                    attempt: 1,
-                                    current: bytes_received.into(),
-                                    total: total_bytes.into(),
-                                })
-                                .await;
+                            cx.send_progress(
+                                StepProgress::with_current_and_total(
+                                    bytes_received as u64,
+                                    total_bytes as u64,
+                                    Default::default(),
+                                ),
+                            )
+                            .await;
                         }
                     }
                 }

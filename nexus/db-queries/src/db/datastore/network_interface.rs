@@ -16,8 +16,10 @@ use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
+use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
+use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
@@ -41,6 +43,7 @@ use sled_agent_client::types as sled_client_types;
 /// interface and VPC subnet tables.
 #[derive(Debug, diesel::Queryable)]
 struct NicInfo {
+    id: uuid::Uuid,
     name: db::model::Name,
     ip: ipnetwork::IpNetwork,
     mac: db::model::MacAddr,
@@ -59,6 +62,7 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
             external::IpNet::V6(nic.ipv6_block.0)
         };
         sled_client_types::NetworkInterface {
+            id: nic.id,
             name: sled_client_types::Name::from(&nic.name.0),
             ip: nic.ip.ip(),
             mac: sled_client_types::MacAddr::from(nic.mac.0),
@@ -78,7 +82,7 @@ impl DataStore {
         authz_subnet: &authz::VpcSubnet,
         authz_instance: &authz::Instance,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, network_interface::InsertError> {
+    ) -> Result<InstanceNetworkInterface, network_interface::InsertError> {
         opctx
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
@@ -94,8 +98,15 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<NetworkInterface, network_interface::InsertError> {
+    ) -> Result<InstanceNetworkInterface, network_interface::InsertError> {
         use db::schema::network_interface::dsl;
+        if interface.kind != NetworkInterfaceKind::Instance {
+            return Err(network_interface::InsertError::External(
+                Error::invalid_request(
+                    "expected instance type network interface",
+                ),
+            ));
+        }
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
         VpcSubnet::insert_resource(
@@ -108,6 +119,9 @@ impl DataStore {
                 .map_err(network_interface::InsertError::External)?,
         )
         .await
+        // Convert to `InstanceNetworkInterface` before returning; we know
+        // this is valid as we've checked the condition on-entry.
+        .map(NetworkInterface::as_instance)
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
                 network_interface::InsertError::External(
@@ -134,7 +148,8 @@ impl DataStore {
         use db::schema::network_interface::dsl;
         let now = Utc::now();
         diesel::update(dsl::network_interface)
-            .filter(dsl::instance_id.eq(authz_instance.id()))
+            .filter(dsl::parent_id.eq(authz_instance.id()))
+            .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
@@ -148,7 +163,7 @@ impl DataStore {
         Ok(())
     }
 
-    /// Delete a `NetworkInterface` attached to a provided instance.
+    /// Delete an `InstanceNetworkInterface` attached to a provided instance.
     ///
     /// Note that the primary interface for an instance cannot be deleted if
     /// there are any secondary interfaces.
@@ -156,13 +171,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        authz_interface: &authz::NetworkInterface,
+        authz_interface: &authz::InstanceNetworkInterface,
     ) -> Result<(), network_interface::DeleteError> {
         opctx
             .authorize(authz::Action::Delete, authz_interface)
             .await
             .map_err(network_interface::DeleteError::External)?;
         let query = network_interface::DeleteQuery::new(
+            NetworkInterfaceKind::Instance,
             authz_instance.id(),
             authz_interface.id(),
         );
@@ -183,7 +199,7 @@ impl DataStore {
     /// Return information about network interfaces required for the sled
     /// agent to instantiate or modify them via OPTE. This function takes
     /// a partially constructed query over the network interface table so
-    /// that we can use it for instances, VPCs, and subnets.
+    /// that we can use it for instances, services, VPCs, and subnets.
     async fn derive_network_interface_info(
         &self,
         opctx: &OpContext,
@@ -205,6 +221,7 @@ impl DataStore {
             // ideal, but we can't derive `Selectable` since this is the result
             // of a JOIN and not from a single table. DRY this out if possible.
             .select((
+                network_interface::id,
                 network_interface::name,
                 network_interface::ip,
                 network_interface::mac,
@@ -238,7 +255,10 @@ impl DataStore {
         self.derive_network_interface_info(
             opctx,
             network_interface::table
-                .filter(network_interface::instance_id.eq(authz_instance.id()))
+                .filter(network_interface::parent_id.eq(authz_instance.id()))
+                .filter(
+                    network_interface::kind.eq(NetworkInterfaceKind::Instance),
+                )
                 .into_boxed(),
         )
         .await
@@ -288,24 +308,26 @@ impl DataStore {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<NetworkInterface> {
+    ) -> ListResultVec<InstanceNetworkInterface> {
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        use db::schema::network_interface::dsl;
+        use db::schema::instance_network_interface::dsl;
         match pagparams {
             PaginatedBy::Id(pagparams) => {
-                paginated(dsl::network_interface, dsl::id, &pagparams)
+                paginated(dsl::instance_network_interface, dsl::id, &pagparams)
             }
             PaginatedBy::Name(pagparams) => paginated(
-                dsl::network_interface,
+                dsl::instance_network_interface,
                 dsl::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::instance_id.eq(authz_instance.id()))
-        .select(NetworkInterface::as_select())
-        .load_async::<NetworkInterface>(self.pool_authorized(opctx).await?)
+        .select(InstanceNetworkInterface::as_select())
+        .load_async::<InstanceNetworkInterface>(
+            self.pool_authorized(opctx).await?,
+        )
         .await
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
@@ -315,11 +337,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        authz_interface: &authz::NetworkInterface,
+        authz_interface: &authz::InstanceNetworkInterface,
         updates: NetworkInterfaceUpdate,
-    ) -> UpdateResult<NetworkInterface> {
-        use crate::db::schema::network_interface::dsl;
-
+    ) -> UpdateResult<InstanceNetworkInterface> {
         // This database operation is surprisingly subtle. It's possible to
         // express this in a single query, with multiple common-table
         // expressions for the updated rows. For example, if we're setting a new
@@ -334,33 +354,54 @@ impl DataStore {
         //
         // See https://github.com/oxidecomputer/omicron/issues/1204 for the
         // issue tracking the work to move this into a CTE.
+        //
+        // It's also further complicated by the fact we're updating a row
+        // in the `network_interface` table but will return a `InstanceNetworkInterface`
+        // which represents a row in the `instance_network_interface`. This is
+        // fine because `instance_network_interface` is just a view over
+        // `network_interface` constrained to rows of `kind = 'instance'`.
 
         // Build up some of the queries first, outside the transaction.
         //
         // This selects the existing primary interface.
+        // Note we consult only `kind = 'instance'` rows by querying from
+        // `instance_network_interface`.
         let instance_id = authz_instance.id();
         let interface_id = authz_interface.id();
-        let find_primary_query = dsl::network_interface
-            .filter(dsl::instance_id.eq(instance_id))
-            .filter(dsl::is_primary.eq(true))
-            .filter(dsl::time_deleted.is_null())
-            .select(NetworkInterface::as_select());
+        let find_primary_query = {
+            use crate::db::schema::instance_network_interface::dsl;
+            dsl::instance_network_interface
+                .filter(dsl::instance_id.eq(instance_id))
+                .filter(dsl::is_primary.eq(true))
+                .filter(dsl::time_deleted.is_null())
+                .select(InstanceNetworkInterface::as_select())
+        };
 
         // This returns the state of the associated instance.
-        let instance_query = db::schema::instance::dsl::instance
-            .filter(db::schema::instance::dsl::id.eq(instance_id))
-            .filter(db::schema::instance::dsl::time_deleted.is_null())
-            .select(Instance::as_select());
+        let instance_query = {
+            use crate::db::schema::instance::dsl;
+            dsl::instance
+                .filter(dsl::id.eq(instance_id))
+                .filter(dsl::time_deleted.is_null())
+                .select(Instance::as_select())
+        };
         let stopped =
             db::model::InstanceState::new(external::InstanceState::Stopped);
 
         // This is the actual query to update the target interface.
+        // Unlike Postgres, CockroachDB doesn't support inserting or updating a view
+        // so we need to use the underlying table, taking care to constrain
+        // the update to rows of `kind = 'instance'`.
         let primary = matches!(updates.primary, Some(true));
-        let update_target_query = diesel::update(dsl::network_interface)
-            .filter(dsl::id.eq(interface_id))
-            .filter(dsl::time_deleted.is_null())
-            .set(updates)
-            .returning(NetworkInterface::as_returning());
+        let update_target_query = {
+            use crate::db::schema::network_interface::dsl;
+            diesel::update(dsl::network_interface)
+                .filter(dsl::id.eq(interface_id))
+                .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
+                .filter(dsl::time_deleted.is_null())
+                .set(updates)
+                .returning(NetworkInterface::as_returning())
+        };
 
         // Errors returned from the below transactions.
         #[derive(Debug)]
@@ -390,8 +431,10 @@ impl DataStore {
                 // If the target and primary are different, we need to toggle
                 // the primary into a secondary.
                 if primary_interface.identity.id != interface_id {
+                    use crate::db::schema::network_interface::dsl;
                     if let Err(e) = diesel::update(dsl::network_interface)
                         .filter(dsl::id.eq(primary_interface.identity.id))
+                        .filter(dsl::kind.eq(NetworkInterfaceKind::Instance))
                         .filter(dsl::time_deleted.is_null())
                         .set(dsl::is_primary.eq(false))
                         .execute_async(&conn)
@@ -429,6 +472,9 @@ impl DataStore {
             })
         }
         .await
+        // Convert to `InstanceNetworkInterface` before returning, we know
+        // this is valid as we've filtered appropriately above.
+        .map(NetworkInterface::as_instance)
         .map_err(|e| match e {
             TxnError::CustomError(
                 NetworkInterfaceUpdateError::InstanceNotStopped,

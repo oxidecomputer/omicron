@@ -8,12 +8,12 @@ on:
     inputs:
 jobs:
   format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v3.5.0
+      - uses: actions/setup-node@v3.6.0
         with:
-          node-version: '14'
+          node-version: '18'
       - name: Install our tools
         shell: bash
         run: |

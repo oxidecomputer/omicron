@@ -7,6 +7,7 @@ members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "end-to-end-tests",
@@ -50,7 +51,9 @@ members = [
     "test-utils",
     "tufaceous",
     "tufaceous-lib",
+    "update-engine",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -61,6 +64,7 @@ default-members = [
     "ddm-admin-client",
     "dpd-client",
     "deploy",
+    "dev-tools",
     "dns-server",
     "dns-service-client",
     "gateway",
@@ -100,7 +104,9 @@ default-members = [
     "test-utils",
     "tufaceous",
     "tufaceous-lib",
+    "update-engine",
     "wicket",
+    "wicket-dbg",
     "wicketd",
     "wicketd-client",
 ]
@@ -120,17 +126,18 @@ bb8 = "0.8.0"
 bcs = "0.1.5"
 bincode = "1.3.3"
 bootstrap-agent-client = { path = "bootstrap-agent-client" }
-buf-list = "1.0.1"
+buf-list = { version = "1.0.3", features = ["tokio1"] }
 bytes = "1.4.0"
 bytesize = "1.2.0"
 camino = "1.1"
 ciborium = "0.2.0"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.1", features = ["derive"] }
+clap = { version = "4.2", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
+crossterm = { version = "0.26.1", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-client-types = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fb671895e8adb3cab5e801bbbe8728997178aba4" }
@@ -141,6 +148,7 @@ ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
+derive-where = "1.2.0"
 diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dns-server = { path = "dns-server" }
@@ -151,10 +159,10 @@ expectorate = "1.0.6"
 fatfs = "0.3.6"
 flate2 = "1.0.25"
 fs-err = "2.9.0"
-futures = "0.3.27"
+futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "a15a3f8f58bb7b2fadc94f42a4747022ae6d401d" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "2dcc63c645005a7184ba754b5c42c341a0777c66" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2dcc63c645005a7184ba754b5c42c341a0777c66" }
 gateway-test-utils = { path = "gateway-test-utils" }
 headers = "0.3.8"
 heck = "0.4"
@@ -166,6 +174,7 @@ hyper-rustls = "0.23.2"
 hyper = "0.14"
 humantime = "2.1.0"
 illumos-utils = { path = "illumos-utils" }
+indexmap = "1.9.3"
 indicatif = { version = "0.17.3", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -176,7 +185,8 @@ ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = "0.20"
 itertools = "0.10.5"
 lazy_static = "1.4.0"
-libc = "0.2.139"
+libc = "0.2.141"
+linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 mime_guess = "2.0.4"
 mockall = "0.11"
@@ -193,13 +203,15 @@ nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 omicron-common = { path = "common" }
+omicron-dev-tools = { path = "dev-tools" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
 omicron-package = { path = "package" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.8.3"
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f36a283e91f228a542149ee9230126e9c4bb5e8b", features = [ "api", "std" ] }
+oxide-client = { path = "oxide-client" }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "1698c8b807670d5145f1b1ff5c50268470e0e50c", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -207,8 +219,9 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f36a283e91f228a542149ee9230126e9c4bb5e8b" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "1698c8b807670d5145f1b1ff5c50268470e0e50c" }
 oso = "0.26"
+owo-colors = "3.5.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "oximeter-client" }
 oximeter-db = { path = "oximeter/db/" }
@@ -223,8 +236,9 @@ paste = "1.0.12"
 percent-encoding = "2.2.0"
 pem = "1.1"
 petgraph = "0.6.3"
-postgres-protocol = "0.6.4"
-predicates = "3.0.1"
+pin-project-lite = "0.2.9"
+postgres-protocol = "0.6.5"
+predicates = "3.0.2"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -249,7 +263,7 @@ semver = { version = "1.0.17", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
-serde_json = "1.0.94"
+serde_json = "1.0.95"
 serde_path_to_error = "0.1.11"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -280,17 +294,17 @@ sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df
 steno = "0.3.1"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
-libsw = { version = "3.2.0", features = ["tokio"] }
+libsw = { version = "3.2.3", features = ["tokio"] }
 syn = { version = "2.0" }
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.4"
+tempfile = "3.5"
 term = "0.7"
 termios = "0.3"
 test-strategy = "0.2.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.26"
+tokio = "1.27"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
@@ -304,10 +318,13 @@ trust-dns-server = "0.22"
 trybuild = "1.0.80"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-uuid = { version = "1.3.0", features = ["serde", "v4"] }
+tui = "0.19.0"
+update-engine = { path = "update-engine" }
+uuid = { version = "1.3.1", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.7", default-features = false, features = ["std"] }
 walkdir = "2.3"
+wicket = { path = "wicket" }
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.4", default-features = false, features = ["deflate","bzip2"] }

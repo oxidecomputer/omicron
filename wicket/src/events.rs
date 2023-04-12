@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::time::{Duration, SystemTime};
 use wicketd_client::types::{
-    ArtifactId, RackV1Inventory, SemverVersion, UpdateLogAll,
+    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion, UpdateLogAll,
 };
 
 /// An event that will update state
@@ -42,6 +42,16 @@ pub enum Event {
     Shutdown,
 }
 
+impl Event {
+    pub fn is_tick(&self) -> bool {
+        if let Event::Tick = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// An event that can be recorded.
 
 /// Instructions for the [`crate::Runner`]
@@ -53,6 +63,7 @@ pub enum Event {
 pub enum Action {
     Redraw,
     Update(ComponentId),
+    Ignition(ComponentId, IgnitionCommand),
 }
 
 impl Action {
@@ -62,7 +73,7 @@ impl Action {
     /// Some downstream operations will not trigger this in the future.
     pub fn should_redraw(&self) -> bool {
         match self {
-            Action::Redraw | Action::Update(_) => true,
+            Action::Redraw | Action::Update(_) | Action::Ignition(_, _) => true,
         }
     }
 }

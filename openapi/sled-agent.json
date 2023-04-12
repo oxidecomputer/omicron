@@ -204,6 +204,29 @@
         }
       }
     },
+    "/timesync": {
+      "get": {
+        "operationId": "timesync_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSync"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update": {
       "post": {
         "operationId": "update_artifact",
@@ -212,6 +235,80 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateArtifactId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v2p/{interface_id}": {
+      "put": {
+        "summary": "Create a mapping from a virtual NIC to a physical host",
+        "operationId": "set_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -576,6 +673,66 @@
             ]
           },
           {
+            "description": "Disk is ready to receive blocks from an external source",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "import_ready"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from a URL",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_url"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from bulk writes",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_bulk_writes"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being finalized to state Detached",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "finalizing"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
             "description": "Disk is undergoing maintenance",
             "type": "object",
             "properties": {
@@ -844,7 +1001,7 @@
             "description": "If we're migrating this instance, the details needed to drive the migration",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceMigrateParams"
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
               }
             ]
           },
@@ -852,7 +1009,7 @@
             "description": "requested runtime state of the Instance",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeStateRequested"
+                "$ref": "#/components/schemas/InstanceStateRequested"
               }
             ]
           }
@@ -936,7 +1093,7 @@
           "snapshot_id"
         ]
       },
-      "InstanceMigrateParams": {
+      "InstanceMigrationTargetParams": {
         "type": "object",
         "properties": {
           "src_propolis_addr": {
@@ -1034,44 +1191,6 @@
           "run_state",
           "sled_id",
           "time_updated"
-        ]
-      },
-      "InstanceRuntimeStateMigrateParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "migration_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_propolis_id",
-          "migration_id"
-        ]
-      },
-      "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeStateMigrateParams"
-              }
-            ]
-          },
-          "run_state": {
-            "$ref": "#/components/schemas/InstanceStateRequested"
-          }
-        },
-        "required": [
-          "run_state"
         ]
       },
       "InstanceState": {
@@ -1174,13 +1293,6 @@
             ]
           },
           {
-            "description": "Migrate the instance to another node.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
             "description": "Stop the instance and delete it.",
             "type": "string",
             "enum": [
@@ -1268,6 +1380,10 @@
         "description": "Information required to construct a virtual network interface for a guest",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "type": "string",
             "format": "ip"
@@ -1294,6 +1410,7 @@
           }
         },
         "required": [
+          "id",
           "ip",
           "mac",
           "name",
@@ -1462,6 +1579,42 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "boundary": {
+                "type": "boolean"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ntp"
+                ]
+              }
+            },
+            "required": [
+              "boundary",
+              "dns_servers",
+              "ntp_servers",
+              "type"
+            ]
           }
         ]
       },
@@ -1505,6 +1658,32 @@
           "zone_type"
         ]
       },
+      "SetVirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
+        ]
+      },
       "Slot": {
         "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
         "type": "integer",
@@ -1537,6 +1716,30 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "TimeSync": {
+        "type": "object",
+        "properties": {
+          "correction": {
+            "description": "The current offset between the NTP clock and system clock.",
+            "type": "number",
+            "format": "double"
+          },
+          "skew": {
+            "description": "The estimated error bound on the frequency.",
+            "type": "number",
+            "format": "double"
+          },
+          "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "correction",
+          "skew",
+          "sync"
         ]
       },
       "UpdateArtifactId": {
@@ -1827,7 +2030,8 @@
           "nexus",
           "oximeter",
           "switch",
-          "crucible_pantry"
+          "crucible_pantry",
+          "ntp"
         ]
       },
       "Zpool": {

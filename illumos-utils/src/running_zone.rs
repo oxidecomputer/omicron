@@ -9,6 +9,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::Port;
 use crate::svc::wait_for_service;
+use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
 use slog::info;
@@ -61,7 +62,7 @@ pub enum EnsureAddressError {
     MissingBootstrapVnic { address: String, zone: String },
 }
 
-/// Erros returned from [`RunningZone::get`].
+/// Errors returned from [`RunningZone::get`].
 #[derive(thiserror::Error, Debug)]
 pub enum GetZoneError {
     #[error("While looking up zones with prefix '{prefix}', could not get zones: {err}")]
@@ -121,6 +122,11 @@ pub struct RunningZone {
 impl RunningZone {
     pub fn name(&self) -> &str {
         &self.inner.name
+    }
+
+    /// Returns the filesystem path to the zone's root
+    pub fn root(&self) -> String {
+        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
     }
 
     /// Runs a command within the Zone, return the output.
@@ -291,6 +297,7 @@ impl RunningZone {
     /// address on the zone.
     pub async fn get(
         log: &Logger,
+        vnic_allocator: &VnicAllocator<Etherstub>,
         zone_prefix: &str,
         addrtype: AddressRequest,
     ) -> Result<Self, GetZoneError> {
@@ -331,7 +338,8 @@ impl RunningZone {
             },
         )?;
 
-        let control_vnic = Link::wrap_existing(vnic_name)
+        let control_vnic = vnic_allocator
+            .wrap_existing(vnic_name)
             .expect("Failed to wrap valid control VNIC");
 
         // The bootstrap address for a running zone never changes,
@@ -343,7 +351,8 @@ impl RunningZone {
                 err,
             })?
             .map(|name| {
-                Link::wrap_existing(name)
+                vnic_allocator
+                    .wrap_existing(name)
                     .expect("Failed to wrap valid bootstrap VNIC")
             });
 
