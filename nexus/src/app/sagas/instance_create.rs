@@ -78,15 +78,13 @@ struct DiskAttachParams {
 
 declare_saga_actions! {
     instance_create;
-    // TODO-robustness This still needs an undo action, and we should really
-    // keep track of resources and reservations, etc.  See the comment on
-    // SagaContext::alloc_server()
     ALLOC_SERVER -> "server_id" {
         + sic_alloc_server
+        - sic_alloc_server_undo
     }
-    RESOURCES_ACCOUNT -> "no_result" {
-        + sic_account_resources
-        - sic_account_resources_undo
+    VIRTUAL_RESOURCES_ACCOUNT -> "no_result" {
+        + sic_account_virtual_resources
+        - sic_account_virtual_resources_undo
     }
     ALLOC_PROPOLIS_IP -> "propolis_ip" {
         + sic_allocate_propolis_ip
@@ -159,7 +157,7 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         builder.append(alloc_server_action());
-        builder.append(resources_account_action());
+        builder.append(virtual_resources_account_action());
         builder.append(alloc_propolis_ip_action());
         builder.append(create_instance_record_action());
 
@@ -430,17 +428,6 @@ async fn sic_add_network_config(
 
     debug!(log, "checking for existing nat mapping for {target_ip:#?}");
 
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    //
-    // currently if we have this environment variable set, we want to
-    // bypass all calls to DPD. This is mainly to facilitate some tests where
-    // we don't have dpd running. In the future we should probably have these
-    // testing environments running dpd-stub so that the full path can be tested.
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
-
     let existing_nat = match target_ip.ip {
         ipnetwork::IpNetwork::V4(network) => {
             dpd_client.nat_ipv4_get(&network.ip(), *target_ip.first_port).await
@@ -538,17 +525,6 @@ async fn sic_remove_network_config(
         })?
         .to_owned();
 
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    //
-    // currently if we have this environment variable set, we want to
-    // bypass all calls to DPD. This is mainly to facilitate some tests where
-    // we don't have dpd running. In the future we should probably have these
-    // testing environments running dpd-stub so that the full path can be tested.
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
-
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
     let result = match target_ip.ip {
@@ -610,17 +586,40 @@ async fn sic_alloc_server(
     //   schedule instances that belong to a cluster on different failure
     //   domains. See https://github.com/oxidecomputer/omicron/issues/1705.
 
-    osagactx
+    // TODO: Fix these values. They're wrong now, but they let us move
+    // forward with plumbing.
+    let params = sagactx.saga_params::<Params>()?;
+    let hardware_threads = params.create_params.ncpus.0;
+    let rss_ram = params.create_params.memory;
+    let reservoir_ram = omicron_common::api::external::ByteCount::from(0);
+
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let resources = db::model::Resources::new(
+        hardware_threads.into(),
+        rss_ram.into(),
+        reservoir_ram.into(),
+    );
+
+    let resource = osagactx
         .nexus()
-        .random_sled_id()
+        .reserve_on_random_sled(
+            instance_id,
+            db::model::SledResourceKind::Instance,
+            resources,
+        )
         .await
-        .map_err(ActionError::action_failed)?
-        .ok_or_else(|| Error::ServiceUnavailable {
-            internal_message: String::from(
-                "no sleds available for new Instance",
-            ),
-        })
-        .map_err(ActionError::action_failed)
+        .map_err(ActionError::action_failed)?;
+    Ok(resource.sled_id)
+}
+
+async fn sic_alloc_server_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    osagactx.nexus().delete_sled_reservation(instance_id).await?;
+    Ok(())
 }
 
 /// Create a network interface for an instance, using the parameters at index
@@ -1078,7 +1077,7 @@ pub(super) async fn allocate_sled_ipv6(
         .map_err(ActionError::action_failed)
 }
 
-async fn sic_account_resources(
+async fn sic_account_virtual_resources(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -1103,7 +1102,7 @@ async fn sic_account_resources(
     Ok(())
 }
 
-async fn sic_account_resources_undo(
+async fn sic_account_virtual_resources_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -1516,6 +1515,41 @@ pub mod test {
             .is_none()
     }
 
+    async fn no_sled_resource_instance_records_exist(
+        datastore: &DataStore,
+    ) -> bool {
+        use crate::db::model::SledResource;
+        use crate::db::schema::sled_resource::dsl;
+
+        datastore
+            .pool_for_tests()
+            .await
+            .unwrap()
+            .transaction_async(|conn| async move {
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok::<_, crate::db::TransactionError<()>>(
+                    dsl::sled_resource
+                        .filter(
+                            dsl::kind.eq(
+                                crate::db::model::SledResourceKind::Instance,
+                            ),
+                        )
+                        .select(SledResource::as_select())
+                        .get_results_async::<SledResource>(&conn)
+                        .await
+                        .unwrap()
+                        .is_empty(),
+                )
+            })
+            .await
+            .unwrap()
+    }
+
     async fn no_virtual_provisioning_resource_records_exist(
         datastore: &DataStore,
     ) -> bool {
@@ -1610,6 +1644,7 @@ pub mod test {
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
+        assert!(no_sled_resource_instance_records_exist(datastore).await);
         assert!(
             no_virtual_provisioning_resource_records_exist(datastore).await
         );
@@ -1745,15 +1780,12 @@ pub mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector {
-            project: PROJECT_NAME.to_string().try_into().unwrap(),
-        };
         let instance_selector = params::InstanceSelector {
-            project_selector: Some(project_selector),
+            project: Some(PROJECT_NAME.to_string().try_into().unwrap()),
             instance: INSTANCE_NAME.to_string().try_into().unwrap(),
         };
         let instance_lookup =
-            nexus.instance_lookup(&opctx, &instance_selector).unwrap();
+            nexus.instance_lookup(&opctx, instance_selector).unwrap();
         nexus.project_destroy_instance(&opctx, &instance_lookup).await.unwrap();
     }
 

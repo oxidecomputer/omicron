@@ -103,6 +103,46 @@ CREATE INDEX ON omicron.public.sled (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
+    -- omicron.public.Dataset
+    'dataset',
+    -- omicron.public.service
+    'service',
+    -- omicron.public.instance
+    'instance',
+    -- omicron.public.sled
+    --
+    -- reserved as an approximation of sled internal usage, such as "by the OS
+    -- and all unaccounted services".
+    'reserved'
+);
+
+-- Accounting for programs using resources on a sled
+CREATE TABLE omicron.public.sled_resource (
+    -- Should match the UUID of the corresponding service
+    id UUID PRIMARY KEY,
+
+    -- The sled where resources are being consumed
+    sled_id UUID NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL,
+
+    -- The maximum number of hardware threads usable by this resource
+    hardware_threads INT8 NOT NULL,
+
+    -- The maximum amount of RSS RAM provisioned to this resource
+    rss_ram INT8 NOT NULL,
+
+    -- The maximum amount of Reservoir RAM provisioned to this resource
+    reservoir_ram INT8 NOT NULL
+);
+
+-- Allow looking up all resources which reside on a sled
+CREATE INDEX ON omicron.public.sled_resource (
+    sled_id
+);
+
 /*
  * Services
  */
@@ -755,12 +795,19 @@ CREATE TABLE omicron.public.instance (
     hostname STRING(63) NOT NULL
 );
 
+-- Names for instances within a project should be unique
 CREATE UNIQUE INDEX ON omicron.public.instance (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
+-- Allow looking up instances by server. This is particularly
+-- useful for resource accounting within a sled.
+CREATE INDEX ON omicron.public.instance (
+    active_server_id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Guest-Visible, Virtual Disks

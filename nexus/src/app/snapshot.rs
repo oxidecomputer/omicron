@@ -5,7 +5,6 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use db::model::Name;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -16,7 +15,6 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use ref_cast::RefCast;
 
 use super::sagas;
 
@@ -26,34 +24,34 @@ impl super::Nexus {
     pub fn snapshot_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        snapshot_selector: &'a params::SnapshotSelector,
+        snapshot_selector: params::SnapshotSelector,
     ) -> LookupResult<lookup::Snapshot<'a>> {
         match snapshot_selector {
             params::SnapshotSelector {
                 snapshot: NameOrId::Id(id),
-                project_selector: None,
+                project: None,
             } => {
                 let snapshot =
-                    LookupPath::new(opctx, &self.db_datastore).snapshot_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).snapshot_id(id);
                 Ok(snapshot)
             }
             params::SnapshotSelector {
                 snapshot: NameOrId::Name(name),
-                project_selector: Some(project_selector),
+                project: Some(project),
             } => {
                 let snapshot = self
-                    .project_lookup(opctx, project_selector)?
-                    .snapshot_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .snapshot_name_owned(name.into());
                 Ok(snapshot)
             }
             params::SnapshotSelector {
                 snapshot: NameOrId::Id(_),
-                project_selector: Some(_),
+                ..
             } => Err(Error::invalid_request(
               "when providing snpashot as an ID, prject should not be specified"
             )),
             _ => Err(Error::invalid_request(
-              "snapshot should either be a UUID or project should be specified"
+              "snapshot should either be an ID or project should be specified"
             ))
         }
     }

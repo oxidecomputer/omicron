@@ -4,16 +4,14 @@
 
 //! Types that are used as both views and params
 
-use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use uuid::Uuid;
+
+pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
 
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments
@@ -159,187 +157,6 @@ pub enum ServiceUsingCertificate {
     ExternalApi,
 }
 
-/// An IP Range is a contiguous range of IP addresses, usually within an IP
-/// Pool.
-///
-/// The first address in the range is guaranteed to be no greater than the last
-/// address.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum IpRange {
-    V4(Ipv4Range),
-    V6(Ipv6Range),
-}
-
-// NOTE: We don't derive JsonSchema. That's intended so that we can use an
-// untagged enum for `IpRange`, and use this method to annotate schemars output
-// for client-generators (e.g., progenitor) to use in generating a better
-// client.
-impl JsonSchema for IpRange {
-    fn schema_name() -> String {
-        "IpRange".to_string()
-    }
-
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
-                one_of: Some(vec![
-                    omicron_common::api::external::label_schema(
-                        "v4",
-                        gen.subschema_for::<Ipv4Range>(),
-                    ),
-                    omicron_common::api::external::label_schema(
-                        "v6",
-                        gen.subschema_for::<Ipv6Range>(),
-                    ),
-                ]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
-
-impl IpRange {
-    pub fn first_address(&self) -> IpAddr {
-        match self {
-            IpRange::V4(inner) => IpAddr::from(inner.first),
-            IpRange::V6(inner) => IpAddr::from(inner.first),
-        }
-    }
-
-    pub fn last_address(&self) -> IpAddr {
-        match self {
-            IpRange::V4(inner) => IpAddr::from(inner.last),
-            IpRange::V6(inner) => IpAddr::from(inner.last),
-        }
-    }
-}
-
-impl From<IpAddr> for IpRange {
-    fn from(addr: IpAddr) -> Self {
-        match addr {
-            IpAddr::V4(addr) => IpRange::V4(Ipv4Range::from(addr)),
-            IpAddr::V6(addr) => IpRange::V6(Ipv6Range::from(addr)),
-        }
-    }
-}
-
-impl TryFrom<(Ipv4Addr, Ipv4Addr)> for IpRange {
-    type Error = String;
-
-    fn try_from(pair: (Ipv4Addr, Ipv4Addr)) -> Result<Self, Self::Error> {
-        Ipv4Range::new(pair.0, pair.1).map(IpRange::V4)
-    }
-}
-
-impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
-    type Error = String;
-
-    fn try_from(pair: (Ipv6Addr, Ipv6Addr)) -> Result<Self, Self::Error> {
-        Ipv6Range::new(pair.0, pair.1).map(IpRange::V6)
-    }
-}
-
-/// A non-decreasing IPv4 address range, inclusive of both ends.
-///
-/// The first address must be less than or equal to the last address.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(try_from = "AnyIpv4Range")]
-pub struct Ipv4Range {
-    first: Ipv4Addr,
-    last: Ipv4Addr,
-}
-
-impl Ipv4Range {
-    pub fn new(first: Ipv4Addr, last: Ipv4Addr) -> Result<Self, String> {
-        if first <= last {
-            Ok(Self { first, last })
-        } else {
-            Err(String::from("IP address ranges must be non-decreasing"))
-        }
-    }
-
-    pub fn first_address(&self) -> Ipv4Addr {
-        self.first
-    }
-
-    pub fn last_address(&self) -> Ipv4Addr {
-        self.last
-    }
-}
-
-impl From<Ipv4Addr> for Ipv4Range {
-    fn from(addr: Ipv4Addr) -> Self {
-        Self { first: addr, last: addr }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-struct AnyIpv4Range {
-    first: Ipv4Addr,
-    last: Ipv4Addr,
-}
-
-impl TryFrom<AnyIpv4Range> for Ipv4Range {
-    type Error = Error;
-    fn try_from(r: AnyIpv4Range) -> Result<Self, Self::Error> {
-        Ipv4Range::new(r.first, r.last)
-            .map_err(|msg| Error::invalid_request(msg.as_str()))
-    }
-}
-
-/// A non-decreasing IPv6 address range, inclusive of both ends.
-///
-/// The first address must be less than or equal to the last address.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
-#[serde(try_from = "AnyIpv6Range")]
-pub struct Ipv6Range {
-    first: Ipv6Addr,
-    last: Ipv6Addr,
-}
-
-impl Ipv6Range {
-    pub fn new(first: Ipv6Addr, last: Ipv6Addr) -> Result<Self, String> {
-        if first <= last {
-            Ok(Self { first, last })
-        } else {
-            Err(String::from("IP address ranges must be non-decreasing"))
-        }
-    }
-
-    pub fn first_address(&self) -> Ipv6Addr {
-        self.first
-    }
-
-    pub fn last_address(&self) -> Ipv6Addr {
-        self.last
-    }
-}
-
-impl From<Ipv6Addr> for Ipv6Range {
-    fn from(addr: Ipv6Addr) -> Self {
-        Self { first: addr, last: addr }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize)]
-struct AnyIpv6Range {
-    first: Ipv6Addr,
-    last: Ipv6Addr,
-}
-
-impl TryFrom<AnyIpv6Range> for Ipv6Range {
-    type Error = Error;
-    fn try_from(r: AnyIpv6Range) -> Result<Self, Self::Error> {
-        Ipv6Range::new(r.first, r.last)
-            .map_err(|msg| Error::invalid_request(msg.as_str()))
-    }
-}
-
 /// The kind of an external IP address for an instance
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -369,12 +186,7 @@ pub enum UpdateableComponentType {
 mod test {
     use super::Policy;
     use super::MAX_ROLE_ASSIGNMENTS_PER_RESOURCE;
-    use crate::external_api::shared::IpRange;
-    use crate::external_api::shared::Ipv4Range;
-    use crate::external_api::shared::Ipv6Range;
     use serde::Deserialize;
-    use std::net::Ipv4Addr;
-    use std::net::Ipv6Addr;
 
     #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
     #[serde(rename_all = "kebab-case")]
@@ -412,63 +224,5 @@ mod test {
             error.to_string(),
             "invalid length 65, expected a list of at most 64 role assignments"
         );
-    }
-
-    #[test]
-    fn test_ip_range_checks_non_decreasing() {
-        let lo = Ipv4Addr::new(10, 0, 0, 1);
-        let hi = Ipv4Addr::new(10, 0, 0, 3);
-        assert!(Ipv4Range::new(lo, hi).is_ok());
-        assert!(Ipv4Range::new(lo, lo).is_ok());
-        assert!(Ipv4Range::new(hi, lo).is_err());
-
-        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
-        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3);
-        assert!(Ipv6Range::new(lo, hi).is_ok());
-        assert!(Ipv6Range::new(lo, lo).is_ok());
-        assert!(Ipv6Range::new(hi, lo).is_err());
-    }
-
-    #[test]
-    fn test_ip_range_enum_deserialization() {
-        let data = r#"{"first": "10.0.0.1", "last": "10.0.0.3"}"#;
-        let expected = IpRange::V4(
-            Ipv4Range::new(
-                Ipv4Addr::new(10, 0, 0, 1),
-                Ipv4Addr::new(10, 0, 0, 3),
-            )
-            .unwrap(),
-        );
-        assert_eq!(expected, serde_json::from_str(data).unwrap());
-
-        let data = r#"{"first": "fd00::", "last": "fd00::3"}"#;
-        let expected = IpRange::V6(
-            Ipv6Range::new(
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
-            )
-            .unwrap(),
-        );
-        assert_eq!(expected, serde_json::from_str(data).unwrap());
-
-        let data = r#"{"first": "fd00::3", "last": "fd00::"}"#;
-        assert!(
-            serde_json::from_str::<IpRange>(data).is_err(),
-            "Expected an error deserializing an IP range with first address \
-            greater than last address",
-        );
-    }
-
-    #[test]
-    fn test_ip_range_try_from() {
-        let lo = Ipv4Addr::new(10, 0, 0, 1);
-        let hi = Ipv4Addr::new(10, 0, 0, 3);
-        assert!(IpRange::try_from((lo, hi)).is_ok());
-        assert!(IpRange::try_from((hi, lo)).is_err());
-
-        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
-        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3);
-        assert!(IpRange::try_from((lo, hi)).is_ok());
-        assert!(IpRange::try_from((hi, lo)).is_err());
     }
 }

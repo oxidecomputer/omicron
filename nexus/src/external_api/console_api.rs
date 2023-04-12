@@ -415,7 +415,7 @@ pub async fn login_local(
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
         login_finish(&opctx, apictx, user, None).await
     };
