@@ -714,7 +714,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateAvailableArtifact,
+    UpdateArtifact,
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,

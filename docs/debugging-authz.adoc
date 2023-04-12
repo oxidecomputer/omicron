@@ -999,7 +999,7 @@ $ grep 'full Oso configuration' log | bunyan
                         if child.fleet = fleet;
 
 
-                    resource UpdateAvailableArtifact {
+                    resource UpdateArtifact {
                         permissions = [
                             "list_children",
                             "modify",
@@ -1013,7 +1013,7 @@ $ grep 'full Oso configuration' log | bunyan
                         "modify" if "admin" on "parent_fleet";
                         "create_child" if "admin" on "parent_fleet";
                     }
-                    has_relation(fleet: Fleet, "parent_fleet", child: UpdateAvailableArtifact)
+                    has_relation(fleet: Fleet, "parent_fleet", child: UpdateArtifact)
                         if child.fleet = fleet;
 
 

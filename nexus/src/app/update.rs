@@ -82,17 +82,14 @@ impl super::Nexus {
         for artifact in &artifacts {
             current_version = Some(artifact.targets_role_version);
             self.db_datastore
-                .update_available_artifact_upsert(&opctx, artifact.clone())
+                .update_artifact_upsert(&opctx, artifact.clone())
                 .await?;
         }
 
         // ensure table is in sync with current copy of artifacts.json
         if let Some(current_version) = current_version {
             self.db_datastore
-                .update_available_artifact_hard_delete_outdated(
-                    &opctx,
-                    current_version,
-                )
+                .update_artifact_hard_delete_outdated(&opctx, current_version)
                 .await?;
         }
 
@@ -151,7 +148,7 @@ impl super::Nexus {
         // We cache the artifact based on its checksum, so fetch that from the
         // database.
         let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
-            .update_available_artifact_tuple(
+            .update_artifact_tuple(
                 &artifact.name,
                 db::model::SemverVersion(artifact.version.clone()),
                 KnownArtifactKind(artifact.kind),

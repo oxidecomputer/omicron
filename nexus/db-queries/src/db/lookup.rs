@@ -348,15 +348,15 @@ impl<'a> LookupPath<'a> {
         PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UpdateAvailableArtifact, identified by its
+    /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
-    pub fn update_available_artifact_tuple(
+    pub fn update_artifact_tuple(
         self,
         name: &str,
         version: db::model::SemverVersion,
         kind: KnownArtifactKind,
-    ) -> UpdateAvailableArtifact<'a> {
-        UpdateAvailableArtifact::PrimaryKey(
+    ) -> UpdateArtifact<'a> {
+        UpdateArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
             version,
@@ -685,7 +685,7 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "UpdateAvailableArtifact",
+    name = "UpdateArtifact",
     ancestors = [],
     children = [],
     lookup_by_name = false,
