@@ -1932,77 +1932,6 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_instance_fails_to_boot_with_disk(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    // Test that the saga correctly unwinds if the sled_agent's instance_put fails
-    // see: https://github.com/oxidecomputer/omicron/issues/1713
-    let client = &cptestctx.external_client;
-
-    // Test pre-reqs
-    DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
-
-    // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata").await;
-
-    // Verify disk is there and currently detached
-    let disks: Vec<Disk> =
-        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
-            .await
-            .expect("failed to list disks")
-            .all_items;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Detached);
-
-    // Create the instance
-    let instance_params = params::InstanceCreate {
-        identity: IdentityMetadataCreateParams {
-            name: Name::try_from(String::from("nfs")).unwrap(),
-            description: String::from("probably serving data"),
-        },
-        // there's a specific line in the simulated sled agent that will return
-        // a 500 if you try to allocate an instance with more than 16 CPUs. a
-        // 500 error is required to exercise the undo nodes of the instance
-        // create saga (where provision fails, instead of just responding with a
-        // bad request).
-        ncpus: InstanceCpuCount::try_from(32).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
-        user_data: vec![],
-        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
-        external_ips: vec![],
-        disks: vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
-                name: Name::try_from(String::from("probablydata")).unwrap(),
-            },
-        )],
-        start: true,
-    };
-
-    let builder =
-        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
-            .body(Some(&instance_params))
-            .expect_status(Some(http::StatusCode::INTERNAL_SERVER_ERROR));
-
-    NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Expected instance creation to fail!");
-
-    // Verify disk is not attached to the instance
-    let disks: Vec<Disk> =
-        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
-            .await
-            .expect("failed to list disks")
-            .all_items;
-
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Detached);
-}
-
-#[nexus_test]
 async fn test_instance_create_attach_disks(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -2679,6 +2608,173 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
             ByteCount::from(params::MIN_MEMORY_SIZE_BYTES)
         ),
     );
+}
+
+async fn expect_instance_creation_fail_unavailable(
+    client: &ClientTestContext,
+    url_instances: &str,
+    instance_params: &params::InstanceCreate,
+) {
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to fail with SERVICE_UNAVAILABLE!");
+}
+
+async fn expect_instance_creation_ok(
+    client: &ClientTestContext,
+    url_instances: &str,
+    instance_params: &params::InstanceCreate,
+) {
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &url_instances)
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let _ = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+}
+
+async fn expect_instance_deletion_ok(
+    client: &ClientTestContext,
+    url_instances: &str,
+) {
+    NexusRequest::object_delete(client, &url_instances)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+}
+
+#[nexus_test]
+async fn test_cannot_provision_instance_beyond_cpu_capacity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(client, PROJECT_NAME).await;
+    populate_ip_pool(&client, "default", None).await;
+
+    let too_many_cpus = InstanceCpuCount::try_from(i64::from(
+        nexus_test_utils::TEST_HARDWARE_THREADS + 1,
+    ))
+    .unwrap();
+    let enough_cpus = InstanceCpuCount::try_from(i64::from(
+        nexus_test_utils::TEST_HARDWARE_THREADS,
+    ))
+    .unwrap();
+
+    // Try to boot an instance that uses more CPUs than we have
+    // on our test sled setup.
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let mut instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: too_many_cpus,
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: false,
+    };
+    let url_instances = get_instances_url();
+
+    expect_instance_creation_fail_unavailable(
+        client,
+        &url_instances,
+        &instance_params,
+    )
+    .await;
+
+    // If we ask for fewer CPUs, the request should work
+    instance_params.ncpus = enough_cpus;
+    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+
+    // Requesting another instance won't have enough space
+    let name2 = Name::try_from(String::from("test2")).unwrap();
+    instance_params.identity.name = name2;
+    expect_instance_creation_fail_unavailable(
+        client,
+        &url_instances,
+        &instance_params,
+    )
+    .await;
+
+    // But if we delete the first instace, we'll have space
+    let url_instance = get_instance_url(&name1.to_string());
+    expect_instance_deletion_ok(client, &url_instance).await;
+    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+}
+
+#[nexus_test]
+async fn test_cannot_provision_instance_beyond_ram_capacity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_project(client, PROJECT_NAME).await;
+    populate_ip_pool(&client, "default", None).await;
+
+    let too_much_ram = ByteCount::try_from(
+        nexus_test_utils::TEST_PHYSICAL_RAM
+            + u64::from(params::MIN_MEMORY_SIZE_BYTES),
+    )
+    .unwrap();
+    let enough_ram =
+        ByteCount::try_from(nexus_test_utils::TEST_PHYSICAL_RAM).unwrap();
+
+    // Try to boot an instance that uses more RAM than we have
+    // on our test sled setup.
+    let name1 = Name::try_from(String::from("test")).unwrap();
+    let mut instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: name1.clone(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: too_much_ram,
+        hostname: String::from("test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: false,
+    };
+    let url_instances = get_instances_url();
+    expect_instance_creation_fail_unavailable(
+        client,
+        &url_instances,
+        &instance_params,
+    )
+    .await;
+
+    // If we ask for less RAM, the request should work
+    instance_params.memory = enough_ram;
+    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
+
+    // Requesting another instance won't have enough space
+    let name2 = Name::try_from(String::from("test2")).unwrap();
+    instance_params.identity.name = name2;
+    expect_instance_creation_fail_unavailable(
+        client,
+        &url_instances,
+        &instance_params,
+    )
+    .await;
+
+    // But if we delete the first instace, we'll have space
+    let url_instance = get_instance_url(&name1.to_string());
+    expect_instance_deletion_ok(client, &url_instance).await;
+    expect_instance_creation_ok(client, &url_instances, &instance_params).await;
 }
 
 #[nexus_test]

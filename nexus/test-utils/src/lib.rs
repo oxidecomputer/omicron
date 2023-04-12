@@ -34,6 +34,11 @@ pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
+/// The reported amount of hardware threads for an emulated sled agent.
+pub const TEST_HARDWARE_THREADS: u32 = 16;
+/// The reported amount of physical RAM for an emulated sled agent.
+pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
@@ -240,6 +245,10 @@ pub async fn start_sled_agent(
         },
         updates: sim::ConfigUpdates {
             zone_artifact_path: update_directory.to_path_buf(),
+        },
+        hardware: sim::ConfigHardware {
+            hardware_threads: TEST_HARDWARE_THREADS,
+            physical_ram: TEST_PHYSICAL_RAM,
         },
     };
 
