@@ -141,10 +141,10 @@ impl ExampleContext {
                         buf_list.push_chunk(&b"downloaded-data"[..]);
                     }
 
-                    Ok(StepResult::success(
+                    StepResult::success(
                         buf_list,
                         ExampleCompletionMetadata::Download { num_bytes },
-                    ))
+                    )
                 },
             )
             .register()
@@ -208,14 +208,14 @@ impl ExampleContext {
                     }
 
                     // Demonstrate how to show a warning.
-                    Ok(StepResult::warning(
+                    StepResult::warning(
                         (),
                         ExampleCompletionMetadata::Write {
                             num_bytes,
                             destination,
                         },
                         "Example warning",
-                    ))
+                    )
                 },
             )
             .with_metadata_fn(move |cx| async move {
@@ -234,7 +234,7 @@ impl ExampleContext {
     ) {
         registrar
             .new_step(ExampleStepId::Skipped, "This step does nothing", |_cx| async move {
-                Ok(StepResult::skipped((), (), "Step skipped"))
+                StepResult::skipped((), (), "Step skipped")
             })
             .register();
     }

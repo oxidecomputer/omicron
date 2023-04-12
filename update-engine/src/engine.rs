@@ -360,8 +360,11 @@ pub struct StepResult<T, S: StepSpec> {
 
 impl<T, S: StepSpec> StepResult<T, S> {
     /// Creates a new `StepResult` corresponding to a successful output.
-    pub fn success(output: T, metadata: S::CompletionMetadata) -> Self {
-        Self { output, outcome: StepOutcome::Success { metadata } }
+    pub fn success(
+        output: T,
+        metadata: S::CompletionMetadata,
+    ) -> Result<Self, S::Error> {
+        Ok(Self { output, outcome: StepOutcome::Success { metadata } })
     }
 
     /// Creates a new `StepResult` corresponding to a successful output, with a
@@ -370,11 +373,11 @@ impl<T, S: StepSpec> StepResult<T, S> {
         output: T,
         metadata: S::CompletionMetadata,
         message: impl Into<Cow<'static, str>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, S::Error> {
+        Ok(Self {
             output,
             outcome: StepOutcome::Warning { metadata, message: message.into() },
-        }
+        })
     }
 
     /// Creates a new `StepResult` corresponding to a skipped step, with a
@@ -383,11 +386,11 @@ impl<T, S: StepSpec> StepResult<T, S> {
         output: T,
         metadata: S::SkippedMetadata,
         message: impl Into<Cow<'static, str>>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, S::Error> {
+        Ok(Self {
             output,
             outcome: StepOutcome::Skipped { metadata, message: message.into() },
-        }
+        })
     }
 }
 
@@ -736,7 +739,7 @@ mod tests {
         engine
             .new_step("foo".to_owned(), 0, "Step 1", |_| async {
                 step_1_run = true;
-                Ok(StepResult::success((), serde_json::Value::Null))
+                StepResult::success((), serde_json::Value::Null)
             })
             .register();
 
@@ -750,7 +753,7 @@ mod tests {
         engine
             .new_step("baz".to_owned(), 0, "Step 3", |_| async {
                 step_3_run = true;
-                Ok(StepResult::success((), serde_json::Value::Null))
+                StepResult::success((), serde_json::Value::Null)
             })
             .register();
 

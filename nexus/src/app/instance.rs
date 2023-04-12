@@ -19,7 +19,6 @@ use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
-use nexus_db_model::Name;
 use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -36,7 +35,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
-use ref_cast::RefCast;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
@@ -56,32 +54,32 @@ impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        instance_selector: &'a params::InstanceSelector,
+        instance_selector: params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
             params::InstanceSelector {
-                project_selector: None,
                 instance: NameOrId::Id(id),
+                project: None
             } => {
                 let instance =
-                    LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
             }
             params::InstanceSelector {
-                project_selector: Some(project_selector),
                 instance: NameOrId::Name(name),
+                project: Some(project)
             } => {
                 let instance = self
-                    .project_lookup(opctx, project_selector)?
-                    .instance_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .instance_name_owned(name.into());
                 Ok(instance)
             }
             params::InstanceSelector {
-                project_selector: Some(_),
                 instance: NameOrId::Id(_),
+                ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing instance as an ID, project should not be specified",
+                    "when providing instance as an ID project should not be specified",
                 ))
             }
             _ => {
@@ -695,10 +693,8 @@ impl super::Nexus {
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector {
-                    project_selector: Some(params::ProjectSelector {
-                        project: authz_project.id().into(),
-                    }),
+                params::DiskSelector {
+                    project: Some(authz_project.id().into()),
                     disk,
                 },
             )?
@@ -754,10 +750,8 @@ impl super::Nexus {
         let (.., authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector {
-                    project_selector: Some(params::ProjectSelector {
-                        project: authz_project.id().into(),
-                    }),
+                params::DiskSelector {
+                    project: Some(authz_project.id().into()),
                     disk,
                 },
             )?
