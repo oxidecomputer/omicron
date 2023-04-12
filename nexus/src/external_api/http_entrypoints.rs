@@ -2390,7 +2390,7 @@ async fn system_image_delete(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::ImageListSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2414,7 +2414,12 @@ async fn image_list(
             }
         };
         let images = nexus
-            .image_list(&opctx, &parent_lookup, &paginated_by)
+            .image_list(
+                &opctx,
+                &parent_lookup,
+                scan_params.selector.include_silo_images,
+                &paginated_by,
+            )
             .await?
             .into_iter()
             .map(|d| d.into())

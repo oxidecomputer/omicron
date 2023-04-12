@@ -333,6 +333,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         parent_lookup: &ImageParentLookup<'_>,
+        include_silo_images: Option<bool>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Image> {
         match parent_lookup {
@@ -340,7 +341,12 @@ impl super::Nexus {
                 let (.., authz_project) =
                     project.lookup_for(authz::Action::ListChildren).await?;
                 self.db_datastore
-                    .project_image_list(opctx, &authz_project, pagparams)
+                    .project_image_list(
+                        opctx,
+                        &authz_project,
+                        include_silo_images.unwrap_or(false),
+                        pagparams,
+                    )
                     .await
             }
             ImageParentLookup::Silo(silo) => {

@@ -115,6 +115,17 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
+/// A specialized selector for image list, it contains an extra feield to indicate
+/// if silo scoped images should be included when listing project images.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct ImageListSelector {
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
+    /// Flag used to indicate if silo scoped images should be included when
+    /// listing project images. Only valid when `project` is provided.
+    pub include_silo_images: Option<bool>,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
     /// Name or ID of the project, only required if `image` is provided as a `Name`

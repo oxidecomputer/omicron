@@ -32,28 +32,56 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
+        include_silo_images: bool,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Image> {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
-        use db::schema::project_image::dsl;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::project_image, dsl::id, &pagparams)
+        use db::schema::image::dsl;
+        use db::schema::project_image::dsl as project_dsl;
+        match include_silo_images {
+            true => match pagparams {
+                PaginatedBy::Id(pagparams) => {
+                    paginated(dsl::image, dsl::id, &pagparams)
+                }
+                PaginatedBy::Name(pagparams) => paginated(
+                    dsl::image,
+                    dsl::name,
+                    &pagparams.map_name(|n| Name::ref_cast(n)),
+                ),
             }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::project_image,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
+            .filter(dsl::time_deleted.is_null())
+            .filter(
+                dsl::project_id
+                    .is_null()
+                    .or(dsl::project_id.eq(authz_project.id())),
+            )
+            .select(Image::as_select())
+            .load_async::<Image>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            }),
+            false => match pagparams {
+                PaginatedBy::Id(pagparams) => paginated(
+                    project_dsl::project_image,
+                    project_dsl::id,
+                    &pagparams,
+                ),
+                PaginatedBy::Name(pagparams) => paginated(
+                    project_dsl::project_image,
+                    project_dsl::name,
+                    &pagparams.map_name(|n| Name::ref_cast(n)),
+                ),
+            }
+            .filter(project_dsl::time_deleted.is_null())
+            .filter(project_dsl::project_id.eq(authz_project.id()))
+            .select(ProjectImage::as_select())
+            .load_async::<ProjectImage>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map(|v| v.into_iter().map(|v| v.into()).collect()),
         }
-        .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
-        .select(ProjectImage::as_select())
-        .load_async::<ProjectImage>(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-        .map(|v| v.into_iter().map(|v| v.into()).collect())
     }
 
     pub async fn silo_image_list(
@@ -128,7 +156,7 @@ impl DataStore {
         authz_project: &authz::Project,
         project_image: ProjectImage,
     ) -> CreateResult<Image> {
-        let project_id = project_image.project_id.clone();
+        let project_id = project_image.project_id;
         let image: Image = project_image.into();
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -166,7 +194,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         project_image: ProjectImage,
     ) -> UpdateResult<Image> {
-        let silo_id = authz_silo.id().clone();
+        let silo_id = authz_silo.id();
         let image: Image = project_image.into();
         let name = image.name().clone();
 

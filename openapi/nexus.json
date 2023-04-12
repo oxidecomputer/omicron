@@ -1126,6 +1126,15 @@
         "parameters": [
           {
             "in": "query",
+            "name": "include_silo_images",
+            "description": "Flag used to indicate if silo scoped images should be included when listing project images. Only valid when `project` is provided.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
