@@ -19,17 +19,26 @@ function on_exit
 
 trap on_exit ERR
 
-# Parse command line options:
-#
-# -y  Assume "yes" intead of showing confirmation prompts.
-# -p  Skip checking paths
+function usage
+{
+  echo "Usage: ./install_builder_prerequisites.sh <OPTIONS>"
+  echo "  Options: "
+  echo "   -y: Assume 'yes' instead of showing confirmation prompts"
+  echo "   -p: Skip checking paths"
+  echo "   -r: Number of retries to perform for network operations (default: 3)"
+  exit 1
+}
+
 ASSUME_YES="false"
 SKIP_PATH_CHECK="false"
-while getopts yp flag
+RETRY_ATTEMPTS=3
+while getopts yp:r: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
     p) SKIP_PATH_CHECK="true" ;;
+    r) RETRY_ATTEMPTS=${OPTARG} ;;
+    *) usage
   esac
 done
 
@@ -54,6 +63,28 @@ function confirm
   esac
 }
 
+# Function which executes all provided arguments, up to ${RETRY_ATTEMPTS}
+# times, or until the command succeeds.
+function retry
+{
+  attempts="${RETRY_ATTEMPTS}"
+  # Always try at least once
+  attempts=$((attempts < 1 ? 1 : attempts))
+  rc=0
+  for i in $(seq 1 $attempts); do
+    "$@" || rc=$?;
+    if [[ "$rc" -eq 0 ]]; then
+      return
+    fi
+
+    if [[ $i -ne $attempts ]]; then
+      echo "Failed to run command -- will try $((attempts - i)) more times"
+    fi
+  done
+
+  exit $rc
+}
+
 # Packages to be installed on all OSes:
 #
 # - libpq, the PostgreSQL client lib.
@@ -71,57 +102,62 @@ function confirm
 # - brand/omicron1/tools: Oxide's omicron1-brand Zone
 
 HOST_OS=$(uname -s)
-if [[ "${HOST_OS}" == "Linux" ]]; then
-  packages=(
-    'libpq-dev'
-    'pkg-config'
-    'xmlsec1'
-    'libxmlsec1-dev'
-    'libxmlsec1-openssl'
-    'libclang-dev'
-    'libsqlite3-dev'
-  )
-  sudo apt-get update
-  if [[ "${ASSUME_YES}" == "true" ]]; then
-    sudo apt-get install -y ${packages[@]}
+
+function install_packages {
+  if [[ "${HOST_OS}" == "Linux" ]]; then
+    packages=(
+      'libpq-dev'
+      'pkg-config'
+      'xmlsec1'
+      'libxmlsec1-dev'
+      'libxmlsec1-openssl'
+      'libclang-dev'
+      'libsqlite3-dev'
+    )
+    sudo apt-get update
+    if [[ "${ASSUME_YES}" == "true" ]]; then
+        sudo apt-get install -y "${packages[@]}"
+    else
+        confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+    fi
+  elif [[ "${HOST_OS}" == "SunOS" ]]; then
+    packages=(
+      'pkg:/package/pkg'
+      'build-essential'
+      'library/postgresql-13'
+      'pkg-config'
+      'library/libxmlsec1'
+      # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
+      'pkg:/ooce/developer/clang-120'
+    )
+
+    # Install/update the set of packages.
+    # Explicitly manage the return code using "rc" to observe the result of this
+    # command without exiting the script entirely (due to bash's "errexit").
+    rc=0
+    confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
+    # Return codes:
+    #  0: Normal Success
+    #  4: Failure because we're already up-to-date. Also acceptable.
+    if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+      exit "$rc"
+    fi
+
+    pkg list -v "${packages[@]}"
+  elif [[ "${HOST_OS}" == "Darwin" ]]; then
+    packages=(
+      'postgresql'
+      'pkg-config'
+      'libxmlsec1'
+    )
+    confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
   else
-      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+    echo "Unsupported OS: ${HOST_OS}"
+    exit 1
   fi
-elif [[ "${HOST_OS}" == "SunOS" ]]; then
-  packages=(
-    'pkg:/package/pkg'
-    'build-essential'
-    'library/postgresql-13'
-    'pkg-config'
-    'library/libxmlsec1'
-    # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
-    'pkg:/ooce/developer/clang-120'
-  )
+}
 
-  # Install/update the set of packages.
-  # Explicitly manage the return code using "rc" to observe the result of this
-  # command without exiting the script entirely (due to bash's "errexit").
-  rc=0
-  confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
-  # Return codes:
-  #  0: Normal Success
-  #  4: Failure because we're already up-to-date. Also acceptable.
-  if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
-    exit "$rc"
-  fi
-
-  pkg list -v "${packages[@]}"
-elif [[ "${HOST_OS}" == "Darwin" ]]; then
-  packages=(
-    'postgresql'
-    'pkg-config'
-    'libxmlsec1'
-  )
-  confirm "Install (or update) [${packages[*]}]?" && brew install ${packages[@]}
-else
-  echo "Unsupported OS: ${HOST_OS}"
-  exit -1
-fi
+install_packages
 
 # CockroachDB and Clickhouse are used by Omicron for storage of
 # control plane metadata and metrics.
@@ -134,23 +170,23 @@ fi
 # - Packaging: When constructing packages on Helios, these utilities
 # are packaged into zones which may be launched by the sled agent.
 
-./tools/ci_download_cockroachdb
-./tools/ci_download_clickhouse
+retry ./tools/ci_download_cockroachdb
+retry ./tools/ci_download_clickhouse
 
 # Install static console assets. These are used when packaging Nexus.
-./tools/ci_download_console
+retry ./tools/ci_download_console
 
 # Download the OpenAPI spec for maghemite. This is required to build the
 # ddm-admin-api crate.
-./tools/ci_download_maghemite_openapi
-#
+retry ./tools/ci_download_maghemite_openapi
+
 # Download the OpenAPI spec for dendrite. This is required to build the
 # dpd-client crate.
-./tools/ci_download_dendrite_openapi
-#
+retry ./tools/ci_download_dendrite_openapi
+
 # Download dendrite-stub. This is required to run tests without a live
 # asic and running dendrite instance
-./tools/ci_download_dendrite_stub
+retry ./tools/ci_download_dendrite_stub
 
 
 # Validate the PATH:
@@ -207,7 +243,7 @@ for command in "${expected_in_path[@]}"; do
 done
 
 if [[ "$ANY_PATH_ERROR" == "true" ]]; then
-  exit -1
+  exit 1
 fi
 
 echo "All builder prerequisites installed successfully, and PATH looks valid"

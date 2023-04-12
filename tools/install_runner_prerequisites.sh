@@ -19,16 +19,29 @@ function on_exit
 
 trap on_exit ERR
 
+function usage
+{
+  echo "Usage: ./install_runner_prerequisites.sh <OPTIONS>"
+  echo "  Options: "
+  echo "   -y: Assume 'yes' instead of showing confirmation prompts"
+  echo "   -p: Skip checking paths"
+  echo "   -r: Number of retries to perform for network operations (default: 3)"
+  exit 1
+}
+
 # Parse command line options:
 #
 # -y  Assume "yes" intead of showing confirmation prompts.
 # -p  Skip checking paths (currently unused)
 ASSUME_YES="false"
-while getopts yp flag
+RETRY_ATTEMPTS=3
+while getopts yp:r: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
     p) continue ;;
+    r) RETRY_ATTEMPTS=${OPTARG} ;;
+    *) usage
   esac
 done
 
@@ -51,6 +64,28 @@ function confirm
       false
       ;;
   esac
+}
+
+# Function which executes all provided arguments, up to ${RETRY_ATTEMPTS}
+# times, or until the command succeeds.
+function retry
+{
+  attempts="${RETRY_ATTEMPTS}"
+  # Always try at least once
+  attempts=$((attempts < 1 ? 1 : attempts))
+  rc=0
+  for i in $(seq 1 $attempts); do
+    "$@" || rc=$?;
+    if [[ "$rc" -eq 0 ]]; then
+      return
+    fi
+
+    if [[ $i -ne $attempts ]]; then
+      echo "Failed to run command -- will try $((attempts - i)) more times"
+    fi
+  done
+
+  exit $rc
 }
 
 # Packages to be installed Helios:
@@ -97,13 +132,13 @@ elif [[ "${HOST_OS}" == "Linux" ]]; then
   )
   sudo apt-get update
   if [[ "${ASSUME_YES}" == "true" ]]; then
-    sudo apt-get install -y ${packages[@]}
+    sudo apt-get install -y "${packages[@]}"
   else
-    confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+    confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
   fi
 else
   echo "Unsupported OS: ${HOST_OS}"
-  exit -1
+  exit 1
 fi
 
 if [[ "${HOST_OS}" == "SunOS" ]]; then
@@ -112,12 +147,12 @@ if [[ "${HOST_OS}" == "SunOS" ]]; then
     # OPTE is a Rust package that is consumed by a kernel module called xde. This
     # installs the `xde` driver and some kernel bits required to work with that
     # driver.
-    ./tools/install_opte.sh
+    retry ./tools/install_opte.sh
 
     # Grab the SoftNPU machinery (ASIC simulator, scadm, P4 program, etc.)
     #
     # create_virtual_hardware.sh will use those to setup the softnpu zone
-    ./tools/ci_download_softnpu_machinery
+    retry ./tools/ci_download_softnpu_machinery
 fi
 
 echo "All runner prerequisites installed successfully"
