@@ -56,9 +56,9 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::NetworkInterface;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::Saga;
@@ -2522,7 +2522,7 @@ async fn image_delete(
 async fn instance_network_interface_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2534,7 +2534,11 @@ async fn instance_network_interface_list(
         let instance_lookup =
             nexus.instance_lookup(&opctx, &scan_params.selector)?;
         let interfaces = nexus
-            .network_interface_list(&opctx, &instance_lookup, &paginated_by)
+            .instance_network_interface_list(
+                &opctx,
+                &instance_lookup,
+                &paginated_by,
+            )
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -2557,8 +2561,8 @@ async fn instance_network_interface_list(
 async fn instance_network_interface_create(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<params::InstanceSelector>,
-    interface_params: TypedBody<params::NetworkInterfaceCreate>,
-) -> Result<HttpResponseCreated<NetworkInterface>, HttpError> {
+    interface_params: TypedBody<params::InstanceNetworkInterfaceCreate>,
+) -> Result<HttpResponseCreated<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2599,13 +2603,15 @@ async fn instance_network_interface_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector {
+        let interface_selector = params::InstanceNetworkInterfaceSelector {
             instance_selector: query.instance_selector,
             network_interface: path.interface,
         };
-        let interface_lookup =
-            nexus.network_interface_lookup(&opctx, &interface_selector)?;
-        nexus.network_interface_delete(&opctx, &interface_lookup).await?;
+        let interface_lookup = nexus
+            .instance_network_interface_lookup(&opctx, &interface_selector)?;
+        nexus
+            .instance_network_interface_delete(&opctx, &interface_lookup)
+            .await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2621,19 +2627,19 @@ async fn instance_network_interface_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let interface_selector = params::NetworkInterfaceSelector {
+        let interface_selector = params::InstanceNetworkInterfaceSelector {
             instance_selector: query.instance_selector,
             network_interface: path.interface,
         };
         let (.., interface) = nexus
-            .network_interface_lookup(&opctx, &interface_selector)?
+            .instance_network_interface_lookup(&opctx, &interface_selector)?
             .fetch()
             .await?;
         Ok(HttpResponseOk(interface.into()))
@@ -2651,8 +2657,8 @@ async fn instance_network_interface_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::NetworkInterfacePath>,
     query_params: Query<params::OptionalInstanceSelector>,
-    updated_iface: TypedBody<params::NetworkInterfaceUpdate>,
-) -> Result<HttpResponseOk<NetworkInterface>, HttpError> {
+    updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
+) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -2660,20 +2666,24 @@ async fn instance_network_interface_update(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let updated_iface = updated_iface.into_inner();
-        let network_interface_selector = params::NetworkInterfaceSelector {
-            instance_selector: query.instance_selector,
-            network_interface: path.interface,
-        };
+        let network_interface_selector =
+            params::InstanceNetworkInterfaceSelector {
+                instance_selector: query.instance_selector,
+                network_interface: path.interface,
+            };
         let network_interface_lookup = nexus
-            .network_interface_lookup(&opctx, &network_interface_selector)?;
+            .instance_network_interface_lookup(
+                &opctx,
+                &network_interface_selector,
+            )?;
         let interface = nexus
-            .network_interface_update(
+            .instance_network_interface_update(
                 &opctx,
                 &network_interface_lookup,
                 updated_iface,
             )
             .await?;
-        Ok(HttpResponseOk(NetworkInterface::from(interface)))
+        Ok(HttpResponseOk(InstanceNetworkInterface::from(interface)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3147,7 +3157,7 @@ async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SubnetPath>,
     query_params: Query<PaginatedByNameOrId<params::OptionalVpcSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<NetworkInterface>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<InstanceNetworkInterface>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -3164,7 +3174,7 @@ async fn vpc_subnet_list_network_interfaces(
         let subnet_lookup =
             nexus.vpc_subnet_lookup(&opctx, &subnet_selector)?;
         let interfaces = nexus
-            .subnet_list_network_interfaces(
+            .subnet_list_instance_network_interfaces(
                 &opctx,
                 &subnet_lookup,
                 &paginated_by,

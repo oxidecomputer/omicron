@@ -21,7 +21,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use sled_agent_client::Client as SledAgentClient;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -242,7 +242,7 @@ impl super::Nexus {
         opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
-        address: Ipv6Addr,
+        address: SocketAddrV6,
         kind: ServiceKind,
     ) -> Result<(), Error> {
         info!(

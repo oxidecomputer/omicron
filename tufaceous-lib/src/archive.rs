@@ -5,6 +5,7 @@
 //! Support for reading and writing zip archives.
 
 use anyhow::{anyhow, bail, Context, Result};
+use buf_list::BufList;
 use bytes::Bytes;
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
@@ -117,6 +118,22 @@ impl ArchiveExtractor<Cursor<Bytes>> {
     /// Loads an archived repository from memory as owned bytes.
     pub fn from_owned_bytes(archive: impl Into<Bytes>) -> Result<Self> {
         let reader = Cursor::new(archive.into());
+        Self::new(reader).context("error opening zip archive from memory")
+    }
+}
+
+impl<'a> ArchiveExtractor<buf_list::Cursor<&'a BufList>> {
+    /// Loads an archived repository from memory as a borrowed BufList.
+    pub fn from_borrowed_buf_list(archive: &'a BufList) -> Result<Self> {
+        let reader = buf_list::Cursor::new(archive);
+        Self::new(reader).context("error opening zip archive from memory")
+    }
+}
+
+impl ArchiveExtractor<buf_list::Cursor<BufList>> {
+    /// Loads an archived repository from memory as an owned BufList.
+    pub fn from_owned_buf_list(archive: BufList) -> Result<Self> {
+        let reader = buf_list::Cursor::new(archive);
         Self::new(reader).context("error opening zip archive from memory")
     }
 }

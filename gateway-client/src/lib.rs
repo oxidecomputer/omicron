@@ -49,6 +49,8 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     patch = {
         SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpIgnition = { derives = [PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpIgnitionSystemType = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
         RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },

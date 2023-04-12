@@ -197,6 +197,11 @@ impl Plan {
             .map(|dns_subnet| dns_subnet.dns_address().ip().to_string())
             .collect::<Vec<String>>();
 
+        let mut services_ip_pool = config
+            .internal_services_ip_pool_ranges
+            .iter()
+            .flat_map(|range| range.iter());
+
         let mut boundary_ntp_servers = vec![];
 
         for idx in 0..sled_addrs.len() {
@@ -222,6 +227,12 @@ impl Plan {
                         omicron_common::address::NEXUS_INTERNAL_PORT,
                     )
                     .unwrap();
+                let external_ip = services_ip_pool.next().ok_or_else(|| {
+                    PlanError::SledInitialization(
+                        "no IP available in services IP pool for Nexus"
+                            .to_string(),
+                    )
+                })?;
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::Nexus,
@@ -229,7 +240,7 @@ impl Plan {
                     gz_addresses: vec![],
                     services: vec![ServiceType::Nexus {
                         internal_ip: address,
-                        external_ip: config.nexus_external_address,
+                        external_ip,
                     }],
                 })
             }

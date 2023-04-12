@@ -26,11 +26,20 @@ impl MacAddr {
     // for an initial discussion of the customer/system address range split.
     pub const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
     pub const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
+    pub const MIN_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_00_00;
+    pub const MAX_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_FF_FF;
 
     /// Generate a random MAC address for a guest network interface
     pub fn random_guest() -> Self {
         let value =
             thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Generate a random MAC address in the system address range
+    pub fn random_system() -> Self {
+        let value = thread_rng()
+            .gen_range(Self::MIN_SYSTEM_ADDR..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
     }
 
