@@ -29,13 +29,9 @@ function usage
   exit 1
 }
 
-# Parse command line options:
-#
-# -y  Assume "yes" intead of showing confirmation prompts.
-# -p  Skip checking paths (currently unused)
 ASSUME_YES="false"
 RETRY_ATTEMPTS=3
-while getopts yp:r: flag
+while getopts ypr: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;

@@ -32,7 +32,7 @@ function usage
 ASSUME_YES="false"
 SKIP_PATH_CHECK="false"
 RETRY_ATTEMPTS=3
-while getopts yp:r: flag
+while getopts ypr: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
