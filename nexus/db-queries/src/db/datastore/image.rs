@@ -5,6 +5,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 
 use crate::authz;
@@ -120,6 +121,7 @@ impl DataStore {
         })?;
         Ok(image)
     }
+
     pub async fn project_image_create(
         &self,
         opctx: &OpContext,
@@ -150,6 +152,44 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::ProjectImage,
+                        name.as_str(),
+                    ),
+                )
+            }
+        })?;
+        Ok(image)
+    }
+
+    pub async fn project_image_promote(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        project_image: ProjectImage,
+    ) -> UpdateResult<Image> {
+        let silo_id = authz_silo.id().clone();
+        let image: Image = project_image.into();
+        let name = image.name().clone();
+
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+
+        use db::schema::image::dsl;
+        let image: Image = Silo::insert_resource(
+            silo_id,
+            diesel::insert_into(dsl::image)
+                .values(image)
+                .on_conflict(dsl::id)
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
+        )
+        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::SiloImage,
                         name.as_str(),
                     ),
                 )

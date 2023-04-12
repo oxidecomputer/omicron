@@ -1312,6 +1312,52 @@
         }
       }
     },
+    "/v1/images/{image}/promote": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Promote a project image to be visible to all projects in the silo",
+        "operationId": "image_promote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "description": "Name or ID of the image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances": {
       "get": {
         "tags": [

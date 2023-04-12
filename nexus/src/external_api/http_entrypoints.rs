@@ -142,6 +142,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_create)?;
         api.register(image_view)?;
         api.register(image_delete)?;
+        api.register(image_promote)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -2540,6 +2541,38 @@ async fn image_delete(
             .await?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Promote a project image to be visible to all projects in the silo
+#[endpoint {
+    method = POST,
+    path = "/v1/images/{image}/promote",
+    tags = ["images"]
+}]
+async fn image_promote(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseAccepted<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let image_lookup = nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?;
+        let image = nexus.image_promote(&opctx, &image_lookup).await?;
+        Ok(HttpResponseAccepted(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

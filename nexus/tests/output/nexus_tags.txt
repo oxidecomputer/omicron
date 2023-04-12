@@ -24,6 +24,7 @@ OPERATION ID                             METHOD   URL PATH
 image_create                             POST     /v1/images
 image_delete                             DELETE   /v1/images/{image}
 image_list                               GET      /v1/images
+image_promote                            POST     /v1/images/{image}/promote
 image_view                               GET      /v1/images/{image}
 
 API operations found with tag "instances"

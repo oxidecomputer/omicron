@@ -25,6 +25,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -373,6 +374,28 @@ impl super::Nexus {
         Err(self
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
             .await)
+    }
+
+    pub async fn image_promote(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        image_lookup: &ImageLookup<'_>,
+    ) -> UpdateResult<db::model::Image> {
+        match image_lookup {
+            ImageLookup::ProjectImage(lookup) => {
+                let (authz_silo, _, _, db_image) =
+                    lookup.fetch_for(authz::Action::Modify).await?;
+                opctx
+                    .authorize(authz::Action::CreateChild, &authz_silo)
+                    .await?;
+                self.db_datastore
+                    .project_image_promote(opctx, &authz_silo, db_image)
+                    .await
+            }
+            ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
+                message: "Cannot promote a silo image".to_string(),
+            }),
+        }
     }
 
     // Globally-Scoped Images
