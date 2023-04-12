@@ -853,17 +853,18 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "snapshot_name",
-            "description": "an optional snapshot name",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeDisk"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1893,7 +1894,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1972,7 +1973,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2369,7 +2370,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2421,7 +2422,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2485,7 +2486,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2537,7 +2538,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2600,7 +2601,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5692,7 +5693,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5736,7 +5737,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5813,7 +5814,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5836,7 +5837,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5872,7 +5873,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5889,7 +5890,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5945,7 +5946,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5962,7 +5963,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6006,7 +6007,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6022,7 +6023,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6076,7 +6077,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6092,7 +6093,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6142,7 +6143,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6193,7 +6194,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6258,7 +6259,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6310,7 +6311,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6372,7 +6373,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6430,7 +6431,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6481,7 +6482,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6546,7 +6547,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6598,7 +6599,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6660,7 +6661,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6727,7 +6728,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8317,6 +8318,21 @@
         "required": [
           "items"
         ]
+      },
+      "FinalizeDisk": {
+        "description": "Parameters for finalizing a disk",
+        "type": "object",
+        "properties": {
+          "snapshot_name": {
+            "nullable": true,
+            "description": "If specified a snapshot of the disk will be created with the given name during finalization. If not specified, a snapshot for the disk will _not_ be created. A snapshot can be manually created once the disk transitions into the `Detached` state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "FleetRole": {
         "type": "string",

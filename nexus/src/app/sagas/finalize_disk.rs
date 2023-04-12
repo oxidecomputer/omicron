@@ -33,7 +33,7 @@ pub struct Params {
     pub project_id: Uuid,
     pub disk_name: Name,
     pub disk_id: Uuid,
-    pub snapshot_name: Option<String>,
+    pub snapshot_name: Option<Name>,
 }
 
 declare_saga_actions! {
@@ -83,9 +83,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 use_the_pantry: true,
                 create_params: params::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
-                        name: snapshot_name.parse().map_err(|e: String| {
-                            SagaInitError::InvalidParameter(e)
-                        })?,
+                        name: snapshot_name.clone(),
                         description: format!(
                             "snapshot of finalized disk {}",
                             params.disk_name
