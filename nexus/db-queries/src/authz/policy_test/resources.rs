@@ -256,7 +256,7 @@ async fn make_project(
     ));
 
     let image_name = format!("{}-image1", project_name);
-    builder.new_resource(authz::Image::new(
+    builder.new_resource(authz::ProjectImage::new(
         project.clone(),
         Uuid::new_v4(),
         LookupType::ByName(image_name),

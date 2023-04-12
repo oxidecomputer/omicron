@@ -1192,7 +1192,6 @@
             "in": "query",
             "name": "project",
             "description": "Name or ID of the project",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -8752,7 +8751,7 @@
         ]
       },
       "Image": {
-        "description": "Client view of project Images",
+        "description": "Client view of images",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8794,7 +8793,8 @@
             "type": "string"
           },
           "project_id": {
-            "description": "The project the image belongs to",
+            "nullable": true,
+            "description": "ID of the parent project if the image is a project image",
             "type": "string",
             "format": "uuid"
           },
@@ -8832,7 +8832,6 @@
           "id",
           "name",
           "os",
-          "project_id",
           "size",
           "time_created",
           "time_modified",

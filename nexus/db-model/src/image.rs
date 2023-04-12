@@ -209,10 +209,7 @@ impl From<Image> for views::Image {
     fn from(image: Image) -> Self {
         Self {
             identity: image.identity(),
-            parent_id: match image.project_id {
-                Some(id) => views::SiloOrProjectId::ProjectId(id),
-                None => views::SiloOrProjectId::SiloId(image.silo_id),
-            },
+            project_id: image.project_id,
             url: image.url,
             os: image.os,
             version: image.version,

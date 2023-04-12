@@ -128,22 +128,14 @@ pub struct GlobalImage {
     pub size: ByteCount,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SiloOrProjectId {
-    SiloId(Uuid),
-    ProjectId(Uuid),
-}
-
-/// Client view of project Images
+/// Client view of images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)] // CC @ahl Is this fine?
 pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    #[serde(flatten)]
-    pub parent_id: SiloOrProjectId,
+    /// ID of the parent project if the image is a project image
+    pub project_id: Option<Uuid>,
 
     /// URL source of this image, if any
     pub url: Option<String>,
