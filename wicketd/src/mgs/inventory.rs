@@ -31,7 +31,7 @@ const POLL_FREQ_IGNITION: Duration = Duration::from_secs(5);
 // results.
 const POLL_FREQ_PRESENT_SP: Duration = Duration::from_secs(10);
 
-// Frequence at which we poll SPs we believe are _not_ present based on ignition
+// Frequency at which we poll SPs we believe are _not_ present based on ignition
 // results. We still poll these SPs (albeit less frequently) to account for
 // problems with ignition (either incorrect results, which should be extremely
 // rare, or problems getting the state, which should also be rare).
