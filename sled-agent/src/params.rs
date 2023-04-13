@@ -273,6 +273,9 @@ pub enum ServiceType {
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
+    Maghemite {
+        mode: String,
+    },
 }
 
 impl std::fmt::Display for ServiceType {
@@ -287,6 +290,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
             ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
     }
 }
@@ -335,6 +339,7 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
                 AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
             }
+            St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }
     }
 }
@@ -450,4 +455,14 @@ pub struct TimeSync {
     pub skew: f64,
     /// The current offset between the NTP clock and system clock.
     pub correction: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
 }

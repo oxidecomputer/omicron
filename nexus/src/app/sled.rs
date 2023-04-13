@@ -108,12 +108,29 @@ impl super::Nexus {
         )))
     }
 
-    pub async fn random_sled_id(&self) -> Result<Option<Uuid>, Error> {
-        Ok(self
-            .db_datastore
-            .random_sled(&self.opctx_alloc)
-            .await?
-            .map(|sled| sled.id()))
+    pub async fn reserve_on_random_sled(
+        &self,
+        resource_id: Uuid,
+        resource_kind: db::model::SledResourceKind,
+        resources: db::model::Resources,
+    ) -> Result<db::model::SledResource, Error> {
+        self.db_datastore
+            .sled_reservation_create(
+                &self.opctx_alloc,
+                resource_id,
+                resource_kind,
+                resources,
+            )
+            .await
+    }
+
+    pub async fn delete_sled_reservation(
+        &self,
+        resource_id: Uuid,
+    ) -> Result<(), Error> {
+        self.db_datastore
+            .sled_reservation_delete(&self.opctx_alloc, resource_id)
+            .await
     }
 
     // Physical disks

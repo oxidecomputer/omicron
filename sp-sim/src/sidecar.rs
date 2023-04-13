@@ -81,12 +81,9 @@ impl Drop for Sidecar {
 #[async_trait]
 impl SimulatedSp for Sidecar {
     async fn state(&self) -> omicron_gateway::http_entrypoints::SpState {
-        omicron_gateway::http_entrypoints::SpState::from(Ok::<
-            _,
-            omicron_gateway::CommunicationError,
-        >(
+        omicron_gateway::http_entrypoints::SpState::from(
             self.handler.as_ref().unwrap().lock().await.sp_state_impl(),
-        ))
+        )
     }
 
     fn manufacturing_public_key(&self) -> Ed25519PublicKey {

@@ -11,7 +11,7 @@
     <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-  <exec_method type='method' name='start' exec='/opt/oxide/wicket/bin/switch_zone_setup' timeout_seconds='300' />
+  <exec_method type='method' name='start' exec='/opt/oxide/bin/switch_zone_setup' timeout_seconds='300' />
   <exec_method type='method' name='stop' exec=':true' timeout_seconds='3' />
 
   <property_group name='startd' type='framework'>

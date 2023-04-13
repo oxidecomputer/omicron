@@ -36,6 +36,11 @@ pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
+/// The reported amount of hardware threads for an emulated sled agent.
+pub const TEST_HARDWARE_THREADS: u32 = 16;
+/// The reported amount of physical RAM for an emulated sled agent.
+pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
@@ -47,6 +52,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
+    pub dendrite: dev::dendrite::DendriteInstance,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -57,6 +63,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
+        self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
 
@@ -135,6 +142,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Start ClickHouse database server.
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
 
+    // Set up a stub instance of dendrite
+    let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
+
     // Store actual address/port information for the databases after they start.
     config.deployment.database =
         nexus_config::Database::FromUrl { url: database.pg_config().clone() };
@@ -145,6 +155,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .as_mut()
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
+    config
+        .pkg
+        .dendrite
+        .address
+        .as_mut()
+        .expect("Tests expect an explicit dendrite address")
+        .set_port(dendrite.port);
 
     // Begin starting Nexus.
     let (nexus_internal, nexus_internal_addr) =
@@ -233,6 +250,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         oximeter,
         producer,
         logctx,
+        dendrite,
     }
 }
 
@@ -259,6 +277,10 @@ pub async fn start_sled_agent(
         },
         updates: sim::ConfigUpdates {
             zone_artifact_path: update_directory.to_path_buf(),
+        },
+        hardware: sim::ConfigHardware {
+            hardware_threads: TEST_HARDWARE_THREADS,
+            physical_ram: TEST_PHYSICAL_RAM,
         },
     };
 

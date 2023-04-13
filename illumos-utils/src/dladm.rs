@@ -122,6 +122,12 @@ pub struct ResetLinkpropError {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct PhysicalLink(pub String);
 
+impl ToString for PhysicalLink {
+    fn to_string(&self) -> String {
+        self.0.clone()
+    }
+}
+
 /// The name of an etherstub
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Etherstub(pub String);

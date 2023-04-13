@@ -172,7 +172,7 @@ impl ServerContext {
             config,
             Arc::clone(&authz),
         )
-        .await;
+        .await?;
 
         Ok(Arc::new(ServerContext {
             nexus,

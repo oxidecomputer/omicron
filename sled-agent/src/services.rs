@@ -30,7 +30,10 @@ use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
 };
-use crate::smf_helper::{Service, SmfHelper};
+use crate::smf_helper::Service;
+use crate::smf_helper::SmfHelper;
+use illumos_utils::addrobj::AddrObject;
+use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
@@ -38,6 +41,7 @@ use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -53,6 +57,7 @@ use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
+use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use slog::Logger;
@@ -145,6 +150,9 @@ pub enum Error {
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
+
+    #[error("Execution error: {0}")]
+    ExecutionError(#[from] illumos_utils::ExecutionError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -250,6 +258,7 @@ pub struct ServiceManagerInner {
     skip_timesync: Option<bool>,
     time_synced: AtomicBool,
     sidecar_revision: String,
+    switch_zone_maghemite_links: Vec<PhysicalLink>,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
@@ -297,6 +306,7 @@ impl ServiceManager {
         skip_timesync: Option<bool>,
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
+        switch_zone_maghemite_links: Vec<PhysicalLink>,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -310,6 +320,7 @@ impl ServiceManager {
                 skip_timesync,
                 time_synced: AtomicBool::new(false),
                 sidecar_revision,
+                switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
@@ -320,13 +331,17 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::new(log)?,
+                ddmd_client: DdmAdminClient::localhost(log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
             }),
         };
         Ok(mgr)
+    }
+
+    pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
+        self.inner.switch_zone_bootstrap_address
     }
 
     /// Loads services from the services manager, and returns once all requested
@@ -502,33 +517,20 @@ impl ServiceManager {
     //
     // No other zone besides the switch and global zones should have a
     // bootstrap address.
-    fn bootstrap_vnic_needed(
-        &self,
-        req: &ServiceZoneRequest,
-    ) -> Result<Option<Link>, Error> {
-        match req.zone_type {
-            ZoneType::Switch => {
-                match self.inner.bootstrap_vnic_allocator.new_bootstrap() {
-                    Ok(link) => Ok(Some(link)),
-                    Err(e) => Err(Error::SledLocalVnicCreation(e)),
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
-    // If we are running in the switch zone, we need a bootstrap vnic so we can
-    // listen on a bootstrap address for the wicketd artifact server.
-    //
-    // No other zone besides the switch and global zones should have a
-    // bootstrap address.
     fn bootstrap_address_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Option<Ipv6Addr> {
+    ) -> Result<Option<(Link, Ipv6Addr)>, Error> {
         match req.zone_type {
-            ZoneType::Switch => Some(self.inner.switch_zone_bootstrap_address),
-            _ => None,
+            ZoneType::Switch => {
+                let link = self
+                    .inner
+                    .bootstrap_vnic_allocator
+                    .new_bootstrap()
+                    .map_err(Error::SledLocalVnicCreation)?;
+                Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -537,10 +539,10 @@ impl ServiceManager {
     //
     // NOTE: This function is implemented to return the first link found, under
     // the assumption that "at most one" would be necessary.
-    fn link_needed(
+    fn links_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Option<Link>, Error> {
+    ) -> Result<Vec<Link>, Error> {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
@@ -555,7 +557,7 @@ impl ServiceManager {
                         .new_control(None)
                     {
                         Ok(n) => {
-                            return Ok(Some(n));
+                            return Ok(vec![n]);
                         }
                         Err(e) => {
                             return Err(Error::NexusVnicCreation(e));
@@ -568,7 +570,7 @@ impl ServiceManager {
                     // bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
-                            return Ok(Some(link));
+                            return Ok(vec![link]);
                         }
                         Err(_) => {
                             return Err(Error::MissingDevice {
@@ -577,10 +579,34 @@ impl ServiceManager {
                         }
                     }
                 }
+                ServiceType::Maghemite { .. } => {
+                    // If on a non-gimlet, sled-agent can be configured to map
+                    // links into the switch zone. Validate those links here.
+                    let mut links = Vec::with_capacity(
+                        self.inner.switch_zone_maghemite_links.len(),
+                    );
+
+                    for link in &self.inner.switch_zone_maghemite_links {
+                        match Dladm::verify_link(&link.to_string()) {
+                            Ok(link) => {
+                                links.push(link);
+                            }
+
+                            Err(_) => {
+                                return Err(Error::MissingDevice {
+                                    device: link.to_string(),
+                                });
+                            }
+                        }
+                    }
+
+                    return Ok(links);
+                }
                 _ => (),
             }
         }
-        Ok(None)
+
+        Ok(vec![])
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -666,10 +692,13 @@ impl ServiceManager {
         filesystems: &[zone::Fs],
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
-        let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
-        let link = self.link_needed(request)?;
+        let (bootstrap_vnic, bootstrap_address) =
+            match self.bootstrap_address_needed(request)? {
+                Some((vnic, address)) => (Some(vnic), Some(address)),
+                None => (None, None),
+            };
+        let links = self.links_needed(request)?;
         let limit_priv = Self::privs_needed(request);
-        let needs_bootstrap_address = bootstrap_vnic.is_some();
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -690,16 +719,27 @@ impl ServiceManager {
             // opte_ports=
             vec![],
             bootstrap_vnic,
-            link,
+            links,
             limit_priv,
         )
         .await?;
 
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        if needs_bootstrap_address {
-            let bootstrap_address =
-                self.bootstrap_address_needed(request).unwrap();
+        for link in running_zone.links() {
+            info!(
+                self.inner.log,
+                "Ensuring {}/{} exists in zone",
+                link.name(),
+                IPV6_LINK_LOCAL_NAME
+            );
+            Zones::ensure_has_link_local_v6_address(
+                Some(running_zone.name()),
+                &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME).unwrap(),
+            )?;
+        }
+
+        if let Some(bootstrap_address) = bootstrap_address {
             info!(
                 self.inner.log,
                 "Ensuring bootstrap address {} exists in {} zone",
@@ -957,10 +997,26 @@ impl ServiceManager {
                         &format!("[::1]:{WICKETD_PORT}"),
                     )?;
 
-                    // TODO: Use bootstrap address
+                    // If we're launching the switch zone, we'll have a
+                    // bootstrap_address based on our call to
+                    // `self.bootstrap_address_needed` (which always gives us an
+                    // address for the switch zone. If we _don't_ have a
+                    // bootstrap address, someone has requested wicketd in a
+                    // non-switch zone; return an error.
+                    let Some(bootstrap_address) = bootstrap_address else {
+                        return Err(Error::BadServiceRequest {
+                            service: "wicketd".to_string(),
+                            message: concat!(
+                                "missing bootstrap address: ",
+                                "wicketd can only be started in the ",
+                                "switch zone",
+                            ).to_string() });
+                    };
                     smfh.setprop(
                         "config/artifact-address",
-                        &format!("[::1]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                        &format!(
+                            "[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"
+                        ),
                     )?;
 
                     smfh.setprop(
@@ -1086,11 +1142,68 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Maghemite { mode } => {
+                    info!(self.inner.log, "Setting up Maghemite service");
+
+                    smfh.setprop("config/mode", &mode)?;
+                    smfh.setprop("config/admin_host", "::")?;
+
+                    let maghemite_interfaces: Vec<AddrObject> =
+                        if is_gimlet().map_err(|e| {
+                            Error::Underlay(underlay::Error::SystemDetection(e))
+                        })? {
+                            (0..31)
+                                .map(|i| {
+                                    // See the `tfport_name` function for how
+                                    // tfportd names the addrconf it creates.
+                                    // Right now, that's `tfportrear[0-31]_0`
+                                    // for all rear ports, which is what we're
+                                    // directing ddmd to listen for
+                                    // advertisements on.
+                                    //
+                                    // This may grow in a multi-rack future to
+                                    // include a subset of "front" ports too,
+                                    // when racks are cabled together.
+                                    AddrObject::new(
+                                        &format!("tfportrear{}_0", i),
+                                        IPV6_LINK_LOCAL_NAME,
+                                    )
+                                    .unwrap()
+                                })
+                                .collect()
+                        } else {
+                            self.inner
+                                .switch_zone_maghemite_links
+                                .iter()
+                                .map(|i| {
+                                    AddrObject::new(
+                                        &i.to_string(),
+                                        IPV6_LINK_LOCAL_NAME,
+                                    )
+                                    .unwrap()
+                                })
+                                .collect()
+                        };
+
+                    smfh.setprop(
+                        "config/interfaces",
+                        format!(
+                            "\'({})\'",
+                            maghemite_interfaces
+                                .iter()
+                                .map(|interface| format!(r#""{}""#, interface))
+                                .join(" "),
+                        ),
+                    )?;
+
+                    smfh.refresh()?;
+                }
             }
 
             debug!(self.inner.log, "enabling service");
             smfh.enable()?;
         }
+
         Ok(running_zone)
     }
 
@@ -1352,6 +1465,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd,
+                    ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
         };
@@ -1530,6 +1644,11 @@ impl ServiceManager {
                         ServiceType::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,
                             // the tfport service shouldn't need to be restarted.
+                        }
+                        ServiceType::Maghemite { mode } => {
+                            smfh.delpropvalue("config/mode", "*")?;
+                            smfh.addpropvalue("config/mode", &mode)?;
+                            smfh.refresh()?;
                         }
                         _ => (),
                     }
@@ -1784,6 +1903,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1822,6 +1942,7 @@ mod test {
             None,
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1862,6 +1983,7 @@ mod test {
             Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1891,6 +2013,7 @@ mod test {
             Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1928,6 +2051,7 @@ mod test {
             Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();
@@ -1959,6 +2083,7 @@ mod test {
             Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
+            vec![],
         )
         .await
         .unwrap();

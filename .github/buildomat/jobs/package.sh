@@ -82,6 +82,7 @@ zones=(
 	out/switch-asic.tar.gz
 	out/switch-softnpu.tar.gz
 	out/ntp.tar.gz
+	out/mg-ddm.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

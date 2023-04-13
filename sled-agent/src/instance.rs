@@ -559,7 +559,7 @@ impl Instance {
             opte_ports,
             // physical_nic=
             None,
-            None,
+            vec![],
             vec![],
         )
         .await?;
