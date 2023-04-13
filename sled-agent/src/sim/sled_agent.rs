@@ -7,7 +7,7 @@
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstancePutStateResponse,
-    InstanceStateRequested,
+    InstanceStateRequested, InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -214,7 +214,7 @@ impl SledAgent {
     /// Idempotently ensures that the given API Instance (described by
     /// `api_instance`) exists on this server in the given runtime state
     /// (described by `target`).
-    pub async fn instance_ensure(
+    pub async fn instance_register(
         self: &Arc<Self>,
         instance_id: Uuid,
         mut initial_hardware: InstanceHardware,
@@ -317,6 +317,41 @@ impl SledAgent {
         Ok(instance_run_time_state)
     }
 
+    /// Forcibly unregisters an instance. To simulate the rude termination that
+    /// this produces in the real sled agent, the instance's mock Propolis is
+    /// not notified.
+    pub async fn instance_unregister(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Ok(InstanceUnregisterResponse { updated_runtime: None });
+        }
+
+        self.detach_disks_from_instance(instance_id).await?;
+
+        // TODO: Simulated instances can currently only be accessed via their
+        // collections, which only support operations that are generic across
+        // all simulated object types. Instantly destroying an object is not
+        // such an operation. Work around this for now by stopping the instance
+        // and immediately draining its state queue so that the instance is
+        // destroyed before this call returns.
+        self.instances
+            .sim_ensure(
+                &instance_id,
+                self.instances.sim_get_current_state(&instance_id).await?,
+                Some(InstanceStateRequested::Stopped),
+            )
+            .await?;
+        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+
+        Ok(InstanceUnregisterResponse {
+            updated_runtime: Some(
+                self.instances.sim_get_current_state(&instance_id).await?,
+            ),
+        })
+    }
+
     /// Asks the supplied instance to transition to the requested state.
     pub async fn instance_ensure_state(
         self: &Arc<Self>,
@@ -325,8 +360,7 @@ impl SledAgent {
     ) -> Result<InstancePutStateResponse, Error> {
         if !self.instances.contains_key(&instance_id).await {
             match state {
-                InstanceStateRequested::Stopped
-                | InstanceStateRequested::Destroyed => {
+                InstanceStateRequested::Stopped => {
                     return Ok(InstancePutStateResponse {
                         updated_runtime: None,
                     });
@@ -351,8 +385,7 @@ impl SledAgent {
                 InstanceStateRequested::Running => {
                     propolis_client::types::InstanceStateRequested::Run
                 }
-                InstanceStateRequested::Destroyed
-                | InstanceStateRequested::Stopped => {
+                InstanceStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
                 }
                 InstanceStateRequested::Reboot => {
@@ -375,24 +408,30 @@ impl SledAgent {
 
         // If this request will shut down the simulated instance, look for any
         // disks that are attached to it and drive them to the Detached state.
-        if matches!(
-            state,
-            InstanceStateRequested::Stopped | InstanceStateRequested::Destroyed
-        ) {
-            self.disks
-                .sim_ensure_for_each_where(
-                    |disk| match disk.current().disk_state {
-                        DiskState::Attached(id) | DiskState::Attaching(id) => {
-                            id == instance_id
-                        }
-                        _ => false,
-                    },
-                    &DiskStateRequested::Detached,
-                )
-                .await?;
+        if matches!(state, InstanceStateRequested::Stopped) {
+            self.detach_disks_from_instance(instance_id).await?;
         }
 
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    async fn detach_disks_from_instance(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<(), Error> {
+        self.disks
+            .sim_ensure_for_each_where(
+                |disk| match disk.current().disk_state {
+                    DiskState::Attached(id) | DiskState::Attaching(id) => {
+                        id == instance_id
+                    }
+                    _ => false,
+                },
+                &DiskStateRequested::Detached,
+            )
+            .await?;
+
+        Ok(())
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)

@@ -91,6 +91,15 @@ pub struct InstancePutStateResponse {
     pub updated_runtime: Option<InstanceRuntimeState>,
 }
 
+/// The response sent from a request to unregister an instance.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstanceUnregisterResponse {
+    /// The current state of the instance after handling the request to
+    /// unregister it. If the instance's state did not change, this field is
+    /// `None`.
+    pub updated_runtime: Option<InstanceRuntimeState>,
+}
+
 /// Parameters used when directing Propolis to initialize itself via live
 /// migration.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -119,8 +128,6 @@ pub enum InstanceStateRequested {
     /// Immediately reset the instance, as though it had stopped and immediately
     /// began to run again.
     Reboot,
-    /// Stop the instance and delete it.
-    Destroyed,
 }
 
 impl Display for InstanceStateRequested {
@@ -136,7 +143,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Destroyed => "destroyed",
         }
     }
 
@@ -147,7 +153,6 @@ impl InstanceStateRequested {
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Destroyed => true,
         }
     }
 }

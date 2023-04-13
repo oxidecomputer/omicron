@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::params::InstanceUnregisterResponse;
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
     InstancePutStateBody, InstancePutStateResponse, ServiceEnsureBody,
@@ -34,6 +35,7 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_state)?;
         api.register(instance_register)?;
+        api.register(instance_unregister)?;
         api.register(services_put)?;
         api.register(sled_role_get)?;
         api.register(set_v2p)?;
@@ -129,6 +131,23 @@ async fn instance_register(
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure_registered(instance_id, body_args.initial)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}",
+}]
+async fn instance_unregister(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(
+        sa.instance_ensure_unregistered(instance_id)
             .await
             .map_err(Error::from)?,
     ))

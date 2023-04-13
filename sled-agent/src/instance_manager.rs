@@ -7,7 +7,7 @@
 use crate::nexus::LazyNexusClient;
 use crate::params::{
     InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
-    VpcFirewallRule,
+    InstanceUnregisterResponse, VpcFirewallRule,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -164,6 +164,30 @@ impl InstanceManager {
         Ok(instance.current_state().await)
     }
 
+    /// Idempotently ensures the instance is not registered with this instance
+    /// manager. If the instance exists and has a running Propolis, that
+    /// Propolis is rudely terminated.
+    pub async fn ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            let instance = instances.get(&instance_id);
+            if let Some((_, instance)) = instance {
+                instance.clone()
+            } else {
+                return Ok(InstanceUnregisterResponse {
+                    updated_runtime: None,
+                });
+            }
+        };
+
+        Ok(InstanceUnregisterResponse {
+            updated_runtime: Some(instance.terminate().await?),
+        })
+    }
+
     /// Idempotently attempts to drive the supplied instance into the supplied
     /// runtime state.
     pub async fn ensure_state(
@@ -187,8 +211,7 @@ impl InstanceManager {
                     // Propolis handled it, sled agent unregistered the
                     // instance, and only then did a second stop request
                     // arrive.
-                    InstanceStateRequested::Stopped
-                    | InstanceStateRequested::Destroyed => {
+                    InstanceStateRequested::Stopped => {
                         return Ok(InstancePutStateResponse {
                             updated_runtime: None,
                         });

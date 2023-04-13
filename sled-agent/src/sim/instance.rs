@@ -188,11 +188,6 @@ impl Simulatable for SimInstance {
                     )))
                 }
             },
-            InstanceStateRequested::Destroyed => {
-                self.state
-                    .observe_transition(&PropolisInstanceState::Destroyed);
-                self.propolis_queue.clear();
-            }
         }
 
         Ok(None)

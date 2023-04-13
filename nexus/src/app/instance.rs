@@ -394,6 +394,24 @@ impl super::Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
+    /// Idempotently ensures that the sled specified in `db_instance` does not
+    /// have a record of the instance. If the instance is currently running on
+    /// this sled, this operation rudely terminates it.
+    pub(crate) async fn instance_unregister(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let sa = self.instance_sled(&db_instance).await?;
+        let result = sa
+            .instance_unregister(&db_instance.id())
+            .await
+            .map(|res| res.into_inner().updated_runtime);
+        self.handle_instance_put_result(db_instance, result).await.map(|_| ())
+    }
+
     /// Returns the SledAgentClient for the host where this Instance is running.
     pub(crate) async fn instance_sled(
         &self,

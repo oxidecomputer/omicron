@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use crate::params::InstanceUnregisterResponse;
 use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstancePutStateBody,
     InstancePutStateResponse, VpcFirewallRulesEnsureBody,
@@ -32,8 +33,9 @@ type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
-        api.register(instance_put)?;
         api.register(instance_put_state)?;
+        api.register(instance_register)?;
+        api.register(instance_unregister)?;
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
@@ -63,7 +65,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn instance_put(
+async fn instance_register(
     rqctx: RequestContext<Arc<SledAgent>>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
@@ -72,8 +74,21 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(instance_id, body_args.initial).await?,
+        sa.instance_register(instance_id, body_args.initial).await?,
     ))
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}",
+}]
+async fn instance_unregister(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(sa.instance_unregister(instance_id).await?))
 }
 
 #[endpoint {

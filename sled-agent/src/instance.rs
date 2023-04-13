@@ -275,6 +275,21 @@ impl InstanceInner {
     ) -> Result<Reaction, Error> {
         info!(self.log, "Observing new propolis state: {:?}", state);
 
+        // The instance might have been rudely terminated between the time the
+        // call to Propolis returned and the time the instance lock was
+        // acquired for this call. If that happened, do not publish the Propolis
+        // state; simply remain in the Destroyed state.
+        //
+        // Returning the `Terminate` action is OK because terminating a
+        // previously-terminated instance is a no-op.
+        if self.state.current().run_state == InstanceState::Destroyed {
+            info!(
+                self.log,
+                "Ignoring new propolis state: instance is already destroyed"
+            );
+            return Ok(Reaction::Terminate);
+        }
+
         // Update the Sled Agent's internal state machine.
         let action = self.state.observe_transition(&state);
         info!(
@@ -431,6 +446,44 @@ impl InstanceInner {
         self.propolis_state_put(requested_state).await?;
         Ok(Reaction::Continue)
     }
+
+    /// Immediately terminates this instance's Propolis zone and cleans up any
+    /// runtime objects associated with the instance.
+    ///
+    /// This routine is safe to call even if the instance's zone was never
+    /// started. It is also safe to call multiple times on a single instance.
+    async fn terminate(&mut self) -> Result<(), Error> {
+        // Ensure that no zone exists. This succeeds even if no zone was ever
+        // created.
+        let zname = propolis_zone_name(self.propolis_id());
+        warn!(self.log, "Halting and removing zone: {}", zname);
+        Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
+
+        // Remove ourselves from the instance manager's map of instances.
+        self.instance_ticket.terminate();
+
+        // See if there are any runtime objects to clean up.
+        let mut running_state = if let Some(state) = self.running_state.take() {
+            state
+        } else {
+            return Ok(());
+        };
+
+        // Remove any OPTE ports from the port manager.
+        let mut result = Ok(());
+        if let Some(tickets) = running_state.port_tickets.as_mut() {
+            for ticket in tickets.iter_mut() {
+                // Release the port from the manager, and store any error. We
+                // don't return immediately so that we can try to clean up all
+                // ports, even if early ones fail. Return the last error, which
+                // is OK for now.
+                if let Err(e) = ticket.release() {
+                    result = Err(e.into());
+                }
+            }
+        }
+        result
+    }
 }
 
 /// A reference to a single instance running a running Propolis server.
@@ -465,6 +518,7 @@ mockall::mock! {
             disk_id: Uuid,
             snapshot_name: Uuid,
         ) -> Result<(), Error>;
+        pub async fn terminate(&self) -> Result<InstanceRuntimeState, Error>;
     }
     impl Clone for Instance {
         fn clone(&self) -> Self;
@@ -638,7 +692,7 @@ impl Instance {
                 // this happens, generate an instance record bearing the
                 // "Destroyed" state and return it to the caller.
                 if inner.running_state.is_none() {
-                    inner.instance_ticket.terminate();
+                    inner.terminate().await?;
                     (None, Some(InstanceState::Destroyed))
                 } else {
                     (Some(PropolisRequest::Stop), Some(InstanceState::Stopping))
@@ -649,10 +703,6 @@ impl Instance {
                     return Err(Error::InstanceNotRunning(*inner.id()));
                 }
                 (Some(PropolisRequest::Reboot), Some(InstanceState::Rebooting))
-            }
-            InstanceStateRequested::Destroyed => {
-                inner.instance_ticket.terminate();
-                (None, Some(InstanceState::Destroyed))
             }
         };
 
@@ -849,32 +899,13 @@ impl Instance {
         })
     }
 
-    /// Terminates this instance's Propolis zone.
-    async fn stop(&self) -> Result<(), Error> {
+    /// Rudely terminates this instance's Propolis (if it has one) and
+    /// immediately transitions the instance to the Destroyed state.
+    pub async fn terminate(&self) -> Result<InstanceRuntimeState, Error> {
         let mut inner = self.inner.lock().await;
-
-        let zname = propolis_zone_name(inner.propolis_id());
-        warn!(inner.log, "Halting and removing zone: {}", zname);
-        Zones::halt_and_remove_logged(&inner.log, &zname).await.unwrap();
-
-        // Remove ourselves from the instance manager's map of instances.
-        inner.instance_ticket.terminate();
-
-        // And remove the OPTE ports from the port manager
-        let running_state = inner.running_state.as_mut().unwrap();
-        let mut result = Ok(());
-        if let Some(tickets) = running_state.port_tickets.as_mut() {
-            for ticket in tickets.iter_mut() {
-                // Release the port from the manager, and store any error. We
-                // don't return immediately so that we can try to clean up all
-                // ports, even if early ones fail. Return the last error, which
-                // is OK for now.
-                if let Err(e) = ticket.release() {
-                    result = Err(e.into());
-                }
-            }
-        }
-        result
+        inner.terminate().await?;
+        inner.state.transition(InstanceState::Destroyed);
+        Ok(inner.state.current().clone())
     }
 
     // Monitors propolis until explicitly told to disconnect.
@@ -899,7 +930,7 @@ impl Instance {
             match reaction {
                 Reaction::Continue => {}
                 Reaction::Terminate => {
-                    return self.stop().await;
+                    return self.terminate().await.map(|_| ());
                 }
             }
 

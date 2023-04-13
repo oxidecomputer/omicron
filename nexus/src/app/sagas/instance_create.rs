@@ -1393,12 +1393,7 @@ async fn sic_instance_ensure_registered_undo(
 
     osagactx
         .nexus()
-        .instance_request_state(
-            &opctx,
-            &authz_instance,
-            &db_instance,
-            InstanceStateRequested::Destroyed,
-        )
+        .instance_unregister(&opctx, &authz_instance, &db_instance)
         .await
         .map_err(ActionError::action_failed)?;
 

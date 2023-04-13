@@ -10,8 +10,9 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
-    InstancePutStateResponse, InstanceStateRequested, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRule, Zpool,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -535,6 +536,22 @@ impl SledAgent {
         self.inner
             .instances
             .ensure_registered(instance_id, initial)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that the specified instance is no longer registered
+    /// on this sled.
+    ///
+    /// If the instance is registered and has a running Propolis, this operation
+    /// rudely terminates the instance.
+    pub async fn instance_ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        self.inner
+            .instances
+            .ensure_unregistered(instance_id)
             .await
             .map_err(|e| Error::Instance(e))
     }
