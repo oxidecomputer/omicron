@@ -4,11 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::params::InstanceUnregisterResponse;
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutStateBody, InstancePutStateResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,

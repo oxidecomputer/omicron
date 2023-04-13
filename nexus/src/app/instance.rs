@@ -397,7 +397,7 @@ impl super::Nexus {
     /// Idempotently ensures that the sled specified in `db_instance` does not
     /// have a record of the instance. If the instance is currently running on
     /// this sled, this operation rudely terminates it.
-    pub(crate) async fn instance_unregister(
+    pub(crate) async fn instance_ensure_unregistered(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
