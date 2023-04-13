@@ -69,10 +69,10 @@ function retry
   attempts="${RETRY_ATTEMPTS}"
   # Always try at least once
   attempts=$((attempts < 1 ? 1 : attempts))
-  rc=0
+  retry_rc=0
   for i in $(seq 1 $attempts); do
-    "$@" || rc=$?;
-    if [[ "$rc" -eq 0 ]]; then
+    "$@" || retry_rc=$?;
+    if [[ "$retry_rc" -eq 0 ]]; then
       return
     fi
 
@@ -81,7 +81,7 @@ function retry
     fi
   done
 
-  exit $rc
+  exit $retry_rc
 }
 
 # Packages to be installed Helios:
