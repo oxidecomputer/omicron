@@ -96,46 +96,51 @@ function retry
 # - pkg, the IPS client (though likely it will just be updated)
 # - brand/omicron1/tools: Oxide's omicron1-brand Zone
 HOST_OS=$(uname -s)
-if [[ "${HOST_OS}" == "SunOS" ]]; then
-  packages=(
-    'pkg:/package/pkg'
-    'library/postgresql-13'
-    'pkg-config'
-    'brand/omicron1/tools'
-    'library/libxmlsec1'
-  )
 
-  # Install/update the set of packages.
-  # Explicitly manage the return code using "rc" to observe the result of this
-  # command without exiting the script entirely (due to bash's "errexit").
-  rc=0
-  confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
-  # Return codes:
-  #  0: Normal Success
-  #  4: Failure because we're already up-to-date. Also acceptable.
-  if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
-    exit "$rc"
-  fi
+function install_packages {
+  if [[ "${HOST_OS}" == "SunOS" ]]; then
+    packages=(
+      'pkg:/package/pkg'
+      'library/postgresql-13'
+      'pkg-config'
+      'brand/omicron1/tools'
+      'library/libxmlsec1'
+    )
 
-  pkg list -v "${packages[@]}"
-elif [[ "${HOST_OS}" == "Linux" ]]; then
-  packages=(
-    'ca-certificates'
-    'libpq5'
-    'libsqlite3-0'
-    'libssl1.1'
-    'libxmlsec1-openssl'
-  )
-  sudo apt-get update
-  if [[ "${ASSUME_YES}" == "true" ]]; then
-    sudo apt-get install -y "${packages[@]}"
+    # Install/update the set of packages.
+    # Explicitly manage the return code using "rc" to observe the result of this
+    # command without exiting the script entirely (due to bash's "errexit").
+    rc=0
+    confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
+    # Return codes:
+    #  0: Normal Success
+    #  4: Failure because we're already up-to-date. Also acceptable.
+    if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+      exit "$rc"
+    fi
+
+    pkg list -v "${packages[@]}"
+  elif [[ "${HOST_OS}" == "Linux" ]]; then
+    packages=(
+      'ca-certificates'
+      'libpq5'
+      'libsqlite3-0'
+      'libssl1.1'
+      'libxmlsec1-openssl'
+    )
+    sudo apt-get update
+    if [[ "${ASSUME_YES}" == "true" ]]; then
+      sudo apt-get install -y "${packages[@]}"
+    else
+      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+    fi
   else
-    confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+    echo "Unsupported OS: ${HOST_OS}"
+    exit 1
   fi
-else
-  echo "Unsupported OS: ${HOST_OS}"
-  exit 1
-fi
+}
+
+retry install_packages
 
 if [[ "${HOST_OS}" == "SunOS" ]]; then
     # Install OPTE

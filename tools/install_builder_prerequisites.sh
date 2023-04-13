@@ -157,7 +157,7 @@ function install_packages {
   fi
 }
 
-install_packages
+retry install_packages
 
 # CockroachDB and Clickhouse are used by Omicron for storage of
 # control plane metadata and metrics.
