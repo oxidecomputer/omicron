@@ -9,6 +9,7 @@ use std::time::Duration;
 use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
+use wicketd_client::types::GetInventoryParams;
 use wicketd_client::GetInventoryResponse;
 
 #[tokio::test]
@@ -16,12 +17,13 @@ async fn test_inventory() {
     let gateway =
         gateway_setup::test_setup("test_inventory", SpPort::One).await;
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
+    let params = GetInventoryParams { force_refresh: Vec::new() };
 
     let inventory_fut = async {
         loop {
             let response = wicketd_testctx
                 .wicketd_client
-                .get_inventory()
+                .get_inventory(&params)
                 .await
                 .expect("get_inventory succeeded")
                 .into_inner();

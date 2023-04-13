@@ -133,7 +133,44 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::NetworkInterfaceKindEnum,
+        parent_id -> Uuid,
+        vpc_id -> Uuid,
+        subnet_id -> Uuid,
+        mac -> Int8,
+        ip -> Inet,
+        slot -> Int2,
+        is_primary -> Bool,
+    }
+}
+
+table! {
+    instance_network_interface (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
+        vpc_id -> Uuid,
+        subnet_id -> Uuid,
+        mac -> Int8,
+        ip -> Inet,
+        slot -> Int2,
+        is_primary -> Bool,
+    }
+}
+
+table! {
+    service_network_interface (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        service_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
@@ -394,6 +431,17 @@ table! {
 }
 
 table! {
+    sled_resource (id) {
+        id -> Uuid,
+        sled_id -> Uuid,
+        kind -> crate::SledResourceKindEnum,
+        hardware_threads -> Int8,
+        rss_ram -> Int8,
+        reservoir_ram -> Int8,
+    }
+}
+
+table! {
     service (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -401,6 +449,7 @@ table! {
 
         sled_id -> Uuid,
         ip -> Inet,
+        port -> Int4,
         kind -> crate::ServiceKindEnum,
     }
 }
@@ -803,6 +852,8 @@ allow_tables_to_appear_in_same_query!(
     instance,
     metric_producer,
     network_interface,
+    instance_network_interface,
+    service_network_interface,
     oximeter,
     project,
     rack,
@@ -815,6 +866,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     service,
     sled,
+    sled_resource,
     router_route,
     volume,
     vpc,

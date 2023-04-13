@@ -42,6 +42,13 @@ pub struct ConfigStorage {
     pub ip: IpAddr,
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct ConfigHardware {
+    pub hardware_threads: u32,
+    pub physical_ram: u64,
+    pub reservoir_ram: u64,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -59,4 +66,6 @@ pub struct Config {
     pub storage: ConfigStorage,
     /// configuration for the sled agent's updates
     pub updates: ConfigUpdates,
+    /// configuration to emulate the sled agent's hardware
+    pub hardware: ConfigHardware,
 }

@@ -12,12 +12,13 @@ use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
     InstanceMigrationTargetParams, InstanceStateRequested, ServiceEnsureBody,
-    TimeSync, Zpool,
+    SledRole, TimeSync, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -505,6 +506,15 @@ impl SledAgent {
         Ok(zpools)
     }
 
+    /// Returns whether or not the sled believes itself to be a scrimlet
+    pub async fn get_role(&self) -> SledRole {
+        if self.inner.hardware.is_scrimlet() {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        }
+    }
+
     /// Ensures that a filesystem type exists within the zpool.
     pub async fn filesystem_ensure(
         &self,
@@ -586,7 +596,29 @@ impl SledAgent {
             .await
             .map_err(Error::from)
     }
-    //
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_virtual_nic_host(mapping)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .unset_virtual_nic_host(mapping)
+            .await
+            .map_err(Error::from)
+    }
+
     /// Gets the sled's current time synchronization state
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
         self.inner.services.timesync_get().await.map_err(Error::from)

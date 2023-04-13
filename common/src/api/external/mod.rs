@@ -698,7 +698,7 @@ pub enum ResourceType {
     Image,
     Instance,
     IpPool,
-    NetworkInterface,
+    InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
     Service,
@@ -2044,9 +2044,10 @@ impl TryFrom<i32> for Vni {
     }
 }
 
-/// A `NetworkInterface` represents a virtual network interface device.
+/// An `InstanceNetworkInterface` represents a virtual network interface device
+/// attached to an instance.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct NetworkInterface {
+pub struct InstanceNetworkInterface {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -2064,9 +2065,9 @@ pub struct NetworkInterface {
     pub mac: MacAddr,
 
     /// The IP address assigned to this interface.
-    pub ip: IpAddr,
     // TODO-correctness: We need to split this into an optional V4 and optional
     // V6 address, at least one of which must be specified.
+    pub ip: IpAddr,
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,

@@ -853,17 +853,18 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "snapshot_name",
-            "description": "an optional snapshot name",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinalizeDisk"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1893,7 +1894,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1972,7 +1973,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2369,7 +2370,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2388,7 +2389,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceResultsPage"
                 }
               }
             }
@@ -2421,7 +2422,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2431,7 +2432,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NetworkInterfaceCreate"
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
               }
             }
           },
@@ -2443,7 +2444,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2485,7 +2486,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2497,7 +2498,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2537,7 +2538,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -2547,7 +2548,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NetworkInterfaceUpdate"
+                "$ref": "#/components/schemas/InstanceNetworkInterfaceUpdate"
               }
             }
           },
@@ -2559,7 +2560,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterface"
+                  "$ref": "#/components/schemas/InstanceNetworkInterface"
                 }
               }
             }
@@ -2600,7 +2601,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `instance` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5692,7 +5693,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5736,7 +5737,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5813,7 +5814,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5836,7 +5837,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5872,7 +5873,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5889,7 +5890,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5945,7 +5946,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5962,7 +5963,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6006,7 +6007,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6022,7 +6023,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6076,7 +6077,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6092,7 +6093,7 @@
           {
             "in": "query",
             "name": "vpc",
-            "description": "Name or ID of the VPC",
+            "description": "Name or ID of the VPC, only required if `subnet` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6142,7 +6143,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6193,7 +6194,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6258,7 +6259,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6310,7 +6311,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6372,7 +6373,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6430,7 +6431,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6481,7 +6482,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6546,7 +6547,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6598,7 +6599,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6660,7 +6661,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6727,7 +6728,7 @@
           {
             "in": "query",
             "name": "project",
-            "description": "Name or ID of the project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6754,7 +6755,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NetworkInterfaceResultsPage"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceResultsPage"
                 }
               }
             }
@@ -8318,6 +8319,21 @@
           "items"
         ]
       },
+      "FinalizeDisk": {
+        "description": "Parameters for finalizing a disk",
+        "type": "object",
+        "properties": {
+          "snapshot_name": {
+            "nullable": true,
+            "description": "If specified a snapshot of the disk will be created with the given name during finalization. If not specified, a snapshot for the disk will _not_ be created. A snapshot can be manually created once the disk transitions into the `Detached` state.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
+      },
       "FleetRole": {
         "type": "string",
         "enum": [
@@ -9218,17 +9234,95 @@
           "dst_sled_id"
         ]
       },
+      "InstanceNetworkInterface": {
+        "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "description": "The Instance to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "description": "The IP address assigned to this interface.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mac": {
+            "description": "The MAC address assigned to this interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MacAddr"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "primary": {
+            "description": "True if this interface is the primary for the instance to which it's attached.",
+            "type": "boolean"
+          },
+          "subnet_id": {
+            "description": "The subnet to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the interface belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "instance_id",
+          "ip",
+          "mac",
+          "name",
+          "primary",
+          "subnet_id",
+          "time_created",
+          "time_modified",
+          "vpc_id"
+        ]
+      },
       "InstanceNetworkInterfaceAttachment": {
-        "description": "Describes an attachment of a `NetworkInterface` to an `Instance`, at the time the instance is created.",
+        "description": "Describes an attachment of an `InstanceNetworkInterface` to an `Instance`, at the time the instance is created.",
         "oneOf": [
           {
-            "description": "Create one or more `NetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
+            "description": "Create one or more `InstanceNetworkInterface`s for the `Instance`.\n\nIf more than one interface is provided, then the first will be designated the primary interface for the instance.",
             "type": "object",
             "properties": {
               "params": {
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/NetworkInterfaceCreate"
+                  "$ref": "#/components/schemas/InstanceNetworkInterfaceCreate"
                 }
               },
               "type": {
@@ -9274,6 +9368,90 @@
             ]
           }
         ]
+      },
+      "InstanceNetworkInterfaceCreate": {
+        "description": "Create-time parameters for an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
+            "nullable": true,
+            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
+            "type": "string",
+            "format": "ip"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "subnet_name": {
+            "description": "The VPC Subnet in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "vpc_name": {
+            "description": "The VPC in which to create the interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "subnet_name",
+          "vpc_name"
+        ]
+      },
+      "InstanceNetworkInterfaceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceNetworkInterface"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InstanceNetworkInterfaceUpdate": {
+        "description": "Parameters for updating an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "primary": {
+            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
+            "default": false,
+            "type": "boolean"
+          }
+        }
       },
       "InstanceResultsPage": {
         "description": "A single page of results",
@@ -9715,168 +9893,6 @@
             ]
           }
         ]
-      },
-      "NetworkInterface": {
-        "description": "A `NetworkInterface` represents a virtual network interface device.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "instance_id": {
-            "description": "The Instance to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "ip": {
-            "description": "The IP address assigned to this interface.",
-            "type": "string",
-            "format": "ip"
-          },
-          "mac": {
-            "description": "The MAC address assigned to this interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MacAddr"
-              }
-            ]
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "primary": {
-            "description": "True if this interface is the primary for the instance to which it's attached.",
-            "type": "boolean"
-          },
-          "subnet_id": {
-            "description": "The subnet to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          },
-          "vpc_id": {
-            "description": "The VPC to which the interface belongs.",
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "instance_id",
-          "ip",
-          "mac",
-          "name",
-          "primary",
-          "subnet_id",
-          "time_created",
-          "time_modified",
-          "vpc_id"
-        ]
-      },
-      "NetworkInterfaceCreate": {
-        "description": "Create-time parameters for a [`NetworkInterface`](omicron_common::api::external::NetworkInterface)",
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "ip": {
-            "nullable": true,
-            "description": "The IP address for the interface. One will be auto-assigned if not provided.",
-            "type": "string",
-            "format": "ip"
-          },
-          "name": {
-            "$ref": "#/components/schemas/Name"
-          },
-          "subnet_name": {
-            "description": "The VPC Subnet in which to create the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "vpc_name": {
-            "description": "The VPC in which to create the interface.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "description",
-          "name",
-          "subnet_name",
-          "vpc_name"
-        ]
-      },
-      "NetworkInterfaceResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "NetworkInterfaceUpdate": {
-        "description": "Parameters for updating a [`NetworkInterface`](omicron_common::api::external::NetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "nullable": true,
-            "type": "string"
-          },
-          "name": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "primary": {
-            "description": "Make a secondary interface the instance's primary interface.\n\nIf applied to a secondary interface, that interface will become the primary on the next reboot of the instance. Note that this may have implications for routing between instances, as the new primary interface will be on a distinct subnet from the previous primary interface.\n\nNote that this can only be used to select a new primary interface for an instance. Requests to change the primary interface into a secondary will return an error.",
-            "default": false,
-            "type": "boolean"
-          }
-        }
       },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",

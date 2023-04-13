@@ -16,6 +16,7 @@ use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use slog::Logger;
@@ -185,7 +186,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &config::Config,
         authz: Arc<authz::Authz>,
-    ) -> Arc<Nexus> {
+    ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         db_datastore.register_producers(&producer_registry);
@@ -210,9 +211,19 @@ impl Nexus {
                 "component" => "DpdClient"
             )),
         };
-        let dpd_address = config.pkg.dendrite.address;
-        let dpd_host = dpd_address.ip().to_string();
-        let dpd_port = dpd_address.port();
+        let (dpd_host, dpd_port) = if let Some(dpd_address) =
+            &config.pkg.dendrite.address
+        {
+            (dpd_address.ip().to_string(), dpd_address.port())
+        } else {
+            let addr = resolver
+                .lock()
+                .await
+                .lookup_socket_v6(ServiceName::Dendrite)
+                .await
+                .map_err(|e| format!("Cannot access Dendrite address: {e}"))?;
+            (addr.ip().to_string(), addr.port())
+        };
         let dpd_client = Arc::new(dpd_client::Client::new(
             &format!("http://[{dpd_host}]:{dpd_port}"),
             client_state,
@@ -304,7 +315,7 @@ impl Nexus {
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus
+        Ok(nexus)
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.

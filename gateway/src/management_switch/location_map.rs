@@ -98,7 +98,6 @@ pub struct LocationDeterminationConfig {
 
 #[derive(Debug)]
 pub(super) struct LocationMap {
-    location_name: String,
     port_to_id: HashMap<SwitchPort, SpIdentifier>,
     id_to_port: HashMap<SpIdentifier, SwitchPort>,
 }
@@ -152,15 +151,7 @@ impl LocationMap {
             id_to_port.insert(id, port);
         }
 
-        Ok(Self { location_name: location, port_to_id, id_to_port })
-    }
-
-    /// Get the name of our location.
-    ///
-    /// This matches one of the names specified as a possible location in the
-    /// configuration we were given.
-    pub(super) fn location_name(&self) -> &str {
-        &self.location_name
+        Ok(Self { port_to_id, id_to_port })
     }
 
     /// Get the ID of a given port.

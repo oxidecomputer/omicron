@@ -7,8 +7,10 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-bhyve_api = { workspace = true }
+async-trait.workspace = true
+bhyve_api.workspace = true
 cfg-if.workspace = true
+futures.workspace = true
 ipnetwork.workspace = true
 libc.workspace = true
 macaddr.workspace = true

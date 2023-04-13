@@ -20,6 +20,7 @@ use omicron_common::backoff::{
 use slog::{info, Drain, Logger};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -95,9 +96,17 @@ impl Server {
                             model: String::from("Unknown"),
                             revision: 0,
                         },
-                        usable_hardware_threads: 4,
-                        usable_physical_ram: NexusTypes::ByteCount(1 << 30),
-                        reservoir_size: NexusTypes::ByteCount(1 << 29),
+                        usable_hardware_threads: config
+                            .hardware
+                            .hardware_threads,
+                        usable_physical_ram: NexusTypes::ByteCount::try_from(
+                            config.hardware.physical_ram,
+                        )
+                        .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)
@@ -217,8 +226,33 @@ impl Server {
             .context("initializing DNS")
             .map_err(|e| e.to_string())?;
 
+        // Record the internal DNS server as though RSS had provisioned it so
+        // that Nexus knows about it.
+        let dns_bound = match dns_server.local_address() {
+            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V6(a) => *a,
+        };
+        let http_bound = match dns_dropshot_server.local_addr() {
+            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V6(a) => a,
+        };
+        let services = vec![
+            NexusTypes::ServicePutRequest {
+                address: dns_bound.to_string(),
+                kind: NexusTypes::ServiceKind::InternalDNS,
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+            },
+            NexusTypes::ServicePutRequest {
+                address: http_bound.to_string(),
+                kind: NexusTypes::ServiceKind::InternalDNSConfig,
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+            },
+        ];
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
-            services: vec![],
+            services,
             datasets,
             internal_services_ip_pool_ranges: vec![],
             certs: vec![],
