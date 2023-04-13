@@ -279,13 +279,13 @@ impl super::Nexus {
         Ok(body)
     }
 
-    pub async fn create_system_update(
+    pub async fn upsert_system_update(
         &self,
         opctx: &OpContext,
         create_update: params::SystemUpdateCreate,
     ) -> CreateResult<db::model::SystemUpdate> {
         let update = db::model::SystemUpdate::new(create_update.version)?;
-        self.db_datastore.create_system_update(opctx, update).await
+        self.db_datastore.upsert_system_update(opctx, update).await
     }
 
     pub async fn create_component_update(
@@ -481,7 +481,7 @@ impl super::Nexus {
         for v in [1, 2, 3] {
             let version = external::SemverVersion::new(v, 0, 0);
             let su = self
-                .create_system_update(
+                .upsert_system_update(
                     opctx,
                     params::SystemUpdateCreate { version: version.clone() },
                 )
@@ -627,18 +627,18 @@ mod tests {
         let su1_create = SystemUpdateCreate {
             version: external::SemverVersion::new(5, 0, 0),
         };
-        let su1 = nexus.create_system_update(&opctx, su1_create).await.unwrap();
+        let su1 = nexus.upsert_system_update(&opctx, su1_create).await.unwrap();
 
         // weird order is deliberate
         let su3_create = SystemUpdateCreate {
             version: external::SemverVersion::new(10, 0, 0),
         };
-        nexus.create_system_update(&opctx, su3_create).await.unwrap();
+        nexus.upsert_system_update(&opctx, su3_create).await.unwrap();
 
         let su2_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 7, 0),
         };
-        let su2 = nexus.create_system_update(&opctx, su2_create).await.unwrap();
+        let su2 = nexus.upsert_system_update(&opctx, su2_create).await.unwrap();
 
         // now there should be a bunch of system updates, sorted by version descending
         let versions: Vec<String> = nexus
@@ -719,21 +719,21 @@ mod tests {
             version: external::SemverVersion::new(100000000, 0, 0),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 100000000, 0),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 0, 100000000),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
     }
 
@@ -777,17 +777,17 @@ mod tests {
         // create system updates for the component updates to hang off of
         let v020 = external::SemverVersion::new(0, 2, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v020 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v020 })
             .await
             .expect("Failed to create system update");
         let v3 = external::SemverVersion::new(4, 0, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v3 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v3 })
             .await
             .expect("Failed to create system update");
         let v10 = external::SemverVersion::new(10, 0, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v10 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v10 })
             .await
             .expect("Failed to create system update");
 

@@ -17,6 +17,7 @@ use crate::db::model::{
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
@@ -66,7 +67,7 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
-    pub async fn create_system_update(
+    pub async fn upsert_system_update(
         &self,
         opctx: &OpContext,
         update: SystemUpdate,
@@ -77,6 +78,11 @@ impl DataStore {
 
         diesel::insert_into(system_update)
             .values(update.clone())
+            .on_conflict(version)
+            .do_update()
+            // for now the only modifiable field is time_modified, but we intend
+            // to add more metadata to this model
+            .set(time_modified.eq(Utc::now()))
             .returning(SystemUpdate::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
