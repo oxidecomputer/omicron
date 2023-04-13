@@ -90,9 +90,10 @@ const MAX_PORT: u16 = u16::MAX;
 ///         <now> AS time_created,
 ///         <now> AS time_modified,
 ///         NULL AS time_deleted,
-///         <instance_id> AS instance_id,
 ///         ip_pool_id,
 ///         ip_pool_range_id,
+///         <instance_id> AS instance_id,
+///         <kind> AS kind,
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port
@@ -124,12 +125,31 @@ const MAX_PORT: u16 = u16::MAX;
 ///         )
 ///     LEFT OUTER JOIN
 ///         -- Join with existing IPs, selecting the first row from the
-///         -- address and port sequence subqueryes that has no match. I.e.,
+///         -- address and port sequence subqueries that has no match. I.e.,
 ///         -- is not yet reserved.
 ///         external_ip
 ///     ON
-///         (ip, first_port, time_deleted IS NULL) =
-///         (candidate_ip, candidate_first_port, TRUE)
+///         -- The JOIN conditions depend on the IP kind:
+///
+///         -- For Floating and Ephemeral IPs, we need to reserve the entire
+///         -- port range which makes the condition pretty simple: We don't
+///         -- care what the port is, any record with that IP is considered
+///         -- a match.
+///         (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
+///
+///         -- SNAT IPs are a little more complicated; we need to prevent
+///         -- SNAT IPs from "carving out" any part of the port range of an
+///         -- IP if there is an Ephemeral or Floating IP with the same
+///         -- address. However, we want to _allow_ taking the next available
+///         -- chunk of ports when there is an existing SNAT IP with the same
+///         -- address. We do this by preventing _overlapping_ port ranges
+///         -- within the same IP.
+///         (
+///             ip,
+///             candidate_first_port >= first_port AND
+///                 candidate_last_port <= last_port AND
+///                 time_deleted IS NULL
+///         ) = (candidate_ip, TRUE)
 ///     WHERE
 ///         (ip IS NULL) OR (id = <ip_id>)
 ///     ORDER BY
