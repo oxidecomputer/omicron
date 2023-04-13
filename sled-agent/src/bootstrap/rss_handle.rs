@@ -47,10 +47,12 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address);
+        let (tx, rx) =
+            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
@@ -67,9 +69,11 @@ impl RssHandle {
     pub(super) async fn run_rss_reset(
         log: &Logger,
         our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address);
+        let (tx, rx) =
+            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
@@ -133,10 +137,15 @@ async fn initialize_sled_agent(
 // communication mechanism.
 fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
+    switch_zone_bootstrap_address: Ipv6Addr,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
+        BootstrapAgentHandle {
+            inner: tx,
+            our_bootstrap_address,
+            switch_zone_bootstrap_address,
+        },
         BootstrapAgentHandleReceiver { inner: rx },
     )
 }
@@ -160,6 +169,7 @@ enum RequestKind {
 pub(crate) struct BootstrapAgentHandle {
     inner: mpsc::Sender<Request>,
     our_bootstrap_address: Ipv6Addr,
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 impl BootstrapAgentHandle {
@@ -208,6 +218,10 @@ impl BootstrapAgentHandle {
 
     pub(crate) fn our_address(&self) -> Ipv6Addr {
         self.our_bootstrap_address
+    }
+
+    pub(crate) fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
+        self.switch_zone_bootstrap_address
     }
 }
 

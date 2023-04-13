@@ -1,11 +1,9 @@
 #!/bin/bash
-
-# This script is used to set up the user required for wicket.
-
 set -ex -o pipefail
 
 . /lib/svc/share/smf_include.sh
 
+# set up the users required for wicket.
 USERS=(wicket support)
 
 for user in ${USERS[@]}; do
@@ -18,5 +16,9 @@ for user in ${USERS[@]}; do
         passwd -d "$user"
     fi
 done
+
+# enable ipv6 forwarding and routing
+pfexec routeadm -e ipv6-forwarding -u
+pfexec routeadm -e ipv6-routing -u
 
 exit $SMF_EXIT_OK
