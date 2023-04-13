@@ -204,6 +204,29 @@
         }
       }
     },
+    "/sled-role": {
+      "get": {
+        "operationId": "sled_role_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRole"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/timesync": {
       "get": {
         "operationId": "timesync_get",
@@ -1725,6 +1748,24 @@
           "virtual_ip",
           "virtual_mac",
           "vni"
+        ]
+      },
+      "SledRole": {
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
         ]
       },
       "Slot": {

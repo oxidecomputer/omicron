@@ -154,7 +154,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
 
-    config.pkg.dendrite.address.set_port(dendrite.port);
+    config
+        .pkg
+        .dendrite
+        .address
+        .as_mut()
+        .expect("Tests expect an explicit dendrite address")
+        .set_port(dendrite.port);
 
     let server = N::start_and_populate(&config, &logctx.log).await;
 
