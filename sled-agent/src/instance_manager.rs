@@ -97,7 +97,7 @@ impl InstanceManager {
         })
     }
 
-    /// Stores the reservoir size to 80% of the usable physical RAM
+    /// Sets the reservoir size to 80% of the usable physical RAM
     pub fn set_reservoir_size(
         &self,
         hardware: &sled_hardware::HardwareManager,
