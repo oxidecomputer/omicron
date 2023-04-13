@@ -168,12 +168,18 @@ impl MessageDisplayState {
                         attempt_elapsed,
                     );
                 }
+                StepEventKind::Nested { .. } => {
+                    // TODO: display nested events
+                }
                 StepEventKind::Unknown => {}
             },
             Event::Progress(event) => match event.kind {
                 ProgressEventKind::Progress { step, progress, .. } => {
                     let node = self.handle_and_get_node(step)?;
                     node.progress(progress);
+                }
+                ProgressEventKind::Nested { .. } => {
+                    // TODO: display nested events
                 }
                 ProgressEventKind::Unknown => {}
             },
@@ -387,8 +393,8 @@ impl ItemNode {
         metadata: Option<&ExampleStepMetadata>,
     ) -> ProgressBar {
         let metadata_message = match metadata {
-            Some(ExampleStepMetadata::Write { path, num_bytes }) => {
-                format!(" to {} ({} bytes)", path.display(), num_bytes)
+            Some(ExampleStepMetadata::Write { num_bytes }) => {
+                format!(" ({num_bytes} bytes)")
             }
             None => String::new(),
         };
