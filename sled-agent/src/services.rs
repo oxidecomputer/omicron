@@ -1144,16 +1144,6 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    // XXX: tfportd is started in the switch zone when it boots,
-                    // and it will add links for both the rear and front ports
-                    // inside that zone. However, this may take some time.
-                    // Unfortunately [ddmd currently panics if a link is not
-                    // ready][1]. This code is written assuming that [1] is
-                    // fixed: it will configure maghemite to listen on all rear
-                    // ports.
-                    //
-                    // [1]: https://github.com/oxidecomputer/maghemite/issues/53
-
                     let maghemite_interfaces: Vec<AddrObject> =
                         if is_gimlet().map_err(|e| {
                             Error::Underlay(underlay::Error::SystemDetection(e))
