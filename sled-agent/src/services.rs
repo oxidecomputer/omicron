@@ -517,33 +517,20 @@ impl ServiceManager {
     //
     // No other zone besides the switch and global zones should have a
     // bootstrap address.
-    fn bootstrap_vnic_needed(
-        &self,
-        req: &ServiceZoneRequest,
-    ) -> Result<Option<Link>, Error> {
-        match req.zone_type {
-            ZoneType::Switch => {
-                match self.inner.bootstrap_vnic_allocator.new_bootstrap() {
-                    Ok(link) => Ok(Some(link)),
-                    Err(e) => Err(Error::SledLocalVnicCreation(e)),
-                }
-            }
-            _ => Ok(None),
-        }
-    }
-
-    // If we are running in the switch zone, we need a bootstrap vnic so we can
-    // listen on a bootstrap address for the wicketd artifact server.
-    //
-    // No other zone besides the switch and global zones should have a
-    // bootstrap address.
     fn bootstrap_address_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Option<Ipv6Addr> {
+    ) -> Result<Option<(Link, Ipv6Addr)>, Error> {
         match req.zone_type {
-            ZoneType::Switch => Some(self.inner.switch_zone_bootstrap_address),
-            _ => None,
+            ZoneType::Switch => {
+                let link = self
+                    .inner
+                    .bootstrap_vnic_allocator
+                    .new_bootstrap()
+                    .map_err(Error::SledLocalVnicCreation)?;
+                Ok(Some((link, self.inner.switch_zone_bootstrap_address)))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -705,10 +692,13 @@ impl ServiceManager {
         filesystems: &[zone::Fs],
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(request)?;
-        let bootstrap_vnic = self.bootstrap_vnic_needed(request)?;
+        let (bootstrap_vnic, bootstrap_address) =
+            match self.bootstrap_address_needed(request)? {
+                Some((vnic, address)) => (Some(vnic), Some(address)),
+                None => (None, None),
+            };
         let links = self.links_needed(request)?;
         let limit_priv = Self::privs_needed(request);
-        let needs_bootstrap_address = bootstrap_vnic.is_some();
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -749,9 +739,7 @@ impl ServiceManager {
             )?;
         }
 
-        if needs_bootstrap_address {
-            let bootstrap_address =
-                self.bootstrap_address_needed(request).unwrap();
+        if let Some(bootstrap_address) = bootstrap_address {
             info!(
                 self.inner.log,
                 "Ensuring bootstrap address {} exists in {} zone",
@@ -1009,10 +997,26 @@ impl ServiceManager {
                         &format!("[::1]:{WICKETD_PORT}"),
                     )?;
 
-                    // TODO: Use bootstrap address
+                    // If we're launching the switch zone, we'll have a
+                    // bootstrap_address based on our call to
+                    // `self.bootstrap_address_needed` (which always gives us an
+                    // address for the switch zone. If we _don't_ have a
+                    // bootstrap address, someone has requested wicketd in a
+                    // non-switch zone; return an error.
+                    let Some(bootstrap_address) = bootstrap_address else {
+                        return Err(Error::BadServiceRequest {
+                            service: "wicketd".to_string(),
+                            message: concat!(
+                                "missing bootstrap address: ",
+                                "wicketd can only be started in the ",
+                                "switch zone",
+                            ).to_string() });
+                    };
                     smfh.setprop(
                         "config/artifact-address",
-                        &format!("[::1]:{BOOTSTRAP_ARTIFACT_PORT}"),
+                        &format!(
+                            "[{bootstrap_address}]:{BOOTSTRAP_ARTIFACT_PORT}"
+                        ),
                     )?;
 
                     smfh.setprop(

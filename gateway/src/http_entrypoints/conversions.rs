@@ -24,12 +24,10 @@ use super::SpState;
 use super::SpType;
 use super::SpUpdateStatus;
 use super::UpdatePreparationProgress;
-use crate::error::SpCommsError;
 use dropshot::HttpError;
 use gateway_messages::SpComponent;
 use gateway_messages::StartupOptions;
 use gateway_messages::UpdateStatus;
-use gateway_sp_comms::error::CommunicationError;
 use std::str;
 
 // wrap `SpComponent::try_from(&str)` into a usable form for dropshot endpoints
@@ -115,20 +113,17 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
         .unwrap_or_else(|_err| hex::encode(bytes))
 }
 
-impl From<Result<gateway_messages::SpState, SpCommsError>> for SpState {
-    fn from(result: Result<gateway_messages::SpState, SpCommsError>) -> Self {
-        match result {
-            Ok(state) => Self::Enabled {
-                serial_number: stringify_byte_string(&state.serial_number),
-                model: stringify_byte_string(&state.model),
-                revision: state.revision,
-                hubris_archive_id: hex::encode(&state.hubris_archive_id),
-                base_mac_address: state.base_mac_address,
-                version: ImageVersion::from(state.version),
-                power_state: PowerState::from(state.power_state),
-                rot: RotState::from(state.rot),
-            },
-            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+impl From<gateway_messages::SpState> for SpState {
+    fn from(state: gateway_messages::SpState) -> Self {
+        Self {
+            serial_number: stringify_byte_string(&state.serial_number),
+            model: stringify_byte_string(&state.model),
+            revision: state.revision,
+            hubris_archive_id: hex::encode(&state.hubris_archive_id),
+            base_mac_address: state.base_mac_address,
+            version: ImageVersion::from(state.version),
+            power_state: PowerState::from(state.power_state),
+            rot: RotState::from(state.rot),
         }
     }
 }
@@ -165,17 +160,9 @@ impl From<gateway_messages::RotSlot> for RotSlot {
 impl From<gateway_messages::RotImageDetails> for RotImageDetails {
     fn from(details: gateway_messages::RotImageDetails) -> Self {
         Self {
-            digest: hex::encode(&details.digest),
+            digest: hex::encode(details.digest),
             version: details.version.into(),
         }
-    }
-}
-
-impl From<Result<gateway_messages::SpState, CommunicationError>> for SpState {
-    fn from(
-        result: Result<gateway_messages::SpState, CommunicationError>,
-    ) -> Self {
-        result.map_err(SpCommsError::from).into()
     }
 }
 
@@ -200,29 +187,6 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
         } else {
             Self::Absent
         }
-    }
-}
-
-impl From<Result<gateway_messages::IgnitionState, SpCommsError>>
-    for SpIgnition
-{
-    fn from(
-        result: Result<gateway_messages::IgnitionState, SpCommsError>,
-    ) -> Self {
-        match result {
-            Ok(state) => state.into(),
-            Err(err) => Self::CommunicationFailed { message: err.to_string() },
-        }
-    }
-}
-
-impl From<Result<gateway_messages::IgnitionState, CommunicationError>>
-    for SpIgnition
-{
-    fn from(
-        result: Result<gateway_messages::IgnitionState, CommunicationError>,
-    ) -> Self {
-        result.map_err(SpCommsError::from).into()
     }
 }
 
