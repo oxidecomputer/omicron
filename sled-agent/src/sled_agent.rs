@@ -262,7 +262,10 @@ impl SledAgent {
             *sled_address.ip(),
             request.gateway.mac.0,
         )?;
-        instances.set_reservoir_size(&hardware)?;
+        instances.set_reservoir_size(&hardware).map_err(|e| {
+            warn!(log, "Failed to set reservoir size: {e}");
+            e
+        })?;
 
         let svc_config = services::Config::new(
             config.sidecar_revision.clone(),

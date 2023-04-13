@@ -97,17 +97,22 @@ impl InstanceManager {
         })
     }
 
-    /// Sets the reservoir size to 80% of the usable physical RAM
+    /// Sets the reservoir size to 50% of the usable physical RAM
     pub fn set_reservoir_size(
         &self,
         hardware: &sled_hardware::HardwareManager,
     ) -> Result<(), Error> {
         let usable_physical_ram = hardware.usable_physical_ram_bytes();
-        let reservoir_size = ((usable_physical_ram as f64) * 0.80) as i64;
+        let reservoir_size = ((usable_physical_ram as f64) * 0.50) as i64;
+
         #[allow(non_upper_case_globals)]
         const MiB: i64 = 1024 * 1024;
         let reservoir_size = ByteCount::try_from((reservoir_size / MiB) * MiB)
             .map_err(Error::BadRamSize)?;
+        info!(
+            self.inner.log,
+            "Setting reservoir size to {reservoir_size}, out of {usable_physical_ram} total"
+        );
         illumos_utils::vmm_reservoir::ReservoirControl::set(reservoir_size)?;
         *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
         Ok(())
