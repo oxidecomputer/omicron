@@ -47,6 +47,7 @@ path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
+path_param!(AddressLotPath, address_lot, "address lot");
 
 // Only by ID because groups have an `external_id` instead of a name and
 // therefore don't implement `ObjectIdentity`, which makes lookup by name
@@ -1143,14 +1144,7 @@ pub struct FinalizeDisk {
 /// Select an address lot by an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct AddressLotSelector {
-    /// An optional address lot name or id to guide selection.
-    pub address_lot: Option<NameOrId>,
-}
-
-/// Select an address lot block by name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct AddressLotBlockSelector {
-    /// The address lot name or id to select.
+    /// Name or id of the address lot to select
     pub address_lot: NameOrId,
 }
 

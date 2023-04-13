@@ -681,6 +681,7 @@ impl TryFrom<i64> for Generation {
 #[display(style = "kebab-case")]
 pub enum ResourceType {
     AddressLot,
+    AddressLotBlock,
     Fleet,
     Silo,
     SiloUser,

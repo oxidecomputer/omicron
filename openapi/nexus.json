@@ -4715,14 +4715,6 @@
         "parameters": [
           {
             "in": "query",
-            "name": "address_lot",
-            "description": "An optional address lot name or id to guide selection.",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -4803,7 +4795,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}": {
       "delete": {
         "tags": [
           "external-networking"
@@ -4812,9 +4806,10 @@
         "operationId": "networking_address_lot_delete",
         "parameters": [
           {
-            "in": "query",
+            "in": "path",
             "name": "address_lot",
-            "description": "An optional address lot name or id to guide selection.",
+            "description": "Name or ID of the address lot",
+            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -4833,7 +4828,7 @@
         }
       }
     },
-    "/v1/system/networking/address-lot/blocks": {
+    "/v1/system/networking/address-lot/{address_lot}/blocks": {
       "get": {
         "tags": [
           "external-networking"
@@ -4842,9 +4837,10 @@
         "operationId": "networking_address_lot_block_list",
         "parameters": [
           {
-            "in": "query",
+            "in": "path",
             "name": "address_lot",
-            "description": "The address lot name or id to select.",
+            "description": "Name or ID of the address lot",
+            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }

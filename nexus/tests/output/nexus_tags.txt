@@ -13,9 +13,9 @@ disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "external-networking"
 OPERATION ID                             METHOD   URL PATH
-networking_address_lot_block_list        GET      /v1/system/networking/address-lot/blocks
+networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
-networking_address_lot_delete            DELETE   /v1/system/networking/address-lot
+networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address

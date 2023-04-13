@@ -747,6 +747,48 @@ authz_resource! {
     polar_snippet = InProject,
 }
 
+// Customer network integration resources nested below "Fleet"
+
+authz_resource! {
+    name = "AddressLot",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "AddressLotBlock",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "LoopbackAddress",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "SwitchPort",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "SwitchPortSettings",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
 // Miscellaneous resources nested directly below "Fleet"
 
 authz_resource! {

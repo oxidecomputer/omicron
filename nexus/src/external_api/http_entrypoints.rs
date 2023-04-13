@@ -2286,19 +2286,21 @@ async fn networking_address_lot_create(
 /// Delete an address lot.
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/address-lot",
+    path = "/v1/system/networking/address-lot/{address_lot}",
     tags = ["external-networking"],
 }]
 async fn networking_address_lot_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<params::AddressLotSelector>,
+    path_params: Path<params::AddressLotPath>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
-        let nexus = &apictx.nexus;
-        let selector = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.address_lot_delete(&opctx, &selector.address_lot).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
+        nexus.address_lot_delete(&opctx, &address_lot_lookup).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2312,7 +2314,7 @@ async fn networking_address_lot_delete(
 }]
 async fn networking_address_lot_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::AddressLotSelector>>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2341,26 +2343,25 @@ async fn networking_address_lot_list(
 /// List the blocks in an address lot.
 #[endpoint {
     method = GET,
-    path = "/v1/system/networking/address-lot/blocks",
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks",
     tags = ["external-networking"],
 }]
 async fn networking_address_lot_block_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById<params::AddressLotBlockSelector>>,
+    path_params: Path<params::AddressLotPath>,
+    query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
+        let path = path_params.into_inner();
         let pagparams = data_page_params_for(&rqctx, &query)?;
-        let scan_params = ScanById::from_query(&query)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
         let blocks = nexus
-            .address_lot_block_list(
-                &opctx,
-                &scan_params.selector.address_lot,
-                &pagparams,
-            )
+            .address_lot_block_list(&opctx, &address_lot_lookup, &pagparams)
             .await?
             .into_iter()
             .map(|p| p.into())

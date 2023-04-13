@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DataStore;
+use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::datastore::PgConnection;
@@ -25,7 +26,7 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
-    LookupResult, LookupType, NameOrId, ResourceType,
+    LookupResult, ResourceType,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -97,48 +98,26 @@ impl DataStore {
     pub async fn address_lot_delete(
         &self,
         opctx: &OpContext,
-        name_or_id: &Option<NameOrId>,
+        authz_address_lot: &authz::AddressLot,
     ) -> DeleteResult {
-        use db::schema::address_lot;
         use db::schema::address_lot::dsl as lot_dsl;
         use db::schema::address_lot_block::dsl as block_dsl;
         use db::schema::address_lot_rsvd_block::dsl as rsvd_block_dsl;
+
+        opctx.authorize(authz::Action::Delete, authz_address_lot).await?;
+
+        let id = authz_address_lot.id();
 
         let pool = self.pool_authorized(opctx).await?;
 
         #[derive(Debug)]
         enum AddressLotDeleteError {
-            NameOrIdRequired,
-            LotNotFound,
             LotInUse,
         }
 
         type TxnError = TransactionError<AddressLotDeleteError>;
 
         pool.transaction_async(|conn| async move {
-            let id = match name_or_id {
-                None => Err(TxnError::CustomError(
-                    AddressLotDeleteError::NameOrIdRequired,
-                ))?,
-                Some(NameOrId::Id(id)) => *id,
-                Some(NameOrId::Name(name)) => {
-                    let name = name.to_string();
-                    lot_dsl::address_lot
-                        .filter(address_lot::time_deleted.is_null())
-                        .filter(address_lot::name.eq(name))
-                        .select(address_lot::id)
-                        .limit(1)
-                        .first_async::<Uuid>(&conn)
-                        .await
-                        .map_err(|e| match e {
-                            ConnectionError::Query(_) => TxnError::CustomError(
-                                AddressLotDeleteError::LotNotFound,
-                            ),
-                            e => e.into(),
-                        })?
-                }
-            };
-
             let rsvd: Vec<AddressLotRsvdBlock> =
                 rsvd_block_dsl::address_lot_rsvd_block
                     .filter(rsvd_block_dsl::address_lot_id.eq(id))
@@ -170,12 +149,6 @@ impl DataStore {
         .map_err(|e| match e {
             TxnError::Pool(e) => {
                 public_error_from_diesel_pool(e, ErrorHandler::Server)
-            }
-            TxnError::CustomError(AddressLotDeleteError::LotNotFound) => {
-                Error::invalid_request("address lot not found")
-            }
-            TxnError::CustomError(AddressLotDeleteError::NameOrIdRequired) => {
-                Error::invalid_request("name or id required")
             }
             TxnError::CustomError(AddressLotDeleteError::LotInUse) => {
                 Error::invalid_request("lot is in use")
@@ -210,50 +183,15 @@ impl DataStore {
     pub async fn address_lot_block_list(
         &self,
         opctx: &OpContext,
-        address_block_id: &NameOrId,
+        authz_address_lot: &authz::AddressLot,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<AddressLotBlock> {
-        use db::schema::address_lot;
-        use db::schema::address_lot::dsl as lot_dsl;
-        use db::schema::address_lot_block::dsl as block_dsl;
+        use db::schema::address_lot_block::dsl;
 
         let pool = self.pool_authorized(opctx).await?;
 
-        let id = match &address_block_id {
-            NameOrId::Id(id) => *id,
-            NameOrId::Name(name) => {
-                let name = name.to_string();
-                lot_dsl::address_lot
-                    .filter(address_lot::time_deleted.is_null())
-                    .filter(address_lot::name.eq(name.clone()))
-                    .select(address_lot::id)
-                    .limit(1)
-                    .first_async::<Uuid>(pool)
-                    .await
-                    .map_err(|e| {
-                        if let PoolError::Connection(ConnectionError::Query(
-                            DieselError::NotFound,
-                        )) = e
-                        {
-                            public_error_from_diesel_pool(
-                                e,
-                                ErrorHandler::NotFoundByLookup(
-                                    ResourceType::AddressLot,
-                                    LookupType::ByName(name),
-                                ),
-                            )
-                        } else {
-                            public_error_from_diesel_pool(
-                                e,
-                                ErrorHandler::Server,
-                            )
-                        }
-                    })?
-            }
-        };
-
-        paginated(block_dsl::address_lot_block, block_dsl::id, &pagparams)
-            .filter(block_dsl::address_lot_id.eq(id))
+        paginated(dsl::address_lot_block, dsl::id, &pagparams)
+            .filter(dsl::address_lot_id.eq(authz_address_lot.id()))
             .select(AddressLotBlock::as_select())
             .load_async(pool)
             .await

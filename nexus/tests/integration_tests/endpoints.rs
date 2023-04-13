@@ -389,11 +389,12 @@ lazy_static! {
 }
 
 lazy_static! {
+    pub static ref DEMO_ADDRESS_LOTS_URL: String =
+        format!("/v1/system/networking/address-lot");
     pub static ref DEMO_ADDRESS_LOT_URL: String =
-        format!("/v1/system/networking/address-lot?address_lot=parkinglot");
-    pub static ref DEMO_ADDRESS_LOT_BLOCKS_URL: String = format!(
-        "/v1/system/networking/address-lot/blocks?address_lot=parkinglot"
-    );
+        format!("/v1/system/networking/address-lot/parkinglot");
+    pub static ref DEMO_ADDRESS_LOT_BLOCKS_URL: String =
+        format!("/v1/system/networking/address-lot/parkinglot/blocks");
     pub static ref DEMO_ADDRESS_LOT_CREATE: params::AddressLotCreate =
         params::AddressLotCreate {
             identity: IdentityMetadataCreateParams {
@@ -1723,16 +1724,24 @@ lazy_static! {
         },
 
         VerifyEndpoint {
-            url: &DEMO_ADDRESS_LOT_URL,
+            url: &DEMO_ADDRESS_LOTS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE).unwrap(),
                 ),
-                AllowedMethod::Delete,
                 AllowedMethod::Get
             ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+            ]
         },
 
         VerifyEndpoint {
