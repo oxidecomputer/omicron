@@ -47,6 +47,22 @@ pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 pub const NTP_PORT: u16 = 123;
 
+// The number of ports available to an SNAT IP.
+// Note that for static NAT, this value isn't used, and all ports are available.
+//
+// NOTE: This must be a power of 2. We're expecting to provide the Tofino with a
+// port mask, e.g., a 16-bit mask such as `0b01...`, where those dots are any 14
+// bits. This signifies the port range `[16384, 32768)`. Such a port mask only
+// works when the port-ranges are limited to powers of 2, not arbitrary ranges.
+//
+// Also NOTE: This is not going to work if we modify this value across different
+// versions of Nexus. Currently, we're considering a port range free simply by
+// checking if the _first_ address in a range is free. However, we'll need to
+// instead to check if a candidate port range has any overlap with an existing
+// port range, which is more complicated. That's deferred until we actually have
+// that situation (which may be as soon as allocating ephemeral IPs).
+pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
+
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
 //
