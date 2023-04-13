@@ -1399,6 +1399,26 @@ async fn sp_local_switch_id(
     Ok(HttpResponseOk(id.into()))
 }
 
+/// Get the complete list of SP identifiers this MGS instance is configured to
+/// find and communicate with.
+///
+/// Note that unlike most MGS endpoints, this endpoint does not send any
+/// communication on the management network.
+#[endpoint {
+    method = GET,
+    path = "/local/all-sp-ids",
+}]
+async fn sp_all_ids(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError> {
+    let apictx = rqctx.context();
+
+    let all_ids =
+        apictx.mgmt_switch.all_sps()?.map(|(id, _)| id.into()).collect();
+
+    Ok(HttpResponseOk(all_ids))
+}
+
 // TODO
 // The gateway service will get asynchronous notifications both from directly
 // SPs over the management network and indirectly from Ignition via the Sidecar
@@ -1444,6 +1464,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_command)?;
         api.register(recovery_host_phase2_upload)?;
         api.register(sp_local_switch_id)?;
+        api.register(sp_all_ids)?;
         Ok(())
     }
 

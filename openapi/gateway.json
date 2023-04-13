@@ -131,6 +131,35 @@
         }
       }
     },
+    "/local/all-sp-ids": {
+      "get": {
+        "summary": "Get the complete list of SP identifiers this MGS instance is configured to",
+        "description": "find and communicate with.\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "operationId": "sp_all_ids",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SpIdentifier",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpIdentifier"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/local/switch-id": {
       "get": {
         "summary": "Get the identifier for the switch this MGS instance is connected to.",

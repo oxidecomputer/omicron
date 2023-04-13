@@ -740,13 +740,13 @@
                   "inventory": {
                     "$ref": "#/components/schemas/RackV1Inventory"
                   },
-                  "received_ago": {
+                  "mgs_last_seen": {
                     "$ref": "#/components/schemas/Duration"
                   }
                 },
                 "required": [
                   "inventory",
-                  "received_ago"
+                  "mgs_last_seen"
                 ]
               },
               "type": {
@@ -1309,20 +1309,28 @@
             "$ref": "#/components/schemas/SpIdentifier"
           },
           "ignition": {
-            "$ref": "#/components/schemas/SpIgnition"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpIgnition"
+              }
+            ]
           },
           "rot": {
             "$ref": "#/components/schemas/RotInventory"
           },
           "state": {
-            "$ref": "#/components/schemas/SpState"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpState"
+              }
+            ]
           }
         },
         "required": [
           "id",
-          "ignition",
-          "rot",
-          "state"
+          "rot"
         ]
       },
       "SpState": {

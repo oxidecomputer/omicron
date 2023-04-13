@@ -102,8 +102,8 @@ impl Inventory {
 #[allow(unused)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sp {
-    ignition: SpIgnition,
-    state: SpState,
+    ignition: Option<SpIgnition>,
+    state: Option<SpState>,
     caboose: Option<SpComponentCaboose>,
     components: Option<Vec<SpComponentInfo>>,
     rot: RotInventory,

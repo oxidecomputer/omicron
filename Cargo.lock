@@ -8813,6 +8813,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "toml 0.7.3",
  "tough",
  "tufaceous",
