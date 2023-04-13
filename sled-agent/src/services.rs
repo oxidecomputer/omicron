@@ -1138,11 +1138,6 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::DnsClient { servers, domain } => {
-                    self.configure_dns_client(&running_zone, servers, domain)
-                        .await?;
-                    continue;
-                }
                 ServiceType::Maghemite { mode } => {
                     info!(self.inner.log, "Setting up Maghemite service");
 

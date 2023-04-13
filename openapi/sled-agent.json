@@ -1642,31 +1642,6 @@
           {
             "type": "object",
             "properties": {
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dns_client"
-                ]
-              }
-            },
-            "required": [
-              "servers",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "mode": {
                 "type": "string"
               },

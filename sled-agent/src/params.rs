@@ -273,10 +273,6 @@ pub enum ServiceType {
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
-    DnsClient {
-        servers: Vec<String>,
-        domain: Option<String>,
-    },
     Maghemite {
         mode: String,
     },
@@ -294,7 +290,6 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
             ServiceType::Ntp { .. } => write!(f, "ntp"),
-            ServiceType::DnsClient { .. } => write!(f, "dns_client"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
     }
@@ -343,9 +338,6 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::CruciblePantry => AutoSt::CruciblePantry,
             St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
                 AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
-            }
-            St::DnsClient { servers, domain } => {
-                AutoSt::DnsClient { servers, domain }
             }
             St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }
