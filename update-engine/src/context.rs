@@ -11,7 +11,11 @@ use derive_where::derive_where;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{events::StepProgress, StepSpec};
+use crate::{
+    errors::ExecutionError,
+    events::{Event, StepProgress},
+    NestedSpec, StepSpec, UpdateEngine,
+};
 
 /// Context for a step's execution function.
 ///
@@ -24,28 +28,110 @@ use crate::{events::StepProgress, StepSpec};
 /// likely that it is dropped at the same time the future completes.
 #[derive(Debug)]
 pub struct StepContext<S: StepSpec> {
-    progress_sender: mpsc::Sender<StepProgress<S>>,
+    log: slog::Logger,
+    payload_sender: mpsc::Sender<StepContextPayload<S>>,
     token: StepHandleToken<S>,
 }
 
 impl<S: StepSpec> StepContext<S> {
-    pub(crate) fn new(progress_sender: mpsc::Sender<StepProgress<S>>) -> Self {
-        Self { progress_sender, token: StepHandleToken::new() }
+    pub(crate) fn new(
+        log: &slog::Logger,
+        payload_sender: mpsc::Sender<StepContextPayload<S>>,
+    ) -> Self {
+        Self { log: log.clone(), payload_sender, token: StepHandleToken::new() }
     }
 
     /// Sends a progress update to the update engine.
     #[inline]
     pub async fn send_progress(&self, progress: StepProgress<S>) {
-        self.progress_sender
-            .send(progress)
+        self.payload_sender
+            .send(StepContextPayload::Progress(progress))
             .await
             .expect("our code always keeps the receiver open")
+    }
+
+    /// Creates a nested execution engine.
+    ///
+    /// An individual step can generate other steps: these steps are treated as
+    /// *nested*, and carry their own progress.
+    pub async fn with_nested_engine<'a, 'this, F, S2>(
+        &'this self,
+        engine_fn: F,
+    ) -> Result<CompletionContext<S2>, S2::Error>
+    where
+        'this: 'a,
+        F: FnOnce(&mut UpdateEngine<'a, S2>) -> Result<(), S2::Error> + Send,
+        S2: StepSpec,
+    {
+        let (sender, mut receiver) = mpsc::channel(128);
+        let mut engine = UpdateEngine::new(&self.log, sender);
+        // Create the engine's steps.
+        (engine_fn)(&mut engine)?;
+
+        // Now run the engine.
+        let engine = engine.execute();
+        tokio::pin!(engine);
+
+        let mut result = None;
+        let mut events_done = false;
+
+        loop {
+            tokio::select! {
+                ret = &mut engine, if result.is_none() => {
+                    match ret {
+                        Ok(cx) => {
+                            result = Some(Ok(cx));
+                        }
+                        Err(ExecutionError::EventSendError(_)) => {
+                            unreachable!("we always keep the receiver open")
+                        }
+                        Err(ExecutionError::StepFailed { error, .. }) => {
+                            result = Some(Err(error));
+                        }
+                    }
+                }
+                event = receiver.recv(), if !events_done => {
+                    match event {
+                        Some(event) => {
+                            match event.into_generic() {
+                                Ok(event) => {
+                                    self.payload_sender.send(
+                                        StepContextPayload::Nested(event)
+                                    )
+                                    .await
+                                    .expect("we always keep the receiver open");
+                                }
+                                Err(error) => {
+                                    // All we can really do is log this as a warning.
+                                    // This
+                                    slog::warn!(self.log, "error serializing nested event: {error}");
+                                }
+                            }
+                        }
+                        None => {
+                            events_done = true;
+                        }
+                    }
+                }
+                else => {
+                    break;
+                }
+            }
+        }
+
+        result.expect("the loop only exits if result is set")
     }
 
     /// Retrieves a token used to fetch the value out of a [`StepHandle`].
     pub fn token(&self) -> &StepHandleToken<S> {
         &self.token
     }
+}
+
+#[derive_where(Debug)]
+pub(crate) enum StepContextPayload<S: StepSpec> {
+    Progress(StepProgress<S>),
+    Nested(Event<NestedSpec>),
 }
 
 /// Context for a step's metadata-generation function.

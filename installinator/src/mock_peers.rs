@@ -97,10 +97,10 @@ impl MockPeersUniverse {
         )
     }
 
-    fn expected_success(
+    fn expected_result(
         &self,
         timeout: Duration,
-    ) -> Option<(usize, SocketAddrV6)> {
+    ) -> Result<(usize, SocketAddrV6), usize> {
         self.attempts()
             .enumerate()
             .filter_map(|(attempt, peers)| {
@@ -112,6 +112,7 @@ impl MockPeersUniverse {
                     .map(|addr| (attempt + 1, addr))
             })
             .next()
+            .ok_or_else(|| self.attempt_bitmaps.len())
     }
 
     fn attempts(&self) -> impl Iterator<Item = Result<MockPeers>> + '_ {
@@ -546,6 +547,10 @@ mod tests {
 
     use bytes::Buf;
     use futures::{future, StreamExt};
+    use installinator_common::{
+        InstallinatorCompletionMetadata, InstallinatorProgressMetadata,
+        StepEvent, StepEventKind, StepOutcome, UpdateEngine,
+    };
     use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use test_strategy::proptest;
@@ -563,7 +568,7 @@ mod tests {
     ) {
         with_test_runtime(move || async move {
             let logctx = test_setup_log("proptest_fetch_artifact");
-            let expected_success = universe.expected_success(timeout);
+            let expected_result = universe.expected_result(timeout);
             let expected_artifact = universe.artifact.clone();
 
             let mut attempts = universe.attempts();
@@ -595,6 +600,8 @@ mod tests {
                 });
             let progress_handle = progress_reporter.start();
 
+            let engine = UpdateEngine::new(&logctx.log, event_sender);
+
             let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
                 &logctx.log,
                 || match attempts.next() {
@@ -615,8 +622,6 @@ mod tests {
             )
             .await;
 
-            std::mem::drop(event_sender);
-
             progress_handle
                 .await
                 .expect("progress reporter task exited successfully");
@@ -627,9 +632,9 @@ mod tests {
 
             println!("finished receiving reports");
 
-            match (expected_success, fetched_artifact) {
+            match (expected_result, fetched_artifact) {
                 (
-                    Some((expected_attempt, expected_addr)),
+                    Ok((expected_attempt, expected_addr)),
                     Ok(FetchedArtifact { attempt, addr, mut artifact }),
                 ) => {
                     assert_eq!(
@@ -647,16 +652,16 @@ mod tests {
                         addr,
                     );
                 }
-                (None, Err(_)) => {}
-                (None, Ok(fetched_artifact)) => {
+                (Err(_), Err(_)) => {}
+                (Err(_), Ok(fetched_artifact)) => {
                     panic!("expected failure to fetch but found success: {fetched_artifact:?}");
                 }
-                (Some((attempt, addr)), Err(err)) => {
+                (Ok((attempt, addr)), Err(err)) => {
                     panic!("expected success at attempt `{attempt}` from `{addr}`, but found failure: {err}");
                 }
             }
 
-            assert_progress_reports(&reports, expected_success);
+            assert_progress_reports(&reports, expected_result);
 
             logctx.cleanup_successful();
         });
@@ -664,31 +669,16 @@ mod tests {
 
     fn assert_progress_reports(
         reports: &[ProgressReport],
-        expected_success: Option<(usize, SocketAddrV6)>,
+        expected_result: Result<(usize, SocketAddrV6), usize>,
     ) {
         for report in reports {
             // Assert that completion event timestamps are before report timestamps.
-            for event in &report.completion_events {
+            for event in &report.step_events {
                 assert!(
                     event.total_elapsed <= report.total_elapsed,
                     "event elapsed {:?} is before report elapsed {:?}",
                     event.total_elapsed,
                     report.total_elapsed
-                );
-            }
-            // Assert that completion events are correctly ordered.
-            for events in report.completion_events.windows(2) {
-                assert!(
-                    events[0].total_elapsed <= events[1].total_elapsed,
-                    "preceding event elapsed {:?} is less than event elapsed {:?}",
-                    events[0].total_elapsed,
-                    events[1].total_elapsed
-                );
-                assert!(
-                    events[0].kind.attempt() <= events[1].kind.attempt(),
-                    "preceding event attempt {:?} is less than event attempt {:?}",
-                    events[0].kind.attempt(),
-                    events[1].kind.attempt(),
                 );
             }
             // For now we only send a single progress event at most.
@@ -707,65 +697,160 @@ mod tests {
             }
         }
 
-        let all_completion_events: Vec<_> = reports
-            .iter()
-            .flat_map(|report| &report.completion_events)
-            .collect();
+        let all_step_events: Vec<_> =
+            reports.iter().flat_map(|report| &report.step_events).collect();
 
         // Assert that we received failure events for all prior attempts and
         // a success event for the current attempt.
-        if let Some((attempt, expected_addr)) = expected_success {
-            let mut saw_success = false;
-
-            for event in all_completion_events {
-                match (event.kind.is_success(), event.kind.peer()) {
-                    (true, Some(peer)) => {
-                        saw_success = true;
-                        assert_eq!(
-                            peer, expected_addr,
-                            "successful peer should match address"
-                        );
-                        assert_eq!(
-                            event.kind.attempt(),
-                            Some(attempt),
-                            "successful attempt should match"
-                        );
-                    }
-                    (false, Some(peer)) => {
-                        // If the peer is the expected one, ensure that the
-                        // attempt is lower.
-                        if peer == expected_addr {
-                            assert!(
-                                event.kind.attempt().unwrap() < attempt,
-                                "for expected peer, failed attempt {:?} < {attempt}",
-                                event.kind.attempt()
-                            );
-                        } else {
-                            assert!(
-                                event.kind.attempt().unwrap() <= attempt,
-                                "for different peer than expected, failed attempt {:?} <= {attempt}",
-                                event.kind.attempt()
-                            );
-                        }
-                    }
-                    (_, None) => {
-                        // This is a non-download event; ignore it.
-                    }
-                }
-            }
-
-            assert!(saw_success, "successful event must have been produced");
-            // It's hard to say anything about failing events for now because
-            // it's possible we didn't have any peers. In the future we can look
-            // at the MockPeersUniverse to ensure that we receive failing
-            // events from every peer that should have failed.
-        } else {
-            for event in all_completion_events {
-                assert!(
-                    !event.kind.is_success(),
-                    "for failed attempts, all events must be failures"
+        match expected_result {
+            Ok((expected_attempt, expected_addr)) => {
+                assert_success_events(
+                    all_step_events,
+                    expected_attempt,
+                    expected_addr,
                 );
             }
+            Err(expected_total_attempts) => {
+                assert_failure_events(all_step_events, expected_total_attempts);
+            }
         }
+    }
+
+    fn assert_success_events(
+        all_step_events: Vec<&StepEvent>,
+        expected_attempt: usize,
+        expected_addr: SocketAddrV6,
+    ) {
+        let mut saw_success = false;
+
+        for event in all_step_events {
+            match &event.kind {
+                StepEventKind::ProgressReset {
+                    step,
+                    attempt,
+                    metadata,
+                    step_elapsed,
+                    attempt_elapsed,
+                    message,
+                } => {
+                    if *attempt == expected_attempt {
+                        match metadata {
+                            InstallinatorProgressMetadata::Download {
+                                peer,
+                            } => {
+                                assert_ne!(
+                                    *peer, expected_addr,
+                                    "peer cannot match since this is the last attempt"
+                                );
+                            }
+                            other => {
+                                panic!("expected download metadata, found {other:?}");
+                            }
+                        };
+                    }
+                }
+                StepEventKind::AttemptRetry {
+                    step,
+                    next_attempt,
+                    step_elapsed,
+                    attempt_elapsed,
+                    message,
+                } => {
+                    // It's hard to say anything about failing attempts for now
+                    // because it's possible we didn't have any peers. In the
+                    // future we can look at the MockPeersUniverse to ensure
+                    // that we receive failing events from every peer that
+                    // should have failed.
+
+                    assert!(
+                        *next_attempt <= expected_attempt,
+                        "next attempt {next_attempt} \
+                             is less than {expected_attempt}"
+                    );
+                }
+                StepEventKind::ExecutionCompleted {
+                    last_step,
+                    last_attempt,
+                    last_outcome,
+                    step_elapsed,
+                    attempt_elapsed,
+                } => {
+                    assert_eq!(
+                        *last_attempt, expected_attempt,
+                        "last attempt matches expected"
+                    );
+                    match last_outcome {
+                        StepOutcome::Success {
+                            metadata:
+                                InstallinatorCompletionMetadata::Download {
+                                    address,
+                                },
+                        } => {
+                            assert_eq!(
+                                *address, expected_addr,
+                                "address matches expected"
+                            );
+                        }
+                        other => {
+                            panic!("expected success, found {last_outcome:?}");
+                        }
+                    }
+                    saw_success = true;
+                }
+                StepEventKind::ExecutionFailed { .. } => {
+                    panic!("received unexpected failed event {:?}", event.kind)
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_success, "successful event must have been produced");
+    }
+
+    fn assert_failure_events(
+        all_step_events: Vec<&StepEvent>,
+        expected_total_attempts: usize,
+    ) {
+        let mut saw_failure = false;
+        for event in all_step_events {
+            match &event.kind {
+                StepEventKind::AttemptRetry {
+                    step,
+                    next_attempt,
+                    step_elapsed,
+                    attempt_elapsed,
+                    message,
+                } => {
+                    assert!(
+                        *next_attempt <= expected_total_attempts,
+                        "next attempt {next_attempt} \
+                             is less than {expected_total_attempts}"
+                    );
+                }
+                StepEventKind::ExecutionFailed {
+                    failed_step,
+                    total_attempts,
+                    step_elapsed,
+                    attempt_elapsed,
+                    message,
+                    causes,
+                } => {
+                    assert_eq!(
+                        *total_attempts, expected_total_attempts,
+                        "total attempts matches expected"
+                    );
+                    saw_failure = true;
+                }
+                StepEventKind::ExecutionCompleted { .. } => {
+                    panic!(
+                        "received unexpected success event {:?}",
+                        event.kind
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_failure, "failure event must have been produced");
     }
 }

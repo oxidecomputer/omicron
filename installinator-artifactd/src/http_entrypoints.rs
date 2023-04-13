@@ -100,13 +100,13 @@ pub(crate) struct ReportQuery {
 async fn report_progress(
     rqctx: RequestContext<ServerContext>,
     path: Path<ReportQuery>,
-    event: TypedBody<ProgressReport>,
+    report: TypedBody<ProgressReport>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let update_id = path.into_inner().update_id;
     match rqctx
         .context()
         .artifact_store
-        .report_progress(update_id, event.into_inner())
+        .report_progress(update_id, report.into_inner())
         .await?
     {
         ProgressReportStatus::Processed => Ok(HttpResponseUpdatedNoContent()),

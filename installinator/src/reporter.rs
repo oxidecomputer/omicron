@@ -8,23 +8,15 @@ use std::time::Duration;
 
 use display_error_chain::DisplayErrorChain;
 use futures::{Future, StreamExt};
-use installinator_common::{
-    CompletionEvent, CompletionEventKind, ProgressEvent, ProgressEventKind,
-    ProgressReport,
-};
+use installinator_common::{Event, ProgressEvent, ProgressReport, StepEvent};
 use tokio::{
     sync::mpsc,
     time::{self, Instant},
 };
+use update_engine::events::StepEventPriority;
 use uuid::Uuid;
 
 use crate::{errors::DiscoverPeersError, peers::Peers};
-
-#[derive(Debug)]
-pub(crate) enum ReportEvent {
-    Completion(CompletionEventKind),
-    Progress(ProgressEventKind),
-}
 
 #[derive(Debug)]
 pub(crate) struct ProgressReporter<F> {
@@ -33,8 +25,8 @@ pub(crate) struct ProgressReporter<F> {
     start: Instant,
     discover_fn: F,
     // Receives updates about progress and completion.
-    event_receiver: mpsc::Receiver<ReportEvent>,
-    completion: Vec<CompletionEvent>,
+    event_receiver: mpsc::Receiver<Event>,
+    step: Vec<StepEvent>,
     last_progress: Option<ProgressEvent>,
 }
 
@@ -47,7 +39,7 @@ where
         log: &slog::Logger,
         update_id: Uuid,
         discover_fn: F,
-    ) -> (Self, mpsc::Sender<ReportEvent>) {
+    ) -> (Self, mpsc::Sender<Event>) {
         // Set a large enough buffer that it filling up isn't an actual problem
         // outside of something going horribly wrong.
         let (event_sender, event_receiver) = mpsc::channel(512);
@@ -57,7 +49,7 @@ where
             start: Instant::now(),
             discover_fn,
             event_receiver,
-            completion: Vec::with_capacity(8),
+            step: Vec::with_capacity(8),
             last_progress: None,
         };
         (ret, event_sender)
@@ -80,22 +72,14 @@ where
 
                     event = self.event_receiver.recv(), if !events_done => {
                         match event {
-                            Some(ReportEvent::Completion(kind)) => {
-                                let event = CompletionEvent {
-                                    total_elapsed: self.start.elapsed(),
-                                    kind,
-                                };
-                                self.completion.push(event);
+                            Some(Event::Step(event)) => {
+                                self.step.push(event);
                                 // Reset progress: we don't want to send
                                 // progress notifications after completion ones
                                 // for the same artifact.
                                 self.last_progress = None;
                             }
-                            Some(ReportEvent::Progress(kind)) => {
-                                let event = ProgressEvent {
-                                    total_elapsed: self.start.elapsed(),
-                                    kind,
-                                };
+                            Some(Event::Progress(event)) => {
                                 self.last_progress = Some(event);
                             }
                             None => {
@@ -108,7 +92,7 @@ where
                     }
                 }
 
-                if events_done && self.completion.is_empty() {
+                if events_done && self.step.is_empty() {
                     // All done, now exit.
                     break;
                 }
@@ -117,18 +101,18 @@ where
     }
 
     async fn on_tick(&mut self) {
-        // Assemble a report out of pending completion and progress events.
-        // For completion, include all success events and the last 20 failure
+        // Assemble a report out of pending completion and progress events. For
+        // completion, include all step events other than the last 20 retry
         // events (with the goal being to keep the size of the report down,
         // since a report that's too large will cause the max payload size to be
         // exceeded.)
         let mut failure_events_seen = 0;
-        let mut completion_events: Vec<_> = self
-            .completion
+        let mut step_events: Vec<_> = self
+            .step
             .iter()
             .rev()
             .filter(|event| {
-                if event.kind.is_success() {
+                if event.kind.priority() >= StepEventPriority::High {
                     true
                 } else {
                     failure_events_seen += 1;
@@ -137,15 +121,15 @@ where
             })
             .cloned()
             .collect();
-        // IMPORTANT: You might be tempted to replace this reverse call with
+        // STEP: You might be tempted to replace this reverse call with
         // another `.rev()` above. Don't do that! It will cause the *first* 20
         // elements to be taken rather than the *last* 20 elements.
-        completion_events.reverse();
+        step_events.reverse();
 
         let progress_events = self.last_progress.clone().into_iter().collect();
         let report = ProgressReport {
             total_elapsed: self.start.elapsed(),
-            completion_events,
+            step_events,
             progress_events,
         };
 
@@ -174,7 +158,7 @@ where
             peers.broadcast_report(self.update_id, report).collect().await;
         if results.iter().any(|res| res.is_ok()) {
             // Reset the state.
-            self.completion.clear();
+            self.step.clear();
             self.last_progress = None;
         }
     }

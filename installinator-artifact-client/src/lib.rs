@@ -20,10 +20,11 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     replace = {
         ProgressReport = installinator_common::ProgressReport,
-        CompletionEvent = installinator_common::CompletionEvent,
-        CompletionEventKind = installinator_common::CompletionEventKind,
-        ProgressEvent = installinator_common::ProgressEvent,
-        ProgressEventKind = installinator_common::ProgressEventKind,
+        StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
+        StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
+        ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
+        M2Slot = installinator_common::M2Slot,
         Duration = std::time::Duration,
     }
 );

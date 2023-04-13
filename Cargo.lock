@@ -3153,6 +3153,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml 0.7.3",
+ "update-engine",
  "uuid",
 ]
 
@@ -3168,6 +3169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "update-engine",
  "uuid",
 ]
 
@@ -3200,11 +3202,15 @@ dependencies = [
 name = "installinator-common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
  "omicron-common 0.1.0",
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
+ "thiserror",
+ "update-engine",
 ]
 
 [[package]]
