@@ -79,6 +79,7 @@ impl fmt::Display for ExampleComponent {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ExampleStepId {
     Download,
+    CreateTempDir,
     Write,
     Skipped,
 }
@@ -86,7 +87,7 @@ pub(crate) enum ExampleStepId {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ExampleStepMetadata {
-    Write { path: PathBuf, num_bytes: u64 },
+    Write { num_bytes: u64 },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -95,8 +96,38 @@ pub(crate) enum ExampleCompletionMetadata {
     Download {
         num_bytes: u64,
     },
+    CreateTempDir {
+        paths: Vec<PathBuf>,
+    },
     Write {
         num_bytes: u64,
+        #[schemars(schema_with = "paths_schema")]
+        destinations: Vec<Utf8PathBuf>,
+    },
+}
+
+/// A new schema for the write step.
+///
+/// This is used as a nested step.
+#[derive(JsonSchema)]
+pub(crate) enum ExampleWriteSpec {}
+
+impl StepSpec for ExampleWriteSpec {
+    type Component = ExampleComponent;
+    type StepId = ExampleWriteStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = ();
+    type CompletionMetadata = ();
+    type SkippedMetadata = ();
+    type Error = anyhow::Error;
+}
+
+#[derive(
+    Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub(crate) enum ExampleWriteStepId {
+    Write {
         #[schemars(schema_with = "path_schema")]
         destination: Utf8PathBuf,
     },
@@ -105,5 +136,11 @@ pub(crate) enum ExampleCompletionMetadata {
 fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
+
+fn paths_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <Vec<String>>::json_schema(gen).into();
+    schema.format = Some("Vec<Utf8PathBuf>".to_owned());
     schema.into()
 }
