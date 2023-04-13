@@ -1335,7 +1335,10 @@ async fn sic_instance_ensure_registered(
         //
         // TODO-correctness: This is dangerous if this step is replayed, since
         // a user can discover this instance and ask to start it in between
-        // attempts to run this step.
+        // attempts to run this step. One way to fix this is to avoid refetching
+        // the previous runtime state each time this step is taken, such that
+        // once this update is applied once, subsequent attempts to apply it
+        // will have an already-used generation number.
         let runtime_state = db::model::InstanceRuntimeState {
             state: db::model::InstanceState::new(InstanceState::Stopped),
             // Must update the generation, or the database query will fail.
