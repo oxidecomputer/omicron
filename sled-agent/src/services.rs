@@ -1148,10 +1148,20 @@ impl ServiceManager {
                         if is_gimlet().map_err(|e| {
                             Error::Underlay(underlay::Error::SystemDetection(e))
                         })? {
-                            (1..32)
+                            (0..31)
                                 .map(|i| {
+                                    // See the `tfport_name` function for how
+                                    // tfportd names the addrconf it creates.
+                                    // Right now, that's `tfportrear[0-31]_0`
+                                    // for all rear ports, which is what we're
+                                    // directing ddmd to listen for
+                                    // advertisements on.
+                                    //
+                                    // This may grow in a multi-rack future to
+                                    // include a subset of "front" ports too,
+                                    // when racks are cabled together.
                                     AddrObject::new(
-                                        &format!("tfport{}", i), // XXX rearN soon!
+                                        &format!("tfportrear{}_0", i),
                                         IPV6_LINK_LOCAL_NAME,
                                     )
                                     .unwrap()
