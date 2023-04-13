@@ -171,3 +171,148 @@ async fn dns_propagate_one(
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::dns_propagation::DnsPropagator;
+    use crate::app::background::dns_servers::DnsServersList;
+    use dns_service_client::types::DnsConfigParams;
+    use httptest::matchers::request;
+    use httptest::responders::status_code;
+    use httptest::Expectation;
+    use nexus_db_queries::context::OpContext;
+    use nexus_test_utils_macros::nexus_test;
+    use serde_json::json;
+    use tokio::sync::watch;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_basic(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let (config_tx, config_rx) = watch::channel(None);
+        let (servers_tx, servers_rx) = watch::channel(None);
+        let mut task = DnsPropagator::new(config_rx, servers_rx, 3);
+
+        let dns_config = DnsConfigParams {
+            generation: 1,
+            time_created: chrono::Utc::now(),
+            zones: vec![],
+        };
+        let dns_servers = DnsServersList { addresses: vec![] };
+
+        // With no config or servers, we should fail with an appropriate
+        // message.
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!({ "error": "no config nor servers" }));
+        config_tx.send(Some(dns_config.clone())).unwrap();
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!({ "error": "no servers" }));
+        config_tx.send(None).unwrap();
+        servers_tx.send(Some(dns_servers)).unwrap();
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!({ "error": "no config" }));
+
+        // With a config and no servers, the operation should be a noop.
+        config_tx.send(Some(dns_config)).unwrap();
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!([]));
+
+        // Now, create some fake servers ready to respond successfully to a
+        // propagation attempt.
+        let mut s1 = httptest::Server::run();
+        let mut s2 = httptest::Server::run();
+
+        servers_tx
+            .send(Some(DnsServersList {
+                addresses: [&s1, &s2].iter().map(|s| s.addr()).collect(),
+            }))
+            .unwrap();
+
+        for s in [&mut s1, &mut s2] {
+            s.expect(
+                Expectation::matching(request::method_path("PUT", "/config"))
+                    .respond_with(status_code(204)),
+            );
+        }
+
+        // Define a type we can use to pick stuff out of error objects.
+        type ServerResult = Vec<Result<(), String>>;
+
+        // Do it!
+        let value = task.activate(&opctx).await;
+        // Check the results.
+        let result: ServerResult = serde_json::from_value(value).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_ok());
+        assert!(result[1].is_ok());
+        s1.verify_and_clear();
+        s2.verify_and_clear();
+
+        // Do it all again.  The task doesn't keep track of what servers have
+        // what versions so both servers should see the same request
+        for s in [&mut s1, &mut s2] {
+            s.expect(
+                Expectation::matching(request::method_path("PUT", "/config"))
+                    .respond_with(status_code(204)),
+            );
+        }
+
+        let value = task.activate(&opctx).await;
+        let result: ServerResult = serde_json::from_value(value).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_ok());
+        assert!(result[1].is_ok());
+        s1.verify_and_clear();
+        s2.verify_and_clear();
+
+        // Take another lap, but this time, have one server fail the request and
+        // try again.
+        s1.expect(
+            Expectation::matching(request::method_path("PUT", "/config"))
+                .respond_with(status_code(204)),
+        );
+        s2.expect(
+            Expectation::matching(request::method_path("PUT", "/config"))
+                .respond_with(status_code(500)),
+        );
+
+        let value = task.activate(&opctx).await;
+        println!("{:?}", value);
+        let result: ServerResult = serde_json::from_value(value).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_ok());
+        assert!(result[1].is_err());
+        assert!(result[1].as_ref().unwrap_err().starts_with(&format!(
+            "failed to propagate DNS generation 1 to server {}",
+            s2.addr()
+        )));
+        s1.verify_and_clear();
+        s2.verify_and_clear();
+
+        // Take one more lap.  Both servers should get the request again.  This
+        // time we'll have both succeed again.
+        for s in [&mut s1, &mut s2] {
+            s.expect(
+                Expectation::matching(request::method_path("PUT", "/config"))
+                    .respond_with(status_code(204)),
+            );
+        }
+
+        let value = task.activate(&opctx).await;
+        let result: ServerResult = serde_json::from_value(value).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_ok());
+        assert!(result[1].is_ok());
+        s1.verify_and_clear();
+        s2.verify_and_clear();
+    }
+}

@@ -97,13 +97,14 @@ fn init_dns(
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::db::TransactionError;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
     use nexus_types::internal_api::params::ServiceKind;
@@ -161,24 +162,8 @@ mod test {
         assert_eq!(config.generation, 1);
 
         // We'll need the id of the internal DNS zone.
-        let dns_zones = datastore
-            .dns_zones_list(
-                &opctx,
-                DnsGroup::Internal,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(2).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            dns_zones.len(),
-            1,
-            "expected exactly one internal DNS zone"
-        );
-        let internal_dns_zone_id = dns_zones[0].id;
+        let internal_dns_zone_id =
+            read_internal_dns_zone_id(&opctx, datastore).await;
 
         // Now spin up another DNS server, add it to the list of servers, and
         // make sure that DNS gets propagated to it.  Note that we shouldn't
@@ -241,54 +226,7 @@ mod test {
 
         // Now, write version 2 of the internal DNS configuration with one
         // additional record.
-        type TxnError = TransactionError<()>;
-        {
-            let conn = datastore.pool_for_tests().await.unwrap();
-            let _: Result<(), TxnError> = conn
-                .transaction_async(|conn| async move {
-                    {
-                        use crate::db::model::DnsVersion;
-                        use crate::db::schema::dns_version::dsl;
-
-                        diesel::insert_into(dsl::dns_version)
-                            .values(DnsVersion {
-                                dns_group: DnsGroup::Internal,
-                                version: Generation(2.try_into().unwrap()),
-                                time_created: chrono::Utc::now(),
-                                creator: String::from("test suite"),
-                                comment: String::from("test suite"),
-                            })
-                            .execute_async(&conn)
-                            .await
-                            .unwrap();
-                    }
-
-                    {
-                        use crate::db::model::DnsName;
-                        use crate::db::schema::dns_name::dsl;
-
-                        diesel::insert_into(dsl::dns_name)
-                            .values(
-                                DnsName::new(
-                                    internal_dns_zone_id,
-                                    String::from("we-got-beets"),
-                                    Generation(2.try_into().unwrap()),
-                                    None,
-                                    vec![nexus_params::DnsRecord::Aaaa(
-                                        "fe80::3".parse().unwrap(),
-                                    )],
-                                )
-                                .unwrap(),
-                            )
-                            .execute_async(&conn)
-                            .await
-                            .unwrap();
-                    }
-
-                    Ok(())
-                })
-                .await;
-        }
+        write_test_dns_generation(datastore, internal_dns_zone_id).await;
 
         // Activate the internal DNS propagation pipeline.
         nexus.background_tasks.activate(&nexus.task_internal_dns_config);
@@ -349,5 +287,83 @@ mod test {
         )
         .await
         .expect("DNS config not propagated in expected time");
+    }
+
+    pub async fn write_test_dns_generation(
+        datastore: &DataStore,
+        internal_dns_zone_id: Uuid,
+    ) {
+        type TxnError = TransactionError<()>;
+        {
+            let conn = datastore.pool_for_tests().await.unwrap();
+            let _: Result<(), TxnError> = conn
+                .transaction_async(|conn| async move {
+                    {
+                        use crate::db::model::DnsVersion;
+                        use crate::db::schema::dns_version::dsl;
+
+                        diesel::insert_into(dsl::dns_version)
+                            .values(DnsVersion {
+                                dns_group: DnsGroup::Internal,
+                                version: Generation(2.try_into().unwrap()),
+                                time_created: chrono::Utc::now(),
+                                creator: String::from("test suite"),
+                                comment: String::from("test suite"),
+                            })
+                            .execute_async(&conn)
+                            .await
+                            .unwrap();
+                    }
+
+                    {
+                        use crate::db::model::DnsName;
+                        use crate::db::schema::dns_name::dsl;
+
+                        diesel::insert_into(dsl::dns_name)
+                            .values(
+                                DnsName::new(
+                                    internal_dns_zone_id,
+                                    String::from("we-got-beets"),
+                                    Generation(2.try_into().unwrap()),
+                                    None,
+                                    vec![nexus_params::DnsRecord::Aaaa(
+                                        "fe80::3".parse().unwrap(),
+                                    )],
+                                )
+                                .unwrap(),
+                            )
+                            .execute_async(&conn)
+                            .await
+                            .unwrap();
+                    }
+
+                    Ok(())
+                })
+                .await;
+        }
+    }
+
+    pub async fn read_internal_dns_zone_id(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Uuid {
+        let dns_zones = datastore
+            .dns_zones_list(
+                &opctx,
+                DnsGroup::Internal,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(2).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            dns_zones.len(),
+            1,
+            "expected exactly one internal DNS zone"
+        );
+        dns_zones[0].id
     }
 }
