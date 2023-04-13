@@ -451,3 +451,13 @@ pub struct TimeSync {
     /// The current offset between the NTP clock and system clock.
     pub correction: f64,
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
+}

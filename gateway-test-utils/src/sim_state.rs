@@ -8,7 +8,6 @@ use gateway_messages::ignition::SystemPowerState;
 use gateway_messages::ignition::SystemType;
 use omicron_gateway::http_entrypoints::SpIdentifier;
 use omicron_gateway::http_entrypoints::SpIgnitionInfo;
-use omicron_gateway::http_entrypoints::SpInfo;
 use omicron_gateway::http_entrypoints::SpState;
 use omicron_gateway::http_entrypoints::SpType;
 use sp_sim::Gimlet;
@@ -19,17 +18,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-pub trait SpStateExt {
-    fn is_enabled(&self) -> bool;
-}
-
-impl SpStateExt for SpState {
-    fn is_enabled(&self) -> bool {
-        match self {
-            SpState::Enabled { .. } => true,
-            SpState::CommunicationFailed { .. } => false,
-        }
-    }
+pub struct SpInfo {
+    pub ignition: SpIgnitionInfo,
+    pub state: Result<SpState, String>,
 }
 
 /// Query the running simulator and translate it into an ordered list of `SpInfo`.
@@ -61,7 +52,7 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
         // setup.
         slot = all_sps.last().map_or(0, |prev_info| {
             // if the type changed, reset to slot 0; otherwise increment
-            if prev_info.info.id.typ != typ {
+            if prev_info.ignition.id.typ != typ {
                 0
             } else {
                 slot + 1
@@ -76,19 +67,17 @@ pub async fn current_simulator_state(simrack: &SimRack) -> Vec<SpInfo> {
 
         let details =
             if matches!(target_state.power_state, SystemPowerState::On) {
-                sp.state().await
+                Ok(sp.state().await)
             } else {
-                SpState::CommunicationFailed {
-                    message: "powered off".to_string(),
-                }
+                Err("powered off".to_string())
             };
 
         all_sps.push(SpInfo {
-            info: SpIgnitionInfo {
+            ignition: SpIgnitionInfo {
                 id: SpIdentifier { typ, slot },
                 details: state.into(),
             },
-            details,
+            state: details,
         });
     }
 

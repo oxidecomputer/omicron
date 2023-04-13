@@ -7,7 +7,7 @@
 use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
-    TimeSync, Zpool,
+    SledRole, TimeSync, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -29,17 +29,18 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
-        api.register(services_put)?;
-        api.register(zpools_get)?;
-        api.register(filesystem_put)?;
-        api.register(instance_put)?;
         api.register(disk_put)?;
-        api.register(update_artifact)?;
+        api.register(filesystem_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
-        api.register(vpc_firewall_rules_put)?;
+        api.register(instance_put)?;
+        api.register(services_put)?;
+        api.register(sled_role_get)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
+        api.register(update_artifact)?;
+        api.register(vpc_firewall_rules_put)?;
+        api.register(zpools_get)?;
 
         Ok(())
     }
@@ -74,6 +75,17 @@ async fn zpools_get(
 ) -> Result<HttpResponseOk<Vec<Zpool>>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.zpools_get().await.map_err(|e| Error::from(e))?))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/sled-role",
+}]
+async fn sled_role_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.get_role().await))
 }
 
 #[endpoint {

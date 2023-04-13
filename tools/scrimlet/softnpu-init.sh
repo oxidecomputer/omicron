@@ -13,27 +13,31 @@ echo "Using $GATEWAY_IP as gateway ip"
 GATEWAY_MAC=${GATEWAY_MAC:=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
 echo "Using $GATEWAY_MAC as gateway mac"
 
-# Sidecar Interface facing "sled"
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port create 1:0 100G RS
+z_swadm () {
+    pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
+}
 
-# Sidecar Interface facing external network
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port create 2:0 100G RS
+
+# Add front facing port
+z_swadm port create 1:0 100G RS
+z_swadm port create 2:0 100G RS
 
 # Configure sidecar local ipv6 addresses
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 1:0 fe80::aae1:deff:fe01:701c
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 2:0 fe80::aae1:deff:fe01:701d
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr add 1:0 fd00:99::1
+z_swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
+z_swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
+z_swadm addr add rear0/0 fd00:99::1
 
-# Configure route to oxide rack
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route add fd00:1122:3344:0101::/64 1:0 fe80::aae1:deff:fe00:1
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
+# Configure route to the "sled"
+z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
+# Create NDP entry for the "sled"
+z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
 
-# Configure default route
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route add 0.0.0.0/0 2:0 "$GATEWAY_IP"
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp add "$GATEWAY_IP" "$GATEWAY_MAC"
+# Configure upstream network gateway ARP entry
+z_swadm arp add "$GATEWAY_IP" "$GATEWAY_MAC"
+# Configure route to upstream gateway
+z_swadm route add 0.0.0.0/0 qsfp0/0 "$GATEWAY_IP"
 
-
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" port list
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" addr list
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" route list
-./out/softnpu/swadm -h "[fd00:1122:3344:101::2]" arp list
+z_swadm port list
+z_swadm addr list
+z_swadm route list
+z_swadm arp list

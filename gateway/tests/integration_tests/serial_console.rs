@@ -10,7 +10,6 @@ use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
 use gateway_test_utils::sim_sp_serial_console;
-use gateway_test_utils::SpStateExt;
 use http::uri::Scheme;
 use http::StatusCode;
 use http::Uri;
@@ -27,8 +26,8 @@ async fn serial_console_communication() {
 
     // sanity check: we have at least 1 gimlet, and all SPs are enabled
     let sim_state = current_simulator_state(simrack).await;
-    assert!(sim_state.iter().any(|sp| sp.info.id.typ == SpType::Sled));
-    assert!(sim_state.iter().all(|sp| sp.details.is_enabled()));
+    assert!(sim_state.iter().any(|sp| sp.ignition.id.typ == SpType::Sled));
+    assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // connect to sled 0's serial console
     let (console_write, mut console_read) =
@@ -73,8 +72,8 @@ async fn serial_console_detach() {
 
     // sanity check: we have at least 1 gimlet, and all SPs are enabled
     let sim_state = current_simulator_state(simrack).await;
-    assert!(sim_state.iter().any(|sp| sp.info.id.typ == SpType::Sled));
-    assert!(sim_state.iter().all(|sp| sp.details.is_enabled()));
+    assert!(sim_state.iter().any(|sp| sp.ignition.id.typ == SpType::Sled));
+    assert!(sim_state.iter().all(|sp| sp.state.is_ok()));
 
     // connect to sled 0's serial console
     let (console_write, mut console_read) =
