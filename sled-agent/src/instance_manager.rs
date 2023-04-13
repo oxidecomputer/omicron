@@ -140,7 +140,9 @@ impl InstanceManager {
                     existing_instance.clone()
                 }
             } else {
-                info!(&self.inner.log, "new instance");
+                info!(&self.inner.log,
+                      "registering new instance";
+                      "instance_id" => ?instance_id);
                 let instance_log = self.inner.log.new(o!());
                 let ticket =
                     InstanceTicket::new(instance_id, self.inner.clone());
