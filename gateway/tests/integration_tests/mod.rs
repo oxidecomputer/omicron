@@ -4,7 +4,6 @@
 
 // Copyright 2022 Oxide Computer Company
 
-mod bulk_state_get;
 mod commands;
 mod component_list;
 mod location_discovery;

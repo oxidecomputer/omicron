@@ -26,8 +26,6 @@ use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
-use futures::stream::FuturesUnordered;
-use futures::FutureExt;
 use futures::TryFutureExt;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
@@ -36,13 +34,10 @@ use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::str;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_stream::StreamExt;
-use tokio_util::either::Either;
 use uuid::Uuid;
 
 #[derive(
@@ -56,37 +51,16 @@ use uuid::Uuid;
     Serialize,
     JsonSchema,
 )]
-pub struct SpInfo {
-    pub info: SpIgnitionInfo,
-    pub details: SpState,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SpState {
-    Enabled {
-        serial_number: String,
-        model: String,
-        revision: u32,
-        hubris_archive_id: String,
-        base_mac_address: [u8; 6],
-        version: ImageVersion,
-        power_state: PowerState,
-        rot: RotState,
-    },
-    CommunicationFailed {
-        message: String,
-    },
+#[serde(rename_all = "snake_case")]
+pub struct SpState {
+    pub serial_number: String,
+    pub model: String,
+    pub revision: u32,
+    pub hubris_archive_id: String,
+    pub base_mac_address: [u8; 6],
+    pub version: ImageVersion,
+    pub power_state: PowerState,
+    pub rot: RotState,
 }
 
 #[derive(
@@ -194,8 +168,6 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
-    #[serde(rename = "error")]
-    CommunicationFailed { message: String },
 }
 
 /// Ignition command.
@@ -520,114 +492,6 @@ struct PathSpIgnitionCommand {
     command: IgnitionCommand,
 }
 
-/// List SPs
-///
-/// Since communication with SPs may be unreliable, consumers may specify an
-/// optional timeout to override the default.
-///
-/// This interface makes use of Ignition as well as the management network.
-/// SPs that are powered off (and therefore cannot respond over the
-/// management network) are represented in the output set. SPs that Ignition
-/// reports as powered on, but that do not respond within the allotted timeout
-/// will similarly be represented in the output; these will only be included in
-/// the output when the allotted timeout has expired.
-///
-/// Note that Ignition provides the full set of SPs that are plugged into the
-/// system so the gateway service knows prior to waiting for responses the
-/// expected cardinality.
-#[endpoint {
-    method = GET,
-    path = "/sp",
-}]
-async fn sp_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
-    let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
-
-    // Build a `FuturesUnordered` to query every SP for its state.
-    let all_sps_stream = mgmt_switch
-        .all_sps()?
-        .map(|(id, sp)| async move {
-            let result = sp.state().await.map_err(SpCommsError::from);
-            Either::Left((id, result))
-        })
-        .collect::<FuturesUnordered<_>>();
-
-    // Build a future to query our local ignition controller for the ignition
-    // state of all SPs.
-    let bulk_ignition_stream =
-        mgmt_switch.bulk_ignition_state().into_stream().map(Either::Right);
-
-    let combo_stream = all_sps_stream.merge(bulk_ignition_stream);
-    tokio::pin!(combo_stream);
-
-    // Wait for all our results to come back. As SP states return, we stash them
-    // in `sp_state`. When the one and only ignition result comes back, we put
-    // it into `bulk_ignition_state`.
-    let mut sp_state = HashMap::new();
-    let mut bulk_ignition_state = None;
-
-    while let Some(item) = combo_stream.next().await {
-        match item {
-            // Result from a single SP.
-            Either::Left((id, state)) => {
-                sp_state.insert(id, state);
-            }
-            // Result from our ignition controller.
-            Either::Right(ignition_state_result) => {
-                // If `bulk_ignition_state` succeeded, it returns an iterator
-                // of `(id, state)` pairs; convert that into a HashMap for quick
-                // lookups below.
-                bulk_ignition_state = Some(
-                    ignition_state_result
-                        .map(|iter| iter.collect::<HashMap<_, _>>()),
-                );
-            }
-        }
-    }
-
-    // We inserted exactly one future for the bulk ignition state into
-    // combo_stream; if combo_stream is exhausted, all our futures have
-    // completed, and we know we've populated `bulk_ignition_state`.
-    let bulk_ignition_state = bulk_ignition_state.unwrap();
-
-    // Build up a list of responses. For any given SP, we might or might not
-    // have its state, and we might or might not have what our ignition
-    // controller thinks its ignition state is.
-    let mut responses = Vec::with_capacity(sp_state.len());
-    for (id, state) in sp_state {
-        let ignition_details =
-            match bulk_ignition_state.as_ref().map(|m| m.get(&id)) {
-                // Happy path
-                Ok(Some(state)) => SpIgnition::from(*state),
-                // Confusing path - we got a response from our ignition
-                // controller, but it didn't include the state for SP `id`. If
-                // we're on a rev-b sidecar, this could be the 36th ignition
-                // target (i.e., the ignition controller does not return
-                // information about itself as a target). For now we'll just
-                // mark this as a failure; hopefully future sidecar revisions
-                // add the 36th target
-                // (https://github.com/oxidecomputer/hardware-sidecar/issues/735).
-                Ok(None) => SpIgnition::CommunicationFailed {
-                    message: format!(
-                        "ignition response missing info for SP {:?}",
-                        id
-                    ),
-                },
-                Err(err) => {
-                    SpIgnition::CommunicationFailed { message: err.to_string() }
-                }
-            };
-        responses.push(SpInfo {
-            info: SpIgnitionInfo { id: id.into(), details: ignition_details },
-            details: state.into(),
-        });
-    }
-
-    Ok(HttpResponseOk(responses))
-}
-
 /// Get info on an SP
 #[endpoint {
     method = GET,
@@ -636,26 +500,14 @@ async fn sp_list(
 async fn sp_get(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
-) -> Result<HttpResponseOk<SpInfo>, HttpError> {
+) -> Result<HttpResponseOk<SpState>, HttpError> {
     let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
     let sp_id = path.into_inner().sp;
-    let ignition_target = mgmt_switch.ignition_target(sp_id.into())?;
-    let sp = mgmt_switch.sp(sp_id.into())?;
+    let sp = apictx.mgmt_switch.sp(sp_id.into())?;
 
-    // Send concurrent requests to our ignition controller and the target SP.
-    let ignition_fut =
-        mgmt_switch.ignition_controller().ignition_state(ignition_target);
-    let sp_fut = sp.state();
+    let state = sp.state().await.map_err(SpCommsError::from)?;
 
-    let (ignition_state, sp_state) = tokio::join!(ignition_fut, sp_fut);
-
-    let info = SpInfo {
-        info: SpIgnitionInfo { id: sp_id, details: ignition_state.into() },
-        details: sp_state.into(),
-    };
-
-    Ok(HttpResponseOk(info))
+    Ok(HttpResponseOk(state.into()))
 }
 
 /// Get host startup options for a sled
@@ -1437,7 +1289,6 @@ pub fn api() -> GatewayApiDescription {
     fn register_endpoints(
         api: &mut GatewayApiDescription,
     ) -> Result<(), String> {
-        api.register(sp_list)?;
         api.register(sp_get)?;
         api.register(sp_startup_options_get)?;
         api.register(sp_startup_options_set)?;
