@@ -6,7 +6,6 @@
 
 use crate::db;
 use crate::db::model::IncompleteNetworkInterface;
-use crate::db::model::MacAddr;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
@@ -27,6 +26,7 @@ use ipnetwork::Ipv4Network;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::NetworkInterfaceKindEnum;
 use omicron_common::api::external;
+use omicron_common::api::external::MacAddr;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -557,7 +557,7 @@ impl QueryFragment<Pg> for NextNicSlot {
 pub struct NextMacAddress {
     inner: NextItem<
         db::schema::network_interface::table,
-        MacAddr,
+        db::model::MacAddr,
         db::schema::network_interface::dsl::mac,
         Uuid,
         db::schema::network_interface::dsl::vpc_id,
@@ -572,14 +572,14 @@ impl NextMacAddress {
                 let x = base.to_i64();
                 let max_shift = MacAddr::MAX_GUEST_ADDR - x;
                 let min_shift = x - MacAddr::MIN_GUEST_ADDR;
-                (base, max_shift, min_shift)
+                (base.into(), max_shift, min_shift)
             }
             NetworkInterfaceKind::Service => {
                 let base = MacAddr::random_system();
                 let x = base.to_i64();
                 let max_shift = MacAddr::MAX_SYSTEM_ADDR - x;
                 let min_shift = x - MacAddr::MAX_SYSTEM_ADDR;
-                (base, max_shift, min_shift)
+                (base.into(), max_shift, min_shift)
             }
         };
         let generator = DefaultShiftGenerator { base, max_shift, min_shift };
@@ -1641,7 +1641,6 @@ mod tests {
     use crate::db::model;
     use crate::db::model::IncompleteNetworkInterface;
     use crate::db::model::Instance;
-    use crate::db::model::MacAddr;
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
@@ -1664,6 +1663,7 @@ mod tests {
     use omicron_common::api::external::InstanceState;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
+    use omicron_common::api::external::MacAddr;
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
