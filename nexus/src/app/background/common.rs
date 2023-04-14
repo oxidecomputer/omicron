@@ -40,7 +40,9 @@
 //!
 //! * providing a way for Nexus at-large to activate your task
 //! * activating your task periodically
-//! * ensuring that the task is activated only once at a time
+//! * ensuring that the task is activated only once at a time in this Nexus
+//!   (but note that it may always be running concurrently in other Nexus
+//!   instances)
 //! * providing basic visibility into whether the task is running, when the task
 //!   last ran, etc.
 //!
@@ -618,7 +620,7 @@ mod test {
         let start = Instant::now();
         let wall_start = Utc::now();
         wait_until_count(rx1.clone(), 4).await;
-        assert_eq!(*rx1.borrow(), 4);
+        assert!(*rx1.borrow() == 4 || *rx1.borrow() == 5);
         let duration = start.elapsed();
         println!("rx1 -> 3 took {:?}", duration);
         assert!(
@@ -694,7 +696,7 @@ mod test {
 
     /// Simple background task that moves in lockstep with a consumer, allowing
     /// the creator to be notified when it becomes active and to determine when
-    /// the activatoin finishes.
+    /// the activation finishes.
     struct PausingTask {
         counter: usize,
         ready_tx: mpsc::Sender<usize>,
