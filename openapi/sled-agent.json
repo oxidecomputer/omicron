@@ -204,6 +204,29 @@
         }
       }
     },
+    "/sled-role": {
+      "get": {
+        "operationId": "sled_role_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRole"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/timesync": {
       "get": {
         "operationId": "timesync_get",
@@ -235,6 +258,80 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateArtifactId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v2p/{interface_id}": {
+      "put": {
+        "summary": "Create a mapping from a virtual NIC to a physical host",
+        "operationId": "set_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -1306,6 +1403,10 @@
         "description": "Information required to construct a virtual network interface for a guest",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "type": "string",
             "format": "ip"
@@ -1332,6 +1433,7 @@
           }
         },
         "required": [
+          "id",
           "ip",
           "mac",
           "name",
@@ -1579,6 +1681,50 @@
           "zone_type"
         ]
       },
+      "SetVirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
+        ]
+      },
+      "SledRole": {
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
+        ]
+      },
       "Slot": {
         "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
         "type": "integer",
@@ -1617,14 +1763,17 @@
         "type": "object",
         "properties": {
           "correction": {
+            "description": "The current offset between the NTP clock and system clock.",
             "type": "number",
             "format": "double"
           },
           "skew": {
+            "description": "The estimated error bound on the frequency.",
             "type": "number",
             "format": "double"
           },
           "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
             "type": "boolean"
           }
         },

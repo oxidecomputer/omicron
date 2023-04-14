@@ -27,6 +27,13 @@ pub struct Params {
 
 declare_saga_actions! {
     instance_delete;
+    V2P_ENSURE_UNDO -> "v2p_ensure_undo" {
+        + sid_noop
+        - sid_v2p_ensure_undo
+    }
+    V2P_ENSURE -> "v2p_ensure" {
+        + sid_v2p_ensure
+    }
     INSTANCE_DELETE_RECORD -> "no_result1" {
         + sid_delete_instance_record
     }
@@ -39,8 +46,11 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
-    RESOURCES_ACCOUNT -> "no_result4" {
-        + sid_account_resources
+    VIRTUAL_RESOURCES_ACCOUNT -> "no_result4" {
+        + sid_account_virtual_resources
+    }
+    SLED_RESOURCES_ACCOUNT -> "no_result5" {
+        + sid_account_sled_resources
     }
 }
 
@@ -60,16 +70,63 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(v2p_ensure_undo_action());
+        builder.append(v2p_ensure_action());
         builder.append(delete_asic_configuration_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
-        builder.append(resources_account_action());
+        builder.append(virtual_resources_account_action());
+        builder.append(sled_resources_account_action());
         Ok(builder.build()?)
     }
 }
 
 // instance delete saga: action implementations
+
+async fn sid_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+/// Ensure that the v2p mappings for this instance are deleted
+async fn sid_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .nexus()
+        .delete_instance_v2p_mappings(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+/// During unwind, ensure that v2p mappings are created again
+async fn sid_v2p_ensure_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
 
 async fn sid_delete_network_config(
     sagactx: NexusActionContext,
@@ -90,17 +147,6 @@ async fn sid_delete_network_config(
         .instance_lookup_external_ips(&opctx, params.authz_instance.id())
         .await
         .map_err(ActionError::action_failed)?;
-
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    //
-    // currently if we have this environment variable set, we want to
-    // bypass all calls to DPD. This is mainly to facilitate some tests where
-    // we don't have dpd running. In the future we should probably have these
-    // testing environments running dpd-stub so that the full path can be tested.
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
 
     let mut errors: Vec<ActionError> = vec![];
 
@@ -212,7 +258,7 @@ async fn sid_deallocate_external_ip(
     Ok(())
 }
 
-async fn sid_account_resources(
+async fn sid_account_virtual_resources(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -231,6 +277,24 @@ async fn sid_account_resources(
             i64::from(params.instance.runtime_state.ncpus.0 .0),
             params.instance.runtime_state.memory,
         )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sid_account_sled_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    osagactx
+        .datastore()
+        .sled_reservation_delete(&opctx, params.instance.id())
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
@@ -364,7 +428,7 @@ mod test {
             project: PROJECT_NAME.to_string().try_into().unwrap(),
         };
         let project_lookup =
-            nexus.project_lookup(&opctx, &project_selector).unwrap();
+            nexus.project_lookup(&opctx, project_selector).unwrap();
         nexus
             .project_create_instance(&opctx, &project_lookup, &params)
             .await

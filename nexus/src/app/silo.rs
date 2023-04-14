@@ -34,17 +34,17 @@ impl super::Nexus {
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        silo: &'a NameOrId,
+        silo: NameOrId,
     ) -> LookupResult<lookup::Silo<'a>> {
         match silo {
             NameOrId::Id(id) => {
                 let silo =
-                    LookupPath::new(opctx, &self.db_datastore).silo_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).silo_id(id);
                 Ok(silo)
             }
             NameOrId::Name(name) => {
                 let silo = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_name(Name::ref_cast(name));
+                    .silo_name_owned(name.into());
                 Ok(silo)
             }
         }
@@ -630,30 +630,30 @@ impl super::Nexus {
     pub fn saml_identity_provider_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
+        saml_identity_provider_selector: params::SamlIdentityProviderSelector,
     ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
         match saml_identity_provider_selector {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(id),
-                silo_selector: None,
+                silo: None,
             } => {
 
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
-                    .saml_identity_provider_id(*id);
+                    .saml_identity_provider_id(id);
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Name(name),
-                silo_selector: Some(silo_selector),
+                silo: Some(silo),
             } => {
                 let saml_provider = self
-                    .silo_lookup(opctx, &silo_selector.silo)?
-                    .saml_identity_provider_name(Name::ref_cast(name));
+                    .silo_lookup(opctx, silo)?
+                    .saml_identity_provider_name_owned(name.into());
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
-                silo_selector: Some(_),
+                silo: _,
             } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
             _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
         }

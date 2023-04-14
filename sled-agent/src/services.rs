@@ -37,7 +37,7 @@ use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
-use illumos_utils::zone::ZONE_PREFIX;
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
@@ -48,6 +48,7 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -56,11 +57,14 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use slog::Logger;
 use std::collections::HashSet;
+use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
@@ -244,6 +248,7 @@ pub struct ServiceManagerInner {
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
     skip_timesync: Option<bool>,
+    time_synced: AtomicBool,
     sidecar_revision: String,
     zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
@@ -279,6 +284,7 @@ impl ServiceManager {
     /// - `bootstrap_etherstub`: Etherstub used to allocate bootstrap service vNICs.
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
     /// - `skip_timesync`: If true, the sled always reports synced time.
+    /// - `time_synced`: If true, time sync was achieved.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_bootstrap_address`: The bootstrap IP to use for the switch zone.
     #[allow(clippy::too_many_arguments)]
@@ -302,6 +308,7 @@ impl ServiceManager {
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
                 sled_mode,
                 skip_timesync,
+                time_synced: AtomicBool::new(false),
                 sidecar_revision,
                 zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
@@ -337,9 +344,9 @@ impl ServiceManager {
                 config,
                 physical_link_vnic_allocator: VnicAllocator::new(
                     "Public",
-                    // NOTE: Right now, we only use a connection to one of the Chelsio
-                    // links. Longer-term, when we we use OPTE, we'll be able to use both
-                    // connections.
+                    // NOTE: Right now, we only use a connection to one of the
+                    // Chelsio links. Longer-term, when we we use OPTE, we'll
+                    // be able to use both connections.
                     physical_link,
                 ),
                 underlay_address,
@@ -365,6 +372,62 @@ impl ServiceManager {
                 err,
             })?;
             let mut existing_zones = self.inner.zones.lock().await;
+
+            // Initialize and DNS and NTP services first as they are required
+            // for time synchronization, which is a pre-requisite for the other
+            // services.
+            self.initialize_services_locked(
+                &mut existing_zones,
+                &cfg.services
+                    .clone()
+                    .into_iter()
+                    .filter(|svc| {
+                        matches!(
+                            svc.zone_type,
+                            ZoneType::InternalDNS | ZoneType::NTP
+                        )
+                    })
+                    .collect(),
+            )
+            .await?;
+
+            drop(existing_zones);
+
+            info!(&self.inner.log, "Waiting for sled time synchronization");
+
+            retry_notify(
+                retry_policy_local(),
+                || async {
+                    match self.timesync_get().await {
+                        Ok(TimeSync { sync: true, .. }) => {
+                            info!(&self.inner.log, "Time is synchronized");
+                            Ok(())
+                        }
+                        Ok(ts) => Err(BackoffError::transient(format!(
+                            "No sync {:?}",
+                            ts
+                        ))),
+                        Err(e) => Err(BackoffError::transient(format!(
+                            "Error checking for time synchronization: {}",
+                            e
+                        ))),
+                    }
+                },
+                |error, delay| {
+                    warn!(
+                        self.inner.log,
+                        "Time not yet synchronised (retrying in {:?})",
+                        delay;
+                        "error" => ?error
+                    );
+                },
+            )
+            .await
+            .expect("Expected an infinite retry loop syncing time");
+
+            let mut existing_zones = self.inner.zones.lock().await;
+
+            // Initialize all remaining serivces
             self.initialize_services_locked(&mut existing_zones, &cfg.services)
                 .await?;
         } else {
@@ -1080,8 +1143,9 @@ impl ServiceManager {
 
     /// Ensures that particular services should be initialized.
     ///
-    /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
+    /// These services will be instantiated by this function, and will be
+    /// recorded to a local file to ensure they start automatically on next
+    /// boot.
     pub async fn ensure_persistent(
         &self,
         request: ServiceEnsureBody,
@@ -1147,15 +1211,61 @@ impl ServiceManager {
         Ok(())
     }
 
+    pub fn boottime_rewrite(&self, zones: &Vec<RunningZone>) {
+        if self
+            .inner
+            .time_synced
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            // Already done.
+            return;
+        }
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("SystemTime before UNIX EPOCH");
+
+        info!(self.inner.log, "Setting boot time to {:?}", now);
+
+        let files: Vec<String> = zones
+            .iter()
+            .map(|z| z.root())
+            .chain(iter::once("".to_string()))
+            .flat_map(|r| {
+                [format!("{r}/var/adm/utmpx"), format!("{r}/var/adm/wtmpx")]
+            })
+            .collect();
+
+        for file in files {
+            let mut command = std::process::Command::new(PFEXEC);
+            let cmd = command.args(&[
+                "/usr/platform/oxide/bin/tmpx",
+                &format!("{}", now.as_secs()),
+                &file,
+            ]);
+            match execute(cmd) {
+                Err(e) => {
+                    warn!(self.inner.log, "Updating {} failed: {}", &file, e);
+                }
+                Ok(_) => {
+                    info!(self.inner.log, "Updated {}", &file);
+                }
+            }
+        }
+    }
+
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        let existing_zones = self.inner.zones.lock().await;
+
         if let Some(true) = self.inner.skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
+            self.boottime_rewrite(&existing_zones);
             return Ok(TimeSync { sync: true, skew: 0.00, correction: 0.00 });
         };
 
-        let existing_zones = self.inner.zones.lock().await;
-
-        let ntp_zone_name = format!("{}{}", ZONE_PREFIX, ZoneType::NTP);
+        let ntp_zone_name =
+            InstalledZone::get_zone_name(&ZoneType::NTP.to_string(), None);
 
         let ntp_zone = existing_zones
             .iter()
@@ -1178,12 +1288,14 @@ impl ServiceManager {
                     let skew = f64::from_str(v[9])
                         .map_err(|_| Error::NtpZoneNotReady)?;
 
-                    Ok(TimeSync {
-                        sync: (skew != 0.0 || correction != 0.0)
-                            && correction.abs() <= 0.05,
-                        skew,
-                        correction,
-                    })
+                    let sync = (skew != 0.0 || correction != 0.0)
+                        && correction.abs() <= 0.05;
+
+                    if sync {
+                        self.boottime_rewrite(&existing_zones);
+                    }
+
+                    Ok(TimeSync { sync, skew, correction })
                 } else {
                     Err(Error::NtpZoneNotReady)
                 }
@@ -1747,7 +1859,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1776,7 +1888,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1813,7 +1925,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )
@@ -1844,7 +1956,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
         )

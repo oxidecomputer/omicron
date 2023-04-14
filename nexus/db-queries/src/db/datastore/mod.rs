@@ -1092,7 +1092,7 @@ mod test {
 
         // Create a new service to exist on this sled.
         let service_id = Uuid::new_v4();
-        let addr = Ipv6Addr::LOCALHOST;
+        let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         let kind = ServiceKind::Nexus;
 
         let service = Service::new(service_id, sled_id, addr, kind);

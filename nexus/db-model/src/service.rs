@@ -5,8 +5,9 @@
 use super::ServiceKind;
 use crate::ipv6;
 use crate::schema::service;
+use crate::SqlU16;
 use db_macros::Asset;
-use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 /// Representation of services which may run on Sleds.
@@ -18,6 +19,7 @@ pub struct Service {
 
     pub sled_id: Uuid,
     pub ip: ipv6::Ipv6Addr,
+    pub port: SqlU16,
     pub kind: ServiceKind,
 }
 
@@ -25,13 +27,14 @@ impl Service {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        addr: Ipv6Addr,
+        addr: SocketAddrV6,
         kind: ServiceKind,
     ) -> Self {
         Self {
             identity: ServiceIdentity::new(id),
             sled_id,
-            ip: addr.into(),
+            ip: addr.ip().into(),
+            port: addr.port().into(),
             kind,
         }
     }

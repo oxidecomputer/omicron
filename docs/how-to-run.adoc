@@ -37,6 +37,11 @@ $ ./tools/install_builder_prerequisites.sh
 $ ./tools/install_runner_prerequisites.sh
 ----
 
+There will be several binaries that will need to be in your `PATH`. The various
+prerequisites scripts will alert you to where you can find the binaries to add
+them to your `PATH`. You can also reference the file in `tools/setup-path.sh` for
+an example of how to add them to your `PATH`.
+
 === Make (or unmake) me a Gimlet!
 
 The sled agent expects to manage a real Gimlet. However, until those are built,

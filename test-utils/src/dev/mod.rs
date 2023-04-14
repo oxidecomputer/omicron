@@ -7,6 +7,7 @@
 
 pub mod clickhouse;
 pub mod db;
+pub mod dendrite;
 pub mod poll;
 pub mod test_cmds;
 

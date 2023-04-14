@@ -16,22 +16,25 @@ use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceStateRequested,
 };
 use crate::updates::UpdateManager;
-use crucible_client_types::VolumeConstructionRequest;
-use dropshot::HttpServer;
 use futures::lock::Mutex;
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
-use propolis_client::Client as PropolisClient;
-use propolis_server::mock_server::Context as PropolisContext;
 use slog::Logger;
-use std::collections::HashMap;
-use std::net::{Ipv6Addr, SocketAddr};
-use std::str::FromStr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
+
+use std::collections::HashMap;
+use std::str::FromStr;
+
+use crucible_client_types::VolumeConstructionRequest;
+use dropshot::HttpServer;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use nexus_client::types::PhysicalDiskKind;
+use omicron_common::address::PROPOLIS_PORT;
+use propolis_client::Client as PropolisClient;
+use propolis_server::mock_server::Context as PropolisContext;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -42,6 +45,7 @@ use uuid::Uuid;
 /// move later.
 pub struct SledAgent {
     pub id: Uuid,
+    pub ip: IpAddr,
     /// collection of simulated instances, indexed by instance uuid
     instances: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
@@ -51,6 +55,7 @@ pub struct SledAgent {
     nexus_address: SocketAddr,
     pub nexus_client: Arc<NexusClient>,
     disk_id_to_region_ids: Mutex<HashMap<String, Vec<Uuid>>>,
+    pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
 }
@@ -119,6 +124,7 @@ impl SledAgent {
 
         Arc::new(SledAgent {
             id,
+            ip: config.dropshot.bind_address.ip(),
             instances: Arc::new(SimCollection::new(
                 Arc::clone(&nexus_client),
                 instance_log,
@@ -139,6 +145,7 @@ impl SledAgent {
             nexus_address,
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
+            v2p_mappings: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
         })
     }
@@ -455,6 +462,28 @@ impl SledAgent {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        interface_id: Uuid,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        let vec = v2p_mappings.entry(interface_id).or_default();
+        vec.push(mapping.clone());
+        Ok(())
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        interface_id: Uuid,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        let mut v2p_mappings = self.v2p_mappings.lock().await;
+        let vec = v2p_mappings.entry(interface_id).or_default();
+        vec.retain(|x| x != mapping);
         Ok(())
     }
 

@@ -136,6 +136,30 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type Project, identified by its owned name
+    pub fn project_name_owned<'b, 'c>(self, name: Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Project::OwnedName(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Project::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
@@ -175,9 +199,12 @@ impl<'a> LookupPath<'a> {
         Snapshot::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type NetworkInterface, identified by its id
-    pub fn network_interface_id(self, id: Uuid) -> NetworkInterface<'a> {
-        NetworkInterface::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type InstanceNetworkInterface, identified by its id
+    pub fn instance_network_interface_id(
+        self,
+        id: Uuid,
+    ) -> InstanceNetworkInterface<'a> {
+        InstanceNetworkInterface::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Vpc, identified by its id
@@ -280,6 +307,15 @@ impl<'a> LookupPath<'a> {
         'b: 'c,
     {
         Silo::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type Silo, identified by its owned name
+    pub fn silo_name_owned<'b, 'c>(self, name: Name) -> Silo<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Silo::OwnedName(Root { lookup_root: self }, name)
     }
 
     /// Select a resource of type SiloUser, identified by its id
@@ -523,14 +559,14 @@ lookup_resource! {
 lookup_resource! {
     name = "Instance",
     ancestors = [ "Silo", "Project" ],
-    children = [ "NetworkInterface" ],
+    children = [ "InstanceNetworkInterface" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
-    name = "NetworkInterface",
+    name = "InstanceNetworkInterface",
     ancestors = [ "Silo", "Project", "Instance" ],
     children = [],
     lookup_by_name = true,

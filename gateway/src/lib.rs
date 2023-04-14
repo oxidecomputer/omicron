@@ -21,6 +21,7 @@ use gateway_sp_comms::InMemoryHostPhase2Provider;
 pub use management_switch::LocationConfig;
 pub use management_switch::LocationDeterminationConfig;
 pub use management_switch::ManagementSwitch;
+pub use management_switch::SpIdentifier;
 pub use management_switch::SpType;
 pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;

@@ -74,7 +74,10 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
-use omicron_common::address::{get_sled_address, NEXUS_INTERNAL_PORT};
+use omicron_common::address::{
+    get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
+    NTP_PORT, OXIMETER_PORT,
+};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
@@ -86,7 +89,7 @@ use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -611,8 +614,6 @@ impl ServiceInner {
         // a format which can be processed by Nexus.
         let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        let mut internal_services_ip_pool_ranges: Vec<NexusTypes::IpRange> =
-            vec![];
         for (addr, service_request) in service_plan.services.iter() {
             let sled_id = *id_map
                 .get(addr)
@@ -620,56 +621,120 @@ impl ServiceInner {
 
             for zone in &service_request.services {
                 for svc in &zone.services {
-                    let kind = match svc {
+                    // TODO-cleanup Here, we take the ServiceZoneRequests that
+                    // were constructed with the ServicePlan and turn them into
+                    // Nexus ServicePutRequest objects.  For Nexus, we need to
+                    // specify a SocketAddr -- both an IP address and a port on
+                    // which the service is listening.  The code here hardcodes
+                    // the default ports for each service.  This happens to be
+                    // correct because the ServicePlan uses the same hardcoded
+                    // ports when it sets up the DNS zone and the Sled Agent
+                    // uses the same hardcoded ports when configuring each of
+                    // these services.  It would be more robust to pick the
+                    // (hardcoded) port when constructing the ServicePlan and
+                    // plumb the SocketAddr (with port) everywhere that needs it
+                    // (including both here and DNS).  That way we don't bake
+                    // the port assumption into multiple places and we can also
+                    // more easily support things running on different ports
+                    // (which is useful in dev/test situations).
+                    match svc {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
-                            // NOTE: Eventually, this IP pool will be entirely
-                            // user-supplied. For now, however, it's inferred
-                            // based on the input IP addresses.
-                            let range = match external_ip {
-                                IpAddr::V4(addr) => NexusTypes::IpRange::V4(
-                                    NexusTypes::Ipv4Range {
-                                        first: *addr,
-                                        last: *addr,
-                                    },
-                                ),
-                                IpAddr::V6(addr) => NexusTypes::IpRange::V6(
-                                    NexusTypes::Ipv6Range {
-                                        first: *addr,
-                                        last: *addr,
-                                    },
-                                ),
-                            };
-                            internal_services_ip_pool_ranges.push(range);
-
-                            NexusTypes::ServiceKind::Nexus {
-                                external_address: *external_ip,
-                            }
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NEXUS_INTERNAL_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Nexus {
+                                    external_address: *external_ip,
+                                },
+                            });
                         }
-                        ServiceType::InternalDns { .. } => {
-                            NexusTypes::ServiceKind::InternalDNS
+                        ServiceType::Dendrite { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    DENDRITE_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Dendrite,
+                            });
+                        }
+                        ServiceType::InternalDns {
+                            server_address,
+                            dns_address,
+                        } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: server_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::InternalDNSConfig,
+                            });
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: dns_address.to_string(),
+                                kind: NexusTypes::ServiceKind::InternalDNS,
+                            });
                         }
                         ServiceType::Oximeter => {
-                            NexusTypes::ServiceKind::Oximeter
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    OXIMETER_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Oximeter,
+                            });
                         }
                         ServiceType::CruciblePantry => {
-                            NexusTypes::ServiceKind::CruciblePantry
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    CRUCIBLE_PANTRY_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::CruciblePantry,
+                            });
                         }
-                        ServiceType::Ntp { .. } => NexusTypes::ServiceKind::NTP,
+                        ServiceType::Ntp { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NTP_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::NTP,
+                            });
+                        }
                         _ => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
                                 svc
                             )));
                         }
-                    };
-
-                    services.push(NexusTypes::ServicePutRequest {
-                        service_id: zone.id,
-                        sled_id,
-                        // TODO: Should this be a vec, or a single value?
-                        address: zone.addresses[0],
-                        kind,
-                    })
+                    }
                 }
             }
 
@@ -684,16 +749,15 @@ impl ServiceInner {
                 })
             }
         }
-
+        let internal_services_ip_pool_ranges = config
+            .internal_services_ip_pool_ranges
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect();
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
-            // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Plumb
-            // these pools through RSS's API.
-            //
-            // Currently, we're passing the addresses to accomodate Nexus
-            // services, but the operator may want to supply additional
-            // addresses.
             internal_services_ip_pool_ranges,
             // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
             // these paths through RSS's API.
@@ -896,7 +960,7 @@ impl ServiceInner {
             if let Some(plan) = ServicePlan::load(&self.log).await? {
                 plan
             } else {
-                ServicePlan::create(&self.log, &config, &sled_addresses).await?
+                ServicePlan::create(&self.log, &config, &plan.sleds).await?
             };
 
         // Set up internal DNS and NTP services.
@@ -963,9 +1027,10 @@ impl ServiceInner {
                 // we must provide the set of *all* services that should be
                 // executing on a sled.
                 //
-                // This means re-requesting the DNS service, even if it is
-                // already running - this is fine, however, as the receiving
-                // sled agent doesn't modify the already-running service.
+                // This means re-requesting the DNS and NTP services, even if
+                // they are already running - this is fine, however, as the
+                // receiving sled agent doesn't modify the already-running
+                // service.
                 self.initialize_services(
                     *sled_address,
                     &services_request.services,

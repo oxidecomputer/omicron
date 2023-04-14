@@ -46,7 +46,8 @@ The control plane is now starting, reference the Running Omicron (Non-Simulated)
 doc for more details on determining when things are ready to go.
 
 Once the control plane is running, `softnpu` can be configured via `dendrite`
-using `swadm`. An example script is provided in `tools/scrimlet/softnpu-init.sh`.
+using the `swadm` binary located in the `oxz_switch` zone.
+An example script is provided in `tools/scrimlet/softnpu-init.sh`.
 This script should work without modification for basic development setups,
 but feel free to tweak it as needed.
 
@@ -63,29 +64,42 @@ Using 10.85.0.1 as gateway ip
 + GATEWAY_MAC=68:d7:9a:1f:77:a1
 + echo 'Using 68:d7:9a:1f:77:a1 as gateway mac'
 Using 68:d7:9a:1f:77:a1 as gateway mac
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 1:0 100G RS
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port add 2:0 100G RS
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 1:0 fe80::aae1:deff:fe01:701c
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 2:0 fe80::aae1:deff:fe01:701d
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr add 1:0 fd00:99::1
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route add fd00:1122:3344:0101::/64 1:0 fe80::aae1:deff:fe00:1
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route add 0.0.0.0/0 2:0 10.85.0.1
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp add 10.85.0.1 68:d7:9a:1f:77:a1
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' port list
++ z_swadm port create 1:0 100G RS
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port create 1:0 100G RS
++ z_swadm port create 2:0 100G RS
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port create 2:0 100G RS
++ z_swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
++ z_swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
++ z_swadm addr add rear0/0 fd00:99::1
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add rear0/0 fd00:99::1
++ z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
++ z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
++ z_swadm arp add 10.85.0.1 68:d7:9a:1f:77:a1
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp add 10.85.0.1 68:d7:9a:1f:77:a1
++ z_swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
++ z_swadm port list
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port list
  NAME  MEDIA    SPEED   FEC     ENA   LINK  MAC
-  1:0  Copper   100G    RS      Ena   Up    a8:40:25:71:e3:82
-  2:0  Copper   100G    RS      Ena   Up    a8:40:25:71:e3:83
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' addr list
+  1:0  Copper   100G    RS      Ena   Up    a8:40:25:46:55:e3
+  2:0  Copper   100G    RS      Ena   Up    a8:40:25:46:55:e4
++ z_swadm addr list
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr list
 Port  IPv4  IPv6
-1:0         fd00:99::1
-            fe80::aae1:deff:fe01:701c
+1:0         fe80::aae1:deff:fe01:701c
+            fd00:99::1
 2:0         fe80::aae1:deff:fe01:701d
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' route list
-Subnet                                      Port     Gateway
-0.0.0.0/0                                   2:0      10.85.0.1
-fd00:1122:3344:101::/64                     1:0      fe80::aae1:deff:fe00:1
-+ ./out/softnpu/swadm -h '[fd00:1122:3344:101::2]' arp list
++ z_swadm route list
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route list
+Subnet                                      Port   Link Gateway
+0.0.0.0/0                                   qsfp0  0    10.85.0.1
+fd00:1122:3344:101::/64                     rear0  0    fe80::aae1:deff:fe00:1
++ z_swadm arp list
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp list
 host                            mac                age
 10.85.0.1                       68:d7:9a:1f:77:a1  0s
 fe80::aae1:deff:fe00:1          a8:e1:de:00:00:01  0s

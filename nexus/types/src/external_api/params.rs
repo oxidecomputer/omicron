@@ -70,8 +70,8 @@ impl From<Name> for SiloSelector {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SamlIdentityProviderSelector {
-    #[serde(flatten)]
-    pub silo_selector: Option<SiloSelector>,
+    /// Name or ID of the silo in which the SAML identity provider is associated
+    pub silo: Option<NameOrId>,
     /// Name or ID of the SAML identity provider
     pub saml_identity_provider: NameOrId,
 }
@@ -95,100 +95,114 @@ pub struct ProjectSelector {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalProjectSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project
+    pub project: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct DiskSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `disk` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the disk
     pub disk: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SnapshotSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `snapshot` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the snapshot
     pub snapshot: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ImageSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `image` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the image
     pub image: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct InstanceSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the instance
     pub instance: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInstanceSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the instance
-    pub instance_selector: Option<InstanceSelector>,
+    pub instance: Option<NameOrId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct NetworkInterfaceSelector {
-    #[serde(flatten)]
-    pub instance_selector: Option<InstanceSelector>,
+pub struct InstanceNetworkInterfaceSelector {
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the instance, only required if `network_interface` is provided as a `Name`
+    pub instance: Option<NameOrId>,
     /// Name or ID of the network interface
     pub network_interface: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct VpcSelector {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the VPC
     pub vpc: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalVpcSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Name or ID of the VPC
-    pub vpc_selector: Option<VpcSelector>,
+    pub vpc: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the subnet
     pub subnet: NameOrId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RouterSelector {
-    #[serde(flatten)]
-    pub vpc_selector: Option<VpcSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the router
     pub router: NameOrId,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct OptionalRouterSelector {
-    #[serde(flatten)]
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
     /// Name or ID of the router
-    pub router_selector: Option<RouterSelector>,
+    pub router: Option<NameOrId>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct RouteSelector {
-    #[serde(flatten)]
-    /// Name or ID of the router
-    pub router_selector: Option<RouterSelector>,
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `subnet` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the router, only required if `route` is provided as a `Name`
+    pub router: Option<NameOrId>,
     /// Name or ID of the route
     pub route: NameOrId,
 }
@@ -602,10 +616,10 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
-/// Create-time parameters for a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface)
+/// Create-time parameters for an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceCreate {
+pub struct InstanceNetworkInterfaceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
     /// The VPC in which to create the interface.
@@ -616,13 +630,13 @@ pub struct NetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
-/// Parameters for updating a
-/// [`NetworkInterface`](omicron_common::api::external::NetworkInterface).
+/// Parameters for updating an
+/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterfaceUpdate {
+pub struct InstanceNetworkInterfaceUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
 
@@ -692,8 +706,8 @@ pub struct IpPoolUpdate {
 
 pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 
-/// Describes an attachment of a `NetworkInterface` to an `Instance`, at the
-/// time the instance is created.
+/// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
+/// at the time the instance is created.
 // NOTE: VPC's are an organizing concept for networking resources, not for
 // instances. It's true that all networking resources for an instance must
 // belong to a single VPC, but we don't consider instances to be "scoped" to a
@@ -711,11 +725,11 @@ pub const MIN_MEMORY_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
 pub enum InstanceNetworkInterfaceAttachment {
-    /// Create one or more `NetworkInterface`s for the `Instance`.
+    /// Create one or more `InstanceNetworkInterface`s for the `Instance`.
     ///
     /// If more than one interface is provided, then the first will be
     /// designated the primary interface for the instance.
-    Create(Vec<NetworkInterfaceCreate>),
+    Create(Vec<InstanceNetworkInterfaceCreate>),
 
     /// The default networking configuration for an instance is to create a
     /// single primary interface with an automatically-assigned IP address. The
@@ -883,8 +897,8 @@ pub struct InstanceMigrate {
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
     /// Character index in the serial buffer from which to read, counting the bytes output since
     /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
     /// provided, `most_recent` must *not* be provided.
@@ -1117,11 +1131,11 @@ pub struct ImportBlocksBulkWrite {
 /// Parameters for finalizing a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct FinalizeDisk {
-    #[serde(flatten)]
-    pub project_selector: Option<ProjectSelector>,
-
-    /// an optional snapshot name
-    pub snapshot_name: Option<String>,
+    /// If specified a snapshot of the disk will be created with the given name
+    /// during finalization. If not specified, a snapshot for the disk will
+    /// _not_ be created. A snapshot can be manually created once the disk
+    /// transitions into the `Detached` state.
+    pub snapshot_name: Option<Name>,
 }
 
 // IMAGES

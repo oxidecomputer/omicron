@@ -479,9 +479,13 @@ async fn ensure_running_zone(
         None,
     );
 
-    let err =
-        RunningZone::get(log, &dataset_info.zone_prefix(), address_request)
-            .await;
+    let err = RunningZone::get(
+        log,
+        &vnic_allocator,
+        &dataset_info.zone_prefix(),
+        address_request,
+    )
+    .await;
     match err {
         Ok(zone) => {
             info!(log, "Zone for {} is already running", dataset_name.full());

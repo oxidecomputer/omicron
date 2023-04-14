@@ -147,6 +147,11 @@ fi
 # Download the OpenAPI spec for dendrite. This is required to build the
 # dpd-client crate.
 ./tools/ci_download_dendrite_openapi
+#
+# Download dendrite-stub. This is required to run tests without a live
+# asic and running dendrite instance
+./tools/ci_download_dendrite_stub
+
 
 # Validate the PATH:
 expected_in_path=(
@@ -154,6 +159,7 @@ expected_in_path=(
   'pkg-config'
   'cockroach'
   'clickhouse'
+  'dpd'
 )
 
 function show_hint
@@ -174,6 +180,9 @@ function show_hint
       ;;
     "clickhouse")
       echo "$1 should have been installed to '$PWD/out/clickhouse'"
+      ;;
+    "dpd")
+      echo "$1 should have been installed to '$PWD/out/dendrite-stub/bin'"
       ;;
     *)
       ;;

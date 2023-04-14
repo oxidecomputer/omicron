@@ -151,10 +151,20 @@ pub async fn test_setup_with_config(
 
     // Build a list of all SPs defined in our config
     let mut all_sp_ids = Vec::new();
+    let mut local_switch = None;
     for port_config in &server_config.switch.port {
-        all_sp_ids.push(
-            port_config.location.get(&expected_location).copied().unwrap(),
-        );
+        let sp_id =
+            port_config.location.get(&expected_location).copied().unwrap();
+        all_sp_ids.push(sp_id);
+
+        // Note the ID of our local ignition controller for use later in
+        // checking that our self-location-discovery was correct.
+        if port_config.config.interface()
+            == server_config.switch.local_ignition_controller_interface
+        {
+            assert!(local_switch.is_none(), "ignition controller listed twice");
+            local_switch = Some(sp_id);
+        }
     }
 
     // Wait until the server has figured out the socket address of all those SPs
@@ -182,7 +192,7 @@ pub async fn test_setup_with_config(
     .unwrap();
 
     // Make sure it discovered the location we expect
-    assert_eq!(mgmt_switch.location_name().unwrap(), expected_location);
+    assert_eq!(mgmt_switch.local_switch().unwrap(), local_switch.unwrap());
 
     let client = ClientTestContext::new(
         server
