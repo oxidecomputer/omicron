@@ -4,6 +4,13 @@
 
 //! Simulated sled agent implementation
 
+use super::collection::{PokeMode, SimCollection};
+use super::config::Config;
+use super::disk::SimDisk;
+use super::instance::SimInstance;
+use super::storage::CrucibleData;
+use super::storage::Storage;
+
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstancePutStateResponse,
@@ -16,9 +23,7 @@ use omicron_common::api::external::{DiskState, Error, ResourceType};
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -28,16 +33,10 @@ use std::str::FromStr;
 use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpServer;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::Client as PropolisClient;
 use propolis_server::mock_server::Context as PropolisContext;
-
-use super::collection::{PokeMode, SimCollection};
-use super::config::Config;
-use super::disk::SimDisk;
-use super::instance::SimInstance;
-use super::storage::CrucibleData;
-use super::storage::Storage;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -466,9 +465,35 @@ impl SledAgent {
         self.disks.sim_poke(id, PokeMode::SingleStep).await;
     }
 
+    /// Adds a Physical Disk to the simulated sled agent.
+    pub async fn create_external_physical_disk(
+        &self,
+        vendor: String,
+        serial: String,
+        model: String,
+    ) {
+        let variant = PhysicalDiskKind::U2;
+        self.storage
+            .lock()
+            .await
+            .insert_physical_disk(vendor, serial, model, variant)
+            .await;
+    }
+
     /// Adds a Zpool to the simulated sled agent.
-    pub async fn create_zpool(&self, id: Uuid, size: u64) {
-        self.storage.lock().await.insert_zpool(id, size).await;
+    pub async fn create_zpool(
+        &self,
+        id: Uuid,
+        vendor: String,
+        serial: String,
+        model: String,
+        size: u64,
+    ) {
+        self.storage
+            .lock()
+            .await
+            .insert_zpool(id, vendor, serial, model, size)
+            .await;
     }
 
     /// Adds a Crucible Dataset within a zpool.

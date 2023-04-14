@@ -275,10 +275,10 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup, Project,
-        Rack, Region, Service, ServiceKind, SiloUser, Sled, SledBaseboard,
-        SledSystemHardware, SshKey, SystemUpdate, UpdateableComponentType,
-        VpcSubnet, Zpool,
+        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup,
+        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
+        ServiceKind, SiloUser, Sled, SledBaseboard, SledSystemHardware, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -508,15 +508,42 @@ mod test {
         ByteCount::from_gibibytes_u32(100)
     }
 
+    const TEST_VENDOR: &str = "test-vendor";
+    const TEST_SERIAL: &str = "test-serial";
+    const TEST_MODEL: &str = "test-model";
+
+    async fn create_test_physical_disk(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+        kind: PhysicalDiskKind,
+    ) -> Uuid {
+        let physical_disk = PhysicalDisk::new(
+            TEST_VENDOR.into(),
+            TEST_SERIAL.into(),
+            TEST_MODEL.into(),
+            kind,
+            sled_id,
+        );
+        datastore
+            .physical_disk_upsert(opctx, physical_disk.clone())
+            .await
+            .expect("Failed to upsert physical disk");
+        physical_disk.uuid()
+    }
+
     // Creates a test zpool, returns its UUID.
-    async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
+    async fn create_test_zpool(
+        datastore: &DataStore,
+        sled_id: Uuid,
+        physical_disk_id: Uuid,
+    ) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(
             zpool_id,
             sled_id,
-            &nexus_types::internal_api::params::ZpoolPutRequest {
-                size: test_zpool_size(),
-            },
+            physical_disk_id,
+            test_zpool_size().into(),
         );
         datastore.zpool_upsert(zpool).await.unwrap();
         zpool_id
@@ -542,17 +569,23 @@ mod test {
     async fn test_region_allocation() {
         let logctx = dev::test_setup_log("test_region_allocation");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
@@ -641,17 +674,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
@@ -717,17 +756,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_not_enough_datasets");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
@@ -773,17 +818,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_out_of_space_fails");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;

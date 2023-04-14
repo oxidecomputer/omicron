@@ -902,7 +902,7 @@ authz_resource! {
 authz_resource! {
     name = "PhysicalDisk",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = (String, String, String),
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
