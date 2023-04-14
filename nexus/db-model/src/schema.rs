@@ -768,7 +768,7 @@ table! {
 }
 
 table! {
-    update_available_artifact (name, version, kind) {
+    update_artifact (name, version, kind) {
         name -> Text,
         version -> Text,
         kind -> crate::KnownArtifactKindEnum,

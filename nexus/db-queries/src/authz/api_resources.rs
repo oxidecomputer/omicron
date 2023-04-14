@@ -908,7 +908,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "UpdateAvailableArtifact",
+    name = "UpdateArtifact",
     parent = "Fleet",
     primary_key = (String, SemverVersion, KnownArtifactKind),
     roles_allowed = false,

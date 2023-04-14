@@ -11,7 +11,7 @@ pub fn read_artifacts(
     trusted_root: &[u8],
     mut base_url: String,
 ) -> Result<
-    Vec<db::model::UpdateAvailableArtifact>,
+    Vec<db::model::UpdateArtifact>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
     use std::io::Read;
@@ -54,7 +54,7 @@ pub fn read_artifacts(
             _ => break,
         };
 
-        v.push(db::model::UpdateAvailableArtifact {
+        v.push(db::model::UpdateArtifact {
             name: artifact.name,
             version: db::model::SemverVersion(artifact.version),
             kind: db::model::KnownArtifactKind(kind),
