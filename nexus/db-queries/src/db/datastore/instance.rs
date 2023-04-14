@@ -163,7 +163,7 @@ impl DataStore {
         Ok(db_instance)
     }
 
-    /// Fetches information about a deleted instance. This can be used used to
+    /// Fetches information about a deleted instance. This can be used to
     /// query the properties an instance had at the time it was deleted, which
     /// can be useful when cleaning up a deleted instance.
     pub async fn instance_fetch_deleted(
