@@ -3,15 +3,16 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db;
-use omicron_common::update::ArtifactsDocument;
+use omicron_common::{api::external::SemverVersion, update::ArtifactsDocument};
 use std::convert::TryInto;
 
 // TODO(iliana): make async/.await. awslabs/tough#213
+// TODO(crespo): returning tuple of system version + artifacts is temporary
 pub fn read_artifacts(
     trusted_root: &[u8],
     mut base_url: String,
 ) -> Result<
-    Vec<db::model::UpdateArtifact>,
+    (SemverVersion, Vec<db::model::UpdateArtifact>),
     Box<dyn std::error::Error + Send + Sync>,
 > {
     use std::io::Read;
@@ -70,5 +71,5 @@ pub fn read_artifacts(
             target_length: target.length.try_into()?,
         });
     }
-    Ok(v)
+    Ok((artifacts.system_version, v))
 }

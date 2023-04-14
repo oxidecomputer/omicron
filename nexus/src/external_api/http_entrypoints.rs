@@ -3825,6 +3825,7 @@ async fn system_update_refresh(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
+        nexus.updates_apply(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

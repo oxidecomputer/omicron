@@ -11,15 +11,17 @@ use chrono::{Duration, Utc};
 use dropshot::test_util::LogContext;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpServerStarter, Path,
-    RequestContext,
+    RequestContext, ResultsPage,
 };
 use http::{Method, Response, StatusCode};
 use hyper::Body;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_nexus::config::UpdatesConfig;
+use omicron_nexus::external_api::views;
 use ring::pkcs8::Document;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
@@ -40,6 +42,7 @@ use tough::schema::{KeyHolder, RoleKeys, RoleType, Root};
 use tough::sign::Sign;
 
 const UPDATE_COMPONENT: &'static str = "omicron-test-component";
+const SYSTEM_VERSION: SemverVersion = SemverVersion::new(1, 1, 0);
 
 #[tokio::test]
 async fn test_update_end_to_end() {
@@ -73,6 +76,16 @@ async fn test_update_end_to_end() {
     .await;
     let client = &cptestctx.external_client;
 
+    // before we run the refresh, there are 3 system updates in the DB
+    // (populated at nexus startup) but our expected one is not there
+    let updates =
+        NexusRequest::object_get(&client, &"/v1/system/update/updates")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<ResultsPage<views::SystemUpdate>>()
+            .await;
+    assert_eq!(updates.items.len(), 3);
+    assert!(!updates.items.iter().any(|u| u.version == SYSTEM_VERSION));
+
     // call /v1/system/update/refresh on nexus
     // - download and verify the repo
     // - return 204 Non Content
@@ -85,6 +98,15 @@ async fn test_update_end_to_end() {
     .execute()
     .await
     .unwrap();
+
+    // running the refresh creates the expected SystemUpdate entry
+    let updates =
+        NexusRequest::object_get(&client, &"/v1/system/update/updates")
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<ResultsPage<views::SystemUpdate>>()
+            .await;
+    assert_eq!(updates.items.len(), 4);
+    assert!(updates.items.iter().any(|u| u.version == SYSTEM_VERSION));
 
     let artifact_path = cptestctx.sled_agent_storage.path();
     let component_path = artifact_path.join(UPDATE_COMPONENT);
@@ -228,7 +250,7 @@ fn generate_targets() -> (TempDir, Vec<&'static str>) {
 
     // artifacts.json, which describes all available artifacts.
     let artifacts = ArtifactsDocument {
-        system_version: "1.0.0".parse().unwrap(),
+        system_version: SYSTEM_VERSION,
         artifacts: vec![Artifact {
             name: UPDATE_COMPONENT.into(),
             version: "0.0.0".parse().unwrap(),

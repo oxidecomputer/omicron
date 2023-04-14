@@ -19,12 +19,13 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_db_model::SystemUpdateComponentUpdate;
+use nexus_db_model::{KnownArtifactKind, SystemUpdateComponentUpdate};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, InternalContext, ListResultVec,
     LookupResult, LookupType, ResourceType, UpdateResult,
 };
+use omicron_common::api::internal::nexus::KnownArtifactKind as KnownArtifactKind_;
 use uuid::Uuid;
 
 impl DataStore {
@@ -65,6 +66,36 @@ impl DataStore {
             .map(|_rows_deleted| ())
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
             .internal_context("deleting outdated available artifacts")
+
+        // TODO: Also delete associations to system versions for all deleted
+        // artifacts. Probably also delete the system version if there are no
+        // more artifacts associated with it. Rather than doing this in here
+        // it might make more sense to orchestrate these related actions in
+        // updates_refresh_metadata.
+    }
+
+    pub async fn update_artifact_list(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<UpdateArtifact> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::update_artifact::dsl::*;
+        // TODO: paginate? by PK? but that's a tuple. could do name, but it's
+        // not unique. not sure if that's a problem. Need a stable order, at
+        // least.
+        update_artifact
+            .select(UpdateArtifact::as_select())
+            // TODO: get rid of this fake filter, which is needed to make CRDB
+            // not complain about table scans, and instead paginate and/or list
+            // artifacts for a single system version. Those could probably be
+            // two different methods.
+            .filter(
+                kind.eq(KnownArtifactKind(KnownArtifactKind_::ControlPlane)),
+            )
+            .load_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
     pub async fn upsert_system_update(

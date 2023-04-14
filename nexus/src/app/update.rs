@@ -8,7 +8,7 @@ use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::KnownArtifactKind;
+use crate::db::model::{KnownArtifactKind, SystemUpdate};
 use chrono::Utc;
 use hex;
 use nexus_db_queries::context::OpContext;
@@ -65,14 +65,28 @@ impl super::Nexus {
                 ),
             })?;
 
-        let artifacts = tokio::task::spawn_blocking(move || {
-            crate::updates::read_artifacts(&trusted_root, base_url)
-        })
-        .await
-        .unwrap()
-        .map_err(|e| Error::InternalError {
-            internal_message: format!("error trying to refresh updates: {}", e),
-        })?;
+        let (system_version, artifacts) =
+            tokio::task::spawn_blocking(move || {
+                crate::updates::read_artifacts(&trusted_root, base_url)
+            })
+            .await
+            .unwrap()
+            .map_err(|e| Error::InternalError {
+                internal_message: format!(
+                    "error trying to refresh updates: {}",
+                    e
+                ),
+            })?;
+
+        // Currently the entire TUF repo has a single system_version. Here we
+        // upsert that version into the DB and associate each artifact with it
+        // in a join table (also an upsert). Eventually each artifact will be
+        // associated with one or more system versions, so we will have to
+        // extract that mapping from the TUF repo and upsert those associations.
+
+        self.db_datastore
+            .upsert_system_update(opctx, SystemUpdate::new(system_version)?)
+            .await?;
 
         // FIXME: if we hit an error in any of these database calls, the
         // available artifact table will be out of sync with the current
@@ -84,6 +98,9 @@ impl super::Nexus {
             self.db_datastore
                 .update_artifact_upsert(&opctx, artifact.clone())
                 .await?;
+            // TODO: associate artifact with system version, possibly inside
+            // update_artifact_upsert (whatever is the easiest way to make it a
+            // single transaction)
         }
 
         // ensure table is in sync with current copy of artifacts.json
@@ -93,8 +110,12 @@ impl super::Nexus {
                 .await?;
         }
 
-        // demo-grade update logic: tell all sleds to apply all artifacts
-        for sled in self
+        Ok(())
+    }
+
+    /// demo-grade update logic: tell all sleds to apply all artifacts
+    pub async fn updates_apply(&self, opctx: &OpContext) -> Result<(), Error> {
+        let sleds = self
             .db_datastore
             .sled_list(
                 &opctx,
@@ -104,8 +125,11 @@ impl super::Nexus {
                     limit: NonZeroU32::new(100).unwrap(),
                 },
             )
-            .await?
-        {
+            .await?;
+
+        let artifacts = self.db_datastore.update_artifact_list(&opctx).await?;
+
+        for sled in sleds {
             let client = self.sled_client(&sled.id()).await?;
             for artifact in &artifacts {
                 info!(

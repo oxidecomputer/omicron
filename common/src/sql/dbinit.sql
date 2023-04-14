@@ -1672,6 +1672,11 @@ CREATE INDEX ON omicron.public.update_artifact (
     targets_role_version
 );
 
+-- TODO: delete this once we can filter artifacts by system version
+CREATE INDEX ON omicron.public.update_artifact (
+    kind
+);
+
 /*
  * System updates
  */
