@@ -19,7 +19,9 @@ use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_db_model::{KnownArtifactKind, SystemUpdateComponentUpdate};
+use nexus_db_model::{
+    KnownArtifactKind, SystemUpdateComponentUpdate, SystemUpdateUpdateArtifact,
+};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, ListResultVec, LookupResult, LookupType,
@@ -46,14 +48,16 @@ impl DataStore {
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
+                use db::schema::system_update_update_artifact as su_to_ua;
                 use db::schema::update_artifact as ua;
 
-                let _ = self
-                    .upsert_system_update(
-                        opctx,
-                        SystemUpdate::new(system_version.0).unwrap(),
-                    )
-                    .await;
+                // TODO: fix these unwraps, what the f
+                let system_update =
+                    SystemUpdate::new(system_version.0).unwrap();
+                let system_update = self
+                    .upsert_system_update(opctx, system_update)
+                    .await
+                    .unwrap();
 
                 // we have to loop here for two reasons: 1) `do_update().set()`
                 // with a vec requires naming the columns one by one, and 2)
@@ -67,6 +71,17 @@ impl DataStore {
                         .set(artifact.clone())
                         .returning(UpdateArtifact::as_returning())
                         .get_result_async(&conn)
+                        .await?;
+
+                    // TODO: eat conflicts, we don't care
+                    diesel::insert_into(su_to_ua::table)
+                        .values(SystemUpdateUpdateArtifact {
+                            system_update_id: system_update.identity.id,
+                            artifact_name: artifact.name.clone(),
+                            artifact_version: artifact.version.clone(),
+                            artifact_kind: artifact.kind,
+                        })
+                        .execute_async(&conn)
                         .await?;
                     created.push(created_artifact);
                 }

@@ -791,6 +791,15 @@ table! {
 }
 
 table! {
+    system_update_update_artifact (system_update_id, artifact_name, artifact_version, artifact_kind) {
+        system_update_id -> Uuid,
+        artifact_name -> Text,
+        artifact_version -> Text,
+        artifact_kind -> crate::KnownArtifactKindEnum,
+    }
+}
+
+table! {
     update_deployment (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -841,6 +850,12 @@ allow_tables_to_appear_in_same_query!(
     system_update_component_update,
 );
 joinable!(system_update_component_update -> component_update (component_update_id));
+
+allow_tables_to_appear_in_same_query!(
+    system_update,
+    update_artifact,
+    system_update_update_artifact,
+);
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));

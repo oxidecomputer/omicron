@@ -6,9 +6,9 @@ use crate::{
     impl_enum_type,
     schema::{
         component_update, system_update, system_update_component_update,
-        update_deployment, updateable_component,
+        system_update_update_artifact, update_deployment, updateable_component,
     },
-    SemverVersion,
+    KnownArtifactKind, SemverVersion,
 };
 use db_macros::Asset;
 use nexus_types::{
@@ -55,6 +55,17 @@ impl From<SystemUpdate> for views::SystemUpdate {
             version: system_update.version.into(),
         }
     }
+}
+
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+)]
+#[diesel(table_name = system_update_update_artifact)]
+pub struct SystemUpdateUpdateArtifact {
+    pub system_update_id: Uuid,
+    pub artifact_name: String,
+    pub artifact_version: SemverVersion,
+    pub artifact_kind: KnownArtifactKind,
 }
 
 impl_enum_type!(

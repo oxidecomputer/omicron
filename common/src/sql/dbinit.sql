@@ -1697,7 +1697,22 @@ CREATE UNIQUE INDEX ON omicron.public.system_update (
     version
 );
 
- 
+/*
+ * Associate system updates with artifacts. Not done with a system_update_id
+ * field on artifact because the same artifact may be part of more than one
+ * system update.
+ */
+CREATE TABLE omicron.public.system_update_update_artifact (
+    system_update_id UUID NOT NULL,
+    
+    -- this tuple is the PK on an artifact
+    artifact_name STRING(63) NOT NULL,
+    artifact_version STRING(63) NOT NULL,
+    artifact_kind omicron.public.update_artifact_kind NOT NULL,
+
+    PRIMARY KEY (system_update_id, artifact_name, artifact_kind, artifact_version)
+);
+
 CREATE TYPE omicron.public.updateable_component_type AS ENUM (
     'bootloader_for_rot',
     'bootloader_for_sp',
