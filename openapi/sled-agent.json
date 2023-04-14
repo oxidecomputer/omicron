@@ -1639,7 +1639,29 @@
               "dns_address": {
                 "type": "string"
               },
-              "server_address": {
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "type": "string"
+              },
+              "http_address": {
                 "type": "string"
               },
               "type": {
@@ -1651,7 +1673,7 @@
             },
             "required": [
               "dns_address",
-              "server_address",
+              "http_address",
               "type"
             ]
           },
@@ -2229,6 +2251,7 @@
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "external_dns",
           "internal_dns",
           "nexus",
           "oximeter",

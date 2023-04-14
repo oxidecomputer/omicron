@@ -15,6 +15,7 @@ pub enum ServiceName {
     Clickhouse,
     Cockroach,
     InternalDNS,
+    ExternalDNS,
     Nexus,
     Oximeter,
     ManagementGatewayService,
@@ -34,6 +35,7 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse => "clickhouse",
             ServiceName::Cockroach => "cockroach",
+            ServiceName::ExternalDNS => "external-dns",
             ServiceName::InternalDNS => "nameservice",
             ServiceName::Nexus => "nexus",
             ServiceName::Oximeter => "oximeter",
@@ -57,6 +59,7 @@ impl ServiceName {
             ServiceName::Clickhouse
             | ServiceName::Cockroach
             | ServiceName::InternalDNS
+            | ServiceName::ExternalDNS
             | ServiceName::Nexus
             | ServiceName::Oximeter
             | ServiceName::ManagementGatewayService
