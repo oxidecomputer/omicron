@@ -88,6 +88,12 @@ pub async fn make_resources(
         LookupType::ById(sled_id),
     ));
 
+    builder.new_resource(authz::PhysicalDisk::new(
+        authz::FLEET,
+        ("vendor".to_string(), "serial".to_string(), "model".to_string()),
+        LookupType::ByCompositeId("vendor-serial-model".to_string()),
+    ));
+
     let global_image_id =
         "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
     builder.new_resource(authz::GlobalImage::new(

@@ -211,7 +211,8 @@ where
         let my_ident = match self.lookup_type() {
             LookupType::ByName(name) => format!("{:?}", name),
             LookupType::ById(id) => format!("id {:?}", id.to_string()),
-            LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
+            LookupType::ByCompositeId(id) => format!("id {:?}", id),
+            LookupType::BySessionToken(_) => {
                 unimplemented!()
             }
         };

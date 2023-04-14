@@ -529,7 +529,7 @@ mod test {
             .physical_disk_upsert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
-        physical_disk.id()
+        physical_disk.uuid()
     }
 
     // Creates a test zpool, returns its UUID.
