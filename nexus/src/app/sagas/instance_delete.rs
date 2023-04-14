@@ -292,9 +292,18 @@ async fn sid_account_sled_resources(
         &params.serialized_authn,
     );
 
+    // Fetch the previously-deleted instance record to get its Propolis ID. It
+    // is safe to fetch the ID at this point because the instance is already
+    // deleted and so cannot change anymore.
+    let instance = osagactx
+        .datastore()
+        .instance_fetch_deleted(&opctx, &params.authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     osagactx
         .datastore()
-        .sled_reservation_delete(&opctx, params.instance.id())
+        .sled_reservation_delete(&opctx, instance.runtime().propolis_id)
         .await
         .map_err(ActionError::action_failed)?;
     Ok(())
