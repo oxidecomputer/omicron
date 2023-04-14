@@ -95,9 +95,9 @@ pub struct ZpoolPutRequest {
     pub size: ByteCount,
 
     // Information to identify the disk to which this zpool belongs
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
+    pub disk_vendor: String,
+    pub disk_serial: String,
+    pub disk_model: String,
     // TODO: We could include any other data from `ZpoolInfo` we want,
     // such as "allocated/free" space and pool health?
 }

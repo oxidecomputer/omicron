@@ -142,9 +142,6 @@ impl Pool {
     /// Returns Ok if the pool exists.
     fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
-
-        // NOTE: This relies on the name being a UUID exactly.
-        // We could be more flexible...
         Ok(Pool { name, info, zones: HashMap::new(), parent })
     }
 
@@ -711,9 +708,9 @@ impl StorageWorker {
         let notify_nexus = move || {
             let zpool_request = ZpoolPutRequest {
                 size: size.into(),
-                vendor: vendor.clone(),
-                serial: serial.clone(),
-                model: model.clone(),
+                disk_vendor: vendor.clone(),
+                disk_serial: serial.clone(),
+                disk_model: model.clone(),
             };
             let lazy_nexus_client = lazy_nexus_client.clone();
             async move {

@@ -2507,10 +2507,13 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
-          "model": {
+          "disk_model": {
             "type": "string"
           },
-          "serial": {
+          "disk_serial": {
+            "type": "string"
+          },
+          "disk_vendor": {
             "type": "string"
           },
           "size": {
@@ -2520,16 +2523,13 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
-          },
-          "vendor": {
-            "type": "string"
           }
         },
         "required": [
-          "model",
-          "serial",
-          "size",
-          "vendor"
+          "disk_model",
+          "disk_serial",
+          "disk_vendor",
+          "size"
         ]
       },
       "ZpoolPutResponse": {

@@ -55,9 +55,9 @@ async fn test_zpool_put_success(cptestctx: &ControlPlaneTestContext) {
 
     let request = ZpoolPutRequest {
         size: ByteCount::from_gibibytes_u32(1),
-        vendor: VENDOR.into(),
-        serial: SERIAL.into(),
-        model: MODEL.into(),
+        disk_vendor: VENDOR.into(),
+        disk_serial: SERIAL.into(),
+        disk_model: MODEL.into(),
     };
     client
         .make_request(
@@ -86,9 +86,9 @@ async fn test_zpool_put_bad_sled_returns_not_found(
 
     let request = ZpoolPutRequest {
         size: ByteCount::from_gibibytes_u32(1),
-        vendor: VENDOR.into(),
-        serial: SERIAL.into(),
-        model: MODEL.into(),
+        disk_vendor: VENDOR.into(),
+        disk_serial: SERIAL.into(),
+        disk_model: MODEL.into(),
     };
     client
         .make_request_error_body(
@@ -113,9 +113,9 @@ async fn test_zpool_put_bad_physical_disk_returns_not_found(
 
     let request = ZpoolPutRequest {
         size: ByteCount::from_gibibytes_u32(1),
-        vendor: VENDOR.into(),
-        serial: SERIAL.into(),
-        model: MODEL.into(),
+        disk_vendor: VENDOR.into(),
+        disk_serial: SERIAL.into(),
+        disk_model: MODEL.into(),
     };
     client
         .make_request_error_body(

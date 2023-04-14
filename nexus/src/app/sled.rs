@@ -219,7 +219,12 @@ impl super::Nexus {
 
         let disk = self
             .db_datastore
-            .physical_disk_lookup(opctx, info.vendor, info.serial, info.model)
+            .physical_disk_lookup(
+                opctx,
+                info.disk_vendor,
+                info.disk_serial,
+                info.disk_model,
+            )
             .await?;
         let zpool =
             db::model::Zpool::new(id, sled_id, disk.id(), info.size.into());

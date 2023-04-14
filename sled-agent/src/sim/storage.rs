@@ -499,17 +499,21 @@ impl Storage {
     pub async fn insert_zpool(
         &mut self,
         zpool_id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        disk_vendor: String,
+        disk_serial: String,
+        disk_model: String,
         size: u64,
     ) {
         // Update our local data
         self.zpools.insert(zpool_id, Zpool::new());
 
         // Notify Nexus
-        let request =
-            ZpoolPutRequest { size: ByteCount(size), vendor, serial, model };
+        let request = ZpoolPutRequest {
+            size: ByteCount(size),
+            disk_vendor,
+            disk_serial,
+            disk_model,
+        };
         self.nexus_client
             .zpool_put(&self.sled_id, &zpool_id, &request)
             .await

@@ -330,7 +330,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
 
 /*
  * ZPools of Storage, attached to Sleds.
- * Typically these are backed by a single physical disk.
+ * These are backed by a single physical disk.
  */
 CREATE TABLE omicron.public.Zpool (
     /* Identity metadata (asset) */

@@ -105,7 +105,7 @@ impl DataStore {
             .filter(dsl::serial.eq(serial.clone()))
             .filter(dsl::model.eq(model.clone()))
             .select(PhysicalDisk::as_select())
-            .first_async(self.pool())
+            .first_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel_pool(

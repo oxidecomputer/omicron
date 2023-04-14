@@ -286,20 +286,7 @@ impl<'de> Deserialize<'de> for ZpoolName {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-
-        if let Some(s) = s.strip_prefix(ZPOOL_EXTERNAL_PREFIX) {
-            let id = Uuid::from_str(s).map_err(serde::de::Error::custom)?;
-            Ok(ZpoolName::new_external(id))
-        } else if let Some(s) = s.strip_prefix(ZPOOL_INTERNAL_PREFIX) {
-            let id = Uuid::from_str(s).map_err(serde::de::Error::custom)?;
-            Ok(ZpoolName::new_internal(id))
-        } else {
-            Err(serde::de::Error::custom(
-                format!(
-                    "Bad zpool prefix - must start with '{ZPOOL_EXTERNAL_PREFIX}' or '{ZPOOL_INTERNAL_PREFIX}'"
-                )
-            ))
-        }
+        ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
