@@ -1694,7 +1694,7 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'switch_rot'
 );
 
-CREATE TABLE omicron.public.update_available_artifact (
+CREATE TABLE omicron.public.update_artifact (
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
@@ -1714,7 +1714,7 @@ CREATE TABLE omicron.public.update_available_artifact (
 );
 
 /* This index is used to quickly find outdated artifacts. */
-CREATE INDEX ON omicron.public.update_available_artifact (
+CREATE INDEX ON omicron.public.update_artifact (
     targets_role_version
 );
 

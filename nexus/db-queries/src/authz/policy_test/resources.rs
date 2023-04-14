@@ -302,7 +302,7 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
-        authz::UpdateAvailableArtifact::get_polar_class(),
+        authz::UpdateArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()
