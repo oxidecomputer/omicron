@@ -124,12 +124,14 @@ pub async fn test_setup<N: NexusServer>(
     test_name: &str,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config::<N>(test_name, &mut config).await
+    test_setup_with_config::<N>(test_name, &mut config, sim::SimMode::Explicit)
+        .await
 }
 
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
+    sim_mode: sim::SimMode,
 ) -> ControlPlaneTestContext<N> {
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
@@ -188,6 +190,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_server_addr,
         sa_id,
         tempdir.path(),
+        sim_mode,
     )
     .await
     .unwrap();
@@ -241,10 +244,11 @@ pub async fn start_sled_agent(
     nexus_address: SocketAddr,
     id: Uuid,
     update_directory: &Path,
+    sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
         id,
-        sim_mode: sim::SimMode::Explicit,
+        sim_mode,
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
