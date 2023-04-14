@@ -14,6 +14,7 @@ use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InstanceState as ApiInstanceState;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::collections::VecDeque;
@@ -87,6 +88,23 @@ impl Simulatable for SimInstance {
         target: &InstanceStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
         match target {
+            InstanceStateRequested::MigrationTarget(_) => {
+                match self.next_resting_state() {
+                    ApiInstanceState::Creating => {
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Migrating);
+                        self.propolis_queue
+                            .push_back(PropolisInstanceState::Running);
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "can't request migration in with pending resting \
+                            state {}",
+                            self.next_resting_state()
+                        )))
+                    }
+                }
+            }
             InstanceStateRequested::Running => {
                 match self.next_resting_state() {
                     ApiInstanceState::Creating => {
@@ -103,26 +121,13 @@ impl Simulatable for SimInstance {
                     | ApiInstanceState::Running
                     | ApiInstanceState::Rebooting
                     | ApiInstanceState::Migrating => {}
-                    ApiInstanceState::Stopping | ApiInstanceState::Stopped => {
-                        // TODO: Normally, Propolis forbids direct transitions
-                        // from a stopped state back to a running state.
-                        // Instead, Nexus creates a new Propolis and sends state
-                        // change requests to that. This arm abstracts this
-                        // behavior away and just allows a fake instance to
-                        // transition right back to a running state after being
-                        // stopped.
-                        //
-                        // This will change in the future when the sled agents
-                        // (both real and simulated) split "registering" an
-                        // instance with the agent and actually starting it into
-                        // separate actions.
-                        self.state.transition(ApiInstanceState::Starting);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Starting);
-                        self.propolis_queue
-                            .push_back(PropolisInstanceState::Running);
-                    }
-                    ApiInstanceState::Repairing
+
+                    // Propolis forbids direct transitions from a stopped state
+                    // back to a running state. Callers who want to restart a
+                    // stopped instance must recreate it.
+                    ApiInstanceState::Stopping
+                    | ApiInstanceState::Stopped
+                    | ApiInstanceState::Repairing
                     | ApiInstanceState::Failed
                     | ApiInstanceState::Destroyed => {
                         return Err(Error::invalid_request(&format!(
@@ -183,11 +188,6 @@ impl Simulatable for SimInstance {
                     )))
                 }
             },
-            InstanceStateRequested::Destroyed => {
-                self.state
-                    .observe_transition(&PropolisInstanceState::Destroyed);
-                self.propolis_queue.clear();
-            }
         }
 
         Ok(None)
@@ -255,5 +255,9 @@ impl Simulatable for SimInstance {
             .await
             .map(|_| ())
             .map_err(Error::from)
+    }
+
+    fn resource_type() -> ResourceType {
+        ResourceType::Instance
     }
 }

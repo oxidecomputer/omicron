@@ -33,6 +33,7 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -194,6 +195,8 @@ pub struct Agent {
     sled_config: SledConfig,
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
+
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -294,6 +297,7 @@ impl Agent {
         ));
         let link = config.link.clone();
         let ip = bootstrap_ip(link.clone(), 1)?;
+        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -332,7 +336,7 @@ impl Agent {
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        let ddmd_client = DdmAdminClient::new(log.clone())?;
+        let ddmd_client = DdmAdminClient::localhost(log.clone())?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
@@ -371,6 +375,7 @@ impl Agent {
             sled_config,
             sp,
             ddmd_client,
+            switch_zone_bootstrap_address,
         };
 
         let hardware_monitor = agent.start_hardware_monitor().await?;
@@ -446,7 +451,8 @@ impl Agent {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
                 if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone()).await?;
+                    self.establish_sled_quorum(share.clone(), request.subnet)
+                        .await?;
                     *self.share.lock().await = Some(share);
                 }
 
@@ -609,8 +615,11 @@ impl Agent {
     async fn establish_sled_quorum(
         &self,
         share: ShareDistribution,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) -> Result<RackSecret, BootstrapError> {
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        // Ask the switch zone's maghemite for peers
+        let ddm_admin_client =
+            DdmAdminClient::switch_zone(self.log.clone(), sled_subnet)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -751,6 +760,7 @@ impl Agent {
             &self.parent_log,
             request,
             self.ip,
+            self.switch_zone_bootstrap_address,
             self.sp.clone(),
             // TODO-cleanup: Remove this arg once RSS can discover the trust
             // quorum members over the management network.
@@ -772,7 +782,13 @@ impl Agent {
             .try_lock()
             .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
-        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
+        RssHandle::run_rss_reset(
+            &self.parent_log,
+            self.ip,
+            self.switch_zone_bootstrap_address,
+            None,
+        )
+        .await?;
         Ok(())
     }
 

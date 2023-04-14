@@ -53,6 +53,16 @@ pub struct Config {
 
     #[serde(default)]
     pub updates: ConfigUpdates,
+
+    /// When running on a scrimlet, tfportd in the switch zone will create links
+    /// when it boots, and maghemite in the switch zone is configured to use
+    /// those in transit mode in order to transit prefix announcements to sleds.
+    ///
+    /// For non-gimlet based testing, tfportd will not add create links when it
+    /// boots. Map these links into the switch zone for use with the transit
+    /// mode maghemite there.
+    #[serde(default)]
+    pub switch_zone_maghemite_links: Vec<PhysicalLink>,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -6,6 +6,7 @@ use crate::nexus::NexusClient;
 use async_trait::async_trait;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::ResourceType;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -116,4 +117,6 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
         id: &Uuid,
         current: Self::CurrentState,
     ) -> Result<(), Error>;
+
+    fn resource_type() -> ResourceType;
 }

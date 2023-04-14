@@ -433,14 +433,21 @@ impl ServiceInner {
         Ok(())
     }
 
-    // Waits for sufficient neighbors to exist so the initial set of requests
-    // can be sent out.
+    /// Waits for sufficient neighbors to exist so the initial set of requests
+    /// can be sent out.
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
         our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        // Ask the switch zone for a list of peers - note that the rack subnet
+        // has not been sent out, and there the switch zone does not have an
+        // underlay address yet, so the bootstrap address is used here.
+        let ddm_admin_client = DdmAdminClient::address(
+            self.log.clone(),
+            switch_zone_bootstrap_address,
+        )?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -796,7 +803,10 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let ddm_admin_client = DdmAdminClient::address(
+            self.log.clone(),
+            local_bootstrap_agent.switch_zone_bootstrap_address(),
+        )?;
         let peer_addrs = ddm_admin_client.peer_addrs().await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
@@ -883,8 +893,13 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
+
         let addrs = self
-            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .wait_for_peers(
+                expectation,
+                local_bootstrap_agent.our_address(),
+                local_bootstrap_agent.switch_zone_bootstrap_address(),
+            )
             .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 

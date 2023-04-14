@@ -8,11 +8,11 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
-use crate::params::VpcFirewallRule;
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
-    InstanceMigrationTargetParams, InstanceStateRequested, ServiceEnsureBody,
-    SledRole, TimeSync, Zpool,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -525,17 +525,47 @@ impl SledAgent {
         Ok(())
     }
 
-    /// Idempotently ensures that a given Instance is running on the sled.
-    pub async fn instance_ensure(
+    /// Idempotently ensures that a given instance is registered with this sled,
+    /// i.e., that it can be addressed by future calls to
+    /// [`instance_ensure_state`].
+    pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
         initial: InstanceHardware,
-        target: InstanceStateRequested,
-        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         self.inner
             .instances
-            .ensure(instance_id, initial, target, migrate)
+            .ensure_registered(instance_id, initial)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that the specified instance is no longer registered
+    /// on this sled.
+    ///
+    /// If the instance is registered and has a running Propolis, this operation
+    /// rudely terminates the instance.
+    pub async fn instance_ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        self.inner
+            .instances
+            .ensure_unregistered(instance_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently drives the specified instance into the specified target
+    /// state.
+    pub async fn instance_ensure_state(
+        &self,
+        instance_id: Uuid,
+        target: InstanceStateRequested,
+    ) -> Result<InstancePutStateResponse, Error> {
+        self.inner
+            .instances
+            .ensure_state(instance_id, target)
             .await
             .map_err(|e| Error::Instance(e))
     }

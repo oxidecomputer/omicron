@@ -173,6 +173,7 @@ impl HardwareMonitor {
             sled_config.skip_timesync,
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
+            sled_config.switch_zone_maghemite_links.clone(),
         )
         .await?;
 
