@@ -675,6 +675,24 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Dendrite,
                             });
                         }
+                        ServiceType::ExternalDns {
+                            http_address,
+                            dns_address,
+                        } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: http_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::ExternalDNSConfig,
+                            });
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: dns_address.to_string(),
+                                kind: NexusTypes::ServiceKind::ExternalDNS,
+                            });
+                        }
                         ServiceType::InternalDns {
                             http_address,
                             dns_address,
