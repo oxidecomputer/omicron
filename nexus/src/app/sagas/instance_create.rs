@@ -599,7 +599,10 @@ async fn sic_alloc_server(
     let rss_ram = params.create_params.memory;
     let reservoir_ram = omicron_common::api::external::ByteCount::from(0);
 
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    // Use the instance's Propolis ID as its resource key, since each unique
+    // Propolis consumes its own resources, and an instance can have multiple
+    // Propolises during a live migration.
+    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
     let resources = db::model::Resources::new(
         hardware_threads.into(),
         rss_ram.into(),
@@ -609,7 +612,7 @@ async fn sic_alloc_server(
     let resource = osagactx
         .nexus()
         .reserve_on_random_sled(
-            instance_id,
+            propolis_id,
             db::model::SledResourceKind::Instance,
             resources,
         )
@@ -622,9 +625,9 @@ async fn sic_alloc_server_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
-    osagactx.nexus().delete_sled_reservation(instance_id).await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
