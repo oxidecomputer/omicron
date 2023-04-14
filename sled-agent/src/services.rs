@@ -144,6 +144,9 @@ pub enum Error {
         err: Box<illumos_utils::opte::Error>,
     },
 
+    #[error("Error contacting dpd: {0}")]
+    DpdError(#[from] dpd_client::Error<dpd_client::types::Error>),
+
     #[error("Failed to create Vnic in sled-local zone: {0}")]
     SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
 
@@ -164,6 +167,9 @@ pub enum Error {
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns::resolver::ResolveError),
 }
 
 impl Error {
@@ -299,6 +305,7 @@ pub struct ServiceManagerInner {
 struct SledAgentInfo {
     config: Config,
     port_manager: PortManager,
+    resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
 }
@@ -383,6 +390,10 @@ impl ServiceManager {
             .set(SledAgentInfo {
                 config,
                 port_manager,
+                resolver: Resolver::new_from_ip(
+                    self.inner.log.new(o!("component" => "DnsResolver")),
+                    underlay_address,
+                )?,
                 underlay_address,
                 rack_id,
             })
@@ -610,7 +621,7 @@ impl ServiceManager {
 
     // Check the services intended to run in the zone to determine whether any
     // OPTE ports need to be created and mapped into the zone when it is created.
-    fn opte_ports_needed(
+    async fn opte_ports_needed(
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Vec<(Port, PortTicket)>, Error> {
@@ -622,12 +633,22 @@ impl ServiceManager {
             return Ok(vec![]);
         }
 
-        let port_manager = &self
-            .inner
-            .sled_info
-            .get()
-            .ok_or(Error::SledAgentNotReady)?
-            .port_manager;
+        let SledAgentInfo { port_manager, resolver, underlay_address, .. } =
+            &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
+
+        let dpd_addr = resolver
+            .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
+            .await?;
+
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
+            dpd_client::ClientState {
+                tag: "sled-agent".to_string(),
+                log: self.inner.log.new(o!(
+                    "component" => "DpdClient"
+                )),
+            },
+        );
 
         let mut ports = vec![];
         for svc in &req.services {
@@ -657,6 +678,33 @@ impl ServiceManager {
                 service: svc.to_string(),
                 err: Box::new(err),
             })?;
+
+            // We also need to update the switch with the NAT mappings
+            let nat_target = dpd_client::types::NatTarget {
+                inner_mac: dpd_client::types::MacAddr {
+                    a: port.0.mac().into_array().to_vec(),
+                },
+                internal_ip: *underlay_address,
+                vni: port.0.vni().as_u32().into(),
+            };
+
+            let (target_ip, first_port, last_port) = match snat {
+                Some(s) => (s.ip, s.first_port, s.last_port),
+                None => (external_ips[0], 0, u16::MAX),
+            };
+
+            match &target_ip {
+                IpAddr::V4(ip) => {
+                    dpd_client
+                        .nat_ipv4_create(ip, first_port, last_port, &nat_target)
+                        .await?;
+                }
+                IpAddr::V6(ip) => {
+                    dpd_client
+                        .nat_ipv6_create(ip, first_port, last_port, &nat_target)
+                        .await?;
+                }
+            }
 
             ports.push(port);
         }
@@ -760,7 +808,7 @@ impl ServiceManager {
         let links_need_link_local: Vec<bool>;
         (links, links_need_link_local) =
             self.links_needed(request)?.into_iter().unzip();
-        let opte_ports = self.opte_ports_needed(request)?;
+        let opte_ports = self.opte_ports_needed(request).await?;
         let limit_priv = Self::privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names

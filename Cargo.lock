@@ -4541,6 +4541,7 @@ dependencies = [
  "ddm-admin-client",
  "dns-server",
  "dns-service-client",
+ "dpd-client",
  "dropshot",
  "expectorate",
  "flate2",

@@ -336,9 +336,33 @@ impl ServiceInner {
         service_plan: &ServicePlan,
     ) -> Result<(), SetupServiceError> {
         let log = &self.log;
+        // Start up the internal DNS services
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                let services: Vec<_> = services_request
+                    .services
+                    .iter()
+                    .filter_map(|svc| {
+                        if matches!(svc.zone_type, ZoneType::InternalDns) {
+                            Some(svc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !services.is_empty() {
+                    self.initialize_services(*sled_address, &services).await?;
+                }
+
+                Ok(())
+            },
+        ))
+        .await
+        .into_iter()
+        .collect::<Result<_, SetupServiceError>>()?;
 
         // Determine the list of DNS servers that are supposed to exist based on
-        // the service plan that has already been deployed.
+        // the service plan that has just been deployed.
         let dns_server_ips =
             // iterate sleds
             service_plan.services.iter().filter_map(
@@ -372,8 +396,8 @@ impl ServiceInner {
                                         InternalDns service for zone with \
                                         type ZoneType::InternalDns, but \
                                         found {} (zone {})",
+                                        addrs.len(),
                                         svc.id,
-                                        addrs.len()
                                     );
                                     None
                                 }
@@ -994,7 +1018,13 @@ impl ServiceInner {
                 ServicePlan::create(&self.log, &config, &plan.sleds).await?
             };
 
-        // Set up internal DNS and NTP services.
+        // Set up internal DNS services first and write the initial
+        // DNS configuration to the internal DNS servers.
+        self.initialize_dns(&service_plan).await?;
+
+        // Next start up the NTP services.
+        // Note we also specify internal DNS services again because it
+        // can ony be additive.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
                 let services: Vec<_> = services_request
@@ -1020,9 +1050,6 @@ impl ServiceInner {
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
-
-        // Write the initial DNS configuration to the internal DNS servers.
-        self.initialize_dns(&service_plan).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
