@@ -106,6 +106,7 @@ table! {
         active_propolis_ip -> Nullable<Inet>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
