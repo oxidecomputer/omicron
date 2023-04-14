@@ -6,6 +6,7 @@
 
 use crate::addrobj::AddrObject;
 use crate::dladm;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::OpteHdl;
 use slog::info;
 use slog::Logger;
@@ -44,7 +45,7 @@ pub enum Error {
     InvalidPortIpConfig,
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, super::params::NetworkInterfaceKind),
+    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 /// Delete all xde devices on the system.

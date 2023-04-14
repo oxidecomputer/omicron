@@ -1151,7 +1151,7 @@ impl From<steno::SagaStateView> for SagaState {
 }
 
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
@@ -1306,7 +1306,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 /// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
@@ -1912,7 +1912,14 @@ impl JsonSchema for L4PortRange {
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
 #[derive(
-    Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay,
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    PartialEq,
+    Eq,
+    SerializeDisplay,
+    Hash,
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
 

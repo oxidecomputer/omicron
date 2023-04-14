@@ -352,7 +352,6 @@ mod test {
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
-    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
@@ -361,6 +360,7 @@ mod test {
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev::test_setup_log;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;

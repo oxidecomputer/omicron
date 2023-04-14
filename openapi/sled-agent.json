@@ -1695,45 +1695,41 @@
             "description": "A vNIC attached to a guest instance",
             "type": "object",
             "properties": {
-              "instance": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
                 ]
               }
             },
             "required": [
-              "instance"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           },
           {
             "description": "A vNIC associated with an internal service",
             "type": "object",
             "properties": {
-              "service": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
                 ]
               }
             },
             "required": [
-              "service"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           }
         ]
       },
@@ -2111,22 +2107,22 @@
         "minimum": 0
       },
       "SourceNatConfig": {
-        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests or services.",
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
           "first_port": {
-            "description": "The first port used for instance NAT, inclusive.",
+            "description": "The first port used for source NAT, inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "ip": {
-            "description": "The external address provided to the instance",
+            "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
           },
           "last_port": {
-            "description": "The last port used for instance NAT, also inclusive.",
+            "description": "The last port used for source NAT, also inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0

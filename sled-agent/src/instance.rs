@@ -9,8 +9,7 @@ use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
-    InstanceMigrationTargetParams, InstanceStateRequested, NetworkInterface,
-    SourceNatConfig, VpcFirewallRule,
+    InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
@@ -26,6 +25,9 @@ use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
+use omicron_common::api::internal::shared::{
+    NetworkInterface, SourceNatConfig,
+};
 use omicron_common::backoff;
 //use propolis_client::generated::DiskRequest;
 use propolis_client::Client as PropolisClient;
@@ -987,7 +989,6 @@ mod test {
     use crate::instance_manager::InstanceManager;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
-    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::opte::PortManager;
@@ -996,6 +997,7 @@ mod test {
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev::test_setup_log;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
