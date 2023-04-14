@@ -37,6 +37,7 @@ use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
+use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
 use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
@@ -137,8 +138,11 @@ pub enum Error {
     #[error("Failed to access underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create Vnic for Nexus: {0}")]
-    NexusVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create OPTE port for service {service}: {err}")]
+    ServicePortCreation {
+        service: String,
+        err: Box<illumos_utils::opte::Error>,
+    },
 
     #[error("Failed to create Vnic in sled-local zone: {0}")]
     SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
@@ -294,7 +298,7 @@ pub struct ServiceManagerInner {
 // operational.
 struct SledAgentInfo {
     config: Config,
-    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
+    port_manager: PortManager,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
 }
@@ -370,7 +374,7 @@ impl ServiceManager {
     pub async fn sled_agent_started(
         &self,
         config: Config,
-        physical_link: PhysicalLink,
+        port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
     ) -> Result<(), Error> {
@@ -378,13 +382,7 @@ impl ServiceManager {
             .sled_info
             .set(SledAgentInfo {
                 config,
-                physical_link_vnic_allocator: VnicAllocator::new(
-                    "Public",
-                    // NOTE: Right now, we only use a connection to one of the
-                    // Chelsio links. Longer-term, when we we use OPTE, we'll
-                    // be able to use both connections.
-                    physical_link,
-                ),
+                port_manager,
                 underlay_address,
                 rack_id,
             })
@@ -567,26 +565,6 @@ impl ServiceManager {
 
         for svc in &req.services {
             match svc {
-                ServiceType::Nexus { .. }
-                | ServiceType::BoundaryNtp { .. }
-                | ServiceType::ExternalDns { .. } => {
-                    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-                    match self
-                        .inner
-                        .sled_info
-                        .get()
-                        .ok_or_else(|| Error::SledAgentNotReady)?
-                        .physical_link_vnic_allocator
-                        .new_control(None)
-                    {
-                        Ok(n) => {
-                            links.push((n, false));
-                        }
-                        Err(e) => {
-                            return Err(Error::NexusVnicCreation(e));
-                        }
-                    }
-                }
                 ServiceType::Tfport { pkt_source } => {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
@@ -628,6 +606,62 @@ impl ServiceManager {
         }
 
         Ok(links)
+    }
+
+    // Check the services intended to run in the zone to determine whether any
+    // OPTE ports need to be created and mapped into the zone when it is created.
+    fn opte_ports_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Result<Vec<(Port, PortTicket)>, Error> {
+        // Only some services currently need OPTE ports
+        if !matches!(
+            req.zone_type,
+            ZoneType::ExternalDns | ZoneType::Nexus | ZoneType::Ntp
+        ) {
+            return Ok(vec![]);
+        }
+
+        let port_manager = &self
+            .inner
+            .sled_info
+            .get()
+            .ok_or(Error::SledAgentNotReady)?
+            .port_manager;
+
+        let mut ports = vec![];
+        for svc in &req.services {
+            let external_ip;
+            let (nic, snat, external_ips) = match svc {
+                ServiceType::Nexus { external_ip, nic, .. } => {
+                    (nic, None, std::slice::from_ref(external_ip))
+                }
+                ServiceType::ExternalDns { dns_address, nic, .. } => {
+                    external_ip = dns_address.ip();
+                    (nic, None, std::slice::from_ref(&external_ip))
+                }
+                ServiceType::BoundaryNtp { nic, snat_cfg, .. } => {
+                    (nic, Some(*snat_cfg), &[][..])
+                }
+                _ => continue,
+            };
+
+            // Create the OPTE port for the service.
+            // Note we don't plumb any firewall rules at this point,
+            // Nexus will plumb them down later but the default OPTE
+            // config allows outbound access which is enough for
+            // Boundary NTP which needs to come up before Nexus.
+            let port = port_manager
+                .create_port(nic, snat, external_ips, &[])
+                .map_err(|err| Error::ServicePortCreation {
+                service: svc.to_string(),
+                err: Box::new(err),
+            })?;
+
+            ports.push(port);
+        }
+
+        Ok(ports)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -719,7 +753,6 @@ impl ServiceManager {
                 Some((vnic, address)) => (Some(vnic), Some(address)),
                 None => (None, None),
             };
-
         // Unzip here, then zip later - it's important that the InstalledZone
         // owns the links, but it doesn't care about the boolean for requesting
         // link local addresses.
@@ -727,7 +760,7 @@ impl ServiceManager {
         let links_need_link_local: Vec<bool>;
         (links, links_need_link_local) =
             self.links_needed(request)?.into_iter().unzip();
-
+        let opte_ports = self.opte_ports_needed(request)?;
         let limit_priv = Self::privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names
@@ -746,8 +779,7 @@ impl ServiceManager {
             // filesystems=
             &filesystems,
             &devices,
-            // opte_ports=
-            vec![],
+            opte_ports,
             bootstrap_vnic,
             links,
             limit_priv,
@@ -904,42 +936,26 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service {
-                ServiceType::Nexus { internal_ip, external_ip, .. } => {
+                ServiceType::Nexus { internal_ip, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
-                    let sled_info =
-                        if let Some(info) = self.inner.sled_info.get() {
-                            info
-                        } else {
-                            return Err(Error::SledAgentNotReady);
-                        };
+                    let sled_info = self
+                        .inner
+                        .sled_info
+                        .get()
+                        .ok_or(Error::SledAgentNotReady)?;
 
-                    // The address of Nexus' external interface is a special
-                    // case; it may be an IPv4 address.
-                    let addr_request =
-                        AddressRequest::new_static(*external_ip, None);
-                    running_zone
-                        .ensure_external_address_with_name(
-                            addr_request,
+                    // While Nexus will be reachable via `external_ip`, it communicates
+                    // atop an OPTE port which operates on a VPC private IP. OPTE will
+                    // map the private IP to the external IP automatically.
+                    let port_ip = running_zone
+                        .ensure_address_for_port(
+                            AddressRequest::Dhcp,
                             "public",
+                            0,
                         )
-                        .await?;
-
-                    if let IpAddr::V4(_public_addr4) = *external_ip {
-                        // If requested, create a default route back through
-                        // the internet gateway.
-                        if let Some(ref gateway) =
-                            sled_info.config.gateway_address
-                        {
-                            running_zone
-                                .add_default_route4(*gateway)
-                                .await
-                                .map_err(|err| Error::ZoneCommand {
-                                    intent: "Adding Route".to_string(),
-                                    err,
-                                })?;
-                        }
-                    }
+                        .await?
+                        .ip();
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
@@ -948,7 +964,7 @@ impl ServiceManager {
                         rack_id: sled_info.rack_id,
 
                         dropshot_external: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(*external_ip, 80),
+                            bind_address: SocketAddr::new(port_ip, 80),
                             // This has to be large enough to support:
                             // - bulk writes to disks
                             request_body_max_bytes: 8192 * 1024,
@@ -1003,39 +1019,20 @@ impl ServiceManager {
                 } => {
                     info!(self.inner.log, "Setting up external-dns service");
 
-                    // Like Nexus, we have to set up a possible IPv4 address for
-                    // external connectivity.
-                    let sled_info =
-                        if let Some(info) = self.inner.sled_info.get() {
-                            info
-                        } else {
-                            return Err(Error::SledAgentNotReady);
-                        };
-
-                    let addr_request =
-                        AddressRequest::new_static(dns_address.ip(), None);
-                    running_zone
-                        .ensure_external_address_with_name(
-                            addr_request,
+                    // Like Nexus, we need to be reachable externally via
+                    // `dns_address` but we don't listen on that address
+                    // directly but instead on a VPC private IP. OPTE will
+                    // en/decapsulate as appropriate.
+                    let port_ip = running_zone
+                        .ensure_address_for_port(
+                            AddressRequest::Dhcp,
                             "public",
+                            0,
                         )
-                        .await?;
-
-                    if let IpAddr::V4(_public_addr4) = dns_address.ip() {
-                        // If requested, create a default route back through
-                        // the internet gateway.
-                        if let Some(ref gateway) =
-                            sled_info.config.gateway_address
-                        {
-                            running_zone
-                                .add_default_route4(*gateway)
-                                .await
-                                .map_err(|err| Error::ZoneCommand {
-                                    intent: "Adding Route".to_string(),
-                                    err,
-                                })?;
-                        }
-                    }
+                        .await?
+                        .ip();
+                    let dns_address =
+                        SocketAddr::new(port_ip, dns_address.port());
 
                     smfh.setprop(
                         "config/http_address",
@@ -1273,6 +1270,17 @@ impl ServiceManager {
                         "config/boundary",
                         if boundary { "true" } else { "false" },
                     )?;
+
+                    if boundary {
+                        // Configure OPTE port for boundary NTP
+                        running_zone
+                            .ensure_address_for_port(
+                                AddressRequest::Dhcp,
+                                "public",
+                                0,
+                            )
+                            .await?;
+                    }
 
                     smfh.delpropvalue("config/server", "*")?;
                     for server in ntp_servers {
@@ -1923,6 +1931,7 @@ mod test {
         svc,
         zone::MockZones,
     };
+    use macaddr::MacAddr6;
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -2090,9 +2099,14 @@ mod test {
         .await
         .unwrap();
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2129,9 +2143,14 @@ mod test {
         .await
         .unwrap();
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2170,9 +2189,14 @@ mod test {
         .await
         .unwrap();
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2200,9 +2224,14 @@ mod test {
         .await
         .unwrap();
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2237,9 +2266,14 @@ mod test {
         )
         .await
         .unwrap();
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2269,9 +2303,14 @@ mod test {
         )
         .await
         .unwrap();
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+            Some(MacAddr6::from([0u8; 6])),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )

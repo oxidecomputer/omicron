@@ -1074,8 +1074,7 @@ mod test {
             log.clone(),
             lazy_nexus_client.clone(),
             Etherstub("mylink".to_string()),
-            underlay_ip,
-            Some(mac),
+            port_manager.clone(),
         )
         .unwrap();
 

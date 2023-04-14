@@ -16,7 +16,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
 #[cfg(any(test, feature = "testing"))]
@@ -60,6 +60,13 @@ pub enum EnsureAddressError {
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
     )]
     MissingBootstrapVnic { address: String, zone: String },
+
+    #[error("Failed ensuring address {request:?} in {zone}: missing opte port ({port_idx})")]
+    MissingOptePort { request: AddressRequest, zone: String, port_idx: usize },
+
+    // TODO-remove: See comment in `ensure_address_for_port`
+    #[error(transparent)]
+    OpteGatewayConfig(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::get`].
@@ -232,24 +239,59 @@ impl RunningZone {
         Ok(())
     }
 
-    // TODO: Remove once Nexus uses OPTE - external addresses should generally
-    // be served via OPTE.
-    pub async fn ensure_external_address_with_name(
+    pub async fn ensure_address_for_port(
         &self,
         addrtype: AddressRequest,
         name: &str,
+        port_idx: usize,
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
-        // XXX there's an open PR changing Nexus to use OPTE that removes this
-        // function! keep it in so that this PR can be tested.
-        let addrobj = AddrObject::new(self.inner.links[0].name(), name)
-            .map_err(|err| EnsureAddressError::AddrObject {
+        let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
+            EnsureAddressError::MissingOptePort {
                 request: addrtype,
                 zone: self.inner.name.clone(),
-                err,
+                port_idx,
+            }
+        })?;
+        // TODO-remove: Switch to using port directly once vnic is no longer needed.
+        let addrobj =
+            AddrObject::new(port.vnic_name(), name).map_err(|err| {
+                EnsureAddressError::AddrObject {
+                    request: addrtype,
+                    zone: self.inner.name.clone(),
+                    err,
+                }
             })?;
         let network =
             Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
+        if let AddressRequest::Dhcp = addrtype {
+            // TODO-remove: OPTE's DHCP "server" returns the list of routes to add
+            // via option 121 (Classless Static Route). The illumos DHCP client
+            // currently does not support this option, so we add the routes
+            // manually here.
+            // https://www.illumos.org/issues/11990
+            if let IpAddr::V4(gateway) = port.gateway().ip() {
+                let gateway_ip = gateway.to_string();
+                let private_ip = network.ip();
+                self.run_cmd(&[
+                    "/usr/sbin/route",
+                    "add",
+                    "-host",
+                    &gateway_ip,
+                    &private_ip.to_string(),
+                    "-interface",
+                    "-ifp",
+                    port.vnic_name(),
+                ])?;
+                self.run_cmd(&[
+                    "/usr/sbin/route",
+                    "add",
+                    "-inet",
+                    "default",
+                    &gateway_ip,
+                ])?;
+            };
+        }
         Ok(network)
     }
 
