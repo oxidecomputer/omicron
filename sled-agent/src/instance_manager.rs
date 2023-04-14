@@ -5,9 +5,9 @@
 //! API for controlling multiple instances on a sled.
 
 use crate::nexus::LazyNexusClient;
-use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
+    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, VpcFirewallRule,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -87,97 +87,146 @@ impl InstanceManager {
         })
     }
 
-    /// Idempotently ensures that the given Instance (described by
-    /// `initial_hardware`) exists on this server in the given runtime state
-    /// (described by `target`).
-    pub async fn ensure(
+    /// Ensures that the instance manager contains a registered instance with
+    /// the supplied instance ID and the Propolis ID specified in
+    /// `initial_hardware`.
+    ///
+    /// # Arguments
+    ///
+    /// * instance_id: The ID of the instance to register.
+    /// * initial_hardware: The initial hardware manifest and runtime state of
+    ///   the instance, to be used if the instance does not already exist.
+    ///
+    /// # Return value
+    ///
+    /// `Ok` if the instance is registered with the supplied Propolis ID, `Err`
+    /// otherwise. This routine is idempotent if called to register the same
+    /// (instance ID, Propolis ID) pair multiple times, but will fail if the
+    /// instance is registered with a Propolis ID different from the one the
+    /// caller supplied.
+    pub async fn ensure_registered(
         &self,
         instance_id: Uuid,
         initial_hardware: InstanceHardware,
-        target: InstanceStateRequested,
-        migrate: Option<InstanceMigrationTargetParams>,
     ) -> Result<InstanceRuntimeState, Error> {
+        let requested_propolis_id = initial_hardware.runtime.propolis_id;
         info!(
             &self.inner.log,
-            "instance_ensure {} -> {:?}", instance_id, target
+            "ensuring instance is registered";
+            "instance_id" => %instance_id,
+            "propolis_id" => %requested_propolis_id
         );
 
-        let target_propolis_id = initial_hardware.runtime.propolis_id;
-
-        let (instance, maybe_instance_ticket) = {
+        let instance = {
             let mut instances = self.inner.instances.lock().unwrap();
-            match (instances.get(&instance_id), &migrate) {
-                (Some((_, instance)), None) => {
-                    // Instance already exists and we're not performing a migration
-                    info!(&self.inner.log, "instance already exists");
-                    (instance.clone(), None)
-                }
-                (Some((propolis_id, instance)), Some(_))
-                    if *propolis_id == target_propolis_id =>
-                {
-                    // A migration was requested but the given propolis id
-                    // already seems to be the propolis backing this instance
-                    // so just return the instance as is without triggering
-                    // another migration.
+            if let Some((existing_propolis_id, existing_instance)) =
+                instances.get(&instance_id)
+            {
+                if requested_propolis_id != *existing_propolis_id {
+                    info!(&self.inner.log,
+                          "instance already registered with another Propolis ID";
+                          "instance_id" => %instance_id,
+                          "existing_propolis_id" => %*existing_propolis_id);
+                    return Err(Error::Instance(
+                        crate::instance::Error::InstanceAlreadyRegistered(
+                            *existing_propolis_id,
+                        ),
+                    ));
+                } else {
                     info!(
                         &self.inner.log,
-                        "instance already exists with given dst propolis"
+                        "instance already registered with requested Propolis ID"
                     );
-                    (instance.clone(), None)
+                    existing_instance.clone()
                 }
-                _ => {
-                    // Instance does not exist or one does but we're performing
-                    // a intra-sled migration. Either way - create an instance
-                    info!(&self.inner.log, "new instance");
-                    let instance_log = self.inner.log.new(o!());
-                    let instance = Instance::new(
-                        instance_log,
-                        instance_id,
-                        initial_hardware,
-                        self.inner.vnic_allocator.clone(),
-                        self.inner.port_manager.clone(),
-                        self.inner.lazy_nexus_client.clone(),
-                    )?;
-                    let instance_clone = instance.clone();
-                    let old_instance = instances
-                        .insert(instance_id, (target_propolis_id, instance));
-                    if let Some((_old_propolis_id, old_instance)) = old_instance
-                    {
-                        // If we had a previous instance, we must be migrating
-                        assert!(migrate.is_some());
-                        // TODO: assert that old_instance.inner.propolis_id() == migrate.src_uuid
+            } else {
+                info!(&self.inner.log,
+                      "registering new instance";
+                      "instance_id" => ?instance_id);
+                let instance_log = self.inner.log.new(o!());
+                let ticket =
+                    InstanceTicket::new(instance_id, self.inner.clone());
+                let instance = Instance::new(
+                    instance_log,
+                    instance_id,
+                    ticket,
+                    initial_hardware,
+                    self.inner.vnic_allocator.clone(),
+                    self.inner.port_manager.clone(),
+                    self.inner.lazy_nexus_client.clone(),
+                )?;
+                let instance_clone = instance.clone();
+                let _old = instances
+                    .insert(instance_id, (requested_propolis_id, instance));
+                assert!(_old.is_none());
+                instance_clone
+            }
+        };
 
-                        // We forget the old instance because otherwise if it is the last
-                        // handle, the `InstanceTicket` it holds will also be dropped.
-                        // `InstanceTicket::drop` will try to remove the corresponding
-                        // instance from the instance manager. It does this based off the
-                        // instance's ID. Given that we just replaced said instance using
-                        // the same ID, that would inadvertantly remove our newly created
-                        // instance instead.
-                        // TODO: cleanup source instance properly
-                        std::mem::forget(old_instance);
+        Ok(instance.current_state().await)
+    }
+
+    /// Idempotently ensures the instance is not registered with this instance
+    /// manager. If the instance exists and has a running Propolis, that
+    /// Propolis is rudely terminated.
+    pub async fn ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            let instance = instances.get(&instance_id);
+            if let Some((_, instance)) = instance {
+                instance.clone()
+            } else {
+                return Ok(InstanceUnregisterResponse {
+                    updated_runtime: None,
+                });
+            }
+        };
+
+        Ok(InstanceUnregisterResponse {
+            updated_runtime: Some(instance.terminate().await?),
+        })
+    }
+
+    /// Idempotently attempts to drive the supplied instance into the supplied
+    /// runtime state.
+    pub async fn ensure_state(
+        &self,
+        instance_id: Uuid,
+        target: InstanceStateRequested,
+    ) -> Result<InstancePutStateResponse, Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            let instance = instances.get(&instance_id);
+
+            if let Some((_, instance)) = instance {
+                instance.clone()
+            } else {
+                match target {
+                    // If the instance isn't registered, then by definition it
+                    // isn't running here. Allow requests to stop or destroy the
+                    // instance to succeed to provide idempotency. This has to
+                    // be handled here (that is, on the "instance not found"
+                    // path) to handle the case where a stop request arrived,
+                    // Propolis handled it, sled agent unregistered the
+                    // instance, and only then did a second stop request
+                    // arrive.
+                    InstanceStateRequested::Stopped => {
+                        return Ok(InstancePutStateResponse {
+                            updated_runtime: None,
+                        });
                     }
-
-                    let ticket = Some(InstanceTicket::new(
-                        instance_id,
-                        self.inner.clone(),
-                    ));
-                    (instance_clone, ticket)
+                    _ => {
+                        return Err(Error::NoSuchInstance(instance_id));
+                    }
                 }
             }
         };
 
-        // If we created a new instance, start or migrate it - but do so outside
-        // the "instances" lock, since initialization may take a while.
-        //
-        // Additionally, this makes it possible to manage the "instance_ticket",
-        // which might need to grab the lock to remove the instance during
-        // teardown.
-        if let Some(instance_ticket) = maybe_instance_ticket {
-            instance.start(instance_ticket, migrate).await?;
-        }
-
-        instance.transition(target).await.map_err(|e| e.into())
+        let new_state = instance.put_state(target).await?;
+        Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
     }
 
     pub async fn instance_issue_disk_snapshot_request(
@@ -237,6 +286,14 @@ impl InstanceManager {
         );
         self.inner.port_manager.unset_virtual_nic_host(mapping)?;
         Ok(())
+    }
+
+    /// Generates an instance ticket associated with this instance manager. This
+    /// allows tests in other modules to create an Instance even though they
+    /// lack visibility to `InstanceManagerInternal`.
+    #[cfg(test)]
+    pub fn test_instance_ticket(&self, instance_id: Uuid) -> InstanceTicket {
+        InstanceTicket::new(instance_id, self.inner.clone())
     }
 }
 
@@ -366,39 +423,65 @@ mod test {
         let ticket = Arc::new(std::sync::Mutex::new(None));
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        let mut seq = mockall::Sequence::new();
+
+        // Expect one call to new() that produces an instance that expects to be
+        // cloned once. The clone should expect to ask to be put into the
+        // Running state.
+        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
             let mut inst = MockInstance::default();
-            inst.expect_clone().return_once(move || {
-                let mut inst = MockInstance::default();
-                inst.expect_start().return_once(move |t, _| {
-                    // Grab hold of the ticket, so we don't try to remove the
-                    // instance immediately after "start" completes.
-                    let mut ticket_guard = ticket_clone.lock().unwrap();
-                    *ticket_guard = Some(t);
-                    Ok(())
-                });
-                inst.expect_transition().return_once(|_| {
-                    let mut rt_state = new_initial_instance();
-                    rt_state.runtime.run_state = InstanceState::Running;
-                    Ok(rt_state.runtime)
-                });
-                inst
-            });
+
+            // Move the instance ticket out to the test, since the mock instance
+            // won't hold onto it.
+            let mut ticket_guard = ticket_clone.lock().unwrap();
+            *ticket_guard = Some(t);
+
+            // Expect to be cloned twice, once during registration (to fish the
+            // current state out of the instance) and once during the state
+            // transition (to hoist the instance reference out of the instance
+            // manager lock).
+            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
+                move || {
+                    let mut inst = MockInstance::default();
+                    inst.expect_current_state()
+                        .return_once(|| new_initial_instance().runtime);
+                    inst
+                },
+            );
+
+            inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
+                move || {
+                    let mut inst = MockInstance::default();
+                    inst.expect_put_state().return_once(|_| {
+                        let mut rt_state = new_initial_instance();
+                        rt_state.runtime.run_state = InstanceState::Running;
+                        Ok(rt_state.runtime)
+                    });
+                    inst
+                },
+            );
+
             Ok(inst)
         });
+
+        im.ensure_registered(test_uuid(), new_initial_instance())
+            .await
+            .unwrap();
+
+        // The instance exists now.
+        assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
+
         let rt_state = im
-            .ensure(
-                test_uuid(),
-                new_initial_instance(),
-                InstanceStateRequested::Running,
-                None,
-            )
+            .ensure_state(test_uuid(), InstanceStateRequested::Running)
             .await
             .unwrap();
 
         // At this point, we can observe the expected state of the instance
-        // manager: contianing the created instance...
-        assert_eq!(rt_state.run_state, InstanceState::Running);
+        // manager: containing the created instance...
+        assert_eq!(
+            rt_state.updated_runtime.unwrap().run_state,
+            InstanceState::Running
+        );
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
 
         // ... however, when we drop the ticket of the corresponding instance,
@@ -411,7 +494,7 @@ mod test {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn ensure_instance_repeatedly() {
+    async fn ensure_instance_state_repeatedly() {
         let logctx = test_setup_log("ensure_instance_repeatedly");
         let log = &logctx.log;
         let lazy_nexus_client =
@@ -441,18 +524,20 @@ mod test {
         let ticket_clone = ticket.clone();
         let instance_new_ctx = MockInstance::new_context();
         let mut seq = mockall::Sequence::new();
-        instance_new_ctx.expect().return_once(move |_, _, _, _, _, _| {
+        instance_new_ctx.expect().return_once(move |_, _, t, _, _, _, _| {
             let mut inst = MockInstance::default();
+            let mut ticket_guard = ticket_clone.lock().unwrap();
+            *ticket_guard = Some(t);
+
             // First call to ensure (start + transition).
             inst.expect_clone().times(1).in_sequence(&mut seq).return_once(
                 move || {
                     let mut inst = MockInstance::default();
-                    inst.expect_start().return_once(move |t, _| {
-                        let mut ticket_guard = ticket_clone.lock().unwrap();
-                        *ticket_guard = Some(t);
-                        Ok(())
-                    });
-                    inst.expect_transition().return_once(|_| {
+
+                    inst.expect_current_state()
+                        .returning(|| new_initial_instance().runtime);
+
+                    inst.expect_put_state().return_once(|_| {
                         let mut rt_state = new_initial_instance();
                         rt_state.runtime.run_state = InstanceState::Running;
                         Ok(rt_state.runtime)
@@ -460,11 +545,12 @@ mod test {
                     inst
                 },
             );
+
             // Next calls to ensure (transition only).
-            inst.expect_clone().times(2).in_sequence(&mut seq).returning(
+            inst.expect_clone().times(3).in_sequence(&mut seq).returning(
                 move || {
                     let mut inst = MockInstance::default();
-                    inst.expect_transition().returning(|_| {
+                    inst.expect_put_state().returning(|_| {
                         let mut rt_state = new_initial_instance();
                         rt_state.runtime.run_state = InstanceState::Running;
                         Ok(rt_state.runtime)
@@ -477,14 +563,12 @@ mod test {
 
         let id = test_uuid();
         let rt = new_initial_instance();
-        let target = InstanceStateRequested::Running;
 
-        // Creates instance, start + transition.
-        im.ensure(id, rt.clone(), target, None).await.unwrap();
-        // Transition only.
-        im.ensure(id, rt.clone(), target, None).await.unwrap();
-        // Transition only.
-        im.ensure(id, rt, target, None).await.unwrap();
+        // Register the instance, then issue all three state transitions.
+        im.ensure_registered(id, rt).await.unwrap();
+        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
+        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
+        im.ensure_state(id, InstanceStateRequested::Running).await.unwrap();
 
         assert_eq!(im.inner.instances.lock().unwrap().len(), 1);
         ticket.lock().unwrap().take();
