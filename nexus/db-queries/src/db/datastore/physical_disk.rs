@@ -177,7 +177,7 @@ mod test {
     // NOTE: Could we derive a UUID from the VSM values?
     // - The 'time' field precision can be modified slightly when inserted into
     // the DB.
-    fn assert_disks_equal_ignore_id(lhs: &PhysicalDisk, rhs: &PhysicalDisk) {
+    fn assert_disks_equal_ignore_uuid(lhs: &PhysicalDisk, rhs: &PhysicalDisk) {
         assert_eq!(lhs.time_deleted().is_some(), rhs.time_deleted().is_some());
         assert_eq!(lhs.vendor, rhs.vendor);
         assert_eq!(lhs.serial, rhs.serial);
@@ -209,8 +209,8 @@ mod test {
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
-        assert_eq!(disk.id(), first_observed_disk.id());
-        assert_disks_equal_ignore_id(&disk, &first_observed_disk);
+        assert_eq!(disk.uuid(), first_observed_disk.uuid());
+        assert_disks_equal_ignore_uuid(&disk, &first_observed_disk);
 
         // Observe the inserted disk
         let pagparams = list_disk_params();
@@ -219,8 +219,8 @@ mod test {
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
-        assert_eq!(disk.id(), disks[0].id());
-        assert_disks_equal_ignore_id(&disk, &disks[0]);
+        assert_eq!(disk.uuid(), disks[0].uuid());
+        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
 
         // Insert the same disk, with a different UUID primary key
         let disk_again = PhysicalDisk::new(
@@ -236,8 +236,9 @@ mod test {
             .expect("Failed second upsert of physical disk");
         // This check is pretty important - note that we return the original
         // UUID, not the new one.
-        assert_ne!(disk_again.id(), second_observed_disk.id());
-        assert_disks_equal_ignore_id(&disk_again, &second_observed_disk);
+        assert_ne!(disk_again.uuid(), second_observed_disk.uuid());
+        assert_eq!(disk_again.id(), second_observed_disk.id());
+        assert_disks_equal_ignore_uuid(&disk_again, &second_observed_disk);
         assert!(
             first_observed_disk.time_modified()
                 <= second_observed_disk.time_modified()
@@ -250,10 +251,10 @@ mod test {
 
         // We'll use the old primary key
         assert_eq!(disks.len(), 1);
-        assert_eq!(disk.id(), disks[0].id());
-        assert_ne!(disk_again.id(), disks[0].id());
-        assert_disks_equal_ignore_id(&disk, &disks[0]);
-        assert_disks_equal_ignore_id(&disk_again, &disks[0]);
+        assert_eq!(disk.uuid(), disks[0].uuid());
+        assert_ne!(disk_again.uuid(), disks[0].uuid());
+        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
+        assert_disks_equal_ignore_uuid(&disk_again, &disks[0]);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -281,19 +282,19 @@ mod test {
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
-        assert_eq!(disk.id(), first_observed_disk.id());
+        assert_eq!(disk.uuid(), first_observed_disk.uuid());
 
         // Insert a disk with an identical UUID
         let second_observed_disk = datastore
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Should have succeeded upserting disk");
-        assert_eq!(disk.id(), second_observed_disk.id());
+        assert_eq!(disk.uuid(), second_observed_disk.uuid());
         assert!(
             first_observed_disk.time_modified()
                 <= second_observed_disk.time_modified()
         );
-        assert_disks_equal_ignore_id(
+        assert_disks_equal_ignore_uuid(
             &first_observed_disk,
             &second_observed_disk,
         );

@@ -1717,6 +1717,14 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
+          "propolis_gen": {
+            "description": "The generation number for the Propolis and sled identifiers for this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
@@ -1746,6 +1754,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_gen",
           "propolis_id",
           "run_state",
           "sled_id",
@@ -2507,6 +2516,15 @@
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
         "properties": {
+          "disk_model": {
+            "type": "string"
+          },
+          "disk_serial": {
+            "type": "string"
+          },
+          "disk_vendor": {
+            "type": "string"
+          },
           "size": {
             "description": "Total size of the pool.",
             "allOf": [
@@ -2517,6 +2535,9 @@
           }
         },
         "required": [
+          "disk_model",
+          "disk_serial",
+          "disk_vendor",
           "size"
         ]
       },

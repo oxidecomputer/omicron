@@ -32,13 +32,13 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
     let create_su =
         params::SystemUpdateCreate { version: SemverVersion::new(0, 2, 0) };
     nexus
-        .create_system_update(&opctx, create_su)
+        .upsert_system_update(&opctx, create_su)
         .await
         .expect("Failed to create system update");
     let create_su =
         params::SystemUpdateCreate { version: SemverVersion::new(1, 0, 1) };
     nexus
-        .create_system_update(&opctx, create_su)
+        .upsert_system_update(&opctx, create_su)
         .await
         .expect("Failed to create system update");
 

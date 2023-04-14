@@ -126,7 +126,20 @@ impl Server {
         // on the physical rack.
         for zpool in &config.storage.zpools {
             let zpool_id = uuid::Uuid::new_v4();
-            sled_agent.create_zpool(zpool_id, zpool.size).await;
+            let vendor = "synthetic-vendor".to_string();
+            let serial = format!("synthetic-serial-{zpool_id}");
+            let model = "synthetic-model".to_string();
+            sled_agent
+                .create_external_physical_disk(
+                    vendor.clone(),
+                    serial.clone(),
+                    model.clone(),
+                )
+                .await;
+
+            sled_agent
+                .create_zpool(zpool_id, vendor, serial, model, zpool.size)
+                .await;
             let dataset_id = uuid::Uuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;

@@ -22,6 +22,7 @@ use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
 use omicron_nexus::external_api::params::ProjectCreate;
 use omicron_nexus::external_api::{shared, views};
+use omicron_sled_agent::sim;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -309,6 +310,7 @@ async fn test_absolute_static_dir() {
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_absolute_static_dir",
         &mut config,
+        sim::SimMode::Explicit,
     )
     .await;
     let testctx = &cptestctx.external_client;

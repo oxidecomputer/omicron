@@ -4276,6 +4276,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "omicron-nexus",
  "omicron-rpaths",
+ "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
  "pq-sys",

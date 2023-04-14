@@ -180,8 +180,13 @@ async fn zpool_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let pi = pool_info.into_inner();
-    nexus.upsert_zpool(path.zpool_id, path.sled_id, pi).await?;
-    Ok(HttpResponseOk(ZpoolPutResponse {}))
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus.upsert_zpool(&opctx, path.zpool_id, path.sled_id, pi).await?;
+        Ok(HttpResponseOk(ZpoolPutResponse {}))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// Path parameters for Instance requests (internal API)

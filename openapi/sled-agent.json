@@ -82,7 +82,7 @@
     },
     "/instances/{instance_id}": {
       "put": {
-        "operationId": "instance_put",
+        "operationId": "instance_register",
         "parameters": [
           {
             "in": "path",
@@ -111,6 +111,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstanceRuntimeState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "instance_unregister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceUnregisterResponse"
                 }
               }
             }
@@ -165,6 +197,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/instances/{instance_id}/state": {
+      "put": {
+        "operationId": "instance_put_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstancePutStateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstancePutStateResponse"
                 }
               }
             }
@@ -1008,38 +1084,20 @@
         "minimum": 0
       },
       "InstanceEnsureBody": {
-        "description": "Sent to a sled agent to establish the runtime state of an Instance",
+        "description": "The body of a request to ensure that an instance is known to a sled agent.",
         "type": "object",
         "properties": {
           "initial": {
-            "description": "Last runtime state of the Instance known to Nexus (used if the agent has never seen this Instance before).",
+            "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceHardware"
               }
             ]
-          },
-          "migrate": {
-            "nullable": true,
-            "description": "If we're migrating this instance, the details needed to drive the migration",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
-              }
-            ]
-          },
-          "target": {
-            "description": "requested runtime state of the Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceStateRequested"
-              }
-            ]
           }
         },
         "required": [
-          "initial",
-          "target"
+          "initial"
         ]
       },
       "InstanceHardware": {
@@ -1117,12 +1175,15 @@
         ]
       },
       "InstanceMigrationTargetParams": {
+        "description": "Parameters used when directing Propolis to initialize itself via live migration.",
         "type": "object",
         "properties": {
           "src_propolis_addr": {
+            "description": "The address of the Propolis server that will serve as the migration source.",
             "type": "string"
           },
           "src_propolis_id": {
+            "description": "The Propolis ID of the migration source.",
             "type": "string",
             "format": "uuid"
           }
@@ -1131,6 +1192,38 @@
           "src_propolis_addr",
           "src_propolis_id"
         ]
+      },
+      "InstancePutStateBody": {
+        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The state into which the instance should be driven.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceStateRequested"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "InstancePutStateResponse": {
+        "description": "The response sent from a request to move an instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          }
+        }
       },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
@@ -1181,6 +1274,14 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
+          "propolis_gen": {
+            "description": "The generation number for the Propolis and sled identifiers for this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
@@ -1210,6 +1311,7 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_gen",
           "propolis_id",
           "run_state",
           "sled_id",
@@ -1295,34 +1397,85 @@
         "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
         "oneOf": [
           {
+            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_target"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
             "description": "Start the instance if it is not already running.",
-            "type": "string",
-            "enum": [
-              "running"
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           },
           {
             "description": "Stop the instance.",
-            "type": "string",
-            "enum": [
-              "stopped"
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           },
           {
-            "description": "Issue a reset command to the instance, such that it should stop and then immediately become running.",
-            "type": "string",
-            "enum": [
-              "reboot"
-            ]
-          },
-          {
-            "description": "Stop the instance and delete it.",
-            "type": "string",
-            "enum": [
-              "destroyed"
+            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reboot"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
         ]
+      },
+      "InstanceUnregisterResponse": {
+        "description": "The response sent from a request to unregister an instance.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          }
+        }
       },
       "IpNet": {
         "oneOf": [

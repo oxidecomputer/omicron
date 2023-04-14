@@ -100,32 +100,74 @@ impl DatastoreAttachTargetConfig<Disk> for Instance {
 )]
 #[diesel(table_name = instance)]
 pub struct InstanceRuntimeState {
-    /// runtime state of the Instance
+    /// The instance's current user-visible instance state.
+    ///
+    /// This field is guarded by the instance's `gen` field.
     #[diesel(column_name = state)]
     pub state: InstanceState,
-    /// timestamp for this information
-    // TODO: Is this redundant with "time_modified"?
+    /// The time at which the runtime state was last updated. This is distinct
+    /// from the time the record was last modified, because some updates don't
+    /// modify the runtime state.
     #[diesel(column_name = time_state_updated)]
     pub time_updated: DateTime<Utc>,
-    /// generation number for this state
+    /// The generation number for the instance's user-visible state. Each
+    /// successive state update from a single incarnation of an instance must
+    /// bear a new generation number.
     #[diesel(column_name = state_generation)]
     pub gen: Generation,
-    /// which sled is running this Instance
-    // TODO: should this be optional?
+    /// The ID of the sled hosting the current incarnation of this instance.
+    ///
+    /// This field is guarded by the instance's `propolis_gen`.
+    //
+    // TODO(#2315): This should be optional so that it can be cleared when the
+    // instance is not active.
     #[diesel(column_name = active_server_id)]
     pub sled_id: Uuid,
+    /// The ID of the Propolis server hosting the current incarnation of this
+    /// instance.
+    ///
+    /// This field is guarded by the instance's `propolis_gen`.
     #[diesel(column_name = active_propolis_id)]
     pub propolis_id: Uuid,
+    /// The IP of the instance's current Propolis server.
+    ///
+    /// This field is guarded by the instance's `propolis_gen`.
     #[diesel(column_name = active_propolis_ip)]
     pub propolis_ip: Option<ipnetwork::IpNetwork>,
+    /// If a migration is in progress, the ID of the Propolis server that is
+    /// the migration target. Note that the target's sled agent will have a
+    /// runtime state where `propolis_id` and `dst_propolis_id` are equal.
+    ///
+    /// This field is guarded by the instance's `propolis_gen`.
     #[diesel(column_name = target_propolis_id)]
     pub dst_propolis_id: Option<Uuid>,
+    /// If a migration is in progress, a UUID identifying that migration. This
+    /// can be used to provide mutual exclusion between multiple attempts to
+    /// migrate and between an attempt to migrate an attempt to mutate an
+    /// instance in a way that's incompatible with migration.
+    ///
+    /// This field is guarded by the instance's `propolis_gen`.
     #[diesel(column_name = migration_id)]
     pub migration_id: Option<Uuid>,
+    /// A generation number protecting the instance's "location" information:
+    /// its sled ID, Propolis ID and IP, and migration information. Each state
+    /// update that updates one or more of these fields must bear a new
+    /// Propolis generation.
+    ///
+    /// Records with new Propolis generations supersede records with older
+    /// generations irrespective of their state generations. That is, a record
+    /// with Propolis generation 4 and state generation 1 is "newer" than
+    /// a record with Propolis generation 3 and state generation 5.
+    #[diesel(column_name = propolis_generation)]
+    pub propolis_gen: Generation,
+    /// The number of vCPUs (i.e., virtual logical processors) to allocate for
+    /// this instance.
     #[diesel(column_name = ncpus)]
     pub ncpus: InstanceCpuCount,
+    /// The amount of guest memory to allocate for this instance.
     #[diesel(column_name = memory)]
     pub memory: ByteCount,
+    /// The instance's hostname.
     // TODO-cleanup: Different type?
     #[diesel(column_name = hostname)]
     pub hostname: String,
@@ -144,6 +186,7 @@ impl From<InstanceRuntimeState>
                 .propolis_ip
                 .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT).to_string()),
             migration_id: s.migration_id,
+            propolis_gen: s.propolis_gen.into(),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -173,6 +216,7 @@ impl From<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             dst_propolis_id: state.dst_propolis_id,
             propolis_ip: state.propolis_addr.map(|addr| addr.ip().into()),
             migration_id: state.migration_id,
+            propolis_gen: state.propolis_gen.into(),
             ncpus: state.ncpus.into(),
             memory: state.memory.into(),
             hostname: state.hostname,
@@ -193,6 +237,7 @@ impl Into<internal::nexus::InstanceRuntimeState> for InstanceRuntimeState {
             propolis_addr: self
                 .propolis_ip
                 .map(|ip| SocketAddr::new(ip.ip(), PROPOLIS_PORT)),
+            propolis_gen: self.propolis_gen.into(),
             migration_id: self.migration_id,
             ncpus: self.ncpus.into(),
             memory: self.memory.into(),

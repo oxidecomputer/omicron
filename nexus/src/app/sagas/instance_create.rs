@@ -120,8 +120,12 @@ declare_saga_actions! {
     V2P_ENSURE -> "v2p_ensure" {
         + sic_v2p_ensure
     }
-    INSTANCE_ENSURE -> "instance_ensure" {
-        + sic_instance_ensure
+    INSTANCE_ENSURE_REGISTERED -> "instance_ensure_registered" {
+        + sic_instance_ensure_registered
+        - sic_instance_ensure_registered_undo
+    }
+    INSTANCE_ENSURE_RUNNING -> "instance_ensure_running" {
+        + sic_instance_ensure_running
     }
 }
 
@@ -348,8 +352,10 @@ impl NexusSaga for SagaInstanceCreate {
         builder.append(v2p_ensure_undo_action());
         builder.append(v2p_ensure_action());
 
-        builder.append(instance_ensure_action());
-
+        builder.append(instance_ensure_registered_action());
+        if params.create_params.start {
+            builder.append(instance_ensure_running_action());
+        }
         Ok(builder.build()?)
     }
 }
@@ -593,7 +599,10 @@ async fn sic_alloc_server(
     let rss_ram = params.create_params.memory;
     let reservoir_ram = omicron_common::api::external::ByteCount::from(0);
 
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    // Use the instance's Propolis ID as its resource key, since each unique
+    // Propolis consumes its own resources, and an instance can have multiple
+    // Propolises during a live migration.
+    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
     let resources = db::model::Resources::new(
         hardware_threads.into(),
         rss_ram.into(),
@@ -603,7 +612,7 @@ async fn sic_alloc_server(
     let resource = osagactx
         .nexus()
         .reserve_on_random_sled(
-            instance_id,
+            propolis_id,
             db::model::SledResourceKind::Instance,
             resources,
         )
@@ -616,9 +625,9 @@ async fn sic_alloc_server_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
-    osagactx.nexus().delete_sled_reservation(instance_id).await?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 
@@ -1163,6 +1172,7 @@ async fn sic_create_instance_record(
             12400,
         )),
         migration_id: None,
+        propolis_gen: Generation::new(),
         hostname: params.create_params.hostname.clone(),
         memory: params.create_params.memory,
         ncpus: params.create_params.ncpus,
@@ -1255,74 +1265,6 @@ async fn sic_delete_instance_record(
     Ok(())
 }
 
-async fn sic_instance_ensure(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    // TODO-correctness is this idempotent?
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let datastore = osagactx.datastore();
-
-    // TODO-correctness TODO-security It's not correct to re-resolve the
-    // instance name now.  See oxidecomputer/omicron#1536.
-    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
-        .project_id(params.project_id)
-        .instance_name(&instance_name)
-        .fetch()
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    if !params.create_params.start {
-        let instance_id = db_instance.id();
-        // If we don't need to start the instance, we can skip the ensure
-        // and just update the instance runtime state to `Stopped`
-        let runtime_state = db::model::InstanceRuntimeState {
-            state: db::model::InstanceState::new(InstanceState::Stopped),
-            // Must update the generation, or the database query will fail.
-            //
-            // The runtime state of the instance record is only changed as a result
-            // of the successful completion of the saga (i.e. after ensure which we're
-            // skipping in this case) or during saga unwinding. So we're guaranteed
-            // that the cached generation in the saga log is the most recent in the database.
-            gen: db::model::Generation::from(
-                db_instance.runtime_state.gen.next(),
-            ),
-            ..db_instance.runtime_state
-        };
-
-        let updated = datastore
-            .instance_update_runtime(&instance_id, &runtime_state)
-            .await
-            .map_err(ActionError::action_failed)?;
-
-        if !updated {
-            warn!(
-                osagactx.log(),
-                "failed to update instance runtime state from creating to stopped",
-            );
-        }
-    } else {
-        osagactx
-            .nexus()
-            .instance_set_runtime(
-                &opctx,
-                &authz_instance,
-                &db_instance,
-                InstanceStateRequested::Running,
-            )
-            .await
-            .map_err(ActionError::action_failed)?;
-    }
-
-    Ok(())
-}
-
 async fn sic_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }
@@ -1362,6 +1304,135 @@ async fn sic_v2p_ensure_undo(
     osagactx
         .nexus()
         .delete_instance_v2p_mappings(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_instance_ensure_registered(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+
+    // TODO-correctness TODO-security It's not correct to re-resolve the
+    // instance name now.  See oxidecomputer/omicron#1536.
+    let instance_name = sagactx.lookup::<db::model::Name>("instance_name")?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .project_id(params.project_id)
+        .instance_name(&instance_name)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if !params.create_params.start {
+        let instance_id = db_instance.id();
+        // If we don't need to start the instance, we can skip the ensure
+        // and just update the instance runtime state to `Stopped`.
+        //
+        // TODO-correctness: This is dangerous if this step is replayed, since
+        // a user can discover this instance and ask to start it in between
+        // attempts to run this step. One way to fix this is to avoid refetching
+        // the previous runtime state each time this step is taken, such that
+        // once this update is applied once, subsequent attempts to apply it
+        // will have an already-used generation number.
+        let runtime_state = db::model::InstanceRuntimeState {
+            state: db::model::InstanceState::new(InstanceState::Stopped),
+            // Must update the generation, or the database query will fail.
+            //
+            // The runtime state of the instance record is only changed as a
+            // result of the successful completion of the saga (i.e. after
+            // ensure which we're skipping in this case) or during saga
+            // unwinding. So we're guaranteed that the cached generation in the
+            // saga log is the most recent in the database.
+            gen: db::model::Generation::from(
+                db_instance.runtime_state.gen.next(),
+            ),
+            ..db_instance.runtime_state
+        };
+
+        let updated = datastore
+            .instance_update_runtime(&instance_id, &runtime_state)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+        if !updated {
+            warn!(
+                osagactx.log(),
+                "failed to update instance runtime state from creating to stopped",
+            );
+        }
+    } else {
+        osagactx
+            .nexus()
+            .instance_ensure_registered(&opctx, &authz_instance, &db_instance)
+            .await
+            .map_err(ActionError::action_failed)?;
+    }
+
+    Ok(())
+}
+
+async fn sic_instance_ensure_registered_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .nexus()
+        .instance_ensure_unregistered(&opctx, &authz_instance, &db_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_instance_ensure_running(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .nexus()
+        .instance_request_state(
+            &opctx,
+            &authz_instance,
+            &db_instance,
+            InstanceStateRequested::Running,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
