@@ -295,6 +295,15 @@ async fn sid_account_sled_resources(
     // Fetch the previously-deleted instance record to get its Propolis ID. It
     // is safe to fetch the ID at this point because the instance is already
     // deleted and so cannot change anymore.
+    //
+    // TODO(#2315): This prevents the garbage collection of soft-deleted
+    // instance records. A better method is to remove a Propolis's reservation
+    // once an instance no longer refers to it (e.g. when it has stopped or
+    // been removed from the instance's migration information) and then make
+    // this saga check that the instance has no active Propolises before it is
+    // deleted. This logic should be part of the logic needed to stop an
+    // instance and release its Propolis reservation; when that is added this
+    // step can be removed.
     let instance = osagactx
         .datastore()
         .instance_fetch_deleted(&opctx, &params.authz_instance)
