@@ -297,7 +297,8 @@ be set as a default route for the Nexus zone.
 | Crucible Downstairs 2      | `[fd00:1122:3344:0101::8]:32345`
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
-| Nexus: External API        | `192.168.1.20:80`
+| External DNS               | `192.168.1.20:53`
+| Nexus: External API        | `192.168.1.21:80`
 | Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
 |===================================================================================================
 

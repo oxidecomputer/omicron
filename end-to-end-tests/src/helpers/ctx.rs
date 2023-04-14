@@ -84,7 +84,7 @@ pub fn nexus_addr() -> SocketAddr {
         return host;
     }
 
-    // If we can find config-rss.toml, grab the first address from the
+    // If we can find config-rss.toml, grab the second address from the
     // configured services IP pool.
     let rss_config_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../smf/sled-agent/non-gimlet/config-rss.toml");
@@ -94,6 +94,7 @@ pub fn nexus_addr() -> SocketAddr {
                 .internal_services_ip_pool_ranges
                 .iter()
                 .flat_map(|range| range.iter())
+                .skip(1)
                 .next()
             {
                 return (addr, 80).into();
