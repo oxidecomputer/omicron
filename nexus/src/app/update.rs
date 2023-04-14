@@ -8,7 +8,7 @@ use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::db::model::{KnownArtifactKind, SystemUpdate};
+use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
 use nexus_db_queries::context::OpContext;
@@ -84,31 +84,11 @@ impl super::Nexus {
         // associated with one or more system versions, so we will have to
         // extract that mapping from the TUF repo and upsert those associations.
 
+        let version = db::model::SemverVersion(system_version);
         self.db_datastore
-            .upsert_system_update(opctx, SystemUpdate::new(system_version)?)
+            .upsert_update_artifacts(&opctx, artifacts, version)
             .await?;
-
-        // FIXME: if we hit an error in any of these database calls, the
-        // available artifact table will be out of sync with the current
-        // artifacts.json. can we do a transaction or something?
-
-        let mut current_version = None;
-        for artifact in &artifacts {
-            current_version = Some(artifact.targets_role_version);
-            self.db_datastore
-                .update_artifact_upsert(&opctx, artifact.clone())
-                .await?;
-            // TODO: associate artifact with system version, possibly inside
-            // update_artifact_upsert (whatever is the easiest way to make it a
-            // single transaction)
-        }
-
-        // ensure table is in sync with current copy of artifacts.json
-        if let Some(current_version) = current_version {
-            self.db_datastore
-                .update_artifact_hard_delete_outdated(&opctx, current_version)
-                .await?;
-        }
+        // TODO: associate artifact with system version inside upsert_update_artifacts
 
         Ok(())
     }

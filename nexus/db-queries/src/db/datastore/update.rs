@@ -22,56 +22,73 @@ use diesel::prelude::*;
 use nexus_db_model::{KnownArtifactKind, SystemUpdateComponentUpdate};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{
-    CreateResult, DataPageParams, DeleteResult, InternalContext, ListResultVec,
-    LookupResult, LookupType, ResourceType, UpdateResult,
+    CreateResult, DataPageParams, ListResultVec, LookupResult, LookupType,
+    ResourceType, UpdateResult,
 };
 use omicron_common::api::internal::nexus::KnownArtifactKind as KnownArtifactKind_;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn update_artifact_upsert(
+    pub async fn upsert_update_artifacts(
         &self,
         opctx: &OpContext,
-        artifact: UpdateArtifact,
-    ) -> CreateResult<UpdateArtifact> {
+        artifacts: Vec<UpdateArtifact>,
+        system_version: SemverVersion,
+    ) -> CreateResult<Vec<UpdateArtifact>> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        use db::schema::update_artifact::dsl;
-        diesel::insert_into(dsl::update_artifact)
-            .values(artifact.clone())
-            .on_conflict((dsl::name, dsl::version, dsl::kind))
-            .do_update()
-            .set(artifact.clone())
-            .returning(UpdateArtifact::as_returning())
-            .get_result_async(self.pool_authorized(opctx).await?)
+        if artifacts.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let current_role_version = artifacts[0].targets_role_version;
+
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                use db::schema::update_artifact as ua;
+
+                let _ = self
+                    .upsert_system_update(
+                        opctx,
+                        SystemUpdate::new(system_version.0).unwrap(),
+                    )
+                    .await;
+
+                // we have to loop here for two reasons: 1) `do_update().set()`
+                // with a vec requires naming the columns one by one, and 2)
+                // lifetime issues with the artifacts Vec
+                let mut created = vec![];
+                for artifact in &artifacts {
+                    let created_artifact = diesel::insert_into(ua::table)
+                        .values(artifact.clone())
+                        .on_conflict((ua::name, ua::version, ua::kind))
+                        .do_update()
+                        .set(artifact.clone())
+                        .returning(UpdateArtifact::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+                    created.push(created_artifact);
+                }
+
+                // We use the `targets_role_version` column in the table to delete any
+                // old rows, keeping the table in sync with the current copy of
+                // artifacts.json.
+                let _ = diesel::delete(ua::table)
+                    .filter(ua::targets_role_version.lt(current_role_version))
+                    .execute_async(&conn)
+                    .await;
+
+                // TODO: Also delete associations to system versions for all deleted
+                // artifacts. Probably also delete the system version if there are no
+                // more artifacts associated with it. Rather than doing this in here
+                // it might make more sense to orchestrate these related actions in
+                // updates_refresh_metadata.
+
+                Ok(created)
+            })
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn update_artifact_hard_delete_outdated(
-        &self,
-        opctx: &OpContext,
-        current_targets_role_version: i64,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        // We use the `targets_role_version` column in the table to delete any
-        // old rows, keeping the table in sync with the current copy of
-        // artifacts.json.
-        use db::schema::update_artifact::dsl;
-        diesel::delete(dsl::update_artifact)
-            .filter(dsl::targets_role_version.lt(current_targets_role_version))
-            .execute_async(self.pool_authorized(opctx).await?)
-            .await
-            .map(|_rows_deleted| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-            .internal_context("deleting outdated available artifacts")
-
-        // TODO: Also delete associations to system versions for all deleted
-        // artifacts. Probably also delete the system version if there are no
-        // more artifacts associated with it. Rather than doing this in here
-        // it might make more sense to orchestrate these related actions in
-        // updates_refresh_metadata.
     }
 
     pub async fn update_artifact_list(
