@@ -364,19 +364,17 @@ impl super::Nexus {
         opctx: &OpContext,
         image_lookup: &ImageLookup<'_>,
     ) -> DeleteResult {
-        let lookup_type = match image_lookup {
+        match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                let (.., authz_image) =
-                    lookup.lookup_for(authz::Action::Delete).await?;
-                LookupType::ById(authz_image.id())
+                lookup.lookup_for(authz::Action::Delete).await?;
             }
             ImageLookup::SiloImage(lookup) => {
-                let (.., authz_image) =
-                    lookup.lookup_for(authz::Action::Delete).await?;
-                LookupType::ById(authz_image.id())
+                lookup.lookup_for(authz::Action::Delete).await?;
             }
         };
-        let error = lookup_type.into_not_found(ResourceType::Image);
+        let error = Error::InternalError {
+            internal_message: "Endpoint not implemented".to_string(),
+        };
         Err(self
             .unimplemented_todo(opctx, Unimpl::ProtectedLookup(error))
             .await)
