@@ -24,7 +24,6 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
@@ -89,36 +88,6 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
-
-    pub async fn physical_disk_lookup(
-        &self,
-        opctx: &OpContext,
-        vendor: String,
-        serial: String,
-        model: String,
-    ) -> LookupResult<db::model::PhysicalDisk> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::physical_disk::dsl;
-        let disk = dsl::physical_disk
-            .filter(dsl::vendor.eq(vendor.clone()))
-            .filter(dsl::serial.eq(serial.clone()))
-            .filter(dsl::model.eq(model.clone()))
-            .select(PhysicalDisk::as_select())
-            .first_async(self.pool_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::PhysicalDisk,
-                        LookupType::ByCompositeId(format!(
-                            "vendor: {vendor}, serial: {serial}, id: {model}"
-                        )),
-                    ),
-                )
-            })?;
-        Ok(disk)
     }
 
     pub async fn sled_list_physical_disks(

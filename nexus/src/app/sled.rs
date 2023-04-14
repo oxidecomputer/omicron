@@ -217,17 +217,17 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
 
-        let disk = self
-            .db_datastore
-            .physical_disk_lookup(
-                opctx,
-                info.disk_vendor,
-                info.disk_serial,
-                info.disk_model,
-            )
-            .await?;
+        let (_authz_disk, db_disk) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .physical_disk(
+                    &info.disk_vendor,
+                    &info.disk_serial,
+                    &info.disk_model,
+                )
+                .fetch()
+                .await?;
         let zpool =
-            db::model::Zpool::new(id, sled_id, disk.id(), info.size.into());
+            db::model::Zpool::new(id, sled_id, db_disk.id(), info.size.into());
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
