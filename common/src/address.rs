@@ -7,8 +7,8 @@
 //! This addressing functionality is shared by both initialization services
 //! and Nexus, who need to agree upon addressing schemes.
 
-use crate::api::external::{self, Error, Ipv6Net};
-use ipnetwork::Ipv6Network;
+use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -62,6 +62,52 @@ pub const NTP_PORT: u16 = 123;
 // port range, which is more complicated. That's deferred until we actually have
 // that situation (which may be as soon as allocating ephemeral IPs).
 pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
+
+lazy_static::lazy_static! {
+    /// The IPv6 prefix assigned to the built-in services VPC.
+    pub static ref SERVICE_VPC_IPV6_PREFIX: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+            Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for External DNS OPTE portsv
+    pub static ref DNS_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 24).unwrap());
+
+    /// The IPv6 subnet for External DNS OPTE ports.
+    pub static ref DNS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
+
+    /// The IPv6 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for Boundary NTP OPTE ports.
+    pub static ref NTP_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+
+    /// The IPv6 subnet for Boundary NTP OPTE ports.
+    pub static ref NTP_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+}
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.

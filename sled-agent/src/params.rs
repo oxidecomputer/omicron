@@ -287,12 +287,20 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
     Nexus {
+        /// The address at which the internal nexus server is reachable.
         internal_ip: Ipv6Addr,
+        /// The address at which the external nexus server is reachable.
         external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
     },
     ExternalDns {
+        /// The address at which the external DNS server API is reachable.
         http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
         dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
     },
     InternalDns {
         http_address: SocketAddrV6,
@@ -312,9 +320,10 @@ pub enum ServiceType {
         ntp_servers: Vec<String>,
         dns_servers: Vec<String>,
         domain: Option<String>,
-        snat_ip: IpAddr,
-        first_port: u16,
-        last_port: u16,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
     },
     InternalNtp {
         ntp_servers: Vec<String>,
@@ -371,13 +380,14 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_ip, external_ip } => {
-                AutoSt::Nexus { internal_ip, external_ip }
+            St::Nexus { internal_ip, external_ip, nic } => {
+                AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() }
             }
-            St::ExternalDns { http_address, dns_address } => {
+            St::ExternalDns { http_address, dns_address, nic } => {
                 AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
+                    nic: nic.into(),
                 }
             }
             St::InternalDns { http_address, dns_address } => {
@@ -404,16 +414,14 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 ntp_servers,
                 dns_servers,
                 domain,
-                snat_ip,
-                first_port,
-                last_port,
+                nic,
+                snat_cfg,
             } => AutoSt::BoundaryNtp {
                 ntp_servers,
                 dns_servers,
                 domain,
-                snat_ip,
-                first_port,
-                last_port,
+                nic: nic.into(),
+                snat_cfg: snat_cfg.into(),
             },
             St::InternalNtp { ntp_servers, dns_servers, domain } => {
                 AutoSt::InternalNtp { ntp_servers, dns_servers, domain }

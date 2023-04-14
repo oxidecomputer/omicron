@@ -2073,6 +2073,9 @@ impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
     pub const MAX_VNI: u32 = 0xFF_FFFF;
 
+    /// The VNI for the builtin services VPC.
+    pub const SERVICES_VNI: Self = Self(100);
+
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
 

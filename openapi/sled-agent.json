@@ -1759,12 +1759,22 @@
             "type": "object",
             "properties": {
               "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
                 "format": "ip"
               },
               "internal_ip": {
+                "description": "The address at which the internal nexus server is reachable.",
                 "type": "string",
                 "format": "ipv6"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1776,6 +1786,7 @@
             "required": [
               "external_ip",
               "internal_ip",
+              "nic",
               "type"
             ]
           },
@@ -1783,10 +1794,20 @@
             "type": "object",
             "properties": {
               "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
                 "type": "string"
               },
               "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
                 "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1798,6 +1819,7 @@
             "required": [
               "dns_address",
               "http_address",
+              "nic",
               "type"
             ]
           },
@@ -1928,15 +1950,13 @@
                 "nullable": true,
                 "type": "string"
               },
-              "first_port": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
-              },
-              "last_port": {
-                "type": "integer",
-                "format": "uint16",
-                "minimum": 0
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "ntp_servers": {
                 "type": "array",
@@ -1944,9 +1964,13 @@
                   "type": "string"
                 }
               },
-              "snat_ip": {
-                "type": "string",
-                "format": "ip"
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1957,10 +1981,9 @@
             },
             "required": [
               "dns_servers",
-              "first_port",
-              "last_port",
+              "nic",
               "ntp_servers",
-              "snat_ip",
+              "snat_cfg",
               "type"
             ]
           },

@@ -904,7 +904,7 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service {
-                ServiceType::Nexus { internal_ip, external_ip } => {
+                ServiceType::Nexus { internal_ip, external_ip, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info =
@@ -998,7 +998,9 @@ impl ServiceManager {
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
                 }
-                ServiceType::ExternalDns { http_address, dns_address } => {
+                ServiceType::ExternalDns {
+                    http_address, dns_address, ..
+                } => {
                     info!(self.inner.log, "Setting up external-dns service");
 
                     // Like Nexus, we have to set up a possible IPv4 address for

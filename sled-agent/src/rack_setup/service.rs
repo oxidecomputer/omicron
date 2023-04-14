@@ -643,7 +643,11 @@ impl ServiceInner {
                     // more easily support things running on different ports
                     // (which is useful in dev/test situations).
                     match svc {
-                        ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                        ServiceType::Nexus {
+                            external_ip,
+                            internal_ip: _,
+                            ..
+                        } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
