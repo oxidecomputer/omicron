@@ -102,7 +102,7 @@ pub fn nexus_addr() -> SocketAddr {
         }
     }
 
-    ([192, 168, 1, 20], 80).into()
+    ([192, 168, 1, 21], 80).into()
 }
 
 fn get_base_url() -> String {

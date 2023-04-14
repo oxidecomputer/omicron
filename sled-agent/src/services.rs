@@ -546,7 +546,8 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
-                | ServiceType::Ntp { boundary: true, .. } => {
+                | ServiceType::Ntp { boundary: true, .. }
+                | ServiceType::ExternalDns { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
                         .inner

@@ -2078,6 +2078,7 @@ dependencies = [
  "russh",
  "russh-keys",
  "tokio",
+ "trust-dns-resolver",
 ]
 
 [[package]]
