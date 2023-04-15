@@ -10,6 +10,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
+use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::ServicePutRequest;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
@@ -155,7 +157,6 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .as_mut()
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
-
     config
         .pkg
         .dendrite
@@ -164,7 +165,40 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .expect("Tests expect an explicit dendrite address")
         .set_port(dendrite.port);
 
-    let server = N::start_and_populate(&config, &logctx.log).await;
+    // Begin starting Nexus.
+    let (nexus_internal, nexus_internal_addr) =
+        N::start_internal(&config, &logctx.log).await;
+
+    // Set up a single sled agent.
+    let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+    let tempdir = tempfile::tempdir().unwrap();
+    let sled_agent = start_sled_agent(
+        logctx.log.new(o!(
+            "component" => "omicron_sled_agent::sim::Server",
+            "sled_id" => sa_id.to_string(),
+        )),
+        nexus_internal_addr,
+        sa_id,
+        tempdir.path(),
+        sim_mode,
+    )
+    .await
+    .unwrap();
+
+    // Finish setting up Nexus by initializing the rack.  We need to include
+    // information about the internal DNS server started within the simulated
+    // Sled Agent.
+    let dns_server_address = match sled_agent.dns_dropshot_server.local_addr() {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => addr,
+    };
+    let dns_service = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        address: dns_server_address,
+        kind: ServiceKind::InternalDNSConfig,
+    };
+    let server = N::start(nexus_internal, &config, vec![dns_service]).await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();
@@ -178,22 +212,6 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_server_addr,
         logctx.log.new(o!("component" => "internal client test context")),
     );
-
-    // Set up a single sled agent.
-    let tempdir = tempfile::tempdir().unwrap();
-    let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let sled_agent = start_sled_agent(
-        logctx.log.new(o!(
-            "component" => "omicron_sled_agent::sim::Server",
-            "sled_id" => sa_id.to_string(),
-        )),
-        internal_server_addr,
-        sa_id,
-        tempdir.path(),
-        sim_mode,
-    )
-    .await
-    .unwrap();
 
     // Set Nexus' shared resolver to point to the simulated sled agent's
     // internal DNS server

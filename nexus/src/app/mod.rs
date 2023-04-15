@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
@@ -166,15 +167,20 @@ pub struct Nexus {
 
     /// Client for dataplane daemon / switch management API
     dpd_client: Arc<dpd_client::Client>,
+
+    /// Background tasks
+    background_tasks: background::Driver,
+
+    /// task handle for the internal DNS config background task
+    task_internal_dns_config: background::TaskHandle,
+
+    /// task handle for the internal DNS servers background task
+    task_internal_dns_servers: background::TaskHandle,
+
+    /// task handle for the external DNS servers background task
+    task_external_dns_servers: background::TaskHandle,
 }
 
-// TODO Is it possible to make some of these operations more generic?  A
-// particularly good example is probably list() (or even lookup()), where
-// with the right type parameters, generic code can be written to work on all
-// types.
-//
-// TODO update and delete need to accommodate both with-etag and don't-care
-// TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
@@ -240,10 +246,8 @@ impl Nexus {
             LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
         };
 
-        // TODO-cleanup We may want a first-class subsystem for managing startup
-        // background tasks.  It could use a Future for each one, a status enum
-        // for each one, status communication via channels, and a single task to
-        // run them all.
+        // TODO-cleanup We may want to make the populator a first-class
+        // background task.
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
@@ -256,6 +260,23 @@ impl Nexus {
             populate_ctx,
             Arc::clone(&db_datastore),
             populate_args,
+        );
+
+        let background_ctx = OpContext::for_background(
+            log.new(o!("component" => "BackgroundTasks")),
+            Arc::clone(&authz),
+            authn::Context::internal_api(),
+            Arc::clone(&db_datastore),
+        );
+        let (
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
+        ) = background::init(
+            &background_ctx,
+            Arc::clone(&db_datastore),
+            &config.pkg.background_tasks,
         );
 
         let nexus = Nexus {
@@ -290,6 +311,10 @@ impl Nexus {
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
             dpd_client,
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -315,6 +340,31 @@ impl Nexus {
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
+
+        // Kick all background tasks once the populate step finishes.  Among
+        // other things, the populate step installs role assignments for
+        // internal identities that are used by the background tasks.  If we
+        // don't do this here, those tasks might fail spuriously on startup and
+        // not be retried for a while.
+        let task_nexus = nexus.clone();
+        let task_log = nexus.log.clone();
+        tokio::spawn(async move {
+            match task_nexus.wait_for_populate().await {
+                Ok(_) => {
+                    info!(
+                        task_log,
+                        "populate complete; activating background tasks"
+                    );
+                    for task in task_nexus.background_tasks.tasks() {
+                        task_nexus.background_tasks.activate(task);
+                    }
+                }
+                Err(_) => {
+                    error!(task_log, "populate failed");
+                }
+            }
+        });
+
         Ok(nexus)
     }
 
