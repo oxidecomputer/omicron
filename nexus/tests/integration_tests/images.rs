@@ -26,8 +26,12 @@ const PROJECT_NAME: &str = "myproj";
 
 const PROJECT_NAME_2: &str = "myproj2";
 
-fn get_images_url(project_name: &str) -> String {
+fn get_project_images_url(project_name: &str) -> String {
     format!("/v1/images?project={}", project_name)
+}
+
+fn get_project_images_with_silo_images_url(project_name: &str) -> String {
+    format!("/v1/images?project={}&include_silo_images=true", project_name)
 }
 
 fn get_image_create(source: params::ImageSource) -> params::ImageCreate {
@@ -62,7 +66,9 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let silo_images_url = format!("/v1/images");
+    let project_images_url = get_project_images_url(PROJECT_NAME);
+    let images_url = get_project_images_with_silo_images_url(PROJECT_NAME);
 
     // Before project exists, image list 404s
     NexusRequest::expect_failure(
@@ -110,7 +116,8 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     // create another project, which is empty until we promote the image to global
     create_project(client, PROJECT_NAME_2).await;
 
-    let project_2_images_url = get_images_url(PROJECT_NAME_2);
+    let project_2_images_url =
+        get_project_images_with_silo_images_url(PROJECT_NAME_2);
 
     let images = NexusRequest::object_get(client, &project_2_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -119,8 +126,37 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
         .items;
     assert_eq!(images.len(), 0);
 
-    // TODO: once we reimplement promote, promote image to global and check that
-    // it shows up in the other project
+    // promote the image to the silo
+    let promote_url = format!("/v1/images/{}/promote", images[0].identity.id);
+    NexusRequest::objects_post(client, &promote_url, &())
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 1);
+    assert_eq!(images[0].identity.name, "alpine-edge");
+
+    // Ensure original project images is empty
+    let images = NexusRequest::object_get(client, &project_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 0);
+
+    // Ensure project 2 images with silos lists the promoted image
+    let images = NexusRequest::object_get(client, &project_2_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+    assert_eq!(images.len(), 0);
 }
 
 #[nexus_test]
@@ -142,7 +178,7 @@ async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
         url: server.url("/image.raw").to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &images_url)
@@ -173,7 +209,7 @@ async fn test_image_create_bad_url(cptestctx: &ControlPlaneTestContext) {
         url: "not_a_url".to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &images_url)
@@ -215,7 +251,7 @@ async fn test_image_create_bad_content_length(
         url: server.url("/image.raw").to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &images_url)
@@ -256,7 +292,7 @@ async fn test_image_create_bad_image_size(cptestctx: &ControlPlaneTestContext) {
         url: server.url("/image.raw").to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &images_url)
@@ -300,7 +336,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
         url: server.url("/alpine/edge.raw").to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let alpine_image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
@@ -351,7 +387,7 @@ async fn test_make_disk_from_image_too_small(
         url: server.url("/alpine/edge.raw").to_string(),
     });
 
-    let images_url = get_images_url(PROJECT_NAME);
+    let images_url = get_project_images_url(PROJECT_NAME);
 
     let alpine_image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)

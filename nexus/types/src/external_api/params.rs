@@ -123,7 +123,8 @@ pub struct ImageListSelector {
     pub project: Option<NameOrId>,
     /// Flag used to indicate if silo scoped images should be included when
     /// listing project images. Only valid when `project` is provided.
-    pub include_silo_images: Option<bool>,
+    #[serde(default)]
+    pub include_silo_images: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]

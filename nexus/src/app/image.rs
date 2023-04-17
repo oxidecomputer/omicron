@@ -333,7 +333,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         parent_lookup: &ImageParentLookup<'_>,
-        include_silo_images: Option<bool>,
+        include_silo_images: bool,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Image> {
         match parent_lookup {
@@ -345,7 +345,7 @@ impl super::Nexus {
                         opctx,
                         &authz_silo,
                         &authz_project,
-                        include_silo_images.unwrap_or(false),
+                        include_silo_images,
                         pagparams,
                     )
                     .await
