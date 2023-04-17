@@ -2417,7 +2417,7 @@ async fn image_list(
             .image_list(
                 &opctx,
                 &parent_lookup,
-                scan_params.selector.include_silo_images,
+                scan_params.selector.include_silo_images.unwrap_or(false),
                 &paginated_by,
             )
             .await?

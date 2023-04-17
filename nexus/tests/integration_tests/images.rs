@@ -127,11 +127,17 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(images.len(), 0);
 
     // promote the image to the silo
-    let promote_url = format!("/v1/images/{}/promote", images[0].identity.id);
-    NexusRequest::objects_post(client, &promote_url, &())
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<views::Image>()
-        .await;
+    let promote_url = format!(
+        "/v1/images/{}/promote?project={}",
+        "alpine-edge", PROJECT_NAME
+    );
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
 
     let silo_images = NexusRequest::object_get(client, &silo_images_url)
         .authn_as(AuthnMode::PrivilegedUser)
