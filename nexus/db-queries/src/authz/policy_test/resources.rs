@@ -188,6 +188,21 @@ async fn make_silo(
         silo_group_id,
         LookupType::ByName(format!("{}-group", silo_name)),
     ));
+    let silo_image_id = Uuid::new_v4();
+    builder.new_resource(authz::SiloImage::new(
+        silo.clone(),
+        silo_image_id,
+        LookupType::ByName(format!("{}-silo-image", silo_name)),
+    ));
+
+    // Image is a special case in that this resource is technically just a pass-through for
+    // `SiloImage` and `ProjectImage` resources.
+    let image_id = Uuid::new_v4();
+    builder.new_resource(authz::Image::new(
+        silo.clone(),
+        image_id,
+        LookupType::ByName(format!("{}-image", silo_name)),
+    ));
 
     let nprojects = if first_branch { 2 } else { 1 };
     for i in 0..nprojects {
