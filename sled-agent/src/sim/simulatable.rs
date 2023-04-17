@@ -98,7 +98,7 @@ pub trait Simulatable: fmt::Debug + Send + Sync {
     fn generation(&self) -> Generation;
 
     /// Returns the current state.
-    fn current(&self) -> &Self::CurrentState;
+    fn current(&self) -> Self::CurrentState;
 
     /// Returns the "desired" state, if one exists.
     ///

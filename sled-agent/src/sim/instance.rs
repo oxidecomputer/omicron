@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use propolis_client::api::InstanceState as PropolisInstanceState;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
@@ -29,7 +30,7 @@ use crate::common::instance::{Action as InstanceAction, InstanceStates};
 /// possible within reason so that it can be used as a test double in Nexus
 /// integration tests.
 #[derive(Debug)]
-pub struct SimInstance {
+struct SimInstanceInner {
     /// The current simulated instance state.
     state: InstanceStates,
 
@@ -41,48 +42,7 @@ pub struct SimInstance {
     destroyed: bool,
 }
 
-impl SimInstance {
-    /// Returns the "resting" state the simulated instance will reach if its
-    /// queue is drained.
-    fn next_resting_state(&self) -> ApiInstanceState {
-        match self.propolis_queue.back() {
-            None => self.state.current().run_state,
-            Some(p) => InstanceState::from(*p).0,
-        }
-    }
-
-    /// Indicates whether there is a reboot transition pending for this
-    /// instance.
-    fn reboot_pending(&self) -> bool {
-        self.propolis_queue
-            .iter()
-            .any(|s| matches!(s, PropolisInstanceState::Rebooting))
-    }
-}
-
-#[async_trait]
-impl Simulatable for SimInstance {
-    type CurrentState = InstanceRuntimeState;
-    type RequestedState = InstanceStateRequested;
-    type ProducerArgs = ();
-    type Action = InstanceAction;
-
-    fn new(current: InstanceRuntimeState) -> Self {
-        SimInstance {
-            state: InstanceStates::new(current),
-            propolis_queue: VecDeque::new(),
-            destroyed: false,
-        }
-    }
-
-    async fn set_producer(
-        &mut self,
-        _args: Self::ProducerArgs,
-    ) -> Result<(), Error> {
-        // NOTE: Not implemented, yet.
-        Ok(())
-    }
-
+impl SimInstanceInner {
     fn request_transition(
         &mut self,
         target: &InstanceStateRequested,
@@ -204,15 +164,11 @@ impl Simulatable for SimInstance {
         }
     }
 
-    fn generation(&self) -> Generation {
-        self.state.current().gen
+    fn current(&self) -> InstanceRuntimeState {
+        self.state.current().clone()
     }
 
-    fn current(&self) -> &Self::CurrentState {
-        self.state.current()
-    }
-
-    fn desired(&self) -> Option<Self::RequestedState> {
+    fn desired(&self) -> Option<InstanceStateRequested> {
         self.propolis_queue.back().map(|terminal| match terminal {
             // State change requests may queue these states as intermediate
             // states, but the simulation (and the tests that rely on it) is
@@ -240,6 +196,108 @@ impl Simulatable for SimInstance {
 
     fn ready_to_destroy(&self) -> bool {
         self.destroyed
+    }
+
+    /// Returns the "resting" state the simulated instance will reach if its
+    /// queue is drained.
+    fn next_resting_state(&self) -> ApiInstanceState {
+        match self.propolis_queue.back() {
+            None => self.state.current().run_state,
+            Some(p) => InstanceState::from(*p).0,
+        }
+    }
+
+    /// Indicates whether there is a reboot transition pending for this
+    /// instance.
+    fn reboot_pending(&self) -> bool {
+        self.propolis_queue
+            .iter()
+            .any(|s| matches!(s, PropolisInstanceState::Rebooting))
+    }
+
+    fn terminate(&mut self) -> InstanceRuntimeState {
+        self.state.transition(ApiInstanceState::Destroyed);
+        self.propolis_queue.clear();
+        self.state.current().clone()
+    }
+}
+
+/// A simulation of an Instance created by the external Oxide API.
+///
+/// Normally, to change a simulated object's state, the simulated sled agent
+/// invokes a generic routine on the object's `SimCollection` that calls the
+/// appropriate `Simulatable` routine on the object in question while holding
+/// the collection's (private) lock. This works fine for generic functionality
+/// that all `Simulatable`s share, but instances have some instance-specific
+/// extensions that are not appropriate to implement in that trait.
+///
+/// To allow sled agent to modify instances in instance-specific ways without
+/// having to hold a `SimCollection` lock, this struct wraps the instance state
+/// in an `Arc` and `Mutex` and then derives `Clone`. This way, the simulated
+/// sled agent proper can ask the instance collection for a clone of a specific
+/// registered instance and get back a reference to the same instance the
+/// `SimCollection` APIs will operate on.
+#[derive(Debug, Clone)]
+pub struct SimInstance {
+    inner: Arc<Mutex<SimInstanceInner>>,
+}
+
+impl SimInstance {
+    pub fn terminate(&self) -> InstanceRuntimeState {
+        self.inner.lock().unwrap().terminate()
+    }
+}
+
+#[async_trait]
+impl Simulatable for SimInstance {
+    type CurrentState = InstanceRuntimeState;
+    type RequestedState = InstanceStateRequested;
+    type ProducerArgs = ();
+    type Action = InstanceAction;
+
+    fn new(current: InstanceRuntimeState) -> Self {
+        SimInstance {
+            inner: Arc::new(Mutex::new(SimInstanceInner {
+                state: InstanceStates::new(current),
+                propolis_queue: VecDeque::new(),
+                destroyed: false,
+            })),
+        }
+    }
+
+    async fn set_producer(
+        &mut self,
+        _args: Self::ProducerArgs,
+    ) -> Result<(), Error> {
+        // NOTE: Not implemented, yet.
+        Ok(())
+    }
+
+    fn request_transition(
+        &mut self,
+        target: &InstanceStateRequested,
+    ) -> Result<Option<InstanceAction>, Error> {
+        self.inner.lock().unwrap().request_transition(target)
+    }
+
+    fn execute_desired_transition(&mut self) -> Option<InstanceAction> {
+        self.inner.lock().unwrap().execute_desired_transition()
+    }
+
+    fn generation(&self) -> Generation {
+        self.inner.lock().unwrap().current().gen
+    }
+
+    fn current(&self) -> Self::CurrentState {
+        self.inner.lock().unwrap().current()
+    }
+
+    fn desired(&self) -> Option<Self::RequestedState> {
+        self.inner.lock().unwrap().desired()
+    }
+
+    fn ready_to_destroy(&self) -> bool {
+        self.inner.lock().unwrap().ready_to_destroy()
     }
 
     async fn notify(

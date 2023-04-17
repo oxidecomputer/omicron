@@ -248,8 +248,8 @@ impl Simulatable for SimDisk {
         self.state.current().gen
     }
 
-    fn current(&self) -> &Self::CurrentState {
-        self.state.current()
+    fn current(&self) -> Self::CurrentState {
+        self.state.current().clone()
     }
 
     fn desired(&self) -> Option<Self::RequestedState> {
