@@ -115,7 +115,7 @@ pub struct SnapshotSelector {
     pub snapshot: NameOrId,
 }
 
-/// A specialized selector for image list, it contains an extra feield to indicate
+/// A specialized selector for image list, it contains an extra field to indicate
 /// if silo scoped images should be included when listing project images.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ImageListSelector {
