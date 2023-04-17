@@ -192,13 +192,16 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
+        authz_project_image: &authz::ProjectImage,
         project_image: ProjectImage,
     ) -> UpdateResult<Image> {
         let silo_id = authz_silo.id();
-        let image: Image = project_image.into();
+        let silo_image: SiloImage = project_image.into();
+        let image: Image = silo_image.into();
         let name = image.name().clone();
 
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use db::schema::image::dsl;
         let image: Image = Silo::insert_resource(

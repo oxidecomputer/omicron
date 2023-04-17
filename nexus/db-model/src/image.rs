@@ -113,6 +113,13 @@ impl TryFrom<Image> for ProjectImage {
     }
 }
 
+impl From<ProjectImage> for SiloImage {
+    fn from(value: ProjectImage) -> Self {
+        let image: Image = value.into();
+        Image { project_id: None, ..image }.try_into().unwrap()
+    }
+}
+
 impl TryFrom<Image> for SiloImage {
     type Error = Error;
 

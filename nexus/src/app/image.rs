@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Images (both project and globally scoped)
+//! Images (both project and silo scoped)
 
 use super::Unimpl;
 use crate::authz;
@@ -359,6 +359,7 @@ impl super::Nexus {
         }
     }
 
+    // TODO-MVP: Implement
     pub async fn image_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -380,6 +381,7 @@ impl super::Nexus {
             .await)
     }
 
+    /// Converts a project scoped image into a silo scoped image
     pub async fn image_promote(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -387,13 +389,18 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                let (authz_silo, _, _, db_image) =
+                let (authz_silo, _, authz_project_image, db_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
                 opctx
                     .authorize(authz::Action::CreateChild, &authz_silo)
                     .await?;
                 self.db_datastore
-                    .project_image_promote(opctx, &authz_silo, db_image)
+                    .project_image_promote(
+                        opctx,
+                        &authz_silo,
+                        &authz_project_image,
+                        db_image,
+                    )
                     .await
             }
             ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
