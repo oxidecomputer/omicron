@@ -74,7 +74,9 @@ fn run_db_run(exec: Exec, wait_for_populate: bool) -> DbRun {
             Err(e) => {
                 panic!("unexpected error reading child process stdout: {}", e);
             }
-            _ => (),
+            Ok(_) => {
+                print!("subproc stdout: {}", buf);
+            }
         }
 
         if let Some(s) = buf.strip_prefix("omicron-dev: temporary directory: ")
@@ -167,7 +169,9 @@ fn run_run_all(exec: Exec) -> RunAll {
             Err(e) => {
                 panic!("unexpected error reading child process stdout: {}", e);
             }
-            _ => (),
+            Ok(_) => {
+                print!("subproc stdout: {}", buf);
+            }
         }
 
         if let Some(s) =

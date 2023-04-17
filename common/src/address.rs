@@ -28,7 +28,7 @@ pub const DNS_REDUNDANCY: usize = 1;
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
 pub const DNS_PORT: u16 = 53;
-pub const DNS_SERVER_PORT: u16 = 5353;
+pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
 /// The port propolis-server listens on inside the propolis zone.

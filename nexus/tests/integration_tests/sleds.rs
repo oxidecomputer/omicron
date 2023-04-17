@@ -16,6 +16,7 @@ use omicron_nexus::external_api::views::{
     PhysicalDisk, PhysicalDiskType, Sled,
 };
 use omicron_nexus::internal_api::params as internal_params;
+use omicron_sled_agent::sim;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -51,9 +52,15 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let addr = cptestctx.server.get_http_server_internal_address().await;
         let update_directory = std::path::Path::new("/should/not/be/used");
         sas.push(
-            start_sled_agent(log, addr, sa_id, &update_directory)
-                .await
-                .unwrap(),
+            start_sled_agent(
+                log,
+                addr,
+                sa_id,
+                &update_directory,
+                sim::SimMode::Explicit,
+            )
+            .await
+            .unwrap(),
         );
     }
 

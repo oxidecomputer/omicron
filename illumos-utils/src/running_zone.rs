@@ -240,14 +240,9 @@ impl RunningZone {
         name: &str,
     ) -> Result<IpNetwork, EnsureAddressError> {
         info!(self.inner.log, "Adding address: {:?}", addrtype);
-        let addrobj = AddrObject::new(
-                self.inner
-                    .link
-                    .as_ref()
-                    .expect("Cannot allocate external address on zone without physical NIC")
-                    .name(),
-                name
-            )
+        // XXX there's an open PR changing Nexus to use OPTE that removes this
+        // function! keep it in so that this PR can be tested.
+        let addrobj = AddrObject::new(self.inner.links[0].name(), name)
             .map_err(|err| EnsureAddressError::AddrObject {
                 request: addrtype,
                 zone: self.inner.name.clone(),
@@ -366,7 +361,7 @@ impl RunningZone {
                 //
                 // Re-initialize guest_vnic state by inspecting the zone.
                 opte_ports: vec![],
-                link: None,
+                links: vec![],
                 bootstrap_vnic,
             },
         })
@@ -390,6 +385,10 @@ impl RunningZone {
                 .map_err(|err| err.to_string())?;
         }
         Ok(())
+    }
+
+    pub fn links(&self) -> &Vec<Link> {
+        &self.inner.links
     }
 }
 
@@ -446,8 +445,8 @@ pub struct InstalledZone {
     // OPTE devices for the guest network interfaces
     opte_ports: Vec<Port>,
 
-    // Physical NIC possibly provisioned to the zone.
-    link: Option<Link>,
+    // Physical NICs possibly provisioned to the zone.
+    links: Vec<Link>,
 }
 
 impl InstalledZone {
@@ -480,7 +479,7 @@ impl InstalledZone {
         devices: &[zone::Device],
         opte_ports: Vec<Port>,
         bootstrap_vnic: Option<Link>,
-        link: Option<Link>,
+        links: Vec<Link>,
         limit_priv: Vec<String>,
     ) -> Result<InstalledZone, InstallZoneError> {
         let control_vnic =
@@ -500,7 +499,7 @@ impl InstalledZone {
             .map(|port| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
-            .chain(link.as_ref().map(|vnic| vnic.name().to_string()))
+            .chain(links.iter().map(|nic| nic.name().to_string()))
             .collect();
 
         Zones::install_omicron_zone(
@@ -526,7 +525,7 @@ impl InstalledZone {
             control_vnic,
             bootstrap_vnic,
             opte_ports,
-            link,
+            links,
         })
     }
 }

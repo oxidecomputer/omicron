@@ -1709,6 +1709,7 @@ mod tests {
                 12400,
             )),
             migration_id: None,
+            propolis_gen: Generation::new(),
             hostname: params.hostname.clone(),
             memory: params.memory,
             ncpus: params.ncpus,

@@ -952,7 +952,7 @@ mod test {
         println!("{}", rustfmt(output).unwrap());
 
         let output = lookup_resource(quote! {
-            name = "UpdateAvailableArtifact",
+            name = "UpdateArtifact",
             ancestors = [],
             children = [],
             lookup_by_name = false,

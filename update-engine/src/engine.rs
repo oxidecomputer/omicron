@@ -728,7 +728,9 @@ impl<S: StepSpec> StepProgressReporter<S> {
         self,
         error: &S::Error,
     ) -> Result<(), mpsc::error::SendError<Event<S>>> {
-        // Written this way to ensure that error isn't held past an await point.
+        // Stringify `error` into a message + list causes; this is written the
+        // way it is to avoid `error` potentially living across the `.await`
+        // below (which can cause lifetime issues in callers).
         let (message, causes) = {
             let error = error.as_error();
             let message = error.to_string();

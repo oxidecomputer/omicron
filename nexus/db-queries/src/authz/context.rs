@@ -62,6 +62,7 @@ impl Authz {
 /// This is the primary external interface for the authorization subsystem,
 /// through which Nexus at-large makes authorization checks.  This is almost
 /// always done through [`OpContext::authorize()`].
+#[derive(Clone)]
 pub struct Context {
     authn: Arc<authn::Context>,
     authz: Arc<Authz>,

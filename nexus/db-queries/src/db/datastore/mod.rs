@@ -275,16 +275,17 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup, Project,
-        Rack, Region, Service, ServiceKind, SiloUser, Sled, SledBaseboard,
-        SledSystemHardware, SshKey, SystemUpdate, UpdateableComponentType,
-        VpcSubnet, Zpool,
+        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup,
+        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
+        ServiceKind, SiloUser, Sled, SledBaseboard, SledSystemHardware, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
     use chrono::{Duration, Utc};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::{
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
@@ -292,6 +293,7 @@ mod test {
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+    use std::num::NonZeroU32;
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -508,15 +510,42 @@ mod test {
         ByteCount::from_gibibytes_u32(100)
     }
 
+    const TEST_VENDOR: &str = "test-vendor";
+    const TEST_SERIAL: &str = "test-serial";
+    const TEST_MODEL: &str = "test-model";
+
+    async fn create_test_physical_disk(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+        kind: PhysicalDiskKind,
+    ) -> Uuid {
+        let physical_disk = PhysicalDisk::new(
+            TEST_VENDOR.into(),
+            TEST_SERIAL.into(),
+            TEST_MODEL.into(),
+            kind,
+            sled_id,
+        );
+        datastore
+            .physical_disk_upsert(opctx, physical_disk.clone())
+            .await
+            .expect("Failed to upsert physical disk");
+        physical_disk.uuid()
+    }
+
     // Creates a test zpool, returns its UUID.
-    async fn create_test_zpool(datastore: &DataStore, sled_id: Uuid) -> Uuid {
+    async fn create_test_zpool(
+        datastore: &DataStore,
+        sled_id: Uuid,
+        physical_disk_id: Uuid,
+    ) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(
             zpool_id,
             sled_id,
-            &nexus_types::internal_api::params::ZpoolPutRequest {
-                size: test_zpool_size(),
-            },
+            physical_disk_id,
+            test_zpool_size().into(),
         );
         datastore.zpool_upsert(zpool).await.unwrap();
         zpool_id
@@ -542,17 +571,23 @@ mod test {
     async fn test_region_allocation() {
         let logctx = dev::test_setup_log("test_region_allocation");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD * 2;
@@ -641,17 +676,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
@@ -717,17 +758,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_not_enough_datasets");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD - 1;
@@ -773,17 +820,23 @@ mod test {
         let logctx =
             dev::test_setup_log("test_region_allocation_out_of_space_fails");
         let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
-        let datastore = Arc::new(DataStore::new(Arc::new(pool)));
-        let opctx =
-            OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
 
-        // ... and a zpool within that sled...
-        let zpool_id = create_test_zpool(&datastore, sled_id).await;
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // ... and a zpool within that disk...
+        let zpool_id =
+            create_test_zpool(&datastore, sled_id, physical_disk_id).await;
 
         // ... and datasets within that zpool.
         let dataset_count = REGION_REDUNDANCY_THRESHOLD;
@@ -1031,25 +1084,114 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_service_upsert() {
-        let logctx = dev::test_setup_log("test_service_upsert");
+    async fn test_service_upsert_and_list() {
+        let logctx = dev::test_setup_log("test_service_upsert_and_list");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a sled on which the service should exist.
         let sled_id = create_test_sled(&datastore).await;
 
-        // Create a new service to exist on this sled.
-        let service_id = Uuid::new_v4();
+        // Create a few new service to exist on this sled.
+        let service1_id =
+            "ab7bd7fd-7c37-48ab-a84a-9c09a90c4c7f".parse().unwrap();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         let kind = ServiceKind::Nexus;
 
-        let service = Service::new(service_id, sled_id, addr, kind);
+        let service1 = Service::new(service1_id, sled_id, addr, kind);
         let result =
-            datastore.service_upsert(&opctx, service.clone()).await.unwrap();
-        assert_eq!(service.id(), result.id());
-        assert_eq!(service.ip, result.ip);
-        assert_eq!(service.kind, result.kind);
+            datastore.service_upsert(&opctx, service1.clone()).await.unwrap();
+        assert_eq!(service1.id(), result.id());
+        assert_eq!(service1.ip, result.ip);
+        assert_eq!(service1.kind, result.kind);
+
+        let service2_id =
+            "fe5b6e3d-dfee-47b4-8719-c54f78912c0b".parse().unwrap();
+        let service2 = Service::new(service2_id, sled_id, addr, kind);
+        let result =
+            datastore.service_upsert(&opctx, service2.clone()).await.unwrap();
+        assert_eq!(service2.id(), result.id());
+        assert_eq!(service2.ip, result.ip);
+        assert_eq!(service2.kind, result.kind);
+
+        let service3_id = Uuid::new_v4();
+        let kind = ServiceKind::Oximeter;
+        let service3 = Service::new(service3_id, sled_id, addr, kind);
+        let result =
+            datastore.service_upsert(&opctx, service3.clone()).await.unwrap();
+        assert_eq!(service3.id(), result.id());
+        assert_eq!(service3.ip, result.ip);
+        assert_eq!(service3.kind, result.kind);
+
+        // Try listing services of one kind.
+        let services = datastore
+            .services_list_kind(
+                &opctx,
+                ServiceKind::Nexus,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(3).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(services[0].id(), service1.id());
+        assert_eq!(services[0].sled_id, service1.sled_id);
+        assert_eq!(services[0].kind, service1.kind);
+        assert_eq!(services[1].id(), service2.id());
+        assert_eq!(services[1].sled_id, service2.sled_id);
+        assert_eq!(services[1].kind, service2.kind);
+        assert_eq!(services.len(), 2);
+
+        // Try listing services of a different kind.
+        let services = datastore
+            .services_list_kind(
+                &opctx,
+                ServiceKind::Oximeter,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(3).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(services[0].id(), service3.id());
+        assert_eq!(services[0].sled_id, service3.sled_id);
+        assert_eq!(services[0].kind, service3.kind);
+        assert_eq!(services.len(), 1);
+
+        // Try listing services of a kind for which there are no services.
+        let services = datastore
+            .services_list_kind(
+                &opctx,
+                ServiceKind::Dendrite,
+                &DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(3).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(services.is_empty());
+
+        // As a quick check, try supplying a marker.
+        let services = datastore
+            .services_list_kind(
+                &opctx,
+                ServiceKind::Nexus,
+                &DataPageParams {
+                    marker: Some(&service1_id),
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(3).unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].id(), service2.id());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1431,8 +1573,9 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Expect DB error if we try to insert a system update with a version or id
-    /// that already exists
+    /// Expect DB error if we try to insert a system update with an id that
+    /// already exists. If version matches, update the existing row (currently
+    /// only time_modified)
     #[tokio::test]
     async fn test_system_update_conflict() {
         let logctx = dev::test_setup_log("test_system_update_conflict");
@@ -1442,25 +1585,31 @@ mod test {
         let v1 = external::SemverVersion::new(1, 0, 0);
         let update1 = SystemUpdate::new(v1.clone()).unwrap();
         datastore
-            .create_system_update(&opctx, update1.clone())
+            .upsert_system_update(&opctx, update1.clone())
             .await
             .expect("Failed to create system update");
 
-        // same version, but different ID (generated by constructor). should conflict
+        // same version, but different ID (generated by constructor). should
+        // conflict and therefore update time_modified, keeping the old ID
         let update2 = SystemUpdate::new(v1).unwrap();
-        let conflict = datastore
-            .create_system_update(&opctx, update2.clone())
+        let updated_update = datastore
+            .upsert_system_update(&opctx, update2.clone())
             .await
-            .unwrap_err();
-        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
+            .unwrap();
+        assert!(updated_update.identity.id == update1.identity.id);
+        assert!(
+            updated_update.identity.time_modified
+                != update1.identity.time_modified
+        );
 
-        // now let's do same ID, different version. should also conflict.
-        // using constructor first to get version_sort business for free
+        // now let's do same ID, but different version. should conflict on the
+        // ID because it's the PK, but since the version doesn't match an
+        // existing row, it errors out instead of updating one
         let update3 =
             SystemUpdate::new(external::SemverVersion::new(2, 0, 0)).unwrap();
         let update3 = SystemUpdate { identity: update1.identity, ..update3 };
         let conflict =
-            datastore.create_system_update(&opctx, update3).await.unwrap_err();
+            datastore.upsert_system_update(&opctx, update3).await.unwrap_err();
         assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
 
         db.cleanup().await.unwrap();
@@ -1479,7 +1628,7 @@ mod test {
         let v1 = external::SemverVersion::new(1, 0, 0);
         let system_update = SystemUpdate::new(v1.clone()).unwrap();
         datastore
-            .create_system_update(&opctx, system_update.clone())
+            .upsert_system_update(&opctx, system_update.clone())
             .await
             .expect("Failed to create system update");
 

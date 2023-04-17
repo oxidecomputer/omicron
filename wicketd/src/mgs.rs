@@ -5,23 +5,25 @@
 //! The collection of tasks used for interacting with MGS and maintaining
 //! runtime state.
 
-use crate::inventory::RotInventory;
 use crate::{RackV1Inventory, SpInventory};
-use futures::stream::FuturesUnordered;
-use futures::{Future, StreamExt};
-use gateway_client::types::{
-    SpComponentCaboose, SpComponentInfo, SpIdentifier, SpInfo,
-};
-use gateway_messages::SpComponent;
+use futures::StreamExt;
+use gateway_client::types::{SpIdentifier, SpIgnition};
 use schemars::JsonSchema;
 use serde::Serialize;
 use slog::{info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddrV6;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{interval, Duration, Instant, MissedTickBehavior};
+use tokio::time::{Duration, Instant};
+use tokio_stream::StreamMap;
 
-const MGS_POLL_INTERVAL: Duration = Duration::from_secs(10);
+use self::inventory::{
+    FetchedIgnitionState, FetchedSpData, IgnitionPresence,
+    IgnitionStateFetcher, SpStateFetcher,
+};
+
+mod inventory;
+
 const MGS_TIMEOUT: Duration = Duration::from_secs(10);
 
 // We support:
@@ -30,17 +32,13 @@ const MGS_TIMEOUT: Duration = Duration::from_secs(10);
 //   * Room for some timeouts and re-requests from wicket.
 const CHANNEL_CAPACITY: usize = 8;
 
-/// Channel errors result only from system shutdown. We have to report them to
-/// satisfy function calls, so we define an error type here.
-#[derive(Debug, PartialEq, Eq)]
-pub struct ShutdownInProgress;
-
 #[derive(Debug)]
 enum MgsRequest {
     GetInventory {
         #[allow(dead_code)]
         etag: Option<String>,
-        reply_tx: oneshot::Sender<GetInventoryResponse>,
+        reply_tx:
+            oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
         force_refresh: Vec<SpIdentifier>,
     },
 }
@@ -56,34 +54,32 @@ pub struct MgsHandle {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case", tag = "type", content = "data")]
 pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, received_ago: Duration },
+    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
     Unavailable,
 }
 
-impl GetInventoryResponse {
-    fn new(inventory: Option<(RackV1Inventory, Instant)>) -> Self {
-        match inventory {
-            Some((inventory, received_at)) => GetInventoryResponse::Response {
-                inventory,
-                received_ago: received_at.elapsed(),
-            },
-            None => GetInventoryResponse::Unavailable,
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GetInventoryError {
+    /// Channel errors result only from system shutdown.
+    ShutdownInProgress,
+
+    /// The client specified an invalid SP identifier in a `force_refresh`
+    /// request.
+    InvalidSpIdentifier,
 }
 
 impl MgsHandle {
     pub async fn get_inventory(
         &self,
         force_refresh: Vec<SpIdentifier>,
-    ) -> Result<GetInventoryResponse, ShutdownInProgress> {
+    ) -> Result<GetInventoryResponse, GetInventoryError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let etag = None;
         self.tx
             .send(MgsRequest::GetInventory { etag, reply_tx, force_refresh })
             .await
-            .map_err(|_| ShutdownInProgress)?;
-        reply_rx.await.map_err(|_| ShutdownInProgress)
+            .map_err(|_| GetInventoryError::ShutdownInProgress)?;
+        reply_rx.await.map_err(|_| GetInventoryError::ShutdownInProgress)?
     }
 }
 
@@ -124,8 +120,15 @@ pub struct MgsManager {
     tx: mpsc::Sender<MgsRequest>,
     rx: mpsc::Receiver<MgsRequest>,
     mgs_client: gateway_client::Client,
-    // The Instant indicates the moment at which the inventory was received.
-    inventory: Option<(RackV1Inventory, Instant)>,
+    inventory: BTreeMap<SpIdentifier, SpInventory>,
+
+    // Our clients can request an immediate refresh for a particular set of SPs.
+    // When they do, we don't want to reply to them until we get updates for
+    // those SPs, so we hold the set of reply channels along with the list of
+    // SPs they're waiting for in this vector. We expect this vec to be small
+    // (almost always empty); whenever we get an update for an SP, we scan this
+    // vec and check if any reply channels can now be satisfied.
+    waiting_for_update: Vec<WaitingForRefresh>,
 }
 
 impl MgsManager {
@@ -133,8 +136,14 @@ impl MgsManager {
         let log = log.new(o!("component" => "wicketd MgsManager"));
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
-        let inventory = None;
-        MgsManager { log, tx, rx, mgs_client, inventory }
+        MgsManager {
+            log,
+            tx,
+            rx,
+            mgs_client,
+            inventory: BTreeMap::new(),
+            waiting_for_update: Vec::new(),
+        }
     }
 
     pub fn get_handle(&self) -> MgsHandle {
@@ -142,303 +151,235 @@ impl MgsManager {
     }
 
     pub async fn run(mut self) {
-        let mgs_client = self.mgs_client;
-        let (poll_inventory_now_tx, poll_inventory_now_rx) = mpsc::channel(1);
-        let mut inventory_rx =
-            poll_sps(&self.log, mgs_client, poll_inventory_now_rx).await;
-        let mut waiting_for_inventory: Vec<
-            oneshot::Sender<GetInventoryResponse>,
-        > = Vec::new();
+        // First, wait until we get a list of SP identifiers that MGS knows how
+        // to talk to. We use this to know how many (and which) SP data-fetching
+        // tasks to create. This does not induce any management network traffic,
+        // and if we can't get a response from this endpoint we're not going to
+        // get responses from any other endpoint anyway, so it's fine to wait
+        // until this succeeds.
+        let all_sp_ids = loop {
+            match self.mgs_client.sp_all_ids().await {
+                Ok(response) => break response.into_inner(),
+                Err(err) => {
+                    const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+                    warn!(
+                        self.log,
+                        "Failed to get SP IDs from MGS (will retry after {:?})",
+                        RETRY_INTERVAL;
+                        "err" => %err,
+                    );
+                    tokio::time::sleep(RETRY_INTERVAL).await;
+                }
+            }
+        };
+
+        // We just fetched all SP IDs from MGS. We'll update this timestamp
+        // below as we get results from the tasks we're about to spawn.
+        let mut last_successful_mgs_response = Instant::now();
+
+        let mut ignition_task_handle = IgnitionStateFetcher::spawn(
+            self.mgs_client.clone(),
+            self.log.clone(),
+        );
+
+        // We build two maps, both with the same keys (i.e., all SP IDs MGS
+        // knows about): one map to the task handles, and the other is a
+        // `StreamMap` that allows us to poll the merged receiver streams
+        // concurrently.
+        let mut sp_task_handles = BTreeMap::new();
+        let mut sp_data_streams = StreamMap::with_capacity(all_sp_ids.len());
+        for id in all_sp_ids {
+            let (handle, stream) = SpStateFetcher::spawn(
+                id,
+                self.mgs_client.clone(),
+                self.log.clone(),
+            );
+            sp_task_handles.insert(id, handle);
+            sp_data_streams.insert(id, stream);
+        }
 
         loop {
             tokio::select! {
-                // Poll MGS inventory
-                Some(PollSps { changed_inventory, mgs_received }) = inventory_rx.recv() => {
-                    let inventory = match (changed_inventory, self.inventory.take())
-                    {
-                        (Some(inventory), _) => inventory,
-                        (None, Some((inventory, _))) => inventory,
-                        (None, None) => return,
-                    };
-                    self.inventory = Some((inventory, mgs_received));
-                    for reply_tx in waiting_for_inventory.drain(..) {
-                        let response = GetInventoryResponse::new(self.inventory.clone());
-                        let _ = reply_tx.send(response);
-                    }
+                ignition = ignition_task_handle.recv() => {
+                    last_successful_mgs_response =
+                        last_successful_mgs_response.max(ignition.mgs_received);
+                    self.update_inventory_with_ignition(
+                        ignition,
+                        &sp_task_handles,
+                        last_successful_mgs_response,
+                    );
                 }
 
-                // Handle requests from clients
+                Some((_, sp)) = sp_data_streams.next() => {
+                    last_successful_mgs_response =
+                        last_successful_mgs_response.max(sp.mgs_received);
+                    self.update_inventory_with_sp(
+                        sp,
+                        last_successful_mgs_response,
+                    );
+                }
+
                 Some(request) = self.rx.recv() => {
                     match request {
-                        MgsRequest::GetInventory {reply_tx, force_refresh, ..} => {
-                            // For now, we ignore the specific contents of
-                            // `force_refresh` because we're hitting MGS's bulk
-                            // `/sp` state endpoint. If wicket wanted us to
-                            // refresh _any_ SPs, we therefore refresh them all.
-                            if !force_refresh.is_empty() {
-                                // Try to send; if the channel is full, we've
-                                // already requested a refresh and we can just
-                                // wait for a response.
-                                _ = poll_inventory_now_tx.try_send(());
-
-                                // We don't want to respond on `reply_tx` until
-                                // we get a new inventory, but we don't want to
-                                // `inventory_rx.recv().await` here because that
-                                // would block non-force-refresh requests.
-                                // Instead, we'll push `reply_tx` onto a queue
-                                // of waiters and respond as soon as we get our
-                                // next inventory update from our polling task
-                                // (which should come soon since we just told it
-                                // to refresh).
-                                waiting_for_inventory.push(reply_tx);
-                            } else {
-                                let response = GetInventoryResponse::new(self.inventory.clone());
-                                let _ = reply_tx.send(response);
-                            }
+                        MgsRequest::GetInventory { reply_tx, force_refresh, .. } => {
+                            self.handle_get_inventory_request(
+                                &ignition_task_handle,
+                                &sp_task_handles,
+                                last_successful_mgs_response,
+                                reply_tx,
+                                force_refresh,
+                            );
                         }
                     }
                 }
             }
         }
     }
-}
 
-type InventoryMap = BTreeMap<SpIdentifier, SpInventory>;
+    fn current_inventory(
+        &self,
+        mgs_last_seen: Instant,
+    ) -> GetInventoryResponse {
+        if self.inventory.is_empty() {
+            GetInventoryResponse::Unavailable
+        } else {
+            let inventory = RackV1Inventory {
+                sps: self.inventory.values().cloned().collect(),
+            };
 
-// For the latest set of sps returned from MGS:
-//  1. Update their state if it has changed
-//  2. Remove any SPs in our current inventory that aren't in the new state
-//
-// Return `true` if inventory was updated, `false` otherwise
-async fn update_inventory(
-    log: &Logger,
-    inventory: &mut InventoryMap,
-    sps: Vec<SpInfo>,
-    client: &gateway_client::Client,
-) -> bool {
-    let new_keys: BTreeSet<SpIdentifier> =
-        sps.iter().map(|sp| sp.info.id).collect();
+            GetInventoryResponse::Response {
+                inventory,
+                mgs_last_seen: mgs_last_seen.elapsed(),
+            }
+        }
+    }
 
-    let old_inventory_len = inventory.len();
+    fn check_completed_waiters(&mut self, mgs_last_seen: Instant) {
+        // This really wants `Vec::drain_filter()`, but it's unstable; instead,
+        // use its sample code (but use `swap_remove()` instead of `remove()`
+        // because we don't care about order).
+        let mut i = 0;
+        while i < self.waiting_for_update.len() {
+            if self.waiting_for_update[i].sps_to_refresh.is_empty()
+                && !self.waiting_for_update[i].need_ignition_refresh
+            {
+                let waiter = self.waiting_for_update.swap_remove(i);
+                _ = waiter
+                    .reply_tx
+                    .send(Ok(self.current_inventory(mgs_last_seen)));
+            } else {
+                i += 1;
+            }
+        }
+    }
 
-    // Remove all keys that are not in the latest update
-    inventory.retain(|k, _| new_keys.contains(k));
+    fn handle_get_inventory_request(
+        &mut self,
+        ignition_handle: &IgnitionStateFetcher,
+        sp_handles: &BTreeMap<SpIdentifier, SpStateFetcher>,
+        mgs_last_seen: Instant,
+        reply_tx: oneshot::Sender<
+            Result<GetInventoryResponse, GetInventoryError>,
+        >,
+        force_refresh: Vec<SpIdentifier>,
+    ) {
+        if force_refresh.is_empty() {
+            // No force refresh: just return our latest cached inventory.
+            _ = reply_tx.send(Ok(self.current_inventory(mgs_last_seen)));
+            return;
+        }
 
-    // Did we remove any keys?
-    let mut inventory_changed = inventory.len() != old_inventory_len;
+        // Trigger immediate refreshes for all SPs listed in `force_refresh`.
+        for &id in &force_refresh {
+            let Some(handle) = sp_handles.get(&id) else {
+                _ = reply_tx.send(Err(GetInventoryError::InvalidSpIdentifier));
+                return;
+            };
 
-    // Build a stream of futures that fetch additional details about the SP's
-    // state that require extra requests to MGS (e.g., to fetch the caboose). We
-    // only update these details if either (1) the SP's state has changed (in
-    // which case we discard all cached details we have) or (2) we don't yet
-    // have the details (e.g., the state previously changed and our attempt to
-    // fetch details at the time failed).
-    let mut details_stream = sps
-        .into_iter()
-        .filter_map(|sp| {
-            let state = sp.details;
-            let id: SpIdentifier = sp.info.id;
-            let ignition = sp.info.details;
+            handle.fetch_now();
+        }
 
-            let curr = inventory
+        // Also fetch new data from ignition for any force refresh request; this
+        // is only called once and covers all SPs simultaneously.
+        ignition_handle.fetch_now();
+
+        // We don't want to respond on `reply_tx` until we get a response to the
+        // requests we just triggered, so push `reply_tx` onto our queue of
+        // waiters. We'll respond as soon as we get updates for all SPs listen
+        // in `force_refresh` (which should come soon since we just told their
+        // tasks to refresh ASAP).
+        self.waiting_for_update.push(WaitingForRefresh {
+            reply_tx,
+            sps_to_refresh: force_refresh.into_iter().collect(),
+            need_ignition_refresh: true,
+        });
+    }
+
+    fn update_inventory_with_ignition(
+        &mut self,
+        ignition: FetchedIgnitionState,
+        sp_handles: &BTreeMap<SpIdentifier, SpStateFetcher>,
+        mgs_last_seen: Instant,
+    ) {
+        for (id, ignition) in ignition.sps {
+            let entry = self
+                .inventory
                 .entry(id)
-                .and_modify(|curr| {
-                    if curr.state != state || curr.ignition != ignition {
-                        // state has changed - discard cached details
-                        inventory_changed = true;
-                        curr.components = None;
-                        curr.caboose = None;
-                        curr.rot.caboose = None;
+                .or_insert_with(|| SpInventory::new(id));
+
+            // Update our handle with the current ignition state so it can
+            // (potentially) adjust its polling frequency.
+            if let Some(sp_handle) = sp_handles.get(&id) {
+                match &ignition {
+                    SpIgnition::No => {
+                        sp_handle
+                            .set_ignition_presence(IgnitionPresence::Absent);
                     }
+                    SpIgnition::Yes { .. } => {
+                        sp_handle
+                            .set_ignition_presence(IgnitionPresence::Present);
+                    }
+                }
+            }
 
-                    curr.state = state.clone();
-                    curr.ignition = ignition.clone();
-                })
-                .or_insert_with(|| SpInventory::new(id, ignition, state));
+            entry.ignition = Some(ignition);
+        }
 
-            fetch_sp_details_if_needed(curr, client, log)
-        })
-        .collect::<FuturesUnordered<_>>();
-
-    // Wait for all our requests to come back - if any of them successfully
-    // fetched any of the detail fields we needed, update our `inventory` and
-    // note that it has changed.
-    while let Some(details) = details_stream.next().await {
-        let item = inventory.get_mut(&details.id).unwrap();
-        if let Some(components) = details.components {
-            item.components = Some(components);
-            inventory_changed = true;
+        // Scan any pending waiters and clear their "waiting for ignition" bit;
+        // if that was the last thing they needed, `check_completed_waiters()`
+        // will send them a response.
+        for waiting in &mut self.waiting_for_update {
+            waiting.need_ignition_refresh = false;
         }
-        if let Some(sp_caboose) = details.caboose {
-            item.caboose = Some(sp_caboose);
-            inventory_changed = true;
-        }
-        if let Some(rot_caboose) = details.rot.caboose {
-            item.rot.caboose = Some(rot_caboose);
-            inventory_changed = true;
-        }
+        self.check_completed_waiters(mgs_last_seen);
     }
 
-    inventory_changed
-}
+    fn update_inventory_with_sp(
+        &mut self,
+        sp: FetchedSpData,
+        mgs_last_seen: Instant,
+    ) {
+        let entry = self
+            .inventory
+            .entry(sp.id)
+            .or_insert_with(|| SpInventory::new(sp.id));
+        entry.state = Some(sp.state);
+        entry.components = sp.components;
+        entry.caboose = sp.caboose;
+        entry.rot = sp.rot;
 
-fn fetch_sp_details_if_needed<'a>(
-    item: &SpInventory,
-    client: &'a gateway_client::Client,
-    log: &'a Logger,
-) -> Option<impl Future<Output = SpDetails> + 'a> {
-    let need_components = item.components.is_none();
-    let need_sp_caboose = item.caboose.is_none();
-    let need_rot_caboose = item.rot.caboose.is_none();
-
-    // If all fields of `item` that we know how to populate are already set, we
-    // have nothing to do.
-    if !need_components && !need_sp_caboose && !need_rot_caboose {
-        return None;
+        // Scan any pending waiters and remove this SP from their list; if that
+        // was the last thing they needed, `check_completed_waiters()` will send
+        // them a response.
+        for waiting in &mut self.waiting_for_update {
+            waiting.sps_to_refresh.remove(&sp.id);
+        }
+        self.check_completed_waiters(mgs_last_seen);
     }
-
-    let id = item.id;
-    Some(async move {
-        let mut details = SpDetails {
-            id,
-            components: None,
-            caboose: None,
-            rot: RotInventory { caboose: None },
-        };
-
-        if need_components {
-            match client.sp_component_list(id.type_, id.slot).await {
-                Ok(val) => {
-                    details.components = Some(val.into_inner().components);
-                }
-                Err(err) => {
-                    warn!(
-                        log, "Failed to get component list for sp";
-                        "sp" => ?id,
-                        "err" => %err,
-                    );
-                }
-            }
-        }
-
-        if need_sp_caboose {
-            match client
-                .sp_component_caboose_get(
-                    id.type_,
-                    id.slot,
-                    SpComponent::SP_ITSELF.const_as_str(),
-                )
-                .await
-            {
-                Ok(val) => {
-                    details.caboose = Some(val.into_inner());
-                }
-                Err(err) => {
-                    warn!(
-                        log, "Failed to get caboose for sp";
-                        "sp" => ?id,
-                        "err" => %err,
-                    );
-                }
-            }
-        }
-
-        if need_rot_caboose {
-            match client
-                .sp_component_caboose_get(
-                    id.type_,
-                    id.slot,
-                    SpComponent::ROT.const_as_str(),
-                )
-                .await
-            {
-                Ok(val) => {
-                    details.rot.caboose = Some(val.into_inner());
-                }
-                Err(err) => {
-                    warn!(
-                        log, "Failed to get caboose for rot";
-                        "sp" => ?id,
-                        "err" => %err,
-                    );
-                }
-            }
-        }
-
-        details
-    })
 }
 
-// Container for details of an SP we have to fetch with separate MGS requests
-// from the main `sp_list()`.
-#[derive(Debug)]
-struct SpDetails {
-    id: SpIdentifier,
-    caboose: Option<SpComponentCaboose>,
-    components: Option<Vec<SpComponentInfo>>,
-    rot: RotInventory,
-}
-
-async fn poll_sps(
-    log: &Logger,
-    client: gateway_client::Client,
-    mut poll_now: mpsc::Receiver<()>,
-) -> mpsc::Receiver<PollSps> {
-    let log = log.clone();
-
-    // We only want one outstanding inventory request at a time
-    let (tx, rx) = mpsc::channel(1);
-
-    // This is a BTreeMap version of inventory that we maintain for the lifetime
-    // of the process.
-    let mut inventory = InventoryMap::default();
-
-    tokio::spawn(async move {
-        let mut ticker = interval(MGS_POLL_INTERVAL);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        loop {
-            // Wait until either our tick interval _or_ we get an explicit
-            // request to update our inventory (in which case we reset our
-            // ticker).
-            tokio::select! {
-                _ = ticker.tick() => (),
-                Some(()) = poll_now.recv() => {
-                    ticker.reset();
-                }
-            }
-
-            match client.sp_list().await {
-                Ok(val) => {
-                    let changed_inventory = update_inventory(
-                        &log,
-                        &mut inventory,
-                        val.into_inner(),
-                        &client,
-                    )
-                    .await
-                    .then(|| RackV1Inventory {
-                        sps: inventory.values().cloned().collect(),
-                    });
-
-                    let _ = tx
-                        .send(PollSps {
-                            changed_inventory,
-                            mgs_received: Instant::now(),
-                        })
-                        .await;
-                }
-                Err(e) => {
-                    warn!(log, "{e}");
-                }
-            }
-        }
-    });
-
-    rx
-}
-
-#[derive(Debug)]
-struct PollSps {
-    changed_inventory: Option<RackV1Inventory>,
-    mgs_received: Instant,
+struct WaitingForRefresh {
+    reply_tx: oneshot::Sender<Result<GetInventoryResponse, GetInventoryError>>,
+    sps_to_refresh: BTreeSet<SpIdentifier>,
+    need_ignition_refresh: bool,
 }

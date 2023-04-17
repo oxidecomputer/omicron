@@ -15,6 +15,7 @@ pub enum ServiceName {
     Clickhouse,
     Cockroach,
     InternalDNS,
+    ExternalDNS,
     Nexus,
     Oximeter,
     ManagementGatewayService,
@@ -26,6 +27,7 @@ pub enum ServiceName {
     Crucible(Uuid),
     BoundaryNTP,
     InternalNTP,
+    Maghemite,
 }
 
 impl ServiceName {
@@ -33,6 +35,7 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse => "clickhouse",
             ServiceName::Cockroach => "cockroach",
+            ServiceName::ExternalDNS => "external-dns",
             ServiceName::InternalDNS => "nameservice",
             ServiceName::Nexus => "nexus",
             ServiceName::Oximeter => "oximeter",
@@ -45,6 +48,7 @@ impl ServiceName {
             ServiceName::Crucible(_) => "crucible",
             ServiceName::BoundaryNTP => "boundary-ntp",
             ServiceName::InternalNTP => "internal-ntp",
+            ServiceName::Maghemite => "maghemite",
         }
     }
 
@@ -55,6 +59,7 @@ impl ServiceName {
             ServiceName::Clickhouse
             | ServiceName::Cockroach
             | ServiceName::InternalDNS
+            | ServiceName::ExternalDNS
             | ServiceName::Nexus
             | ServiceName::Oximeter
             | ServiceName::ManagementGatewayService
@@ -63,7 +68,8 @@ impl ServiceName {
             | ServiceName::Tfport
             | ServiceName::CruciblePantry
             | ServiceName::BoundaryNTP
-            | ServiceName::InternalNTP => {
+            | ServiceName::InternalNTP
+            | ServiceName::Maghemite => {
                 format!("_{}._tcp", self.service_kind())
             }
             ServiceName::SledAgent(id) => {
