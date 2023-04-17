@@ -42,14 +42,7 @@ pub struct Image {
 }
 
 #[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Resource,
-    Serialize,
-    Deserialize,
+    Queryable, Selectable, Clone, Debug, Resource, Serialize, Deserialize,
 )]
 #[diesel(table_name = project_image)]
 pub struct ProjectImage {
@@ -70,14 +63,7 @@ pub struct ProjectImage {
 }
 
 #[derive(
-    Queryable,
-    Insertable,
-    Selectable,
-    Clone,
-    Debug,
-    Resource,
-    Serialize,
-    Deserialize,
+    Queryable, Selectable, Clone, Debug, Resource, Serialize, Deserialize,
 )]
 #[diesel(table_name = silo_image)]
 pub struct SiloImage {
