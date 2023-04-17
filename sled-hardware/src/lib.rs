@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::swap::Swap;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use schemars::JsonSchema;
@@ -138,6 +139,8 @@ pub enum DiskError {
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
     #[error("Cannot import zpool: {0}")]
     ZpoolImport(illumos_utils::zpool::Error),
+    #[error("Failed to access swap: {0}")]
+    SwapError(#[from] illumos_utils::swap::Error),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
@@ -286,17 +289,69 @@ pub struct Disk {
 }
 
 impl Disk {
+    /// Parses a disk, ensuring that all expected partitions exist.
     #[allow(dead_code)]
     pub fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
     ) -> Result<Self, DiskError> {
         let paths = &unparsed_disk.paths;
+        let variant = unparsed_disk.variant;
         // First, ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions =
-            ensure_partition_layout(&log, &paths, unparsed_disk.variant)?;
+        let partitions = ensure_partition_layout(&log, &paths, variant)?;
 
+        Self::initialize_swap(&log, &paths, &partitions)?;
+        let zpool_name =
+            Self::initialize_zpool(&log, variant, &paths, &partitions)?;
+
+        Ok(Self {
+            paths: unparsed_disk.paths,
+            slot: unparsed_disk.slot,
+            variant: unparsed_disk.variant,
+            identity: unparsed_disk.identity,
+            partitions,
+            zpool_name,
+        })
+    }
+
+    // Initize a swap device within the DumpDevice partition, if one exists.
+    fn initialize_swap(
+        log: &Logger,
+        paths: &DiskPaths,
+        partitions: &Vec<Partition>,
+    ) -> Result<(), DiskError> {
+        match paths.partition_device_path(
+            &partitions,
+            Partition::DumpDevice,
+            false,
+        ) {
+            // The disk should have a dump device: ensure it has been
+            // initialized.
+            Ok(path) => {
+                let swap_devices = Swap::list_swap_devices()?;
+                if !swap_devices.contains(&path) {
+                    info!(log, "Adding new swap device: {}", path.display());
+                    Swap::set_swap(&path)?;
+                } else {
+                    info!(log, "Already using swap device: {}", path.display());
+                }
+            }
+            // The disk should not have a dump device: ignore it.
+            Err(DiskError::NotFound { .. }) => {}
+            // The disk should have a dump device, but we can't read it: bail.
+            Err(e) => return Err(e),
+        };
+        Ok(())
+    }
+
+    // Initialize a swap within the ZfsPool partition.
+    fn initialize_zpool(
+        log: &Logger,
+        variant: DiskVariant,
+        paths: &DiskPaths,
+        partitions: &Vec<Partition>,
+    ) -> Result<ZpoolName, DiskError> {
         // Find the path to the zpool which exists on this disk.
         //
         // NOTE: At the moment, we're hard-coding the assumption that at least
@@ -327,7 +382,7 @@ impl Disk {
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.
-                let zpool_name = match unparsed_disk.variant {
+                let zpool_name = match variant {
                     DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
                     DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
                 };
@@ -340,15 +395,7 @@ impl Disk {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             DiskError::ZpoolImport(e)
         })?;
-
-        Ok(Self {
-            paths: unparsed_disk.paths,
-            slot: unparsed_disk.slot,
-            variant: unparsed_disk.variant,
-            identity: unparsed_disk.identity,
-            partitions,
-            zpool_name,
-        })
+        Ok(zpool_name)
     }
 
     pub fn identity(&self) -> &DiskIdentity {

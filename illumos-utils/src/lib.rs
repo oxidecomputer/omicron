@@ -14,6 +14,7 @@ pub mod link;
 pub mod opte;
 pub mod running_zone;
 pub mod svc;
+pub mod swap;
 pub mod zfs;
 pub mod zone;
 pub mod zpool;

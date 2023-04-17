@@ -139,7 +139,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                 DiskVariant::M2 => {
                     // TODO: If we see a completely empty M.2, should we create
                     // the expected partitions? Or would it be wiser to infer
-                    // that this indicates an unexpected error conditions that
+                    // that this indicates an unexpected error condition that
                     // needs mitigation?
                     return Err(DiskError::CannotFormatM2NotImplemented);
                 }
