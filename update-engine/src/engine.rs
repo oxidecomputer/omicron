@@ -71,7 +71,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         step_fn: F,
     ) -> NewStep<'_, 'a, S, T>
     where
-        F: FnOnce(StepContext<S>) -> Fut + 'a,
+        F: FnOnce(StepContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
@@ -254,7 +254,7 @@ impl<'engine, 'a, S: StepSpec> ComponentRegistrar<'engine, 'a, S> {
         step_fn: F,
     ) -> NewStep<'engine, 'a, S, T>
     where
-        F: FnOnce(StepContext<S>) -> Fut + 'a,
+        F: FnOnce(StepContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
@@ -313,7 +313,7 @@ impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
     /// be infallible, and will often just be synchronous code.
     pub fn with_metadata_fn<F, Fut>(mut self, f: F) -> Self
     where
-        F: FnOnce(MetadataContext<S>) -> Fut + 'a,
+        F: FnOnce(MetadataContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = S::StepMetadata> + Send + 'a,
     {
         self.metadata_fn = Some(DebugIgnore(Box::new(|cx| (f)(cx).boxed())));
@@ -518,7 +518,7 @@ type StepMetadataFn<'a, S> = Box<
     dyn FnOnce(
             MetadataContext<S>,
         ) -> BoxFuture<'a, <S as StepSpec>::StepMetadata>
-        + 'a,
+        + Send + 'a,
 >;
 
 /// NOTE: Ideally this would take `&mut StepContext<S>`, so that it can't get
@@ -533,7 +533,7 @@ type StepExecFn<'a, S> = Box<
             StepContext<S>,
         )
             -> BoxFuture<'a, Result<StepOutcome<S>, <S as StepSpec>::Error>>
-        + 'a,
+        + Send + 'a,
 >;
 
 struct StepProgressReporter<S: StepSpec> {
