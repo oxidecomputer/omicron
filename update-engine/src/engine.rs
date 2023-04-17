@@ -518,7 +518,8 @@ type StepMetadataFn<'a, S> = Box<
     dyn FnOnce(
             MetadataContext<S>,
         ) -> BoxFuture<'a, <S as StepSpec>::StepMetadata>
-        + Send + 'a,
+        + Send
+        + 'a,
 >;
 
 /// NOTE: Ideally this would take `&mut StepContext<S>`, so that it can't get
@@ -533,7 +534,8 @@ type StepExecFn<'a, S> = Box<
             StepContext<S>,
         )
             -> BoxFuture<'a, Result<StepOutcome<S>, <S as StepSpec>::Error>>
-        + Send + 'a,
+        + Send
+        + 'a,
 >;
 
 struct StepProgressReporter<S: StepSpec> {
