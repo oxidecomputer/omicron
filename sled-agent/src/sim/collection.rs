@@ -147,7 +147,7 @@ impl<S: Simulatable> SimObject<S> {
     }
 
     fn transition_finish(&mut self) {
-        let current = self.object.current().clone();
+        let current = self.object.current();
         let desired = self.object.desired();
         let action = self.object.execute_desired_transition();
         info!(self.log, "simulated transition finish";
@@ -337,7 +337,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         };
 
         let rv = if let Some(target) = target {
-            object.transition(target).map(|_| object.object.current().clone())
+            object.transition(target).map(|_| object.object.current())
         } else {
             Ok(current.clone())
         };
@@ -360,7 +360,7 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         let instance = objects
             .get(id)
             .ok_or_else(|| Error::not_found_by_id(S::resource_type(), id))?;
-        Ok(instance.object.current().clone())
+        Ok(instance.object.current())
     }
 
     /// Iterates over all of the existing objects in the collection and, for any
