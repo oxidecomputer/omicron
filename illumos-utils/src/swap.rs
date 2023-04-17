@@ -26,7 +26,7 @@ pub struct Swap {}
 
 #[cfg_attr(test, mockall::automock)]
 impl Swap {
-    /// Executes the 'swap -a <device>' command
+    /// Executes the 'swap -a (device)' command
     pub fn set_swap(path: &Path) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
