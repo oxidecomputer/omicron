@@ -1002,6 +1002,7 @@ mod test {
                 dst_propolis_id: None,
                 propolis_addr: Some("[fd00:1de::74]:12400".parse().unwrap()),
                 migration_id: None,
+                propolis_gen: Generation::new(),
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_mebibytes_u32(512),
                 hostname: "myvm".to_string(),

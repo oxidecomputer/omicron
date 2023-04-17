@@ -20,6 +20,7 @@ use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{Artifact, ArtifactKind, ArtifactsDocument};
 use omicron_nexus::config::UpdatesConfig;
+use omicron_sled_agent::sim;
 use ring::pkcs8::Document;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::Ed25519KeyPair;
@@ -69,6 +70,7 @@ async fn test_update_end_to_end() {
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_update_end_to_end",
         &mut config,
+        sim::SimMode::Explicit,
     )
     .await;
     let client = &cptestctx.external_client;

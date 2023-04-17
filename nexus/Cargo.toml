@@ -90,6 +90,7 @@ oximeter-producer.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 criterion.workspace = true
+dns-server.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 itertools.workspace = true

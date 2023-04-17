@@ -344,19 +344,29 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk_id(self, id: Uuid) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    pub fn physical_disk(
+        self,
+        vendor: &str,
+        serial: &str,
+        model: &str,
+    ) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(
+            Root { lookup_root: self },
+            vendor.to_string(),
+            serial.to_string(),
+            model.to_string(),
+        )
     }
 
-    /// Select a resource of type UpdateAvailableArtifact, identified by its
+    /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
-    pub fn update_available_artifact_tuple(
+    pub fn update_artifact_tuple(
         self,
         name: &str,
         version: db::model::SemverVersion,
         kind: KnownArtifactKind,
-    ) -> UpdateAvailableArtifact<'a> {
-        UpdateAvailableArtifact::PrimaryKey(
+    ) -> UpdateArtifact<'a> {
+        UpdateArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
             version,
@@ -681,11 +691,15 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [
+        { column_name = "vendor", rust_type = String },
+        { column_name = "serial", rust_type = String },
+        { column_name = "model", rust_type = String }
+    ]
 }
 
 lookup_resource! {
-    name = "UpdateAvailableArtifact",
+    name = "UpdateArtifact",
     ancestors = [],
     children = [],
     lookup_by_name = false,

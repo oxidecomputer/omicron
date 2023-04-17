@@ -12,11 +12,12 @@ use crate::db::error::{
     public_error_from_diesel_pool, ErrorHandler, TransactionError,
 };
 use crate::db::model::{
-    ComponentUpdate, SemverVersion, SystemUpdate, UpdateAvailableArtifact,
+    ComponentUpdate, SemverVersion, SystemUpdate, UpdateArtifact,
     UpdateDeployment, UpdateStatus, UpdateableComponent,
 };
 use crate::db::pagination::paginated;
 use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl};
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::SystemUpdateComponentUpdate;
 use nexus_types::identity::Asset;
@@ -27,26 +28,26 @@ use omicron_common::api::external::{
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn update_available_artifact_upsert(
+    pub async fn update_artifact_upsert(
         &self,
         opctx: &OpContext,
-        artifact: UpdateAvailableArtifact,
-    ) -> CreateResult<UpdateAvailableArtifact> {
+        artifact: UpdateArtifact,
+    ) -> CreateResult<UpdateArtifact> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        use db::schema::update_available_artifact::dsl;
-        diesel::insert_into(dsl::update_available_artifact)
+        use db::schema::update_artifact::dsl;
+        diesel::insert_into(dsl::update_artifact)
             .values(artifact.clone())
             .on_conflict((dsl::name, dsl::version, dsl::kind))
             .do_update()
             .set(artifact.clone())
-            .returning(UpdateAvailableArtifact::as_returning())
+            .returning(UpdateArtifact::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
-    pub async fn update_available_artifact_hard_delete_outdated(
+    pub async fn update_artifact_hard_delete_outdated(
         &self,
         opctx: &OpContext,
         current_targets_role_version: i64,
@@ -56,8 +57,8 @@ impl DataStore {
         // We use the `targets_role_version` column in the table to delete any
         // old rows, keeping the table in sync with the current copy of
         // artifacts.json.
-        use db::schema::update_available_artifact::dsl;
-        diesel::delete(dsl::update_available_artifact)
+        use db::schema::update_artifact::dsl;
+        diesel::delete(dsl::update_artifact)
             .filter(dsl::targets_role_version.lt(current_targets_role_version))
             .execute_async(self.pool_authorized(opctx).await?)
             .await
@@ -66,7 +67,7 @@ impl DataStore {
             .internal_context("deleting outdated available artifacts")
     }
 
-    pub async fn create_system_update(
+    pub async fn upsert_system_update(
         &self,
         opctx: &OpContext,
         update: SystemUpdate,
@@ -77,6 +78,11 @@ impl DataStore {
 
         diesel::insert_into(system_update)
             .values(update.clone())
+            .on_conflict(version)
+            .do_update()
+            // for now the only modifiable field is time_modified, but we intend
+            // to add more metadata to this model
+            .set(time_modified.eq(Utc::now()))
             .returning(SystemUpdate::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await
