@@ -7737,7 +7737,7 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+http://github.com/oxidecomputer/tofino?branch=main#2249eaa53c3d3bad512ac7f47d59b888b09d4145"
+source = "git+http://github.com/oxidecomputer/tofino?branch=main#8283f8021068f055484b653f0cc6b4d5c0979dc1"
 dependencies = [
  "anyhow",
  "cc",
