@@ -26,7 +26,7 @@ async fn test_inventory() {
                 .await
                 .expect("get_inventory succeeded")
                 .into_inner();
-            match response.into() {
+            match response {
                 GetInventoryResponse::Response { inventory, .. } => {
                     break inventory
                 }

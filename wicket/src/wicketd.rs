@@ -245,7 +245,7 @@ impl WicketdManager {
                 let params = GetInventoryParams { force_refresh };
                 // TODO: We should really be using ETAGs here
                 match client.get_inventory(&params).await {
-                    Ok(val) => match val.into_inner().into() {
+                    Ok(val) => match val.into_inner() {
                         GetInventoryResponse::Response {
                             inventory,
                             mgs_last_seen,
