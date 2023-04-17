@@ -17,10 +17,9 @@ z_swadm () {
     pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-
-# Add front facing port
-z_swadm port create 1:0 100G RS
-z_swadm port create 2:0 100G RS
+# Create links
+z_swadm link create rear0 --speed 100G --fec RS
+z_swadm link create qsfp0 --speed 100G --fec RS
 
 # Configure sidecar local ipv6 addresses
 z_swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
@@ -37,7 +36,7 @@ z_swadm arp add "$GATEWAY_IP" "$GATEWAY_MAC"
 # Configure route to upstream gateway
 z_swadm route add 0.0.0.0/0 qsfp0/0 "$GATEWAY_IP"
 
-z_swadm port list
+z_swadm link ls
 z_swadm addr list
 z_swadm route list
 z_swadm arp list

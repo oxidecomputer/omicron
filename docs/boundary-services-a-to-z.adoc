@@ -64,10 +64,10 @@ Using 10.85.0.1 as gateway ip
 + GATEWAY_MAC=68:d7:9a:1f:77:a1
 + echo 'Using 68:d7:9a:1f:77:a1 as gateway mac'
 Using 68:d7:9a:1f:77:a1 as gateway mac
-+ z_swadm port create 1:0 100G RS
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port create 1:0 100G RS
-+ z_swadm port create 2:0 100G RS
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port create 2:0 100G RS
++ z_swadm link create rear0 --speed 100G --fec RS
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link create rear0 --speed 100G --fec RS
++ z_swadm link create qsfp0 --speed 100G --fec RS
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link create qsfp0 --speed 100G --fec RS
 + z_swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
 + pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
 + z_swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
@@ -82,17 +82,17 @@ Using 68:d7:9a:1f:77:a1 as gateway mac
 + pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp add 10.85.0.1 68:d7:9a:1f:77:a1
 + z_swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
 + pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
-+ z_swadm port list
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm port list
- NAME  MEDIA    SPEED   FEC     ENA   LINK  MAC
-  1:0  Copper   100G    RS      Ena   Up    a8:40:25:46:55:e3
-  2:0  Copper   100G    RS      Ena   Up    a8:40:25:46:55:e4
++ z_swadm link ls
++ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link ls
+Port/Link  Media    Speed  FEC   Enabled  Link  MAC
+rear0/0    Copper   100G   RS    true     Up    a8:40:25:46:55:e3
+qsfp0/0    Copper   100G   RS    true     Up    a8:40:25:46:55:e4
 + z_swadm addr list
 + pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr list
-Port  IPv4  IPv6
-1:0         fe80::aae1:deff:fe01:701c
-            fd00:99::1
-2:0         fe80::aae1:deff:fe01:701d
+Link      IPv4  IPv6
+rear0/0         fe80::aae1:deff:fe01:701c
+                fd00:99::1
+qsfp0/0         fe80::aae1:deff:fe01:701d
 + z_swadm route list
 + pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route list
 Subnet                                      Port   Link Gateway
