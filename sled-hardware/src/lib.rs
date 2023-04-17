@@ -339,7 +339,7 @@ impl Disk {
             }
             // The disk should not have a dump device: ignore it.
             Err(DiskError::NotFound { .. }) => {}
-            // The disk should have a dump device, but we can't read it: bail.
+            // The disk maybe has a dump device, but we can't read it: bail.
             Err(e) => return Err(e),
         };
         Ok(())
