@@ -687,15 +687,22 @@ impl<S: StepSpec> StepProgressReporter<S> {
         self,
         error: &S::Error,
     ) -> Result<(), mpsc::error::SendError<Event<S>>> {
-        let error = error.as_error();
-        let message = error.to_string();
+        // Stringify `error` into a message + list causes; this is written the
+        // way it is to avoid `error` potentially living across the `.await`
+        // below (which can cause lifetime issues in callers).
+        let (message, causes) = {
+            let error = error.as_error();
+            let message = error.to_string();
 
-        let mut current = error;
-        let mut causes = vec![];
-        while let Some(source) = current.source() {
-            causes.push(source.to_string());
-            current = source;
-        }
+            let mut current = error;
+            let mut causes = vec![];
+            while let Some(source) = current.source() {
+                causes.push(source.to_string());
+                current = source;
+            }
+
+            (message, causes)
+        };
 
         self.sender
             .send(Event::Step(StepEvent {
