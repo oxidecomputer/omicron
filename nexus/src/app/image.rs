@@ -44,7 +44,7 @@ impl super::Nexus {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
                     .image_id(id).fetch().await?;
                 let lookup = match db_image.project_id {
-                    Some(id) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
+                    Some(_) => ImageLookup::ProjectImage(LookupPath::new(opctx, &self.db_datastore)
                         .project_image_id(id)),
                     None => {
                         ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
