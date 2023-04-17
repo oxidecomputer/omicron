@@ -316,6 +316,13 @@ impl Disk {
     }
 
     // Initize a swap device within the DumpDevice partition, if one exists.
+    //
+    // It's a common convention on illumos to use the same partition for managing
+    // both a dump device and swap device - while the OS is booted, the space can
+    // be used as a swap device, and if the OS crashes, it can be used as a dump
+    // device. This convention is so common that "swap -a" actually calls "dumpadm"
+    // to initialize swap device as a dump device, unless it is explicilty requested
+    // not to do so.
     fn initialize_swap(
         log: &Logger,
         paths: &DiskPaths,
