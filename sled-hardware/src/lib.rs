@@ -352,7 +352,7 @@ impl Disk {
         Ok(())
     }
 
-    // Initialize a swap within the ZfsPool partition.
+    // Ensure a Zpool exists within the ZfsPool partition.
     fn initialize_zpool(
         log: &Logger,
         variant: DiskVariant,
