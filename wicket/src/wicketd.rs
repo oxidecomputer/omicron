@@ -10,9 +10,9 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
-    GetInventoryParams, IgnitionCommand, SpIdentifier, SpType,
+    GetInventoryParams, GetInventoryResponse, IgnitionCommand, SpIdentifier,
+    SpType,
 };
-use wicketd_client::GetInventoryResponse;
 
 use crate::state::ComponentId;
 use crate::Event;
