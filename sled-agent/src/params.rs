@@ -272,8 +272,12 @@ pub enum ServiceType {
         internal_ip: Ipv6Addr,
         external_ip: IpAddr,
     },
+    ExternalDns {
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    },
     InternalDns {
-        server_address: SocketAddrV6,
+        http_address: SocketAddrV6,
         dns_address: SocketAddrV6,
     },
     Oximeter,
@@ -301,6 +305,7 @@ impl std::fmt::Display for ServiceType {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         match self {
             ServiceType::Nexus { .. } => write!(f, "nexus"),
+            ServiceType::ExternalDns { .. } => write!(f, "external_dns"),
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
@@ -335,9 +340,15 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Nexus { internal_ip, external_ip } => {
                 AutoSt::Nexus { internal_ip, external_ip }
             }
-            St::InternalDns { server_address, dns_address } => {
+            St::ExternalDns { http_address, dns_address } => {
+                AutoSt::ExternalDns {
+                    http_address: http_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::InternalDns { http_address, dns_address } => {
                 AutoSt::InternalDns {
-                    server_address: server_address.to_string(),
+                    http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
                 }
             }
@@ -368,6 +379,8 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub enum ZoneType {
+    #[serde(rename = "external_dns")]
+    ExternalDNS,
     #[serde(rename = "internal_dns")]
     InternalDNS,
     #[serde(rename = "nexus")]
@@ -386,6 +399,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
             ZoneType::InternalDNS => Self::InternalDns,
+            ZoneType::ExternalDNS => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
@@ -399,6 +413,7 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
+            ExternalDNS => "external_dns",
             InternalDNS => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",

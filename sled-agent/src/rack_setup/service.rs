@@ -356,8 +356,8 @@ impl ServiceInner {
                                 // and port that have been assigned to it.
                                 // There should be exactly one.
                                 let addrs = svc.services.iter().filter_map(|s| {
-                                    if let ServiceType::InternalDns { server_address, .. } = s {
-                                        Some(*server_address)
+                                    if let ServiceType::InternalDns { http_address, .. } = s {
+                                        Some(*http_address)
                                     } else {
                                         None
                                     }
@@ -675,14 +675,23 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Dendrite,
                             });
                         }
+                        ServiceType::ExternalDns { http_address, .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: http_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::ExternalDNSConfig,
+                            });
+                        }
                         ServiceType::InternalDns {
-                            server_address,
+                            http_address,
                             dns_address,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
-                                address: server_address.to_string(),
+                                address: http_address.to_string(),
                                 kind:
                                     NexusTypes::ServiceKind::InternalDNSConfig,
                             });

@@ -546,7 +546,8 @@ impl ServiceManager {
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
-                | ServiceType::Ntp { boundary: true, .. } => {
+                | ServiceType::Ntp { boundary: true, .. }
+                | ServiceType::ExternalDns { .. } => {
                     // TODO: Remove once Nexus traffic is transmitted over OPTE.
                     match self
                         .inner
@@ -931,14 +932,69 @@ impl ServiceManager {
                         |err| Error::Io { path: config_path.clone(), err },
                     )?;
                 }
-                ServiceType::InternalDns { server_address, dns_address } => {
+                ServiceType::ExternalDns { http_address, dns_address } => {
+                    info!(self.inner.log, "Setting up external-dns service");
+
+                    // Like Nexus, we have to set up a possible IPv4 address for
+                    // external connectivity.
+                    let sled_info =
+                        if let Some(info) = self.inner.sled_info.get() {
+                            info
+                        } else {
+                            return Err(Error::SledAgentNotReady);
+                        };
+
+                    let addr_request =
+                        AddressRequest::new_static(dns_address.ip(), None);
+                    running_zone
+                        .ensure_external_address_with_name(
+                            addr_request,
+                            "public",
+                        )
+                        .await?;
+
+                    if let IpAddr::V4(_public_addr4) = dns_address.ip() {
+                        // If requested, create a default route back through
+                        // the internet gateway.
+                        if let Some(ref gateway) =
+                            sled_info.config.gateway_address
+                        {
+                            running_zone
+                                .add_default_route4(*gateway)
+                                .await
+                                .map_err(|err| Error::ZoneCommand {
+                                    intent: "Adding Route".to_string(),
+                                    err,
+                                })?;
+                        }
+                    }
+
+                    smfh.setprop(
+                        "config/http_address",
+                        format!(
+                            "[{}]:{}",
+                            http_address.ip(),
+                            http_address.port(),
+                        ),
+                    )?;
+                    smfh.setprop(
+                        "config/dns_address",
+                        dns_address.to_string(),
+                    )?;
+
+                    // Refresh the manifest with the new properties we set, so
+                    // they become "effective" properties when the service is
+                    // enabled.
+                    smfh.refresh()?;
+                }
+                ServiceType::InternalDns { http_address, dns_address } => {
                     info!(self.inner.log, "Setting up internal-dns service");
                     smfh.setprop(
                         "config/http_address",
                         format!(
                             "[{}]:{}",
-                            server_address.ip(),
-                            server_address.port(),
+                            http_address.ip(),
+                            http_address.port(),
                         ),
                     )?;
                     smfh.setprop(
