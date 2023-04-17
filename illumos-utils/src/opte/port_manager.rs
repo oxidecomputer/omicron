@@ -269,6 +269,11 @@ impl PortManager {
             "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
         );
 
+        // TODO-remove: Nexus will plumb proper service fw rules
+        if let NetworkInterfaceKind::Service { .. } = nic.kind {
+            rules.push("dir=in priority=100 action=allow".parse().unwrap());
+        }
+
         debug!(
             self.inner.log,
             "Setting firewall rules";
