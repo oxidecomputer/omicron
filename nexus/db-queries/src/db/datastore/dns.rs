@@ -28,6 +28,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::bail_unless;
 use slog::debug;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
@@ -50,6 +52,45 @@ impl DataStore {
             .load_async(self.pool_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
+    /// Fetch the DNS zone for the "external" DNS group
+    ///
+    /// **Where possible, we should avoid assuming that there is only one
+    /// external DNS zone.**  This generality is intended to support renaming
+    /// the external DNS zone in the future (by having a second one with the
+    /// name during a transitionary period).  However, there are some cases
+    /// where this isn't practical today.  This function lists external DNS
+    /// zones, ensures that there's exactly one, and returns it.  If there are
+    /// some other number of external DNS zones, this function returns an
+    /// internal error.
+    ///
+    /// This is not exposed outside this crate nor the DataStore, which
+    /// mitigates the fact that it's not protected by an authz check.  (If we
+    /// wanted to do an authz check here, we'd have to plumb through some
+    /// privileged Nexus-specific OpContext, because the users doing this
+    /// operation generally don't themselves have visibility into the external
+    /// DNS zones.)
+    pub(crate) async fn dns_zone_external(&self) -> LookupResult<DnsZone> {
+        use db::schema::dns_zone::dsl;
+        let list = dsl::dns_zone
+            .filter(dsl::dns_group.eq(DnsGroup::External))
+            .limit(2)
+            .select(DnsZone::as_select())
+            .load_async(self.pool())
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+        match list.len() {
+            1 => Ok(list.into_iter().next().unwrap()),
+            0 => Err(Error::internal_error(
+                "expected exactly one external DNS zone, found 0",
+            )),
+            _ => Err(Error::internal_error(
+                "expected exactly one external DNS zone, found at least two",
+            )),
+        }
     }
 
     /// Get the latest version for a given DNS group
@@ -309,6 +350,169 @@ impl DataStore {
         }
 
         Ok(())
+    }
+
+    // XXX-dap TODO-coverage
+    /// Load initial data for a DNS group into the database
+    pub async fn dns_update<ConnErr>(
+        &self,
+        opctx: &OpContext,
+        conn: &(impl async_bb8_diesel::AsyncConnection<
+            crate::db::pool::DbConnection,
+            ConnErr,
+        > + Sync),
+        update: DnsVersionUpdate,
+    ) -> Result<(), Error>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        ConnErr: Into<PoolError>,
+    {
+        // TODO-scalability TODO-performance This would be much better as a CTE
+        // for all the usual reasons described in RFD 192.  Using an interactive
+        // transaction here means that either we wind up holding database locks
+        // while executing code on the client (resulting in latency bubbles for
+        // other clients) or else the database invalidates our transaction if
+        // there's a conflict (which increases the likelihood that these
+        // operations fail spuriously as far as the client is concerned).  We
+        // expect these problems to be small or unlikely at small scale but
+        // significant as the system scales up.
+        let dns_group = update.dns_zone.dns_group;
+        let version = self.dns_group_latest_version(opctx, dns_group).await?;
+        let new_version = version.version.next();
+        let new_version = DnsVersion {
+            dns_group: update.dns_zone.dns_group,
+            version: new_version,
+            time_created: chrono::Utc::now(),
+            creator: update.creator,
+            comment: update.comment,
+        };
+
+        let new_names = update
+            .names_added
+            .into_iter()
+            .map(|(name, records)| {
+                DnsName::new(
+                    update.dns_zone.id,
+                    name,
+                    new_version.version,
+                    None,
+                    records,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        {
+            use db::schema::dns_version::dsl;
+            diesel::insert_into(dsl::dns_version)
+                .values(new_version)
+                .execute_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e.into(),
+                        ErrorHandler::Server,
+                    )
+                })?;
+        }
+
+        {
+            use db::schema::dns_name::dsl;
+            let nadded = diesel::insert_into(dsl::dns_name)
+                .values(new_names)
+                .execute_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e.into(),
+                        ErrorHandler::Server,
+                    )
+                })?;
+
+            // XXX-dap TODO-coverage add a test for this
+            bail_unless!(
+                nadded == new_names.len(),
+                "inserted wrong number of dns_name records: expected {}, \
+                actually inserted {}",
+                new_names.len(),
+                nadded
+            );
+
+            let to_remove = update.names_removed;
+            let nremoved = diesel::update(
+                dsl::dns_name.filter(dsl::name.eq_any(&to_remove)),
+            )
+            .set(dsl::version_removed.eq(new_version.version))
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+            })?;
+
+            // XXX-dap TODO-coverage add a test for this
+            bail_unless!(
+                nremoved == to_remove.len(),
+                "updated wrong number of dns_name records: expected {}, \
+                actually marked {} for removal",
+                to_remove.len(),
+                nremoved
+            );
+        }
+
+        Ok(())
+    }
+}
+
+// XXX-dap TODO-doc
+// XXX-dap TODO-coverage
+// XXX-dap should this go into the db-model crate?
+pub struct DnsVersionUpdate {
+    dns_zone: DnsZone,
+    comment: String,
+    creator: String,
+    names_added: HashMap<String, Vec<DnsRecord>>,
+    names_removed: HashSet<String>,
+}
+
+impl DnsVersionUpdate {
+    pub fn new(
+        dns_zone: DnsZone,
+        comment: String,
+        creator: String,
+    ) -> DnsVersionUpdate {
+        DnsVersionUpdate {
+            dns_zone,
+            comment,
+            creator,
+            names_added: HashMap::new(),
+            names_removed: HashSet::new(),
+        }
+    }
+
+    pub fn new_name(
+        &mut self,
+        name: String,
+        records: Vec<DnsRecord>,
+    ) -> Result<(), Error> {
+        // XXX-dap TODO-coverage add a test for this
+        match self.names_added.insert(name.clone(), records) {
+            None => Ok(()),
+            Some(_) => Err(Error::internal_error(&format!(
+                "DNS update ({:?}) attempted to add name {:?} multiple times",
+                self.comment, &name
+            ))),
+        }
+    }
+
+    pub fn remove_name(&mut self, name: String) -> Result<(), Error> {
+        // XXX-dap TODO-coverage add a test for this
+        match self.names_removed.insert(name.clone()) {
+            true => Ok(()),
+            false => Err(Error::internal_error(&format!(
+                "DNS update ({:?}) attempted to remove name {:?} \
+                multiple times",
+                self.comment, &name,
+            ))),
+        }
     }
 }
 

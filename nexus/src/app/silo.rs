@@ -60,9 +60,17 @@ impl super::Nexus {
         // create arbitrary groups in the Silo, but we allow them to create
         // this one in this case.
         let external_authn_opctx = self.opctx_external_authn();
-        self.datastore()
-            .silo_create(&opctx, &external_authn_opctx, new_silo_params)
-            .await
+        let silo = self
+            .datastore()
+            .silo_create(
+                &opctx,
+                &external_authn_opctx,
+                new_silo_params,
+                self.id.to_string(),
+            )
+            .await?;
+        self.background_tasks.activate(&self.task_external_dns_config);
+        Ok(silo)
     }
 
     pub async fn silos_list(
@@ -80,7 +88,11 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
-        self.db_datastore.silo_delete(opctx, &authz_silo, &db_silo).await
+        self.db_datastore
+            .silo_delete(opctx, &authz_silo, &db_silo, self.id.to_string())
+            .await?;
+        self.background_tasks.activate(&self.task_external_dns_config);
+        Ok(())
     }
 
     // Role assignments
