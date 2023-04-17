@@ -243,7 +243,7 @@ mod test {
 
         // If the generation numbers are right, but either requested ID is not
         // present in the current instance, the requested IDs aren't set.
-        old_instance = orig_instance.clone();
+        old_instance = orig_instance;
         new_instance.current.migration_id = Some(Uuid::new_v4());
         assert!(!new_instance.migration_ids_already_set(
             old_instance.current(),
