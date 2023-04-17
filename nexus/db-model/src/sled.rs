@@ -143,3 +143,41 @@ impl DatastoreCollectionConfig<super::Service> for Sled {
     type CollectionTimeDeletedColumn = sled::dsl::time_deleted;
     type CollectionIdColumn = service::dsl::sled_id;
 }
+
+/// A set of constraints that can be placed on operations that select a sled.
+#[derive(Debug)]
+pub struct SledReservationConstraints {
+    must_select_from: Vec<Uuid>,
+}
+
+impl SledReservationConstraints {
+    pub fn none() -> Self {
+        Self { must_select_from: Vec::new() }
+    }
+
+    pub fn must_select_from(&self) -> &[Uuid] {
+        &self.must_select_from
+    }
+}
+
+#[derive(Debug)]
+pub struct SledReservationConstraintBuilder {
+    constraints: SledReservationConstraints,
+}
+
+impl SledReservationConstraintBuilder {
+    pub fn new() -> Self {
+        SledReservationConstraintBuilder {
+            constraints: SledReservationConstraints::none(),
+        }
+    }
+
+    pub fn must_select_from(mut self, sled_ids: &[Uuid]) -> Self {
+        self.constraints.must_select_from.extend(sled_ids);
+        self
+    }
+
+    pub fn build(self) -> SledReservationConstraints {
+        self.constraints
+    }
+}

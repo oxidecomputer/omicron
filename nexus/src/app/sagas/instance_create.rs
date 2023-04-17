@@ -615,6 +615,7 @@ async fn sic_alloc_server(
             propolis_id,
             db::model::SledResourceKind::Instance,
             resources,
+            db::model::SledReservationConstraints::none(),
         )
         .await
         .map_err(ActionError::action_failed)?;

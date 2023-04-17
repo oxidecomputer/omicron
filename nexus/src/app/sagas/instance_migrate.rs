@@ -41,6 +41,12 @@ pub struct Params {
 // migration is over.
 declare_saga_actions! {
     instance_migrate;
+
+    RESERVE_RESOURCES -> "server_id" {
+        + sim_reserve_sled_resources
+        - sim_release_sled_resources
+    }
+
     ALLOCATE_PROPOLIS_IP -> "dst_propolis_ip" {
         + sim_allocate_propolis_ip
     }
@@ -158,6 +164,7 @@ impl NexusSaga for SagaInstanceMigrate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
+        builder.append(reserve_resources_action());
         builder.append(allocate_propolis_ip_action());
         builder.append(set_migration_ids_action());
         builder.append(create_destination_state_action());
@@ -172,6 +179,51 @@ impl NexusSaga for SagaInstanceMigrate {
 
 /// A no-op forward action.
 async fn sim_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+/// Reserves resources for the destination on the specified target sled.
+async fn sim_reserve_sled_resources(
+    sagactx: NexusActionContext,
+) -> Result<Uuid, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    // N.B. This assumes that the instance's shape (CPU/memory allotment) is
+    //      immutable despite being in the instance's "runtime" state.
+    let resources = db::model::Resources::new(
+        params.instance.runtime_state.ncpus.0 .0.into(),
+        params.instance.runtime_state.memory.into(),
+        // TODO(#2804): Properly specify reservoir size.
+        omicron_common::api::external::ByteCount::from(0).into(),
+    );
+
+    // Add a constraint that the only allowed sled is the one specified in the
+    // parameters.
+    let constraints = db::model::SledReservationConstraintBuilder::new()
+        .must_select_from(&[params.migrate_params.dst_sled_id])
+        .build();
+
+    let propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+    let resource = osagactx
+        .nexus()
+        .reserve_on_random_sled(
+            propolis_id,
+            db::model::SledResourceKind::Instance,
+            resources,
+            constraints,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(resource.sled_id)
+}
+
+async fn sim_release_sled_resources(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
+    osagactx.nexus().delete_sled_reservation(propolis_id).await?;
     Ok(())
 }
 

@@ -113,6 +113,7 @@ impl super::Nexus {
         resource_id: Uuid,
         resource_kind: db::model::SledResourceKind,
         resources: db::model::Resources,
+        constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, Error> {
         self.db_datastore
             .sled_reservation_create(
@@ -120,6 +121,7 @@ impl super::Nexus {
                 resource_id,
                 resource_kind,
                 resources,
+                constraints,
             )
             .await
     }

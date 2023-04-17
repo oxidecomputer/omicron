@@ -76,6 +76,7 @@ impl DataStore {
         resource_id: Uuid,
         resource_kind: db::model::SledResourceKind,
         resources: db::model::Resources,
+        constraints: db::model::SledReservationConstraints,
     ) -> CreateResult<db::model::SledResource> {
         #[derive(Debug)]
         enum SledReservationError {
@@ -120,10 +121,10 @@ impl DataStore {
                         resource_dsl::rss_ram::NAME
                     )) + resources.rss_ram)
                         .le(sled_dsl::usable_physical_ram);
-                sql_function!(fn random() -> diesel::sql_types::Float);
-                let sled_targets = sled_dsl::sled
-                    // LEFT JOIN so we can observe sleds with no
-                    // currently-allocated resources as potential targets
+
+                // Generate a query describing all of the sleds that have space
+                // for this reservation.
+                let mut sled_targets = sled_dsl::sled
                     .left_join(
                         resource_dsl::sled_resource
                             .on(resource_dsl::sled_id.eq(sled_dsl::id)),
@@ -135,6 +136,19 @@ impl DataStore {
                     )
                     .filter(sled_dsl::time_deleted.is_null())
                     .select(sled_dsl::id)
+                    .into_boxed();
+
+                // Further constrain the sled IDs according to any caller-
+                // supplied constraints.
+                if !constraints.must_select_from().is_empty() {
+                    sled_targets = sled_targets.filter(
+                        sled_dsl::id
+                            .eq_any(constraints.must_select_from().to_vec()),
+                    );
+                }
+
+                sql_function!(fn random() -> diesel::sql_types::Float);
+                let sled_targets = sled_targets
                     .order(random())
                     .limit(1)
                     .get_results_async::<Uuid>(&conn)
