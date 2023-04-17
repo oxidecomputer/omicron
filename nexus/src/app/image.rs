@@ -338,11 +338,12 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::Image> {
         match parent_lookup {
             ImageParentLookup::Project(project) => {
-                let (.., authz_project) =
+                let (authz_silo, authz_project) =
                     project.lookup_for(authz::Action::ListChildren).await?;
                 self.db_datastore
                     .project_image_list(
                         opctx,
+                        &authz_silo,
                         &authz_project,
                         include_silo_images.unwrap_or(false),
                         pagparams,

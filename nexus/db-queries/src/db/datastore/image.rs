@@ -31,6 +31,7 @@ impl DataStore {
     pub async fn project_image_list(
         &self,
         opctx: &OpContext,
+        authz_silo: &authz::Silo,
         authz_project: &authz::Project,
         include_silo_images: bool,
         pagparams: &PaginatedBy<'_>,
@@ -51,6 +52,7 @@ impl DataStore {
                 ),
             }
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::silo_id.eq(authz_silo.id()))
             .filter(
                 dsl::project_id
                     .is_null()
