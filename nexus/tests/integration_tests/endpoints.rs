@@ -1191,7 +1191,7 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::Post(serde_json::value::Value::Null),
+                AllowedMethod::Post(serde_json::from_str("{}").unwrap()),
             ],
         },
 

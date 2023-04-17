@@ -93,6 +93,11 @@ pub struct PhysicalDiskDeleteRequest {
 pub struct ZpoolPutRequest {
     /// Total size of the pool.
     pub size: ByteCount,
+
+    // Information to identify the disk to which this zpool belongs
+    pub disk_vendor: String,
+    pub disk_serial: String,
+    pub disk_model: String,
     // TODO: We could include any other data from `ZpoolInfo` we want,
     // such as "allocated/free" space and pool health?
 }
@@ -156,15 +161,11 @@ pub struct DatasetPutRequest {
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
+    ExternalDNS,
+    ExternalDNSConfig,
     InternalDNS,
     InternalDNSConfig,
-    Nexus {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
-        // While it's true that Nexus will only run with a single address,
-        // we want to convey information about the available pool of addresses
-        // when handing off from RSS -> Nexus.
-        external_address: IpAddr,
-    },
+    Nexus { external_address: IpAddr },
     Oximeter,
     Dendrite,
     Tfport,
@@ -176,6 +177,8 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
+            ExternalDNSConfig => "external_dns_config",
+            ExternalDNS => "external_dns",
             InternalDNSConfig => "internal_dns_config",
             InternalDNS => "internal_dns",
             Nexus { .. } => "nexus",

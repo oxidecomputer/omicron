@@ -71,7 +71,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         step_fn: F,
     ) -> NewStep<'_, 'a, S, T>
     where
-        F: FnOnce(StepContext<S>) -> Fut + 'a,
+        F: FnOnce(StepContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
@@ -254,7 +254,7 @@ impl<'engine, 'a, S: StepSpec> ComponentRegistrar<'engine, 'a, S> {
         step_fn: F,
     ) -> NewStep<'engine, 'a, S, T>
     where
-        F: FnOnce(StepContext<S>) -> Fut + 'a,
+        F: FnOnce(StepContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = Result<StepResult<T, S>, S::Error>> + Send + 'a,
         T: Send + 'a,
     {
@@ -313,7 +313,7 @@ impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
     /// be infallible, and will often just be synchronous code.
     pub fn with_metadata_fn<F, Fut>(mut self, f: F) -> Self
     where
-        F: FnOnce(MetadataContext<S>) -> Fut + 'a,
+        F: FnOnce(MetadataContext<S>) -> Fut + Send + 'a,
         Fut: Future<Output = S::StepMetadata> + Send + 'a,
     {
         self.metadata_fn = Some(DebugIgnore(Box::new(|cx| (f)(cx).boxed())));
@@ -519,6 +519,7 @@ type StepMetadataFn<'a, S> = Box<
     dyn FnOnce(
             MetadataContext<S>,
         ) -> BoxFuture<'a, <S as StepSpec>::StepMetadata>
+        + Send
         + 'a,
 >;
 
@@ -534,6 +535,7 @@ type StepExecFn<'a, S> = Box<
             StepContext<S>,
         )
             -> BoxFuture<'a, Result<StepOutcome<S>, <S as StepSpec>::Error>>
+        + Send
         + 'a,
 >;
 
@@ -688,15 +690,22 @@ impl<S: StepSpec> StepProgressReporter<S> {
         self,
         error: &S::Error,
     ) -> Result<(), mpsc::error::SendError<Event<S>>> {
-        let error = error.as_error();
-        let message = error.to_string();
+        // Stringify `error` into a message + list causes; this is written the
+        // way it is to avoid `error` potentially living across the `.await`
+        // below (which can cause lifetime issues in callers).
+        let (message, causes) = {
+            let error = error.as_error();
+            let message = error.to_string();
 
-        let mut current = error;
-        let mut causes = vec![];
-        while let Some(source) = current.source() {
-            causes.push(source.to_string());
-            current = source;
-        }
+            let mut current = error;
+            let mut causes = vec![];
+            while let Some(source) = current.source() {
+                causes.push(source.to_string());
+                current = source;
+            }
+
+            (message, causes)
+        };
 
         self.sender
             .send(Event::Step(StepEvent {

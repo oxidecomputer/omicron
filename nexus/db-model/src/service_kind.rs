@@ -12,7 +12,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
@@ -50,6 +50,12 @@ impl From<ServiceUsingCertificate> for ServiceKind {
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
+            internal_api::params::ServiceKind::ExternalDNS => {
+                ServiceKind::ExternalDNS
+            }
+            internal_api::params::ServiceKind::ExternalDNSConfig => {
+                ServiceKind::ExternalDNSConfig
+            }
             internal_api::params::ServiceKind::InternalDNS => {
                 ServiceKind::InternalDNS
             }

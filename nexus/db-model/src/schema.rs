@@ -106,6 +106,7 @@ table! {
         active_propolis_ip -> Nullable<Inet>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -430,6 +431,17 @@ table! {
 }
 
 table! {
+    sled_resource (id) {
+        id -> Uuid,
+        sled_id -> Uuid,
+        kind -> crate::SledResourceKindEnum,
+        hardware_threads -> Int8,
+        rss_ram -> Int8,
+        reservoir_ram -> Int8,
+    }
+}
+
+table! {
     service (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -520,6 +532,7 @@ table! {
         rcgen -> Int8,
 
         sled_id -> Uuid,
+        physical_disk_id -> Uuid,
 
         total_size -> Int8,
     }
@@ -757,7 +770,7 @@ table! {
 }
 
 table! {
-    update_available_artifact (name, version, kind) {
+    update_artifact (name, version, kind) {
         name -> Text,
         version -> Text,
         kind -> crate::KnownArtifactKindEnum,
@@ -854,6 +867,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     service,
     sled,
+    sled_resource,
     router_route,
     volume,
     vpc,

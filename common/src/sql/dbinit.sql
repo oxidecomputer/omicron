@@ -103,6 +103,46 @@ CREATE INDEX ON omicron.public.sled (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
+    -- omicron.public.Dataset
+    'dataset',
+    -- omicron.public.service
+    'service',
+    -- omicron.public.instance
+    'instance',
+    -- omicron.public.sled
+    --
+    -- reserved as an approximation of sled internal usage, such as "by the OS
+    -- and all unaccounted services".
+    'reserved'
+);
+
+-- Accounting for programs using resources on a sled
+CREATE TABLE omicron.public.sled_resource (
+    -- Should match the UUID of the corresponding service
+    id UUID PRIMARY KEY,
+
+    -- The sled where resources are being consumed
+    sled_id UUID NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL,
+
+    -- The maximum number of hardware threads usable by this resource
+    hardware_threads INT8 NOT NULL,
+
+    -- The maximum amount of RSS RAM provisioned to this resource
+    rss_ram INT8 NOT NULL,
+
+    -- The maximum amount of Reservoir RAM provisioned to this resource
+    reservoir_ram INT8 NOT NULL
+);
+
+-- Allow looking up all resources which reside on a sled
+CREATE INDEX ON omicron.public.sled_resource (
+    sled_id
+);
+
 /*
  * Services
  */
@@ -290,7 +330,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
 
 /*
  * ZPools of Storage, attached to Sleds.
- * Typically these are backed by a single physical disk.
+ * These are backed by a single physical disk.
  */
 CREATE TABLE omicron.public.Zpool (
     /* Identity metadata (asset) */
@@ -303,7 +343,8 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    /* TODO: Could also store physical disk FK here */
+    /* FK into the Physical Disk table */
+    physical_disk_id UUID NOT NULL,
 
     total_size INT NOT NULL
 );
@@ -749,18 +790,34 @@ CREATE TABLE omicron.public.instance (
      */
     migration_id UUID,
 
+    /*
+     * A generation number protecting information about the "location" of a
+     * running instance: its active server ID, Propolis ID and IP, and migration
+     * information. This is used for mutual exclusion (to allow only one
+     * migration to proceed at a time) and to coordinate state changes when a
+     * migration finishes.
+     */
+    propolis_generation INT NOT NULL,
+
     /* Instance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL
 );
 
+-- Names for instances within a project should be unique
 CREATE UNIQUE INDEX ON omicron.public.instance (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
+-- Allow looking up instances by server. This is particularly
+-- useful for resource accounting within a sled.
+CREATE INDEX ON omicron.public.instance (
+    active_server_id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Guest-Visible, Virtual Disks
@@ -1601,7 +1658,7 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'switch_rot'
 );
 
-CREATE TABLE omicron.public.update_available_artifact (
+CREATE TABLE omicron.public.update_artifact (
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
@@ -1621,7 +1678,7 @@ CREATE TABLE omicron.public.update_available_artifact (
 );
 
 /* This index is used to quickly find outdated artifacts. */
-CREATE INDEX ON omicron.public.update_available_artifact (
+CREATE INDEX ON omicron.public.update_artifact (
     targets_role_version
 );
 

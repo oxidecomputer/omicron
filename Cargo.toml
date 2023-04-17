@@ -170,7 +170,7 @@ hex = "0.4.3"
 hex-literal = "0.3.4"
 http = "0.2.9"
 httptest = "0.15.4"
-hyper-rustls = "0.23.2"
+hyper-rustls = "0.24.0"
 hyper = "0.14"
 humantime = "2.1.0"
 illumos-utils = { path = "illumos-utils" }
@@ -256,7 +256,7 @@ regress = "0.5.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.16"
 rustfmt-wrapper = "0.2"
-rustls = "0.20.7"
+rustls = "0.21.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
 semver = { version = "1.0.17", features = ["std", "serde"] }
@@ -267,17 +267,17 @@ serde_json = "1.0.95"
 serde_path_to_error = "0.1.11"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = "2.3.1"
+serde_with = "2.3.2"
 serial_test = "0.10"
 sha2 = "0.10.6"
-sha3 = "0.10.6"
+sha3 = "0.10.7"
 shell-words = "1.1.0"
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sled = "0.34"
 sled-agent-client = { path = "sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
-slog = { version = "2.7", features = [ "max_level_trace", "release_max_level_debug" ] }
+slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.7"
 slog-dtrace = "0.2"
 slog-envlogger = "2.2"

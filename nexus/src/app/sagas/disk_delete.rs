@@ -190,7 +190,7 @@ pub(crate) mod test {
             project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
         };
         let project_lookup =
-            nexus.project_lookup(&opctx, &project_selector).unwrap();
+            nexus.project_lookup(&opctx, project_selector).unwrap();
 
         nexus
             .project_create_disk(

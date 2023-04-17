@@ -46,6 +46,7 @@ pub struct OpContext {
     kind: OpKind,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OpKind {
     /// Handling an external API request
     ExternalApiRequest,
@@ -200,6 +201,34 @@ impl OpContext {
         }
     }
 
+    /// Creates a new `OpContext` with extra metadata (including log metadata)
+    ///
+    /// This is intended for cases where you want an OpContext that's
+    /// functionally the same as one that you already have, but where you want
+    /// to provide extra debugging information (in the form of key-value pairs)
+    /// in both the OpContext itself and its logger.
+    pub fn child(&self, new_metadata: BTreeMap<String, String>) -> OpContext {
+        let created_instant = Instant::now();
+        let created_walltime = SystemTime::now();
+        let mut metadata = self.metadata.clone();
+        let mut log = self.log.clone();
+
+        for (k, v) in new_metadata {
+            metadata.insert(k.clone(), v.clone());
+            log = log.new(o!(k => v));
+        }
+
+        OpContext {
+            log,
+            authn: self.authn.clone(),
+            authz: self.authz.clone(),
+            created_instant,
+            created_walltime,
+            metadata,
+            kind: self.kind,
+        }
+    }
+
     /// Check whether the actor performing this request is authorized for
     /// `action` on `resource`.
     pub async fn authorize<Resource>(
@@ -254,6 +283,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -305,6 +335,53 @@ mod test {
             .authorize(Action::Query, &authz::DATABASE)
             .await
             .expect("expected authorization to succeed");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_child_context() {
+        let logctx = dev::test_setup_log("test_child_context");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_, datastore) =
+            crate::db::datastore::datastore_test(&logctx, &db).await;
+        let opctx = OpContext::for_background(
+            logctx.log.new(o!()),
+            Arc::new(authz::Authz::new(&logctx.log)),
+            authn::Context::internal_unauthenticated(),
+            datastore,
+        );
+
+        let child_opctx = opctx.child(BTreeMap::from([
+            (String::from("one"), String::from("two")),
+            (String::from("three"), String::from("four")),
+        ]));
+        let grandchild_opctx = opctx.child(BTreeMap::from([
+            (String::from("one"), String::from("seven")),
+            (String::from("five"), String::from("six")),
+        ]));
+
+        // Verify they're the same "kind".
+        assert_eq!(opctx.kind, child_opctx.kind);
+        assert_eq!(opctx.kind, grandchild_opctx.kind);
+
+        // Verify that both descendants have metadata from the root.
+        for (k, v) in opctx.metadata.iter() {
+            assert_eq!(v, &child_opctx.metadata[k]);
+            assert_eq!(v, &grandchild_opctx.metadata[k]);
+        }
+
+        // The child opctx ought to have its own metadata and not any of its
+        // child's metadata.
+        assert_eq!(child_opctx.metadata["one"], "two");
+        assert_eq!(child_opctx.metadata["three"], "four");
+        assert!(!child_opctx.metadata.contains_key("five"));
+
+        // The granchild opctx ought to have its own metadata, one key of which
+        // overrides its parent's.
+        assert_eq!(grandchild_opctx.metadata["one"], "seven");
+        assert_eq!(grandchild_opctx.metadata["five"], "six");
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

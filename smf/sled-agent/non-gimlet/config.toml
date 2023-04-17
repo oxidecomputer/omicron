@@ -37,6 +37,12 @@ zpools = [
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
+# If testing on non-gimlet hardware, fill this in with the name of links that
+# should be mapped into the switch zone and used for transit mode maghemite
+# there. On gimlets, this is not required as tfportd will create links in the
+# switch zone when it boots, and maghemite is configured to use those.
+#switch_zone_maghemite_links = ["ixgbe0", "ixgbe1"]
+
 [log]
 level = "info"
 mode = "file"

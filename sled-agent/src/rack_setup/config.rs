@@ -40,7 +40,8 @@ impl SetupServiceConfig {
 mod test {
     use super::*;
     use crate::bootstrap::params::Gateway;
-    use std::net::Ipv6Addr;
+    use omicron_common::address::IpRange;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn test_subnets() {
@@ -53,7 +54,9 @@ mod test {
             },
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec![String::from("1.1.1.1")],
-            nexus_external_address: "192.168.1.20".parse().unwrap(),
+            internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
+                Ipv4Addr::new(129, 168, 1, 20),
+            ))],
         };
 
         assert_eq!(

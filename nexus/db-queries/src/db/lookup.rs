@@ -136,6 +136,30 @@ impl<'a> LookupPath<'a> {
         }
     }
 
+    /// Select a resource of type Project, identified by its owned name
+    pub fn project_name_owned<'b, 'c>(self, name: Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Project::OwnedName(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Project::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type Project, identified by its id
     pub fn project_id(self, id: Uuid) -> Project<'a> {
         Project::PrimaryKey(Root { lookup_root: self }, id)
@@ -285,6 +309,15 @@ impl<'a> LookupPath<'a> {
         Silo::Name(Root { lookup_root: self }, name)
     }
 
+    /// Select a resource of type Silo, identified by its owned name
+    pub fn silo_name_owned<'b, 'c>(self, name: Name) -> Silo<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Silo::OwnedName(Root { lookup_root: self }, name)
+    }
+
     /// Select a resource of type SiloUser, identified by its id
     pub fn silo_user_id(self, id: Uuid) -> SiloUser<'a> {
         SiloUser::PrimaryKey(Root { lookup_root: self }, id)
@@ -311,19 +344,29 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk_id(self, id: Uuid) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
+    pub fn physical_disk(
+        self,
+        vendor: &str,
+        serial: &str,
+        model: &str,
+    ) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(
+            Root { lookup_root: self },
+            vendor.to_string(),
+            serial.to_string(),
+            model.to_string(),
+        )
     }
 
-    /// Select a resource of type UpdateAvailableArtifact, identified by its
+    /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
-    pub fn update_available_artifact_tuple(
+    pub fn update_artifact_tuple(
         self,
         name: &str,
         version: db::model::SemverVersion,
         kind: KnownArtifactKind,
-    ) -> UpdateAvailableArtifact<'a> {
-        UpdateAvailableArtifact::PrimaryKey(
+    ) -> UpdateArtifact<'a> {
+        UpdateArtifact::PrimaryKey(
             Root { lookup_root: self },
             name.to_string(),
             version,
@@ -648,11 +691,15 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [
+        { column_name = "vendor", rust_type = String },
+        { column_name = "serial", rust_type = String },
+        { column_name = "model", rust_type = String }
+    ]
 }
 
 lookup_resource! {
-    name = "UpdateAvailableArtifact",
+    name = "UpdateArtifact",
     ancestors = [],
     children = [],
     lookup_by_name = false,

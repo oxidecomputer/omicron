@@ -163,6 +163,36 @@ impl DataStore {
         Ok(db_instance)
     }
 
+    /// Fetches information about a deleted instance. This can be used to
+    /// query the properties an instance had at the time it was deleted, which
+    /// can be useful when cleaning up a deleted instance.
+    pub async fn instance_fetch_deleted(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<Instance> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
+        use db::schema::instance::dsl;
+        let instance = dsl::instance
+            .filter(dsl::id.eq(authz_instance.id()))
+            .filter(dsl::time_deleted.is_not_null())
+            .select(Instance::as_select())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(authz_instance.id()),
+                    ),
+                )
+            })?;
+
+        Ok(instance)
+    }
+
     // TODO-design It's tempting to return the updated state of the Instance
     // here because it's convenient for consumers and by using a RETURNING
     // clause, we could ensure that the "update" and "fetch" are atomic.
@@ -180,11 +210,18 @@ impl DataStore {
         let updated = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(*instance_id))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            // Runtime state updates are allowed if either:
+            // - the active Propolis ID will not change, the state generation
+            //   increased, and the Propolis generation will not change, or
+            // - the Propolis generation increased.
             .filter(
-                dsl::migration_id
-                    .is_null()
-                    .or(dsl::target_propolis_id.eq(new_runtime.propolis_id)),
+                (dsl::active_propolis_id
+                    .eq(new_runtime.propolis_id)
+                    .and(dsl::state_generation.lt(new_runtime.gen))
+                    .and(
+                        dsl::propolis_generation.eq(new_runtime.propolis_gen),
+                    ))
+                .or(dsl::propolis_generation.lt(new_runtime.propolis_gen)),
             )
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(*instance_id)

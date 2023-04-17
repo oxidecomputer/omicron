@@ -36,7 +36,7 @@ const NMAX_DNS_ZONES: u32 = 10;
 
 impl DataStore {
     /// List all DNS zones in a DNS group (paginated)
-    async fn dns_zones_list(
+    pub async fn dns_zones_list(
         &self,
         opctx: &OpContext,
         dns_group: DnsGroup,
@@ -53,7 +53,7 @@ impl DataStore {
     }
 
     /// Get the latest version for a given DNS group
-    async fn dns_group_latest_version(
+    pub async fn dns_group_latest_version(
         &self,
         opctx: &OpContext,
         dns_group: DnsGroup,
