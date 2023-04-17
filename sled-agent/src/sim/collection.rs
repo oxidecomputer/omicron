@@ -352,17 +352,6 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         self.objects.lock().await.contains_key(id)
     }
 
-    pub async fn sim_get_current_state(
-        self: &Arc<Self>,
-        id: &Uuid,
-    ) -> Result<S::CurrentState, Error> {
-        let objects = self.objects.lock().await;
-        let instance = objects
-            .get(id)
-            .ok_or_else(|| Error::not_found_by_id(S::resource_type(), id))?;
-        Ok(instance.object.current())
-    }
-
     /// Iterates over all of the existing objects in the collection and, for any
     /// that meet `condition`, asks to transition them into the supplied target
     /// state.

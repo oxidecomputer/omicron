@@ -214,6 +214,12 @@ impl SimInstanceInner {
             .iter()
             .any(|s| matches!(s, PropolisInstanceState::Rebooting))
     }
+
+    fn terminate(&mut self) -> InstanceRuntimeState {
+        self.state.transition(ApiInstanceState::Destroyed);
+        self.propolis_queue.clear();
+        self.state.current().clone()
+    }
 }
 
 /// A simulation of an Instance created by the external Oxide API.
@@ -234,6 +240,12 @@ impl SimInstanceInner {
 #[derive(Debug, Clone)]
 pub struct SimInstance {
     inner: Arc<Mutex<SimInstanceInner>>,
+}
+
+impl SimInstance {
+    pub fn terminate(&self) -> InstanceRuntimeState {
+        self.inner.lock().unwrap().terminate()
+    }
 }
 
 #[async_trait]
