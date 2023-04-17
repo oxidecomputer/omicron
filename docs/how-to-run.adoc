@@ -279,9 +279,26 @@ unique local addresses in the subnet of the first Sled Agent: `fd00:1122:3344:1:
 If you'd like to modify these values to suit your local network, you can modify
 them within the https://github.com/oxidecomputer/omicron/tree/main/smf[`smf/` subdirectory].
 Notably, Nexus is being served from IPv4 address, which may be configured to be
-external. By default, it uses a private IPv4 address and no Internet gateway, but may
-be configured to use a public-facing IP address with an Internet gateway that may
-be set as a default route for the Nexus zone.
+external. By default, it uses a private IPv4 address but may be configured to use
+a public-facing IP address.
+
+NOTE: Internal services that require external connectivity (e.g. Nexus, Boundary NTP,
+External DNS) do so via OPTE. When using SoftNPU we'll need to configure Proxy ARP for
+the services IP Pool.
+
+[source,console]
+----
+# dladm won't return leading zeroes but `scadm` expects them
+$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
+$ pfexec /opt/oxide/softnpu/stuff/scadm \
+  --server /opt/oxide/softnpu/stuff/server \
+  --client /opt/oxide/softnpu/stuff/client \
+  standalone \
+  add-proxy-arp \
+  $SERVICE_IP_POOL_START \
+  $SERVICE_IP_POOL_END \
+  $SOFTNPU_MAC
+----
 
 [options="header"]
 |===================================================================================================
@@ -299,7 +316,6 @@ be set as a default route for the Nexus zone.
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | External DNS               | `192.168.1.20:53`
 | Nexus: External API        | `192.168.1.21:80`
-| Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other
