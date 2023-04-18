@@ -258,7 +258,7 @@ impl UpdateTracker {
         match sp_update_data.entry(sp) {
             Entry::Vacant(_) => crate::update_events::UpdateLog::default(),
             Entry::Occupied(slot) => {
-                slot.get().update_log.lock().unwrap().clone().into()
+                slot.get().update_log.lock().unwrap().clone()
             }
         }
     }
@@ -274,7 +274,7 @@ impl UpdateTracker {
             let update_log = update_data.update_log.lock().unwrap().clone();
             let inner: &mut BTreeMap<_, _> =
                 converted_logs.entry(sp.type_).or_default();
-            inner.insert(sp.slot, update_log.into());
+            inner.insert(sp.slot, update_log);
         }
         converted_logs
     }
@@ -427,10 +427,10 @@ impl UpdateDriver {
         event_receiving_task.await.expect("event receiving task panicked");
     }
 
-    fn register_sp_component_steps<'engine, 'a>(
+    fn register_sp_component_steps<'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut ComponentRegistrar<'engine, 'a>,
+        registrar: &mut ComponentRegistrar<'_, 'a>,
         artifact: &'a ArtifactIdData,
         component_name: &'static str,
         firmware_slot: u16,
@@ -482,10 +482,10 @@ impl UpdateDriver {
         );
     }
 
-    fn register_component_update_completion_steps<'engine, 'a>(
+    fn register_component_update_completion_steps<'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut ComponentRegistrar<'engine, 'a>,
+        registrar: &mut ComponentRegistrar<'_, 'a>,
         artifact: &'a ArtifactId,
         update_id: Uuid,
         component: &'static str,
@@ -619,10 +619,10 @@ impl UpdateDriver {
     // Installs the trampoline phase 1 and configures the host to fetch phase
     // 2 from MGS on boot, returning the image ID of that phase 2 image for use
     // when querying MGS for progress on its delivery to the SP.
-    fn register_trampoline_phase1_steps<'engine, 'a>(
+    fn register_trampoline_phase1_steps<'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut ComponentRegistrar<'engine, 'a>,
+        registrar: &mut ComponentRegistrar<'_, 'a>,
         plan: &'a UpdatePlan,
     ) -> StepHandle<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
@@ -867,10 +867,10 @@ impl UpdateDriver {
             .register();
     }
 
-    fn register_deliver_host_phase1_steps<'engine, 'a>(
+    fn register_deliver_host_phase1_steps<'a>(
         &self,
         update_cx: &'a UpdateContext,
-        registrar: &mut ComponentRegistrar<'engine, 'a>,
+        registrar: &mut ComponentRegistrar<'_, 'a>,
         artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
         boot_slot: u16,
@@ -1264,7 +1264,7 @@ impl UpdateContext {
                             total_attempts: attempt,
                             step_elapsed: elapsed, // TODO
                             attempt_elapsed: elapsed,
-                            message: message.into(),
+                            message,
                             causes: Vec::new(),
                         }
                     } else {
