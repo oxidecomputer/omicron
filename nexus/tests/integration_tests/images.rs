@@ -66,7 +66,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let silo_images_url = format!("/v1/images");
+    let silo_images_url = "/v1/images";
     let project_images_url = get_project_images_url(PROJECT_NAME);
     let images_url = get_project_images_with_silo_images_url(PROJECT_NAME);
 
@@ -182,7 +182,7 @@ async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let silo_images_url = format!("/v1/images");
+    let silo_images_url = "/v1/images";
 
     // Expect no images in the silo
     let images = NexusRequest::object_get(client, &silo_images_url)
