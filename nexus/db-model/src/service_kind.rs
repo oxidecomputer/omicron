@@ -75,7 +75,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::CruciblePantry => {
                 ServiceKind::CruciblePantry
             }
-            internal_api::params::ServiceKind::NTP => ServiceKind::NTP,
+            internal_api::params::ServiceKind::Ntp => ServiceKind::Ntp,
         }
     }
 }

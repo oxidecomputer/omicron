@@ -170,7 +170,7 @@ pub enum ServiceKind {
     Dendrite,
     Tfport,
     CruciblePantry,
-    NTP,
+    Ntp,
 }
 
 impl fmt::Display for ServiceKind {
@@ -186,7 +186,7 @@ impl fmt::Display for ServiceKind {
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
-            NTP => "ntp",
+            Ntp => "ntp",
         };
         write!(f, "{}", s)
     }

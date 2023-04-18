@@ -741,7 +741,7 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::NTP,
+                                kind: NexusTypes::ServiceKind::Ntp,
                             });
                         }
                         _ => {
