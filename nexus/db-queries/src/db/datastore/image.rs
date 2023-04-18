@@ -1,4 +1,5 @@
 use diesel::prelude::*;
+use nexus_db_model::ImagePromotionUpdate;
 use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -197,37 +198,25 @@ impl DataStore {
         authz_project_image: &authz::ProjectImage,
         project_image: ProjectImage,
     ) -> UpdateResult<Image> {
-        let silo_id = authz_silo.id();
-        let silo_image: SiloImage = project_image.into();
-        let image: Image = silo_image.into();
-        let name = image.name().clone();
+        let image_update: ImagePromotionUpdate = project_image.into();
 
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use db::schema::image::dsl;
-        let image: Image = Silo::insert_resource(
-            silo_id,
-            diesel::insert_into(dsl::image)
-                .values(image)
-                .on_conflict(dsl::id)
-                .do_update()
-                .set(dsl::time_modified.eq(dsl::time_modified)),
-        )
-        .insert_and_get_result_async(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => authz_silo.not_found(),
-            AsyncInsertError::DatabaseError(e) => {
+        let image: Image = diesel::update(dsl::image)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_project_image.id()))
+            .set(image_update)
+            .returning(Image::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SiloImage,
-                        name.as_str(),
-                    ),
+                    ErrorHandler::NotFoundByResource(authz_project_image),
                 )
-            }
-        })?;
+            })?;
         Ok(image)
     }
 }

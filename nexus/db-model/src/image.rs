@@ -4,6 +4,7 @@
 
 use super::{BlockSize, ByteCount, Digest};
 use crate::schema::{image, project_image, silo_image};
+use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
@@ -113,13 +114,6 @@ impl TryFrom<Image> for ProjectImage {
     }
 }
 
-impl From<ProjectImage> for SiloImage {
-    fn from(value: ProjectImage) -> Self {
-        let image: Image = value.into();
-        Image { project_id: None, ..image }.try_into().unwrap()
-    }
-}
-
 impl TryFrom<Image> for SiloImage {
     type Error = Error;
 
@@ -210,5 +204,19 @@ impl From<Image> for views::Image {
             block_size: image.block_size.into(),
             size: image.size.into(),
         }
+    }
+}
+
+// Changeset used to
+#[derive(AsChangeset)]
+#[diesel(table_name = image)]
+pub struct ImagePromotionUpdate {
+    pub project_id: Option<Uuid>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<ProjectImage> for ImagePromotionUpdate {
+    fn from(_image: ProjectImage) -> Self {
+        Self { project_id: None, time_modified: Utc::now() }
     }
 }
