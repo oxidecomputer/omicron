@@ -206,17 +206,3 @@ impl From<Image> for views::Image {
         }
     }
 }
-
-// Changeset used to
-#[derive(AsChangeset)]
-#[diesel(table_name = image)]
-pub struct ImagePromotionUpdate {
-    pub project_id: Option<Uuid>,
-    pub time_modified: DateTime<Utc>,
-}
-
-impl From<ProjectImage> for ImagePromotionUpdate {
-    fn from(_image: ProjectImage) -> Self {
-        Self { project_id: None, time_modified: Utc::now() }
-    }
-}

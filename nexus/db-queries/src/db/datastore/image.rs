@@ -1,5 +1,5 @@
+use chrono::Utc;
 use diesel::prelude::*;
-use nexus_db_model::ImagePromotionUpdate;
 use nexus_db_model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -25,6 +25,7 @@ use crate::db::model::SiloImage;
 use crate::db::pagination::paginated;
 
 use async_bb8_diesel::AsyncRunQueryDsl;
+use uuid::Uuid;
 
 use super::DataStore;
 
@@ -196,10 +197,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         authz_project_image: &authz::ProjectImage,
-        project_image: ProjectImage,
     ) -> UpdateResult<Image> {
-        let image_update: ImagePromotionUpdate = project_image.into();
-
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
@@ -207,7 +205,10 @@ impl DataStore {
         let image: Image = diesel::update(dsl::image)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project_image.id()))
-            .set(image_update)
+            .set((
+                dsl::project_id.eq(None::<Uuid>),
+                dsl::time_modified.eq(Utc::now()),
+            ))
             .returning(Image::as_returning())
             .get_result_async(self.pool_authorized(opctx).await?)
             .await

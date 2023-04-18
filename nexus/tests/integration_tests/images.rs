@@ -146,7 +146,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
         .items;
 
     assert_eq!(silo_images.len(), 1);
-    assert_eq!(images[0].identity.name, "alpine-edge");
+    assert_eq!(silo_images[0].identity.name, "alpine-edge");
 
     // Ensure original project images is empty
     let images = NexusRequest::object_get(client, &project_images_url)
@@ -162,7 +162,7 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
         .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
         .await
         .items;
-    assert_eq!(images.len(), 0);
+    assert_eq!(images.len(), 1);
 }
 
 #[nexus_test]
