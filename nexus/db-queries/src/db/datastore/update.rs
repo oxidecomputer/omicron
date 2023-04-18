@@ -89,6 +89,9 @@ impl DataStore {
                 // We use the `targets_role_version` column in the table to delete any
                 // old rows, keeping the table in sync with the current copy of
                 // artifacts.json.
+
+                // TODO: what is this about, and does it still exist in
+                // multi-system-version TUF repo world?
                 let _ = diesel::delete(ua::table)
                     .filter(ua::targets_role_version.lt(current_role_version))
                     .execute_async(&conn)
@@ -118,6 +121,7 @@ impl DataStore {
         // least.
         update_artifact
             .select(UpdateArtifact::as_select())
+            // TODO: join to system updates and select by system update version
             // TODO: get rid of this fake filter, which is needed to make CRDB
             // not complain about table scans, and instead paginate and/or list
             // artifacts for a single system version. Those could probably be

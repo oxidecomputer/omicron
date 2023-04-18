@@ -95,6 +95,8 @@ impl super::Nexus {
 
     /// demo-grade update logic: tell all sleds to apply all artifacts
     pub async fn updates_apply(&self, opctx: &OpContext) -> Result<(), Error> {
+        // TODO: create system UpdateDeployment entry
+
         let sleds = self
             .db_datastore
             .sled_list(
@@ -469,6 +471,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<()> {
+        // TODO: do all this with upsert_update_artifacts instead
+
         let types = vec![
             shared::UpdateableComponentType::HubrisForPscRot,
             shared::UpdateableComponentType::HubrisForPscSp,

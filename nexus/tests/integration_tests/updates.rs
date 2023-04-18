@@ -108,6 +108,8 @@ async fn test_update_end_to_end() {
     assert_eq!(updates.items.len(), 4);
     assert!(updates.items.iter().any(|u| u.version == SYSTEM_VERSION));
 
+    // TODO: confirm the artifacts are associated with the system version
+
     let artifact_path = cptestctx.sled_agent_storage.path();
     let component_path = artifact_path.join(UPDATE_COMPONENT);
     // check sled agent did the thing

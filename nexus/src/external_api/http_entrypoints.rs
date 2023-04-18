@@ -3825,6 +3825,8 @@ async fn system_update_refresh(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.updates_refresh_metadata(&opctx).await?;
+
+        // TODO: move this call to update start endpoint
         nexus.updates_apply(&opctx).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
