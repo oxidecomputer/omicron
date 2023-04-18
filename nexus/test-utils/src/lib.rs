@@ -196,7 +196,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         address: dns_server_address,
-        kind: ServiceKind::InternalDNSConfig,
+        kind: ServiceKind::InternalDnsConfig,
     };
     let server = N::start(nexus_internal, &config, vec![dns_service]).await;
 
