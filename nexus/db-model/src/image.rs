@@ -4,7 +4,6 @@
 
 use super::{BlockSize, ByteCount, Digest};
 use crate::schema::{image, project_image, silo_image};
-use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
