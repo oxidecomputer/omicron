@@ -33,8 +33,13 @@ progenitor::generate_api!(
         RotInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        UpdateComponent = { derives = [ Copy, PartialEq, Eq, PartialOrd, Ord ] },
     },
     replace = {
         Duration = std::time::Duration,
     }
 );
+
+pub type ProgressEventKind = types::ProgressEventKindForWicketdEngineSpec;
+pub type StepEventKind = types::StepEventKindForWicketdEngineSpec;
+pub type StepInfoWithMetadata = types::StepInfoWithMetadataForWicketdEngineSpec;
