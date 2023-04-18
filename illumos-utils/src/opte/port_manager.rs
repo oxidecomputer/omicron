@@ -499,23 +499,16 @@ impl PortManager {
 pub struct PortTicket {
     id: Uuid,
     kind: NetworkInterfaceKind,
-    manager: Option<Arc<PortManagerInner>>,
+    manager: Arc<PortManagerInner>,
 }
 
 impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.manager.is_some() {
-            f.debug_struct("PortTicket")
-                .field("id", &self.id)
-                .field("kind", &self.kind)
-                .field("manager", &"{ .. }")
-                .finish()
-        } else {
-            f.debug_struct("PortTicket")
-                .field("id", &self.id)
-                .field("kind", &self.kind)
-                .finish()
-        }
+        f.debug_struct("PortTicket")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("manager", &"{ .. }")
+            .finish()
     }
 }
 
@@ -525,30 +518,40 @@ impl PortTicket {
         kind: NetworkInterfaceKind,
         manager: Arc<PortManagerInner>,
     ) -> Self {
-        Self { id, kind, manager: Some(manager) }
+        Self { id, kind, manager }
     }
 
-    pub fn release(&mut self) -> Result<(), Error> {
-        if let Some(manager) = self.manager.take() {
-            let mut ports = manager.ports.lock().unwrap();
-            let Some(port) = ports.remove(&(self.id, self.kind)) else {
-                error!(
-                    manager.log,
-                    "Tried to release non-existent port";
-                    "id" => ?&self.id,
-                    "kind" => ?&self.kind,
-                );
-                return Err(Error::ReleaseMissingPort(self.id, self.kind));
-            };
-            debug!(
-                manager.log,
-                "Removing OPTE port from manager";
+    fn release_inner(&mut self) -> Result<(), Error> {
+        let mut ports = self.manager.ports.lock().unwrap();
+        let Some(port) = ports.remove(&(self.id, self.kind)) else {
+            error!(
+                self.manager.log,
+                "Tried to release non-existent port";
                 "id" => ?&self.id,
                 "kind" => ?&self.kind,
-                "port" => ?&port,
             );
-        }
+            return Err(Error::ReleaseMissingPort(self.id, self.kind));
+        };
+        debug!(
+            self.manager.log,
+            "Removed OPTE port from manager";
+            "id" => ?&self.id,
+            "kind" => ?&self.kind,
+            "port" => ?&port,
+        );
         Ok(())
+    }
+
+    pub fn release(mut self) {
+        // There can only be a single `PortTicket` per-port
+        // and we've taken it here by value, so the port must
+        // still exist in the manager.
+        self.release_inner()
+            .expect("failed to release Port with valid PortTicket");
+
+        // NOTE: We've already called `release_inner` so let's
+        // skip the Drop impl which also calls `release_inner`.
+        std::mem::forget(self);
     }
 }
 
@@ -556,6 +559,6 @@ impl Drop for PortTicket {
     fn drop(&mut self) {
         // We're ignoring the value since (1) it's already logged and (2) we
         // can't do anything with it anyway.
-        let _ = self.release();
+        let _ = self.release_inner();
     }
 }

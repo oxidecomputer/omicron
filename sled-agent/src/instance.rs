@@ -467,7 +467,7 @@ impl InstanceInner {
         running_state.running_zone.stop().await.unwrap();
 
         // Remove any OPTE ports from the port manager.
-        running_state.running_zone.release_opte_ports()?;
+        running_state.running_zone.release_opte_ports();
 
         Ok(())
     }

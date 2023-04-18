@@ -373,16 +373,10 @@ impl RunningZone {
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
-    ///
-    /// Returns the last error, if any.
-    pub fn release_opte_ports(&mut self) -> Result<(), crate::opte::Error> {
-        let mut result = Ok(());
-        for (_, ticket) in &mut self.inner.opte_ports {
-            if let Err(e) = ticket.release() {
-                result = Err(e);
-            }
+    pub fn release_opte_ports(&mut self) {
+        for (_, ticket) in self.inner.opte_ports.drain(..) {
+            ticket.release();
         }
-        result
     }
 
     /// Halts and removes the zone, awaiting its termination.
