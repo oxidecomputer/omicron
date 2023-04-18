@@ -380,9 +380,9 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 )]
 pub enum ZoneType {
     #[serde(rename = "external_dns")]
-    ExternalDNS,
+    ExternalDns,
     #[serde(rename = "internal_dns")]
-    InternalDNS,
+    InternalDns,
     #[serde(rename = "nexus")]
     Nexus,
     #[serde(rename = "oximeter")]
@@ -398,8 +398,8 @@ pub enum ZoneType {
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
-            ZoneType::InternalDNS => Self::InternalDns,
-            ZoneType::ExternalDNS => Self::ExternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
@@ -413,8 +413,8 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
-            ExternalDNS => "external_dns",
-            InternalDNS => "internal_dns",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",

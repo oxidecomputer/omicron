@@ -399,7 +399,7 @@ impl ServiceManager {
                     .filter(|svc| {
                         matches!(
                             svc.zone_type,
-                            ZoneType::InternalDNS | ZoneType::NTP
+                            ZoneType::InternalDns | ZoneType::NTP
                         )
                     })
                     .collect(),
