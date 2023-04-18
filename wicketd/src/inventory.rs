@@ -15,25 +15,22 @@ use serde::Serialize;
 #[serde(tag = "sp_inventory", rename_all = "snake_case")]
 pub struct SpInventory {
     pub id: SpIdentifier,
-    pub ignition: SpIgnition,
-    pub state: SpState,
+    pub ignition: Option<SpIgnition>,
+    pub state: Option<SpState>,
     pub components: Option<Vec<SpComponentInfo>>,
     pub caboose: Option<SpComponentCaboose>,
     pub rot: RotInventory,
 }
+
 impl SpInventory {
-    /// The ignition info and state of the SP are retrieved initiailly
+    /// Create an empty inventory with the given id.
     ///
-    /// The components are filled in via a separate call
-    pub fn new(
-        id: SpIdentifier,
-        ignition: SpIgnition,
-        state: SpState,
-    ) -> SpInventory {
+    /// All remaining fields are populated later as MGS responds.
+    pub fn new(id: SpIdentifier) -> SpInventory {
         SpInventory {
             id,
-            ignition,
-            state,
+            ignition: None,
+            state: None,
             components: None,
             caboose: None,
             rot: RotInventory::default(),

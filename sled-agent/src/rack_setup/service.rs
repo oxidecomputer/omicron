@@ -75,8 +75,8 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::{
-    get_sled_address, CRUCIBLE_PANTRY_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
-    OXIMETER_PORT,
+    get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
+    NTP_PORT, OXIMETER_PORT,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -356,8 +356,8 @@ impl ServiceInner {
                                 // and port that have been assigned to it.
                                 // There should be exactly one.
                                 let addrs = svc.services.iter().filter_map(|s| {
-                                    if let ServiceType::InternalDns { server_address, .. } = s {
-                                        Some(*server_address)
+                                    if let ServiceType::InternalDns { http_address, .. } = s {
+                                        Some(*http_address)
                                     } else {
                                         None
                                     }
@@ -433,14 +433,21 @@ impl ServiceInner {
         Ok(())
     }
 
-    // Waits for sufficient neighbors to exist so the initial set of requests
-    // can be sent out.
+    /// Waits for sufficient neighbors to exist so the initial set of requests
+    /// can be sent out.
     async fn wait_for_peers(
         &self,
         expectation: PeerExpectation,
         our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        // Ask the switch zone for a list of peers - note that the rack subnet
+        // has not been sent out, and there the switch zone does not have an
+        // underlay address yet, so the bootstrap address is used here.
+        let ddm_admin_client = DdmAdminClient::address(
+            self.log.clone(),
+            switch_zone_bootstrap_address,
+        )?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -654,14 +661,37 @@ impl ServiceInner {
                                 },
                             });
                         }
+                        ServiceType::Dendrite { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    DENDRITE_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Dendrite,
+                            });
+                        }
+                        ServiceType::ExternalDns { http_address, .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id: zone.id,
+                                sled_id,
+                                address: http_address.to_string(),
+                                kind:
+                                    NexusTypes::ServiceKind::ExternalDNSConfig,
+                            });
+                        }
                         ServiceType::InternalDns {
-                            server_address,
+                            http_address,
                             dns_address,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
-                                address: server_address.to_string(),
+                                address: http_address.to_string(),
                                 kind:
                                     NexusTypes::ServiceKind::InternalDNSConfig,
                             });
@@ -782,7 +812,10 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        let ddm_admin_client = DdmAdminClient::address(
+            self.log.clone(),
+            local_bootstrap_agent.switch_zone_bootstrap_address(),
+        )?;
         let peer_addrs = ddm_admin_client.peer_addrs().await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
@@ -869,8 +902,13 @@ impl ServiceInner {
         } else {
             PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
         };
+
         let addrs = self
-            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .wait_for_peers(
+                expectation,
+                local_bootstrap_agent.our_address(),
+                local_bootstrap_agent.switch_zone_bootstrap_address(),
+            )
             .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
@@ -946,7 +984,7 @@ impl ServiceInner {
             if let Some(plan) = ServicePlan::load(&self.log).await? {
                 plan
             } else {
-                ServicePlan::create(&self.log, &config, &sled_addresses).await?
+                ServicePlan::create(&self.log, &config, &plan.sleds).await?
             };
 
         // Set up internal DNS and NTP services.

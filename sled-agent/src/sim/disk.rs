@@ -14,6 +14,7 @@ use dropshot::ConfigLoggingLevel;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use oximeter_producer::Server as ProducerServer;
@@ -247,8 +248,8 @@ impl Simulatable for SimDisk {
         self.state.current().gen
     }
 
-    fn current(&self) -> &Self::CurrentState {
-        self.state.current()
+    fn current(&self) -> Self::CurrentState {
+        self.state.current().clone()
     }
 
     fn desired(&self) -> Option<Self::RequestedState> {
@@ -272,5 +273,9 @@ impl Simulatable for SimDisk {
             .await
             .map(|_| ())
             .map_err(Error::from)
+    }
+
+    fn resource_type() -> ResourceType {
+        ResourceType::Disk
     }
 }

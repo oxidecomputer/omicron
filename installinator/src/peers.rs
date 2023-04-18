@@ -114,7 +114,7 @@ impl FetchedArtifact {
     /// If `discover_fn` returns [`DiscoverPeersError::Retry`], this function will retry. If it
     /// returns `DiscoverPeersError::Abort`, this function will exit with the underlying error.
     pub(crate) async fn loop_fetch_from_peers<F, Fut>(
-        cx: StepContext,
+        cx: &StepContext,
         log: &slog::Logger,
         mut discover_fn: F,
         artifact_hash_id: &ArtifactHashId,
@@ -134,10 +134,12 @@ impl FetchedArtifact {
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
                         DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
                     );
+                    cx.send_progress(StepProgress::retry(format!(
+                        "failed to discover peers: {error}"
+                    )))
+                    .await;
                     // Add a small delay here to avoid slamming the CPU.
                     tokio::time::sleep(Duration::from_millis(10)).await;
-                    // Don't bother sending a retry message here -- if we don't
-                    // have any peers that
                     continue;
                 }
                 Err(DiscoverPeersError::Abort(error)) => {
@@ -151,7 +153,7 @@ impl FetchedArtifact {
                 peers.peer_count(),
                 peers.display(),
             );
-            match peers.fetch_artifact(&cx, attempt, artifact_hash_id).await {
+            match peers.fetch_artifact(&cx, artifact_hash_id).await {
                 Some((addr, artifact)) => {
                     return Ok(Self { attempt, addr, artifact })
                 }
@@ -160,6 +162,11 @@ impl FetchedArtifact {
                         log,
                         "unable to fetch artifact from peers, retrying discovery",
                     );
+                    cx.send_progress(StepProgress::retry(format!(
+                        "unable to fetch artifact from any of {} peers, retrying",
+                        peers.peer_count(),
+                    )))
+                    .await;
                     // Add a small delay here to avoid slamming the CPU.
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
@@ -205,7 +212,6 @@ impl Peers {
     pub(crate) async fn fetch_artifact(
         &self,
         cx: &StepContext,
-        attempt: usize,
         artifact_hash_id: &ArtifactHashId,
     ) -> Option<(SocketAddrV6, BufList)> {
         // TODO: do we want a check phase that happens before the download?
@@ -228,10 +234,7 @@ impl Peers {
 
             // Attempt to download data from this peer.
             let start = Instant::now();
-            match self
-                .fetch_from_peer(cx, attempt, peer, artifact_hash_id, start)
-                .await
-            {
+            match self.fetch_from_peer(cx, peer, artifact_hash_id).await {
                 Ok(artifact_bytes) => {
                     let elapsed = start.elapsed();
                     slog::info!(
@@ -270,10 +273,8 @@ impl Peers {
     async fn fetch_from_peer(
         &self,
         cx: &StepContext,
-        attempt: usize,
         peer: SocketAddrV6,
         artifact_hash_id: &ArtifactHashId,
-        start: Instant,
     ) -> Result<BufList, ArtifactFetchError> {
         let log = self.log.new(slog::o!("peer" => peer.to_string()));
 
@@ -284,14 +285,11 @@ impl Peers {
         {
             Ok(x) => x,
             Err(error) => {
-                _ = cx
-                    .send_progress(StepProgress::Reset {
-                        metadata: InstallinatorProgressMetadata::Download {
-                            peer,
-                        },
-                        message: error.to_string().into(),
-                    })
-                    .await;
+                cx.send_progress(StepProgress::Reset {
+                    metadata: InstallinatorProgressMetadata::Download { peer },
+                    message: error.to_string().into(),
+                })
+                .await;
                 return Err(ArtifactFetchError::HttpError { peer, error });
             }
         };
@@ -310,13 +308,12 @@ impl Peers {
                     );
                     downloaded_bytes += bytes.len() as u64;
                     artifact_bytes.push_chunk(bytes);
-                    _ = cx
-                        .send_progress(StepProgress::with_current_and_total(
-                            downloaded_bytes,
-                            total_bytes,
-                            metadata.clone(),
-                        ))
-                        .await;
+                    cx.send_progress(StepProgress::with_current_and_total(
+                        downloaded_bytes,
+                        total_bytes,
+                        metadata.clone(),
+                    ))
+                    .await;
                 }
                 Ok(Some(Err(error))) => {
                     slog::debug!(
@@ -324,12 +321,11 @@ impl Peers {
                         "received error from peer, sending cancellation: {}",
                         DisplayErrorChain::new(&error),
                     );
-                    _ = cx
-                        .send_progress(StepProgress::Reset {
-                            metadata: metadata.clone(),
-                            message: error.to_string().into(),
-                        })
-                        .await;
+                    cx.send_progress(StepProgress::Reset {
+                        metadata: metadata.clone(),
+                        message: error.to_string().into(),
+                    })
+                    .await;
                     return Err(ArtifactFetchError::HttpError {
                         peer,
                         error: error.into(),
@@ -341,16 +337,15 @@ impl Peers {
                 }
                 Err(_) => {
                     // The operation timed out.
-                    _ = cx
-                        .send_progress(StepProgress::Reset {
-                            metadata,
-                            message: format!(
-                                "operation timed out ({:?})",
-                                self.timeout
-                            )
-                            .into(),
-                        })
-                        .await;
+                    cx.send_progress(StepProgress::Reset {
+                        metadata,
+                        message: format!(
+                            "operation timed out ({:?})",
+                            self.timeout
+                        )
+                        .into(),
+                    })
+                    .await;
                     return Err(ArtifactFetchError::Timeout {
                         peer,
                         timeout: self.timeout,
@@ -366,10 +361,8 @@ impl Peers {
                 artifact_size: total_bytes,
                 downloaded_bytes,
             };
-            _ = cx.send_progress(StepProgress::reset(
-                metadata,
-                error.to_string(),
-            ));
+            cx.send_progress(StepProgress::reset(metadata, error.to_string()))
+                .await;
             return Err(error);
         }
 

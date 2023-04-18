@@ -57,6 +57,7 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{create_instance, create_project};
 use nexus_test_utils_macros::nexus_test;
+use omicron_sled_agent::sim;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -3056,9 +3057,15 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let addr = cptestctx.server.get_http_server_internal_address().await;
         let update_directory = std::path::Path::new("/should/not/be/used");
         additional_sleds.push(
-            start_sled_agent(log, addr, sa_id, &update_directory)
-                .await
-                .unwrap(),
+            start_sled_agent(
+                log,
+                addr,
+                sa_id,
+                &update_directory,
+                sim::SimMode::Explicit,
+            )
+            .await
+            .unwrap(),
         );
     }
 

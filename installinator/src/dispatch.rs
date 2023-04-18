@@ -9,7 +9,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent,
-    InstallinatorStepId, StepContext, StepOutcome, UpdateEngine,
+    InstallinatorStepId, StepContext, UpdateEngine,
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
@@ -198,7 +198,7 @@ impl InstallOpts {
                 "Downloading artifact",
                 |cx| async move {
                     let host_phase_2_artifact =
-                        fetch_artifact(cx, &host_phase_2_id, discovery, &log)
+                        fetch_artifact(&cx, &host_phase_2_id, discovery, &log)
                             .await?;
 
                     let address = host_phase_2_artifact.addr;
@@ -223,7 +223,7 @@ impl InstallOpts {
                 "Downloading artifact",
                 |cx| async move {
                     let control_plane_artifact =
-                        fetch_artifact(cx, &control_plane_id, discovery, &log)
+                        fetch_artifact(&cx, &control_plane_id, discovery, &log)
                             .await?;
 
                     let address = control_plane_artifact.addr;
@@ -247,39 +247,43 @@ impl InstallOpts {
 
         // XXX: look at breaking this up into separate steps. This is tricky
         // because of the combined logic around handling retries.
-        engine.new_step(
-            InstallinatorComponent::Both,
-            InstallinatorStepId::Write,
-            "Writing host and control plane artifacts",
-            |cx| async move {
-                let host_phase_2_artifact =
-                    host_phase_2_artifact.into_value(cx.token()).await;
-                let control_plane_artifact =
-                    control_plane_artifact.into_value(cx.token()).await;
+        engine
+            .new_step(
+                InstallinatorComponent::Both,
+                InstallinatorStepId::Write,
+                "Writing host and control plane artifacts",
+                |cx| async move {
+                    let host_phase_2_artifact =
+                        host_phase_2_artifact.into_value(cx.token()).await;
+                    let control_plane_artifact =
+                        control_plane_artifact.into_value(cx.token()).await;
 
-                let mut writer = ArtifactWriter::new(
-                    &host_2_phase_id_2,
-                    &host_phase_2_artifact.artifact,
-                    &control_plane_id_2,
-                    &control_plane_artifact.artifact,
-                    destination,
-                );
+                    let mut writer = ArtifactWriter::new(
+                        &host_2_phase_id_2,
+                        &host_phase_2_artifact.artifact,
+                        &control_plane_id_2,
+                        &control_plane_artifact.artifact,
+                        destination,
+                    );
 
-                let slots_written = writer.write(&log, &cx).await;
+                    let slots_written = writer.write(&cx, &log).await;
 
-                // TODO: warning message in case one of the slots wasn't
-                // written?
+                    // TODO: warning message in case one of the slots wasn't
+                    // written?
 
-                // TODO: verify artifact was correctly written out to disk.
+                    // TODO: verify artifact was correctly written out to disk.
 
-                StepResult::success(
-                    (),
-                    InstallinatorCompletionMetadata::Write { slots_written },
-                )
-            },
-        );
+                    StepResult::success(
+                        (),
+                        InstallinatorCompletionMetadata::Write {
+                            slots_written,
+                        },
+                    )
+                },
+            )
+            .register();
 
-        engine.execute().await;
+        engine.execute().await.context("failed to execute installinator")?;
 
         // Wait for all progress reports to be sent.
         progress_handle.await.context("progress reporter to complete")?;
@@ -296,7 +300,7 @@ impl InstallOpts {
 }
 
 async fn fetch_artifact(
-    cx: StepContext,
+    cx: &StepContext,
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
     log: &slog::Logger,

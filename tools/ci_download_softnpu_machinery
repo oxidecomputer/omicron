@@ -30,11 +30,3 @@ if [[ ! -f out/softnpu/libsidecar_lite.so ]]; then
     curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3Y38K0Q14F2989R20QCBA/Ny1N0clhEwz2nfbsdTY8ta7pd9IYy1ofxG6ViCDN6Uy4xW3F/01GTD3YZ0TC9SCB4TFNYWP0DEM/01GTD4CA8KRGR8HK4S6B0DEEJC/libsidecar_lite.so
     mv libsidecar_lite.so out/softnpu/
 fi
-
-# This is the CLI client for dendrite
-if [[ ! -f out/softnpu/swadm ]]; then
-    echo "fetching swadm"
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GVRJ8RKWX9R26DX39KMGYZ3Z/IXahhCNnTV5VY8QPRWC9acX9ZNaDFLnY7TyTOZ0ch3rnHFqs/01GVRJ9QZ278DAD31FVSD5NH2A/01GVRKVC0F833P1XR0W9W8X6N7/swadm
-    chmod +x swadm
-    mv swadm out/softnpu/
-fi

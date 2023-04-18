@@ -9,8 +9,7 @@ use std::time::Duration;
 use super::setup::WicketdTestContext;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use wicketd_client::types::GetInventoryParams;
-use wicketd_client::GetInventoryResponse;
+use wicketd_client::types::{GetInventoryParams, GetInventoryResponse};
 
 #[tokio::test]
 async fn test_inventory() {
@@ -27,7 +26,7 @@ async fn test_inventory() {
                 .await
                 .expect("get_inventory succeeded")
                 .into_inner();
-            match response.into() {
+            match response {
                 GetInventoryResponse::Response { inventory, .. } => {
                     break inventory
                 }

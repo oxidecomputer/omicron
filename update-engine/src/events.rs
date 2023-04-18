@@ -60,6 +60,7 @@ impl<S: StepSpec> Event<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "StepEventFor{S}")]
 pub struct StepEvent<S: StepSpec> {
     /// Total time elapsed since the start of execution.
     pub total_elapsed: Duration,
@@ -103,6 +104,7 @@ impl<S: StepSpec> StepEvent<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case", tag = "kind")]
+#[schemars(rename = "StepEventKindFor{S}")]
 pub enum StepEventKind<S: StepSpec> {
     /// No steps were defined, and the executor exited without doing anything.
     ///
@@ -261,6 +263,23 @@ pub enum StepEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEventKind<S> {
+    /// Returns true if this is a terminal step event.
+    ///
+    /// Terminal events guarantee that there are no further events coming for this update engine.
+    pub fn is_terminal(&self) -> bool {
+        match self {
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionCompleted { .. }
+            | StepEventKind::ExecutionFailed { .. } => true,
+            StepEventKind::ExecutionStarted { .. }
+            | StepEventKind::ProgressReset { .. }
+            | StepEventKind::AttemptRetry { .. }
+            | StepEventKind::StepCompleted { .. }
+            | StepEventKind::Nested { .. }
+            | StepEventKind::Unknown => false,
+        }
+    }
+
     /// Returns the priority of the event.
     ///
     /// For more about this, see [`StepEventPriority`].
@@ -580,6 +599,7 @@ pub enum StepEventPriority {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case", tag = "kind")]
+#[schemars(rename = "StepOutcomeFor{S}")]
 pub enum StepOutcome<S: StepSpec> {
     /// The step completed successfully.
     Success {
@@ -676,6 +696,7 @@ impl<S: StepSpec> StepOutcome<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "ProgressEventFor{S}")]
 pub struct ProgressEvent<S: StepSpec> {
     /// Total time elapsed since the start of execution.
     pub total_elapsed: Duration,
@@ -719,6 +740,7 @@ impl<S: StepSpec> ProgressEvent<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case", tag = "kind")]
+#[schemars(rename = "ProgressEventKindFor{S}")]
 pub enum ProgressEventKind<S: StepSpec> {
     Progress {
         /// Information about the step.
@@ -861,6 +883,7 @@ impl<S: StepSpec> ProgressEventKind<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "StepInfoFor{S}")]
 pub struct StepInfo<S: StepSpec> {
     /// An identifier for this step.
     pub id: S::StepId,
@@ -930,6 +953,7 @@ impl<S: StepSpec> StepInfo<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "StepComponentSummaryFor{S}")]
 pub struct StepComponentSummary<S: StepSpec> {
     /// The component.
     pub component: S::Component,
@@ -973,6 +997,7 @@ impl<S: StepSpec> StepComponentSummary<S> {
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[derive_where(Clone, Debug, Eq, PartialEq)]
 #[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "StepInfoWithMetadataFor{S}")]
 pub struct StepInfoWithMetadata<S: StepSpec> {
     /// Information about this step.
     pub info: StepInfo<S>,

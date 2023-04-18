@@ -97,6 +97,9 @@ impl MockPeersUniverse {
         )
     }
 
+    /// On success this returns (successful attempt, peer).
+    ///
+    /// On failure this returns the number of attempts that failed.
     fn expected_result(
         &self,
         timeout: Duration,
@@ -112,7 +115,11 @@ impl MockPeersUniverse {
                     .map(|addr| (attempt + 1, addr))
             })
             .next()
-            .ok_or_else(|| self.attempt_bitmaps.len())
+            .ok_or_else(|| {
+                // We're going to try one last time after the attempt bitmaps
+                // run out, then abort. Hence + 1.
+                self.attempt_bitmaps.len() + 1
+            })
     }
 
     fn attempts(&self) -> impl Iterator<Item = Result<MockPeers>> + '_ {
@@ -548,8 +555,9 @@ mod tests {
     use bytes::Buf;
     use futures::{future, StreamExt};
     use installinator_common::{
-        InstallinatorCompletionMetadata, InstallinatorProgressMetadata,
-        StepEvent, StepEventKind, StepOutcome, UpdateEngine,
+        InstallinatorCompletionMetadata, InstallinatorComponent,
+        InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
+        StepEvent, StepEventKind, StepOutcome, StepResult, UpdateEngine,
     };
     use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
@@ -571,7 +579,7 @@ mod tests {
             let expected_result = universe.expected_result(timeout);
             let expected_artifact = universe.artifact.clone();
 
-            let mut attempts = universe.attempts();
+            let attempts = universe.attempts();
 
             let (report_sender, report_receiver) = mpsc::channel(512);
 
@@ -601,26 +609,33 @@ mod tests {
             let progress_handle = progress_reporter.start();
 
             let engine = UpdateEngine::new(&logctx.log, event_sender);
+            let log = logctx.log.clone();
+            let artifact_handle = engine
+                .new_step(
+                    InstallinatorComponent::HostPhase2,
+                    InstallinatorStepId::Download,
+                    "Downloading artifact",
+                    |cx| async move {
+                        let artifact =
+                            fetch_artifact(&cx, &log, attempts, timeout)
+                                .await?;
+                        let address = artifact.addr;
+                        StepResult::success(
+                            artifact,
+                            InstallinatorCompletionMetadata::Download {
+                                address,
+                            },
+                        )
+                    },
+                )
+                .register();
 
-            let fetched_artifact = FetchedArtifact::loop_fetch_from_peers(
-                &logctx.log,
-                || match attempts.next() {
-                    Some(Ok(peers)) => future::ok(Peers::new(
-                        &logctx.log,
-                        Box::new(peers),
-                        timeout,
-                    )),
-                    Some(Err(error)) => {
-                        future::err(DiscoverPeersError::Retry(error))
-                    }
-                    None => future::err(DiscoverPeersError::Abort(
-                        anyhow::anyhow!("ran out of attempts"),
-                    )),
-                },
-                &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
-                &event_sender,
-            )
-            .await;
+            let fetched_artifact = match engine.execute().await {
+                Ok(completion_cx) => {
+                    Ok(artifact_handle.into_value(completion_cx.token()).await)
+                }
+                Err(error) => Err(error),
+            };
 
             progress_handle
                 .await
@@ -665,6 +680,32 @@ mod tests {
 
             logctx.cleanup_successful();
         });
+    }
+
+    async fn fetch_artifact(
+        cx: &StepContext,
+        log: &slog::Logger,
+        attempts: impl IntoIterator<Item = Result<MockPeers>>,
+        timeout: Duration,
+    ) -> Result<FetchedArtifact> {
+        let mut attempts = attempts.into_iter();
+        FetchedArtifact::loop_fetch_from_peers(
+            cx,
+            log,
+            || match attempts.next() {
+                Some(Ok(peers)) => {
+                    future::ok(Peers::new(&log, Box::new(peers), timeout))
+                }
+                Some(Err(error)) => {
+                    future::err(DiscoverPeersError::Retry(error))
+                }
+                None => future::err(DiscoverPeersError::Abort(
+                    anyhow::anyhow!("ran out of attempts"),
+                )),
+            },
+            &dummy_artifact_hash_id(KnownArtifactKind::ControlPlane),
+        )
+        .await
     }
 
     fn assert_progress_reports(
@@ -725,14 +766,7 @@ mod tests {
 
         for event in all_step_events {
             match &event.kind {
-                StepEventKind::ProgressReset {
-                    step,
-                    attempt,
-                    metadata,
-                    step_elapsed,
-                    attempt_elapsed,
-                    message,
-                } => {
+                StepEventKind::ProgressReset { attempt, metadata, .. } => {
                     if *attempt == expected_attempt {
                         match metadata {
                             InstallinatorProgressMetadata::Download {
@@ -749,13 +783,7 @@ mod tests {
                         };
                     }
                 }
-                StepEventKind::AttemptRetry {
-                    step,
-                    next_attempt,
-                    step_elapsed,
-                    attempt_elapsed,
-                    message,
-                } => {
+                StepEventKind::AttemptRetry { next_attempt, .. } => {
                     // It's hard to say anything about failing attempts for now
                     // because it's possible we didn't have any peers. In the
                     // future we can look at the MockPeersUniverse to ensure
@@ -764,16 +792,13 @@ mod tests {
 
                     assert!(
                         *next_attempt <= expected_attempt,
-                        "next attempt {next_attempt} \
-                             is less than {expected_attempt}"
+                        "next attempt {next_attempt} is <= {expected_attempt} + 1"
                     );
                 }
                 StepEventKind::ExecutionCompleted {
-                    last_step,
                     last_attempt,
                     last_outcome,
-                    step_elapsed,
-                    attempt_elapsed,
+                    ..
                 } => {
                     assert_eq!(
                         *last_attempt, expected_attempt,
@@ -792,7 +817,7 @@ mod tests {
                             );
                         }
                         other => {
-                            panic!("expected success, found {last_outcome:?}");
+                            panic!("expected success, found {other:?}");
                         }
                     }
                     saw_success = true;
@@ -814,27 +839,14 @@ mod tests {
         let mut saw_failure = false;
         for event in all_step_events {
             match &event.kind {
-                StepEventKind::AttemptRetry {
-                    step,
-                    next_attempt,
-                    step_elapsed,
-                    attempt_elapsed,
-                    message,
-                } => {
+                StepEventKind::AttemptRetry { next_attempt, .. } => {
                     assert!(
                         *next_attempt <= expected_total_attempts,
                         "next attempt {next_attempt} \
                              is less than {expected_total_attempts}"
                     );
                 }
-                StepEventKind::ExecutionFailed {
-                    failed_step,
-                    total_attempts,
-                    step_elapsed,
-                    attempt_elapsed,
-                    message,
-                    causes,
-                } => {
+                StepEventKind::ExecutionFailed { total_attempts, .. } => {
                     assert_eq!(
                         *total_attempts, expected_total_attempts,
                         "total attempts matches expected"

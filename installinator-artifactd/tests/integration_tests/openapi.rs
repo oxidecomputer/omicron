@@ -29,13 +29,7 @@ fn test_server_openapi() {
         .expect("stdout was not valid OpenAPI");
 
     // Check for lint errors.
-    let mut errors = openapi_lint::validate(&spec);
-    // XXX: For types like `StepEvent<InstallinatorSpec>`, schemars generates
-    // names like `StepEvent_for_InstallinatorSpec`. Filter them out since we
-    // can't control those names.
-    errors.retain(|s| {
-        !(s.contains("that is not PascalCase") && s.contains("_for_"))
-    });
+    let errors = openapi_lint::validate(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
     // Confirm that the output hasn't changed. It's expected that we'll change

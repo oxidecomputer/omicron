@@ -543,7 +543,22 @@ impl DiskTest {
             datasets: vec![TestDataset { id: Uuid::new_v4() }],
         };
 
-        self.sled_agent.create_zpool(zpool.id, zpool.size.to_bytes()).await;
+        self.sled_agent
+            .create_external_physical_disk(
+                "test-vendor".into(),
+                "test-serial".into(),
+                "test-model".into(),
+            )
+            .await;
+        self.sled_agent
+            .create_zpool(
+                zpool.id,
+                "test-vendor".into(),
+                "test-serial".into(),
+                "test-model".into(),
+                zpool.size.to_bytes(),
+            )
+            .await;
 
         for dataset in &zpool.datasets {
             let address = self

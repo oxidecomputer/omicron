@@ -218,6 +218,18 @@ pub struct StepHandle<T, S> {
 }
 
 impl<T, S> StepHandle<T, S> {
+    /// Creates a `StepHandle` that immediately provides a value.
+    ///
+    /// The value is always available and can be used within any steps.
+    pub fn ready(value: T) -> Self {
+        let (sender, receiver) = oneshot::channel();
+        // Can't use expect here because T doesn't implement Debug.
+        if let Err(_) = sender.send(value) {
+            unreachable!("we're holding the receiver open")
+        }
+        Self::new(receiver)
+    }
+
     pub(crate) fn new(receiver: oneshot::Receiver<T>) -> Self {
         Self { receiver, _marker: PhantomData }
     }

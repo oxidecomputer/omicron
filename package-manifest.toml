@@ -190,13 +190,20 @@ source.type = "local"
 source.rust.binary_names = ["wicket"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/switch_zone_setup", to = "/var/svc/manifest/site/switch_zone_setup" },
-  { from = "wicket/scripts/switch_zone_setup", to = "/opt/oxide/wicket/bin/switch_zone_setup" },
   { from = "wicket/zone-etc", to = "/etc" },
 ]
 output.type = "zone"
 output.intermediate_only = true
 
+[package.switch_zone_setup]
+service_name = "switch_zone_setup"
+source.type = "local"
+source.paths = [
+  { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
+  { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
+]
+output.type = "zone"
+output.intermediate_only = true
 
 # Packages not built within Omicron, but which must be imported.
 
@@ -255,11 +262,27 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "459ca9f302b78c78aafc836d9ace7c22067f0b65"
+source.commit = "866dd228d07944b3f0116ed67a10e7f9b58495fb"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "c365c25f87cb13d2960dc196cd18849dc99bbba0f992f7cb4168feff47fa855d"
+source.sha256 = "b1a74fb788f2873414d6e3f77b6eb0dc0f2b8894c17cbaac380f68e6412d59d5"
 output.type = "tarball"
+
+[package.mg-ddm]
+service_name = "mg-ddm"
+# Note: unlike every other package, `maghemite` is not restricted to either the
+# "standard" or "trampoline" image; it is included in both.
+source.type = "prebuilt"
+source.repo = "maghemite"
+# Updating the commit hash here currently requires also updating
+# `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
+# building `ddm-admin-client` (which will instruct you to update
+# `tools/maghemite_openapi_version`).
+source.commit = "866dd228d07944b3f0116ed67a10e7f9b58495fb"
+# The SHA256 digest is automatically posted to:
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
+source.sha256 = "7ec96d153dc85ed4b54470bd23a4ffc04026cd92fc80ba78caac5daf060d5192"
+output.type = "zone"
 
 [package.dendrite-stub]
 service_name = "dendrite"
@@ -275,8 +298,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "231ad14027c01df2ce239b455220a90a24d4afc7"
-source.sha256 = "240e43417c4f637d2a19b5a343097a134a7d6ac344ff3b62a0824e9f9b7417ad"
+source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
+source.sha256 = "e7021cfa8432a24b21a514433bb08f0ad6754f3b8d0115ae152356566283c72e"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -301,8 +324,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "11e0730f6e300749fe1ca1028bb7ab30f62a9712"
-source.sha256 = "555d31972d7b622353ff61defe372a72e641b9677b10c4fb7e5ca84a1872a025"
+source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
+source.sha256 = "f14914d96bea9d6b4914849ba54d12aa3818637ce070c6db8f830e793e2c596b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -320,8 +343,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "231ad14027c01df2ce239b455220a90a24d4afc7"
-source.sha256 = "b175f795fb966b2c58cc772620b5a3affeb5bc978fe72720df2093576d480e15"
+source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
+source.sha256 = "d69fd155072a33f3395cb60d25eb6f9951d52efe393835b6f7b169cebe6df9b2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -335,7 +358,7 @@ service_name = "switch"
 only_for_targets.switch = "asic"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-asic.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
 output.type = "zone"
 
 # To package and install the stub variant of the switch, do the following:
@@ -348,7 +371,7 @@ service_name = "switch"
 only_for_targets.switch = "stub"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-stub.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
 output.type = "zone"
 
 # To package and install the softnpu variant of the switch, do the following:
@@ -361,5 +384,5 @@ service_name = "switch"
 only_for_targets.switch = "softnpu"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz", "wicketd.tar.gz", "wicket.tar.gz" ]
+source.packages = [ "omicron-gateway.tar.gz", "dendrite-softnpu.tar.gz", "wicketd.tar.gz", "wicket.tar.gz", "mg-ddm.tar.gz", "switch_zone_setup.tar.gz" ]
 output.type = "zone"

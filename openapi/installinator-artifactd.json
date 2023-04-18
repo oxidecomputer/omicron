@@ -405,7 +405,57 @@
           "current"
         ]
       },
-      "ProgressEventKind_for_GenericSpec": {
+      "ProgressEventForGenericSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForGenericSpec"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForInstallinatorSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForInstallinatorSpec"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventKindForGenericSpec": {
         "oneOf": [
           {
             "type": "object",
@@ -446,7 +496,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -489,7 +539,7 @@
                 "description": "The event that occurred.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/ProgressEvent_for_GenericSpec"
+                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
                   }
                 ]
               },
@@ -503,7 +553,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -542,7 +592,7 @@
           }
         ]
       },
-      "ProgressEventKind_for_InstallinatorSpec": {
+      "ProgressEventKindForInstallinatorSpec": {
         "oneOf": [
           {
             "type": "object",
@@ -588,7 +638,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -631,7 +681,7 @@
                 "description": "The event that occurred.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/ProgressEvent_for_GenericSpec"
+                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
                   }
                 ]
               },
@@ -645,7 +695,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -684,56 +734,6 @@
           }
         ]
       },
-      "ProgressEvent_for_GenericSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ProgressEventKind_for_GenericSpec"
-              }
-            ]
-          },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "total_elapsed"
-        ]
-      },
-      "ProgressEvent_for_InstallinatorSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ProgressEventKind_for_InstallinatorSpec"
-              }
-            ]
-          },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "total_elapsed"
-        ]
-      },
       "ProgressReport": {
         "description": "A report, consisting of a list of events and some more metadata.",
         "type": "object",
@@ -742,14 +742,14 @@
             "description": "A list of progress events.\n\nFor now, this is zero or one events since the installinator performs its actions serially.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProgressEvent_for_InstallinatorSpec"
+              "$ref": "#/components/schemas/ProgressEventForInstallinatorSpec"
             }
           },
           "step_events": {
             "description": "A list of step events.\n\nStep events include success and failure events.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/StepEvent_for_InstallinatorSpec"
+              "$ref": "#/components/schemas/StepEventForInstallinatorSpec"
             }
           },
           "total_elapsed": {
@@ -767,7 +767,7 @@
           "total_elapsed"
         ]
       },
-      "StepComponentSummary_for_GenericSpec": {
+      "StepComponentSummaryForGenericSpec": {
         "type": "object",
         "properties": {
           "component": {
@@ -785,7 +785,7 @@
           "total_component_steps"
         ]
       },
-      "StepComponentSummary_for_InstallinatorSpec": {
+      "StepComponentSummaryForInstallinatorSpec": {
         "type": "object",
         "properties": {
           "component": {
@@ -808,7 +808,57 @@
           "total_component_steps"
         ]
       },
-      "StepEventKind_for_GenericSpec": {
+      "StepEventForGenericSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepEventKindForGenericSpec"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "total_elapsed"
+        ]
+      },
+      "StepEventForInstallinatorSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepEventKindForInstallinatorSpec"
+              }
+            ]
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "total_elapsed"
+        ]
+      },
+      "StepEventKindForGenericSpec": {
         "oneOf": [
           {
             "description": "No steps were defined, and the executor exited without doing anything.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
@@ -833,14 +883,14 @@
                 "description": "A list of components, along with the number of items each component has.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepComponentSummary_for_GenericSpec"
+                  "$ref": "#/components/schemas/StepComponentSummaryForGenericSpec"
                 }
               },
               "first_step": {
                 "description": "Information about the first step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -854,7 +904,7 @@
                 "description": "The list of steps that will be executed.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepInfo_for_GenericSpec"
+                  "$ref": "#/components/schemas/StepInfoForGenericSpec"
                 }
               }
             },
@@ -900,7 +950,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -955,7 +1005,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1005,7 +1055,7 @@
                 "description": "The next step that is being started.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1013,7 +1063,7 @@
                 "description": "The outcome of the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcome_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForGenericSpec"
                   }
                 ]
               },
@@ -1021,7 +1071,7 @@
                 "description": "Information about the step that just completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1072,7 +1122,7 @@
                 "description": "The outcome of the last step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcome_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForGenericSpec"
                   }
                 ]
               },
@@ -1080,7 +1130,7 @@
                 "description": "Information about the last step that completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1125,7 +1175,7 @@
                 "description": "Information about the step that failed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1186,7 +1236,7 @@
                 "description": "The event that occurred.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepEvent_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepEventForGenericSpec"
                   }
                 ]
               },
@@ -1200,7 +1250,7 @@
                 "description": "Information about the step that's occurring.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
                   }
                 ]
               },
@@ -1239,7 +1289,7 @@
           }
         ]
       },
-      "StepEventKind_for_InstallinatorSpec": {
+      "StepEventKindForInstallinatorSpec": {
         "oneOf": [
           {
             "description": "No steps were defined, and the executor exited without doing anything.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
@@ -1264,14 +1314,14 @@
                 "description": "A list of components, along with the number of items each component has.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepComponentSummary_for_InstallinatorSpec"
+                  "$ref": "#/components/schemas/StepComponentSummaryForInstallinatorSpec"
                 }
               },
               "first_step": {
                 "description": "Information about the first step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1285,7 +1335,7 @@
                 "description": "The list of steps that will be executed.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepInfo_for_InstallinatorSpec"
+                  "$ref": "#/components/schemas/StepInfoForInstallinatorSpec"
                 }
               }
             },
@@ -1336,7 +1386,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1391,7 +1441,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1441,7 +1491,7 @@
                 "description": "The next step that is being started.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1449,7 +1499,7 @@
                 "description": "The outcome of the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcome_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForInstallinatorSpec"
                   }
                 ]
               },
@@ -1457,7 +1507,7 @@
                 "description": "Information about the step that just completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1508,7 +1558,7 @@
                 "description": "The outcome of the last step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcome_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForInstallinatorSpec"
                   }
                 ]
               },
@@ -1516,7 +1566,7 @@
                 "description": "Information about the last step that completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1561,7 +1611,7 @@
                 "description": "Information about the step that failed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1622,7 +1672,7 @@
                 "description": "The event that occurred.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepEvent_for_GenericSpec"
+                    "$ref": "#/components/schemas/StepEventForGenericSpec"
                   }
                 ]
               },
@@ -1636,7 +1686,7 @@
                 "description": "Information about the step that's occurring.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadata_for_InstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
                   }
                 ]
               },
@@ -1675,104 +1725,7 @@
           }
         ]
       },
-      "StepEvent_for_GenericSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepEventKind_for_GenericSpec"
-              }
-            ]
-          },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "total_elapsed"
-        ]
-      },
-      "StepEvent_for_InstallinatorSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepEventKind_for_InstallinatorSpec"
-              }
-            ]
-          },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "total_elapsed"
-        ]
-      },
-      "StepInfoWithMetadata_for_GenericSpec": {
-        "description": "Serializable information about a step.",
-        "type": "object",
-        "properties": {
-          "info": {
-            "description": "Information about this step.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepInfo_for_GenericSpec"
-              }
-            ]
-          },
-          "metadata": {
-            "nullable": true,
-            "description": "Additional metadata associated with this step."
-          }
-        },
-        "required": [
-          "info"
-        ]
-      },
-      "StepInfoWithMetadata_for_InstallinatorSpec": {
-        "description": "Serializable information about a step.",
-        "type": "object",
-        "properties": {
-          "info": {
-            "description": "Information about this step.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepInfo_for_InstallinatorSpec"
-              }
-            ]
-          },
-          "metadata": {
-            "nullable": true,
-            "description": "Additional metadata associated with this step.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstallinatorStepMetadata"
-              }
-            ]
-          }
-        },
-        "required": [
-          "info"
-        ]
-      },
-      "StepInfo_for_GenericSpec": {
+      "StepInfoForGenericSpec": {
         "description": "Serializable information about a step.",
         "type": "object",
         "properties": {
@@ -1814,7 +1767,7 @@
           "total_component_steps"
         ]
       },
-      "StepInfo_for_InstallinatorSpec": {
+      "StepInfoForInstallinatorSpec": {
         "description": "Serializable information about a step.",
         "type": "object",
         "properties": {
@@ -1866,7 +1819,54 @@
           "total_component_steps"
         ]
       },
-      "StepOutcome_for_GenericSpec": {
+      "StepInfoWithMetadataForGenericSpec": {
+        "description": "Serializable information about a step.",
+        "type": "object",
+        "properties": {
+          "info": {
+            "description": "Information about this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepInfoForGenericSpec"
+              }
+            ]
+          },
+          "metadata": {
+            "nullable": true,
+            "description": "Additional metadata associated with this step."
+          }
+        },
+        "required": [
+          "info"
+        ]
+      },
+      "StepInfoWithMetadataForInstallinatorSpec": {
+        "description": "Serializable information about a step.",
+        "type": "object",
+        "properties": {
+          "info": {
+            "description": "Information about this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepInfoForInstallinatorSpec"
+              }
+            ]
+          },
+          "metadata": {
+            "nullable": true,
+            "description": "Additional metadata associated with this step.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstallinatorStepMetadata"
+              }
+            ]
+          }
+        },
+        "required": [
+          "info"
+        ]
+      },
+      "StepOutcomeForGenericSpec": {
         "oneOf": [
           {
             "description": "The step completed successfully.",
@@ -1937,7 +1937,7 @@
           }
         ]
       },
-      "StepOutcome_for_InstallinatorSpec": {
+      "StepOutcomeForInstallinatorSpec": {
         "oneOf": [
           {
             "description": "The step completed successfully.",

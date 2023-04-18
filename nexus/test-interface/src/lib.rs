@@ -39,7 +39,18 @@ use uuid::Uuid;
 
 #[async_trait]
 pub trait NexusServer {
-    async fn start_and_populate(config: &Config, log: &Logger) -> Self;
+    type InternalServer;
+
+    async fn start_internal(
+        config: &Config,
+        log: &Logger,
+    ) -> (Self::InternalServer, SocketAddr);
+
+    async fn start(
+        internal_server: Self::InternalServer,
+        config: &Config,
+        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+    ) -> Self;
 
     async fn get_http_server_external_address(&self) -> Option<SocketAddr>;
     async fn get_https_server_external_address(&self) -> Option<SocketAddr>;

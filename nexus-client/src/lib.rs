@@ -74,6 +74,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             dst_propolis_id: s.dst_propolis_id,
             propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             migration_id: s.migration_id,
+            propolis_gen: s.propolis_gen.into(),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,

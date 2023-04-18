@@ -10,7 +10,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use installinator_artifactd::ProgressReportStatus;
-use installinator_common::{CompletionEventKind, ProgressReport};
+use installinator_common::ProgressReport;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
@@ -53,8 +53,8 @@ impl IprArtifactServer {
         if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
                 self.log,
-                "progress report seen ({} completion events, {} progress events)",
-                report.completion_events.len(),
+                "progress report seen ({} step events, {} progress events)",
+                report.step_events.len(),
                 report.progress_events.len();
                 "update_id" => %update_id
             );
@@ -168,18 +168,17 @@ impl RunningUpdate {
         sender: mpsc::Sender<ProgressReport>,
         report: ProgressReport,
     ) -> Self {
-        let is_completed = Self::is_completed(&report);
+        let is_terminal = Self::is_terminal(&report);
         _ = sender.send(report).await;
-        if is_completed {
+        if is_terminal {
             Self::Closed
         } else {
             Self::ReportsReceived(sender)
         }
     }
 
-    fn is_completed(report: &ProgressReport) -> bool {
-        report.completion_events.last().map(|e| &e.kind)
-            == Some(&CompletionEventKind::Completed)
+    fn is_terminal(report: &ProgressReport) -> bool {
+        report.step_events.last().map(|e| e.kind.is_terminal()).unwrap_or(false)
     }
 }
 
@@ -187,7 +186,11 @@ impl RunningUpdate {
 mod tests {
     use std::time::Duration;
 
-    use installinator_common::CompletionEvent;
+    use installinator_common::{
+        InstallinatorCompletionMetadata, InstallinatorComponent,
+        InstallinatorStepId, M2Slot, StepEvent, StepEventKind, StepInfo,
+        StepInfoWithMetadata, StepOutcome,
+    };
     use omicron_test_utils::dev::test_setup_log;
 
     use super::*;
@@ -238,9 +241,29 @@ mod tests {
         // Send a completion report.
         let completion_report = ProgressReport {
             total_elapsed: Duration::from_secs(4),
-            completion_events: vec![CompletionEvent {
+            step_events: vec![StepEvent {
                 total_elapsed: Duration::from_secs(2),
-                kind: CompletionEventKind::Completed,
+                kind: StepEventKind::ExecutionCompleted {
+                    last_step: StepInfoWithMetadata {
+                        info: StepInfo {
+                            id: InstallinatorStepId::Write,
+                            component: InstallinatorComponent::Both,
+                            description: "Fake step".into(),
+                            index: 0,
+                            component_index: 0,
+                            total_component_steps: 1,
+                        },
+                        metadata: None,
+                    },
+                    last_attempt: 1,
+                    last_outcome: StepOutcome::Success {
+                        metadata: InstallinatorCompletionMetadata::Write {
+                            slots_written: vec![M2Slot::A],
+                        },
+                    },
+                    step_elapsed: Duration::from_secs(1),
+                    attempt_elapsed: Duration::from_secs(1),
+                },
             }],
             ..Default::default()
         };

@@ -20,10 +20,12 @@ mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
 
-# Configuration for interacting with the timeseries database
-[timeseries_db]
-address = "[fd00:1122:3344:0101::6]:8123"
-
-# Configuration for interacting with the dataplane daemon
-[dendrite]
-address = "[fd00:1122:3344:101::2]:12224"
+[background_tasks]
+dns_internal.period_secs_config = 60
+dns_internal.period_secs_servers = 60
+dns_internal.period_secs_propagation = 60
+dns_internal.max_concurrent_server_updates = 5
+dns_external.period_secs_config = 60
+dns_external.period_secs_servers = 60
+dns_external.period_secs_propagation = 60
+dns_external.max_concurrent_server_updates = 5

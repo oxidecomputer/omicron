@@ -32,7 +32,6 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
-use installinator_common::ProgressEventKind;
 use installinator_common::ProgressReport;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
@@ -636,89 +635,32 @@ impl UpdateDriver {
         }
     }
 
-    async fn process_installinator_report(
-        &mut self,
-        mut report: ProgressReport,
-    ) {
+    async fn process_installinator_report(&mut self, report: ProgressReport) {
         let now = Instant::now();
 
-        // Currently, progress reports have zero or one progress events. Don't
-        // assert that here, in case this version of wicketd is updating a
-        // future installinator which reports multiple progress events.
-        let new_state =
-            if let Some(event) = report.progress_events.drain(..).next() {
-                let timestamp = report
-                    .total_elapsed
-                    .checked_sub(event.total_elapsed)
-                    .and_then(|age| now.checked_sub(age))
-                    .unwrap_or(now);
+        // XXX: This needs to be hooked up to wicketd once that's on the update
+        // engine.
+        let new_state = UpdateState {
+            timestamp: now,
+            kind: UpdateStateKind::WaitingForProgress {
+                component: "installinator".to_owned(),
+            },
+        };
 
-                let kind = match event.kind {
-                    ProgressEventKind::DownloadProgress {
-                        attempt,
-                        kind,
-                        peer: _peer,
-                        downloaded_bytes,
-                        total_bytes,
-                        elapsed,
-                    } => UpdateStateKind::ArtifactDownloadProgress {
-                        attempt,
-                        kind,
-                        downloaded_bytes,
-                        total_bytes,
-                        elapsed,
-                    },
-                    ProgressEventKind::FormatProgress {
-                        attempt,
-                        path,
-                        percentage,
-                        elapsed,
-                    } => UpdateStateKind::InstallinatorFormatProgress {
-                        attempt,
-                        path,
-                        percentage,
-                        elapsed,
-                    },
-                    ProgressEventKind::WriteProgress {
-                        attempt,
-                        kind,
-                        destination,
-                        written_bytes,
-                        total_bytes,
-                        elapsed,
-                    } => UpdateStateKind::ArtifactWriteProgress {
-                        attempt,
-                        kind,
-                        destination: Some(destination),
-                        written_bytes,
-                        total_bytes,
-                        elapsed,
-                    },
-                };
-                UpdateState { timestamp, kind }
-            } else {
-                UpdateState {
-                    timestamp: now,
-                    kind: UpdateStateKind::WaitingForProgress {
-                        component: "installinator".to_owned(),
-                    },
-                }
-            };
-
-        let events = report.completion_events.into_iter().map(|event| {
-            let event_kind =
-                UpdateNormalEventKind::InstallinatorEvent(event.kind);
+        let events = report.step_events.into_iter().map(|event| {
+            let total_elapsed = event.total_elapsed;
+            let normal_event = UpdateNormalEventKind::InstallinatorEvent(event);
 
             // Convert the agent of this event from installinator into
             // an `Instant`; if we can't, log it and lie that the event
             // occurred "now".
             let timestamp = report
                 .total_elapsed
-                .checked_sub(event.total_elapsed)
+                .checked_sub(total_elapsed)
                 .and_then(|age| now.checked_sub(age))
                 .unwrap_or(now);
 
-            (timestamp, UpdateEventKind::Normal(event_kind))
+            (timestamp, UpdateEventKind::Normal(normal_event))
         });
 
         self.push_update_events(events, Some(new_state));

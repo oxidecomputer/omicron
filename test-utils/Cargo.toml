@@ -17,6 +17,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
 usdt.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

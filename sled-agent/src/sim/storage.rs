@@ -19,7 +19,9 @@ use crucible_agent_client::types::{
 use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpError;
 use futures::lock::Mutex;
-use nexus_client::types::{ByteCount, ZpoolPutRequest};
+use nexus_client::types::{
+    ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
+};
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -369,6 +371,10 @@ impl CrucibleServer {
     }
 }
 
+struct PhysicalDisk {
+    _variant: PhysicalDiskKind,
+}
+
 struct Zpool {
     datasets: HashMap<Uuid, CrucibleServer>,
 }
@@ -424,11 +430,19 @@ impl Zpool {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DiskName {
+    vendor: String,
+    serial: String,
+    model: String,
+}
+
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
     nexus_client: Arc<NexusClient>,
     log: Logger,
+    physical_disks: HashMap<DiskName, PhysicalDisk>,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
@@ -445,19 +459,61 @@ impl Storage {
             sled_id,
             nexus_client,
             log,
+            physical_disks: HashMap::new(),
             zpools: HashMap::new(),
             crucible_ip,
             next_crucible_port: 100,
         }
     }
 
+    pub async fn insert_physical_disk(
+        &mut self,
+        vendor: String,
+        serial: String,
+        model: String,
+        variant: PhysicalDiskKind,
+    ) {
+        let identifier = DiskName {
+            vendor: vendor.clone(),
+            serial: serial.clone(),
+            model: model.clone(),
+        };
+        self.physical_disks
+            .insert(identifier, PhysicalDisk { _variant: variant });
+
+        // Notify Nexus
+        let request = PhysicalDiskPutRequest {
+            vendor,
+            serial,
+            model,
+            variant,
+            sled_id: self.sled_id,
+        };
+        self.nexus_client
+            .physical_disk_put(&request)
+            .await
+            .expect("Failed to notify Nexus about new Physical Disk");
+    }
+
     /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
-    pub async fn insert_zpool(&mut self, zpool_id: Uuid, size: u64) {
+    pub async fn insert_zpool(
+        &mut self,
+        zpool_id: Uuid,
+        disk_vendor: String,
+        disk_serial: String,
+        disk_model: String,
+        size: u64,
+    ) {
         // Update our local data
         self.zpools.insert(zpool_id, Zpool::new());
 
         // Notify Nexus
-        let request = ZpoolPutRequest { size: ByteCount(size) };
+        let request = ZpoolPutRequest {
+            size: ByteCount(size),
+            disk_vendor,
+            disk_serial,
+            disk_model,
+        };
         self.nexus_client
             .zpool_put(&self.sled_id, &zpool_id, &request)
             .await

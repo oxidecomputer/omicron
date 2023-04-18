@@ -178,7 +178,9 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Upserts a physical disk into the database, updating it if it already exists.
+    /// Removes a physical disk from the database.
+    ///
+    /// TODO: Remove Zpools and datasets contained within this disk.
     pub async fn delete_physical_disk(
         &self,
         opctx: &OpContext,
@@ -208,12 +210,28 @@ impl super::Nexus {
     /// Upserts a Zpool into the database, updating it if it already exists.
     pub async fn upsert_zpool(
         &self,
+        opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
         info: ZpoolPutRequest,
     ) -> Result<(), Error> {
         info!(self.log, "upserting zpool"; "sled_id" => sled_id.to_string(), "zpool_id" => id.to_string());
-        let zpool = db::model::Zpool::new(id, sled_id, &info);
+
+        let (_authz_disk, db_disk) =
+            LookupPath::new(&opctx, &self.db_datastore)
+                .physical_disk(
+                    &info.disk_vendor,
+                    &info.disk_serial,
+                    &info.disk_model,
+                )
+                .fetch()
+                .await?;
+        let zpool = db::model::Zpool::new(
+            id,
+            sled_id,
+            db_disk.uuid(),
+            info.size.into(),
+        );
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
@@ -254,6 +272,13 @@ impl super::Nexus {
         );
         let service = db::model::Service::new(id, sled_id, address, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
+
+        if kind == ServiceKind::ExternalDNSConfig {
+            self.background_tasks.activate(&self.task_external_dns_servers);
+        } else if kind == ServiceKind::InternalDNSConfig {
+            self.background_tasks.activate(&self.task_internal_dns_servers);
+        }
+
         Ok(())
     }
 

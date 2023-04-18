@@ -8,7 +8,8 @@ use camino::Utf8PathBuf;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::PowerState;
 use gateway_client::types::UpdatePreparationProgress;
-use installinator_common::CompletionEventKind;
+use installinator_common::InstallinatorSpec;
+use installinator_common::StepEvent;
 use omicron_common::update::ArtifactId;
 use omicron_common::update::ArtifactKind;
 use schemars::gen::SchemaGenerator;
@@ -43,6 +44,7 @@ pub enum UpdateStateKind {
         artifact: ArtifactId,
         progress: Option<UpdatePreparationProgress>,
     },
+    #[allow(unused)]
     ArtifactDownloadProgress {
         attempt: usize,
         kind: ArtifactKind,
@@ -59,6 +61,7 @@ pub enum UpdateStateKind {
         total_bytes: u64,
         elapsed: Duration,
     },
+    #[allow(unused)]
     InstallinatorFormatProgress {
         attempt: usize,
         #[schemars(schema_with = "path_schema")]
@@ -99,7 +102,7 @@ pub enum UpdateEventKind {
 pub enum UpdateNormalEventKind {
     SpResetComplete,
     ArtifactUpdateComplete { artifact: ArtifactId },
-    InstallinatorEvent(CompletionEventKind),
+    InstallinatorEvent(StepEvent<InstallinatorSpec>),
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
