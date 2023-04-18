@@ -330,7 +330,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
 
 /*
  * ZPools of Storage, attached to Sleds.
- * Typically these are backed by a single physical disk.
+ * These are backed by a single physical disk.
  */
 CREATE TABLE omicron.public.Zpool (
     /* Identity metadata (asset) */
@@ -343,7 +343,8 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    /* TODO: Could also store physical disk FK here */
+    /* FK into the Physical Disk table */
+    physical_disk_id UUID NOT NULL,
 
     total_size INT NOT NULL
 );
@@ -788,6 +789,15 @@ CREATE TABLE omicron.public.instance (
      * Identifies an ongoing migration for this instance.
      */
     migration_id UUID,
+
+    /*
+     * A generation number protecting information about the "location" of a
+     * running instance: its active server ID, Propolis ID and IP, and migration
+     * information. This is used for mutual exclusion (to allow only one
+     * migration to proceed at a time) and to coordinate state changes when a
+     * migration finishes.
+     */
+    propolis_generation INT NOT NULL,
 
     /* Instance configuration */
     ncpus INT NOT NULL,
@@ -1648,7 +1658,7 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'switch_rot'
 );
 
-CREATE TABLE omicron.public.update_available_artifact (
+CREATE TABLE omicron.public.update_artifact (
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
@@ -1668,7 +1678,7 @@ CREATE TABLE omicron.public.update_available_artifact (
 );
 
 /* This index is used to quickly find outdated artifacts. */
-CREATE INDEX ON omicron.public.update_available_artifact (
+CREATE INDEX ON omicron.public.update_artifact (
     targets_role_version
 );
 

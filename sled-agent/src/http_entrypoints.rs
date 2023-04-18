@@ -4,10 +4,10 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
-    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody, ServiceEnsureBody,
-    TimeSync, Zpool,
+    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -29,17 +29,20 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
-        api.register(services_put)?;
-        api.register(zpools_get)?;
-        api.register(filesystem_put)?;
-        api.register(instance_put)?;
         api.register(disk_put)?;
-        api.register(update_artifact)?;
+        api.register(filesystem_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
-        api.register(vpc_firewall_rules_put)?;
+        api.register(instance_put_state)?;
+        api.register(instance_register)?;
+        api.register(instance_unregister)?;
+        api.register(services_put)?;
+        api.register(sled_role_get)?;
         api.register(set_v2p)?;
         api.register(del_v2p)?;
         api.register(timesync_get)?;
+        api.register(update_artifact)?;
+        api.register(vpc_firewall_rules_put)?;
+        api.register(zpools_get)?;
 
         Ok(())
     }
@@ -77,6 +80,17 @@ async fn zpools_get(
 }
 
 #[endpoint {
+    method = GET,
+    path = "/sled-role",
+}]
+async fn sled_role_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.get_role().await))
+}
+
+#[endpoint {
     method = PUT,
     path = "/filesystem",
 }]
@@ -106,7 +120,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn instance_put(
+async fn instance_register(
     rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
@@ -115,14 +129,45 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(
-            instance_id,
-            body_args.initial,
-            body_args.target,
-            body_args.migrate,
-        )
-        .await
-        .map_err(Error::from)?,
+        sa.instance_ensure_registered(instance_id, body_args.initial)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}",
+}]
+async fn instance_unregister(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(
+        sa.instance_ensure_unregistered(instance_id)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_put_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutStateBody>,
+) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_ensure_state(instance_id, body_args.state)
+            .await
+            .map_err(Error::from)?,
     ))
 }
 

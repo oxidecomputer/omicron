@@ -6,6 +6,7 @@
 
 use ddm_admin_client::types::Ipv6Prefix;
 use ddm_admin_client::Client;
+use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
@@ -41,10 +42,35 @@ pub struct DdmAdminClient {
 }
 
 impl DdmAdminClient {
-    /// Creates a new [`DdmAdminClient`].
-    pub fn new(log: Logger) -> Result<Self, DdmError> {
+    /// Creates a new [`DdmAdminClient`] that points to localhost
+    pub fn localhost(log: Logger) -> Result<Self, DdmError> {
+        Self::new(log, SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0))
+    }
+
+    /// Creates a new [`DdmAdminClient`] that points to the switch zone in a
+    /// sled subnet.
+    pub fn switch_zone(
+        log: Logger,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) -> Result<Self, DdmError> {
+        Self::new(
+            log,
+            SocketAddrV6::new(
+                get_switch_zone_address(sled_subnet),
+                DDMD_PORT,
+                0,
+                0,
+            ),
+        )
+    }
+
+    /// Creates a new [`DdmAdminClient`] that points to an IPv6 address
+    pub fn address(log: Logger, address: Ipv6Addr) -> Result<Self, DdmError> {
+        Self::new(log, SocketAddrV6::new(address, DDMD_PORT, 0, 0))
+    }
+
+    fn new(log: Logger, ddmd_addr: SocketAddrV6) -> Result<Self, DdmError> {
         let dur = std::time::Duration::from_secs(60);
-        let ddmd_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0);
 
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -99,8 +125,8 @@ impl DdmAdminClient {
             // down to just one. Connections on the bootstrap network are always
             // authenticated via sprockets, which only needs one address.
             prefixes.into_iter().find_map(|prefix| {
-                let mut segments = prefix.addr.segments();
-                if prefix.len == BOOTSTRAP_MASK
+                let mut segments = prefix.destination.addr.segments();
+                if prefix.destination.len == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
                     // Bootstrap agent IPs always end in ::1; convert the

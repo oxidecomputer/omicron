@@ -37,6 +37,11 @@ $ ./tools/install_builder_prerequisites.sh
 $ ./tools/install_runner_prerequisites.sh
 ----
 
+There will be several binaries that will need to be in your `PATH`. The various
+prerequisites scripts will alert you to where you can find the binaries to add
+them to your `PATH`. You can also reference the file in `tools/setup-path.sh` for
+an example of how to add them to your `PATH`.
+
 === Make (or unmake) me a Gimlet!
 
 The sled agent expects to manage a real Gimlet. However, until those are built,
@@ -292,7 +297,8 @@ be set as a default route for the Nexus zone.
 | Crucible Downstairs 2      | `[fd00:1122:3344:0101::8]:32345`
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
-| Nexus: External API        | `192.168.1.20:80`
+| External DNS               | `192.168.1.20:53`
+| Nexus: External API        | `192.168.1.21:80`
 | Internet Gateway           | None, but can be set in `smf/sled-agent/config-rss.toml`
 |===================================================================================================
 

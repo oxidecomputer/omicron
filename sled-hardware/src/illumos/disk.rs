@@ -132,7 +132,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
                         paths.devfs_path.display()
                     );
                     // If a zpool does not already exist, create one.
-                    let zpool_name = ZpoolName::new(Uuid::new_v4());
+                    let zpool_name = ZpoolName::new_external(Uuid::new_v4());
                     Zpool::create(zpool_name, dev_path)?;
                     return Ok(vec![Partition::ZfsPool]);
                 }

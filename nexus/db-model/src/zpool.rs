@@ -7,7 +7,6 @@ use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{dataset, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::internal_api;
 use uuid::Uuid;
 
 /// Database representation of a Pool.
@@ -25,6 +24,9 @@ pub struct Zpool {
     // Sled to which this Zpool belongs.
     pub sled_id: Uuid,
 
+    // The physical disk to which this Zpool is attached.
+    pub physical_disk_id: Uuid,
+
     // TODO: In the future, we may expand this structure to include
     // size, allocation, and health information.
     pub total_size: ByteCount,
@@ -34,14 +36,16 @@ impl Zpool {
     pub fn new(
         id: Uuid,
         sled_id: Uuid,
-        info: &internal_api::params::ZpoolPutRequest,
+        physical_disk_id: Uuid,
+        total_size: ByteCount,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             sled_id,
-            total_size: info.size.into(),
+            physical_disk_id,
+            total_size,
         }
     }
 }

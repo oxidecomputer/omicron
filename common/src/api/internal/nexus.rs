@@ -47,6 +47,9 @@ pub struct InstanceRuntimeState {
     pub propolis_addr: Option<SocketAddr>,
     /// migration id (if one in process)
     pub migration_id: Option<Uuid>,
+    /// The generation number for the Propolis and sled identifiers for this
+    /// instance.
+    pub propolis_gen: Generation,
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
     /// memory allocated for this Instance

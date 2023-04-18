@@ -65,11 +65,11 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Get state of one (or all) SPs
+    /// Get state of one SP
     State {
         /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
         #[clap(value_parser = sp_identifier_from_str, action)]
-        sp: Option<SpIdentifier>,
+        sp: SpIdentifier,
     },
 
     /// Get ignition state of one (or all) SPs
@@ -381,13 +381,8 @@ async fn main() -> Result<()> {
 
     match args.command {
         Command::State { sp } => {
-            if let Some(sp) = sp {
-                let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
-                dumper.dump(&info)?;
-            } else {
-                let info = client.sp_list().await?.into_inner();
-                dumper.dump(&info)?;
-            }
+            let info = client.sp_get(sp.type_, sp.slot).await?.into_inner();
+            dumper.dump(&info)?;
         }
         Command::Ignition { sp } => {
             if let Some(sp) = sp {

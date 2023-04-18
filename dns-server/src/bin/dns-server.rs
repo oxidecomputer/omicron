@@ -23,7 +23,7 @@ struct Args {
     http_address: SocketAddrV6,
 
     #[clap(long, action)]
-    dns_address: SocketAddrV6,
+    dns_address: SocketAddr,
 }
 
 #[derive(Deserialize, Debug)]
@@ -50,9 +50,8 @@ async fn main() -> Result<(), anyhow::Error> {
         .to_logger("dns-server")
         .context("failed to create logger")?;
 
-    let dns_server_config = dns_server::dns_server::Config {
-        bind_address: SocketAddr::V6(args.dns_address),
-    };
+    let dns_server_config =
+        dns_server::dns_server::Config { bind_address: args.dns_address };
 
     info!(&log, "config";
         "config" => ?config,
