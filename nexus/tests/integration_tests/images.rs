@@ -166,6 +166,55 @@ async fn test_image_create(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
+async fn test_silo_image_create(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    let silo_images_url = format!("/v1/images");
+
+    // Expect no images in the silo
+    let images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(images.len(), 0);
+
+    // Create an image in the project
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    // Create image
+    NexusRequest::objects_post(client, &silo_images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    let images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].identity.name, "alpine-edge");
+}
+
+#[nexus_test]
 async fn test_image_create_url_404(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
