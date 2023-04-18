@@ -33,6 +33,7 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -56,7 +57,10 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
-use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
+    BackoffError,
+};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
@@ -145,7 +149,7 @@ pub enum Error {
     },
 
     #[error("Error contacting dpd: {0}")]
-    DpdError(#[from] dpd_client::Error<dpd_client::types::Error>),
+    DpdError(#[from] DpdError<DpdTypes::Error>),
 
     #[error("Failed to create Vnic in sled-local zone: {0}")]
     SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
@@ -640,7 +644,7 @@ impl ServiceManager {
             .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
             .await?;
 
-        let dpd_client = dpd_client::Client::new(
+        let dpd_client = DpdClient::new(
             &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
             dpd_client::ClientState {
                 tag: "sled-agent".to_string(),
@@ -693,18 +697,49 @@ impl ServiceManager {
                 None => (external_ips[0], 0, u16::MAX),
             };
 
-            match &target_ip {
-                IpAddr::V4(ip) => {
-                    dpd_client
-                        .nat_ipv4_create(ip, first_port, last_port, &nat_target)
-                        .await?;
+            let nat_create = || async {
+                info!(
+                    self.inner.log, "creating NAT entry for service";
+                    "service" => ?svc,
+                );
+                match &target_ip {
+                    IpAddr::V4(ip) => {
+                        dpd_client
+                            .nat_ipv4_create(
+                                ip,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
+                    IpAddr::V6(ip) => {
+                        dpd_client
+                            .nat_ipv6_create(
+                                ip,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
                 }
-                IpAddr::V6(ip) => {
-                    dpd_client
-                        .nat_ipv6_create(ip, first_port, last_port, &nat_target)
-                        .await?;
-                }
-            }
+                .map_err(BackoffError::transient)?;
+                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+            };
+            let log_failure = |error, _| {
+                warn!(
+                    self.inner.log, "failed to create NAT entry for service";
+                    "error" => ?error,
+                    "service" => ?svc,
+                );
+            };
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                nat_create,
+                log_failure,
+            )
+            .await?;
 
             ports.push(port);
         }
