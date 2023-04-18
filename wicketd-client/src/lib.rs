@@ -4,11 +4,6 @@
 
 //! Interface for making API requests to wicketd
 
-use std::time::Duration;
-
-use serde::{Deserialize, Serialize};
-use types::RackV1Inventory;
-
 progenitor::generate_api!(
     spec = "../openapi/wicketd.json",
     inner_type = slog::Logger,
@@ -38,33 +33,8 @@ progenitor::generate_api!(
         RotInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+    },
+    replace = {
+        Duration = std::time::Duration,
     }
 );
-
-/// A domain type for the response from the `get_inventory` method.
-///
-/// This enum has the same shape as `types::GetInventoryResponse`, but uses `std::time::Duration`
-/// rather than `types::Duration`.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, mgs_last_seen: Duration },
-    Unavailable,
-}
-
-impl From<types::GetInventoryResponse> for GetInventoryResponse {
-    fn from(response: types::GetInventoryResponse) -> Self {
-        match response {
-            types::GetInventoryResponse::Response {
-                inventory,
-                mgs_last_seen,
-            } => {
-                let mgs_last_seen =
-                    Duration::new(mgs_last_seen.secs, mgs_last_seen.nanos);
-                Self::Response { inventory, mgs_last_seen }
-            }
-            types::GetInventoryResponse::Unavailable => Self::Unavailable,
-        }
-    }
-}
