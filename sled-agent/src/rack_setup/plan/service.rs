@@ -512,7 +512,7 @@ impl Plan {
 
                 request.services.push(ServiceZoneRequest {
                     id,
-                    zone_type: ZoneType::NTP,
+                    zone_type: ZoneType::Ntp,
                     addresses: vec![address],
                     gz_addresses: vec![],
                     services: services,

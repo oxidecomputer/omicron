@@ -996,7 +996,7 @@ impl ServiceInner {
                     .filter_map(|svc| {
                         if matches!(
                             svc.zone_type,
-                            ZoneType::InternalDns | ZoneType::NTP
+                            ZoneType::InternalDns | ZoneType::Ntp
                         ) {
                             Some(svc.clone())
                         } else {

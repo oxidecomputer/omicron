@@ -2403,7 +2403,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "n_t_p"
+                  "ntp"
                 ]
               }
             },

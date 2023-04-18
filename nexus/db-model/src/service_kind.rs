@@ -26,7 +26,7 @@ impl_enum_type!(
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Tfport => b"tfport"
-    NTP => b"ntp"
+    Ntp => b"ntp"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {

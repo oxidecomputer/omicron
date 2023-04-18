@@ -378,21 +378,15 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ZoneType {
-    #[serde(rename = "external_dns")]
     ExternalDns,
-    #[serde(rename = "internal_dns")]
     InternalDns,
-    #[serde(rename = "nexus")]
     Nexus,
-    #[serde(rename = "oximeter")]
     Oximeter,
-    #[serde(rename = "switch")]
     Switch,
-    #[serde(rename = "crucible_pantry")]
     CruciblePantry,
-    #[serde(rename = "ntp")]
-    NTP,
+    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
@@ -404,7 +398,7 @@ impl From<ZoneType> for sled_agent_client::types::ZoneType {
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::NTP => Self::Ntp,
+            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -419,7 +413,7 @@ impl std::fmt::Display for ZoneType {
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
-            NTP => "ntp",
+            Ntp => "ntp",
         };
         write!(f, "{name}")
     }
