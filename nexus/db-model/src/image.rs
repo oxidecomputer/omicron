@@ -2,6 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Image, ProjectImage, and SiloImage are almost identical. Image is the model
+//! for the underlying table and ProjectImage and SiloImage are backed by views
+//! of that table. They have all the same fields except ProjectImage has both a
+//! silo_id and a project_id, while SiloImage only has a silo_id. Image has a
+//! silo_id and an optional project_id to cover both possibilities.
+
 use super::{BlockSize, ByteCount, Digest};
 use crate::schema::{image, project_image, silo_image};
 use db_macros::Resource;
