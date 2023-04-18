@@ -820,7 +820,7 @@ mod tests {
                         if failed_step.info.component == "bar"
                         && message == "example failed"
                     ),
-                    "event di't match: {last_event:?}"
+                    "event didn't match: {last_event:?}"
                 )
             }
             _ => panic!("unexpected event: {last_event:?}"),

@@ -116,7 +116,7 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.10"
+assert_cmd = "2.0.11"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.68"
 authz-macros = { path = "nexus/authz-macros" }
@@ -148,7 +148,7 @@ ddm-admin-client = { path = "ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
-derive-where = "1.2.0"
+derive-where = "1.2.1"
 diesel = { version = "2.0.3" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dns-server = { path = "dns-server" }
@@ -238,7 +238,7 @@ pem = "1.1"
 petgraph = "0.6.3"
 pin-project-lite = "0.2.9"
 postgres-protocol = "0.6.5"
-predicates = "3.0.2"
+predicates = "3.0.3"
 pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -263,7 +263,7 @@ semver = { version = "1.0.17", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
-serde_json = "1.0.95"
+serde_json = "1.0.96"
 serde_path_to_error = "0.1.11"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -294,7 +294,7 @@ sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df
 steno = "0.3.1"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
-libsw = { version = "3.2.3", features = ["tokio"] }
+libsw = { version = "3.2.4", features = ["tokio"] }
 syn = { version = "2.0" }
 tar = "0.4"
 tempdir = "0.3"

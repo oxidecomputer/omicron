@@ -276,14 +276,14 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, internal_ip).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        ServiceName::ExternalDNS,
+                        ServiceName::ExternalDns,
                         &zone,
                         http_port,
                     )
                     .unwrap();
                 request.services.push(ServiceZoneRequest {
                     id,
-                    zone_type: ZoneType::ExternalDNS,
+                    zone_type: ZoneType::ExternalDns,
                     addresses: vec![internal_ip],
                     gz_addresses: vec![],
                     services: vec![ServiceType::ExternalDns {
@@ -426,14 +426,14 @@ impl Plan {
                 let zone = dns_builder.host_zone(id, dns_addr).unwrap();
                 dns_builder
                     .service_backend_zone(
-                        ServiceName::InternalDNS,
+                        ServiceName::InternalDns,
                         &zone,
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
                 request.services.push(ServiceZoneRequest {
                     id,
-                    zone_type: ZoneType::InternalDNS,
+                    zone_type: ZoneType::InternalDns,
                     addresses: vec![dns_addr],
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
                     services: vec![ServiceType::InternalDns {
@@ -512,7 +512,7 @@ impl Plan {
 
                 request.services.push(ServiceZoneRequest {
                     id,
-                    zone_type: ZoneType::NTP,
+                    zone_type: ZoneType::Ntp,
                     addresses: vec![address],
                     gz_addresses: vec![],
                     services: services,

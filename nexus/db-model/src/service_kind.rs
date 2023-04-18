@@ -19,14 +19,14 @@ impl_enum_type!(
     // Enum values
     CruciblePantry => b"crucible_pantry"
     Dendrite => b"dendrite"
-    ExternalDNS => b"external_dns"
-    ExternalDNSConfig => b"external_dns_config"
-    InternalDNS => b"internal_dns"
-    InternalDNSConfig => b"internal_dns_config"
+    ExternalDns => b"external_dns"
+    ExternalDnsConfig => b"external_dns_config"
+    InternalDns => b"internal_dns"
+    InternalDnsConfig => b"internal_dns_config"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Tfport => b"tfport"
-    NTP => b"ntp"
+    Ntp => b"ntp"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -50,17 +50,17 @@ impl From<ServiceUsingCertificate> for ServiceKind {
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
-            internal_api::params::ServiceKind::ExternalDNS => {
-                ServiceKind::ExternalDNS
+            internal_api::params::ServiceKind::ExternalDns => {
+                ServiceKind::ExternalDns
             }
-            internal_api::params::ServiceKind::ExternalDNSConfig => {
-                ServiceKind::ExternalDNSConfig
+            internal_api::params::ServiceKind::ExternalDnsConfig => {
+                ServiceKind::ExternalDnsConfig
             }
-            internal_api::params::ServiceKind::InternalDNS => {
-                ServiceKind::InternalDNS
+            internal_api::params::ServiceKind::InternalDns => {
+                ServiceKind::InternalDns
             }
-            internal_api::params::ServiceKind::InternalDNSConfig => {
-                ServiceKind::InternalDNSConfig
+            internal_api::params::ServiceKind::InternalDnsConfig => {
+                ServiceKind::InternalDnsConfig
             }
             internal_api::params::ServiceKind::Nexus { .. } => {
                 ServiceKind::Nexus
@@ -75,7 +75,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::CruciblePantry => {
                 ServiceKind::CruciblePantry
             }
-            internal_api::params::ServiceKind::NTP => ServiceKind::NTP,
+            internal_api::params::ServiceKind::Ntp => ServiceKind::Ntp,
         }
     }
 }

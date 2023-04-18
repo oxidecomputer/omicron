@@ -348,7 +348,7 @@ impl ServiceInner {
                         .services
                         .iter()
                         .filter_map(|svc| {
-                            if !matches!(svc.zone_type, ZoneType::InternalDNS) {
+                            if !matches!(svc.zone_type, ZoneType::InternalDns) {
                                 // This is not an internal DNS zone.
                                 None
                             } else {
@@ -370,7 +370,7 @@ impl ServiceInner {
                                         log,
                                         "DNS configuration: expected one \
                                         InternalDns service for zone with \
-                                        type ZoneType::InternalDNS, but \
+                                        type ZoneType::InternalDns, but \
                                         found {} (zone {})",
                                         svc.id,
                                         addrs.len()
@@ -681,7 +681,7 @@ impl ServiceInner {
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
-                                    NexusTypes::ServiceKind::ExternalDNSConfig,
+                                    NexusTypes::ServiceKind::ExternalDnsConfig,
                             });
                         }
                         ServiceType::InternalDns {
@@ -693,13 +693,13 @@ impl ServiceInner {
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
-                                    NexusTypes::ServiceKind::InternalDNSConfig,
+                                    NexusTypes::ServiceKind::InternalDnsConfig,
                             });
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
                                 address: dns_address.to_string(),
-                                kind: NexusTypes::ServiceKind::InternalDNS,
+                                kind: NexusTypes::ServiceKind::InternalDns,
                             });
                         }
                         ServiceType::Oximeter => {
@@ -741,7 +741,7 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::NTP,
+                                kind: NexusTypes::ServiceKind::Ntp,
                             });
                         }
                         _ => {
@@ -996,7 +996,7 @@ impl ServiceInner {
                     .filter_map(|svc| {
                         if matches!(
                             svc.zone_type,
-                            ZoneType::InternalDNS | ZoneType::NTP
+                            ZoneType::InternalDns | ZoneType::Ntp
                         ) {
                             Some(svc.clone())
                         } else {

@@ -87,7 +87,6 @@ impl ConvertGenericError {
 impl fmt::Display for ConvertGenericError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("error converting path: ")?;
-        // VecDeque doesn't have join()...
         for (idx, element) in self.path.iter().enumerate() {
             match element {
                 ConvertGenericPathElement::Path(path) => f.write_str(path)?,

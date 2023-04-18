@@ -378,33 +378,27 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ZoneType {
-    #[serde(rename = "external_dns")]
-    ExternalDNS,
-    #[serde(rename = "internal_dns")]
-    InternalDNS,
-    #[serde(rename = "nexus")]
+    ExternalDns,
+    InternalDns,
     Nexus,
-    #[serde(rename = "oximeter")]
     Oximeter,
-    #[serde(rename = "switch")]
     Switch,
-    #[serde(rename = "crucible_pantry")]
     CruciblePantry,
-    #[serde(rename = "ntp")]
-    NTP,
+    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
-            ZoneType::InternalDNS => Self::InternalDns,
-            ZoneType::ExternalDNS => Self::ExternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::NTP => Self::Ntp,
+            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -413,13 +407,13 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
-            ExternalDNS => "external_dns",
-            InternalDNS => "internal_dns",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
-            NTP => "ntp",
+            Ntp => "ntp",
         };
         write!(f, "{name}")
     }

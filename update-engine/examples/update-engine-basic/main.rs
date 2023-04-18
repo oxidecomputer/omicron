@@ -290,7 +290,7 @@ fn register_nested_write_steps<'a>(
     destinations: &'a [Utf8PathBuf],
     buf_list: BufList,
     error_index: Option<usize>,
-    cx: &'a StepContext<ExampleSpec>,
+    parent_cx: &'a StepContext<ExampleSpec>,
 ) {
     for (index, destination) in destinations.into_iter().enumerate() {
         let mut buf_list = buf_list.clone();
@@ -301,13 +301,14 @@ fn register_nested_write_steps<'a>(
                     destination: destination.to_owned(),
                 },
                 format!("Writing to {destination}"),
-                move |cx2| async move {
-                    cx.send_progress(StepProgress::with_current_and_total(
-                        index as u64,
-                        destinations.len() as u64,
-                        Default::default(),
-                    ))
-                    .await;
+                move |cx| async move {
+                    parent_cx
+                        .send_progress(StepProgress::with_current_and_total(
+                            index as u64,
+                            destinations.len() as u64,
+                            Default::default(),
+                        ))
+                        .await;
                     let mut file =
                         tokio::fs::File::create(destination)
                             .await
@@ -324,13 +325,11 @@ fn register_nested_write_steps<'a>(
                             .context("error writing data")?;
 
                         total_written += written_bytes;
-                        cx2.send_progress(
-                            StepProgress::with_current_and_total(
-                                total_written as u64,
-                                num_bytes,
-                                (),
-                            ),
-                        )
+                        cx.send_progress(StepProgress::with_current_and_total(
+                            total_written as u64,
+                            num_bytes,
+                            (),
+                        ))
                         .await;
 
                         if (error_index == Some(index))
