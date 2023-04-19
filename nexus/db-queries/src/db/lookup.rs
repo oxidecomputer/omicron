@@ -189,9 +189,12 @@ impl<'a> LookupPath<'a> {
         Disk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Image, identified by its id
     pub fn image_id(self, id: Uuid) -> Image<'a> {
         Image::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn project_image_id(self, id: Uuid) -> ProjectImage<'a> {
+        ProjectImage::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Snapshot, identified by its id
@@ -358,6 +361,33 @@ impl<'a> LookupPath<'a> {
         )
     }
 
+    pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
+        SiloImage::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn silo_image_name<'b, 'c>(self, name: &'b Name) -> SiloImage<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Organization by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                SiloImage::Name(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                SiloImage::Error(root, error)
+            }
+        }
+    }
+
     /// Select a resource of type UpdateArtifact, identified by its
     /// `(name, version, kind)` tuple
     pub fn update_artifact_tuple(
@@ -463,7 +493,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project" ],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -484,6 +514,15 @@ lookup_resource! {
     ancestors = [ "Silo" ],
     children = [],
     lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "SiloImage",
+    ancestors = [ "Silo" ],
+    children = [],
+    lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
@@ -533,7 +572,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "Image" ],
+    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -550,6 +589,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Image",
+    ancestors = ["Silo"],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "ProjectImage",
     ancestors = [ "Silo", "Project" ],
     children = [],
     lookup_by_name = true,
@@ -754,6 +802,18 @@ lookup_resource! {
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+// Helpers for unifying the interfaces around images
+
+pub enum ImageLookup<'a> {
+    ProjectImage(ProjectImage<'a>),
+    SiloImage(SiloImage<'a>),
+}
+
+pub enum ImageParentLookup<'a> {
+    Project(Project<'a>),
+    Silo(Silo<'a>),
 }
 
 #[cfg(test)]

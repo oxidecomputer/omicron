@@ -248,7 +248,7 @@ async fn test_project_deletion_with_image(cptestctx: &ControlPlaneTestContext) {
             .await;
 
     assert_eq!(
-        "project to be deleted contains an image: alpine-edge",
+        "project to be deleted contains a project image: alpine-edge",
         delete_project_expect_fail(&url, &client).await,
     );
 

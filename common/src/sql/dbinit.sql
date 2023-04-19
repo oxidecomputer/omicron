@@ -915,7 +915,9 @@ CREATE TABLE omicron.public.image (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    project_id UUID NOT NULL,
+    silo_id UUID NOT NULL,
+    project_id UUID,
+
     volume_id UUID NOT NULL,
 
     url STRING(8192),
@@ -926,7 +928,51 @@ CREATE TABLE omicron.public.image (
     size_bytes INT NOT NULL
 );
 
+CREATE VIEW omicron.public.project_image AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    silo_id,
+    project_id,
+    volume_id,
+    url,
+    os,
+    version,
+    digest,
+    block_size,
+    size_bytes
+FROM 
+    omicron.public.image
+WHERE 
+    project_id IS NOT NULL;
+
+CREATE VIEW omicron.public.silo_image AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    silo_id,
+    volume_id,
+    url,
+    os,
+    version,
+    digest,
+    block_size,
+    size_bytes
+FROM 
+    omicron.public.image
+WHERE 
+    project_id IS NULL;
+
 CREATE UNIQUE INDEX on omicron.public.image (
+    silo_id,
     project_id,
     name
 ) WHERE
