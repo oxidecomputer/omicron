@@ -1500,6 +1500,7 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Wicketd,
+                    ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
 
