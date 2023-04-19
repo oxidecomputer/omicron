@@ -30,6 +30,7 @@ use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
@@ -40,6 +41,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Groups arguments related to rack initialization
@@ -400,6 +402,29 @@ impl DataStore {
             })?;
 
         Ok(())
+    }
+
+    pub async fn nexus_external_addresses(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<IpAddr>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use crate::db::schema::external_ip::dsl as extip_dsl;
+        use crate::db::schema::nexus_service::dsl as nexus_dsl;
+        Ok(extip_dsl::external_ip
+            .filter(extip_dsl::id.eq_any(
+                nexus_dsl::nexus_service.select(nexus_dsl::external_ip_id),
+            ))
+            .select(ExternalIp::as_select())
+            .get_results_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?
+            .into_iter()
+            .map(|external_ip| external_ip.ip.ip())
+            .collect())
     }
 }
 

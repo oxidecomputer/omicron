@@ -37,6 +37,7 @@ struct Opt {
     subcommand: SubCommand,
 }
 
+// XXX-dap add support for v4
 #[derive(Debug, Subcommand)]
 enum SubCommand {
     /// List all records in all zones operated by the DNS server
@@ -122,6 +123,9 @@ async fn main() -> Result<()> {
                     println!("    key {:?}:", name);
                     for record in records {
                         match record {
+                            DnsRecord::A(addr) => {
+                                println!("        A:    {:?}", addr);
+                            }
                             DnsRecord::Aaaa(addr) => {
                                 println!("        AAAA: {:?}", addr);
                             }

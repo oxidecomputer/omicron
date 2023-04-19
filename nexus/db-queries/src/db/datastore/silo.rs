@@ -89,7 +89,7 @@ impl DataStore {
         opctx: &OpContext,
         group_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
-        dns_update_creator: String,
+        dns_update: DnsVersionUpdate,
     ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
@@ -147,33 +147,6 @@ impl DataStore {
                 None
             };
 
-        // Set up an external DNS name for this Silo's API and console
-        // endpoints (which are the same endpoint).  This specific naming scheme
-        // is determined under RFD 357.  Note that RFD 4 constrains resource
-        // names (including Silo names) to DNS-safe strings, which is why it's
-        // safe to directly put the name of the resource into the DNS name
-        // rather than doing any kind of escaping.
-        let silo_name = &new_silo_params.identity.name;
-        let dns_zone = self.dns_zone_external().await;
-        let dns_update_comment = format!("create silo: {:?}", silo_name);
-        let mut dns_update = DnsVersionUpdate::new(
-            dns_zone,
-            dns_update_comment,
-            dns_update_creator,
-        );
-        dns_update.new_name(format!("{}.sys", silo_name));
-
-        // XXX-dap: ^ that compile error reveals that we need to create DNS
-        // records here.  But that's nasty -- that means looking up in-service
-        // Nexus instances' IPs right here.  We'd also need something to update
-        // these records when Nexus instances come and go.  Maybe think about
-        // whether this should be a separate background task that watches the
-        // set of Silos and notices when they come and go?  One thing that's a
-        // little tricky is that those are _not_ supposed to be incremental.
-        // Alternatively, if we have that, we've already built a thing that
-        // lists the "current external Nexus IPs", so maybe just build _that_
-        // and use it here?
-
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
@@ -198,7 +171,7 @@ impl DataStore {
                     insert_new_query.execute_async(&conn).await?;
                 }
 
-                self.dns_update(&conn, dns_update).await?;
+                self.dns_update(group_opctx, &conn, dns_update).await?;
 
                 Ok(silo)
             })
@@ -257,7 +230,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
-        dns_update_creator: String,
+        dns_update: DnsVersionUpdate,
     ) -> DeleteResult {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
@@ -291,16 +264,6 @@ impl DataStore {
 
         let now = Utc::now();
 
-        // See the analogous code in silo_create() above.
-        let dns_zone = self.dns_zone_external().await;
-        let dns_update_comment = format!("delete silo: {:?}", db_silo.name());
-        let mut dns_update = DnsVersionUpdate::new(
-            dns_zone,
-            dns_update_comment,
-            dns_update_creator,
-        );
-        dns_update.remove_name(format!("{}.sys", db_silo.name()));
-
         type TxnError = TransactionError<Error>;
         self.pool_authorized(opctx)
             .await?
@@ -331,7 +294,7 @@ impl DataStore {
                     id,
                 ).await?;
 
-                self.dns_update(&conn, dns_update).await?;
+                self.dns_update(opctx, &conn, dns_update).await?;
 
                 info!(opctx.log, "deleted silo {}", id);
 

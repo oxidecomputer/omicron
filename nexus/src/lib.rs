@@ -31,13 +31,14 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use internal_dns::DnsConfigBuilder;
 use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
 // These modules used to be within nexus, but have been moved to
 // nexus-db-queries. Keeping these around temporarily for migration reasons.
 pub use nexus_db_queries::{authn, authz, db};
+use omicron_common::address::{IpRange, Ipv4Range};
 
 #[macro_use]
 extern crate slog;
@@ -219,7 +220,13 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services,
                     datasets: vec![],
-                    internal_services_ip_pool_ranges: vec![],
+                    internal_services_ip_pool_ranges: vec![IpRange::V4(
+                        Ipv4Range::new(
+                            Ipv4Addr::LOCALHOST,
+                            Ipv4Addr::LOCALHOST,
+                        )
+                        .unwrap(),
+                    )],
                     certs: vec![],
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
                 },

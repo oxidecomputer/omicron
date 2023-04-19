@@ -198,7 +198,29 @@ pub async fn test_setup_with_config<N: NexusServer>(
         address: dns_server_address,
         kind: ServiceKind::InternalDNSConfig,
     };
-    let server = N::start(nexus_internal, &config, vec![dns_service]).await;
+    let nexus_service = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        address: SocketAddrV6::new(
+            match nexus_internal_addr.ip() {
+                IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+                IpAddr::V6(addr) => addr,
+            },
+            nexus_internal_addr.port(),
+            0,
+            0,
+        ),
+        kind: ServiceKind::Nexus {
+            external_address: config
+                .deployment
+                .dropshot_external
+                .bind_address
+                .ip(),
+        },
+    };
+    let server =
+        N::start(nexus_internal, &config, vec![dns_service, nexus_service])
+            .await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();

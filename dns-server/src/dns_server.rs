@@ -231,6 +231,14 @@ async fn handle_dns_message(
     let response_records = records
         .into_iter()
         .map(|record| match record {
+            DnsRecord::A(addr) => {
+                let mut a = Record::new();
+                a.set_name(name.clone())
+                    .set_rr_type(RecordType::A)
+                    .set_data(Some(RData::A(addr)));
+                Ok(a)
+            }
+
             DnsRecord::AAAA(addr) => {
                 let mut aaaa = Record::new();
                 aaaa.set_name(name.clone())

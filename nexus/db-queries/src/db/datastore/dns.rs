@@ -64,14 +64,12 @@ impl DataStore {
     /// zones, ensures that there's exactly one, and returns it.  If there are
     /// some other number of external DNS zones, this function returns an
     /// internal error.
-    ///
-    /// This is not exposed outside this crate nor the DataStore, which
-    /// mitigates the fact that it's not protected by an authz check.  (If we
-    /// wanted to do an authz check here, we'd have to plumb through some
-    /// privileged Nexus-specific OpContext, because the users doing this
-    /// operation generally don't themselves have visibility into the external
-    /// DNS zones.)
-    pub(crate) async fn dns_zone_external(&self) -> LookupResult<DnsZone> {
+    pub async fn dns_zone_external(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<DnsZone> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
         use db::schema::dns_zone::dsl;
         let list = dsl::dns_zone
             .filter(dsl::dns_group.eq(DnsGroup::External))
@@ -378,10 +376,11 @@ impl DataStore {
         // significant as the system scales up.
         let dns_group = update.dns_zone.dns_group;
         let version = self.dns_group_latest_version(opctx, dns_group).await?;
-        let new_version = version.version.next();
+        let new_version_num =
+            nexus_db_model::Generation(version.version.next());
         let new_version = DnsVersion {
             dns_group: update.dns_zone.dns_group,
-            version: new_version,
+            version: new_version_num,
             time_created: chrono::Utc::now(),
             creator: update.creator,
             comment: update.comment,
@@ -394,12 +393,13 @@ impl DataStore {
                 DnsName::new(
                     update.dns_zone.id,
                     name,
-                    new_version.version,
+                    new_version_num,
                     None,
                     records,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let ntoadd = new_names.len();
 
         {
             use db::schema::dns_version::dsl;
@@ -430,18 +430,19 @@ impl DataStore {
 
             // XXX-dap TODO-coverage add a test for this
             bail_unless!(
-                nadded == new_names.len(),
+                nadded == ntoadd,
                 "inserted wrong number of dns_name records: expected {}, \
                 actually inserted {}",
-                new_names.len(),
+                ntoadd,
                 nadded
             );
 
             let to_remove = update.names_removed;
+            let ntoremove = to_remove.len();
             let nremoved = diesel::update(
-                dsl::dns_name.filter(dsl::name.eq_any(&to_remove)),
+                dsl::dns_name.filter(dsl::name.eq_any(to_remove)),
             )
-            .set(dsl::version_removed.eq(new_version.version))
+            .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
             .await
             .map_err(|e| {
@@ -450,10 +451,10 @@ impl DataStore {
 
             // XXX-dap TODO-coverage add a test for this
             bail_unless!(
-                nremoved == to_remove.len(),
+                nremoved == ntoremove,
                 "updated wrong number of dns_name records: expected {}, \
                 actually marked {} for removal",
-                to_remove.len(),
+                ntoremove,
                 nremoved
             );
         }
@@ -488,7 +489,7 @@ impl DnsVersionUpdate {
         }
     }
 
-    pub fn new_name(
+    pub fn add_name(
         &mut self,
         name: String,
         records: Vec<DnsRecord>,
