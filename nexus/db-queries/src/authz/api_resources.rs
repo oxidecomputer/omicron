@@ -684,7 +684,7 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "Image",
+    name = "ProjectImage",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
@@ -865,6 +865,23 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "SiloImage",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InSilo,
+}
+
+// This resource is a collection of _all_ images in a silo, including project images.
+authz_resource! {
+    name = "Image",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InSilo,
 }
 
 authz_resource! {

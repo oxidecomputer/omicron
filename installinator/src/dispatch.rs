@@ -272,8 +272,7 @@ impl InstallOpts {
                     let slots_not_written = write_output.slots_not_written();
 
                     let metadata = InstallinatorCompletionMetadata::Write {
-                        slots_attempted: write_output.slots_attempted,
-                        slots_written: write_output.slots_written,
+                        output: write_output,
                     };
 
                     if slots_not_written.is_empty() {

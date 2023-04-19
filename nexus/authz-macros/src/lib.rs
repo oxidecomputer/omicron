@@ -136,6 +136,9 @@ enum PolarSnippet {
     /// Generate it as a global resource, manipulable only to administrators
     FleetChild,
 
+    /// Generate it as resource nested under the Silo
+    InSilo,
+
     /// Generate it as a resource nested within a Project (either directly or
     /// indirectly)
     InProject,
@@ -196,6 +199,31 @@ fn do_authz_resource(
                 }}
                 has_relation(fleet: Fleet, "parent_fleet", child: {})
                     if child.fleet = fleet;
+            "#,
+            resource_name, resource_name,
+        ),
+
+        // If this resource is directly inside a Silo, we only need to define
+        // permissions that are contingent on having roles on that Silo.
+        (PolarSnippet::InSilo, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                    ];
+
+                    relations = {{ containing_silo: Silo }};
+                    "list_children" if "viewer" on "containing_silo";
+                    "read" if "viewer" on "containing_silo";
+                    "modify" if "collaborator" on "containing_silo";
+                    "create_child" if "collaborator" on "containing_silo";
+                }}
+
+                has_relation(parent: Silo, "containing_silo", child: {})
+                    if child.silo = parent;
             "#,
             resource_name, resource_name,
         ),

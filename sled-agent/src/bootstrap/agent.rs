@@ -874,7 +874,7 @@ impl Agent {
         &self,
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
-        let datasets = zfs::get_all_omicron_datasets()
+        let datasets = zfs::get_all_omicron_datasets_for_delete()
             .map_err(BootstrapError::ZfsDatasetsList)?;
         for dataset in &datasets {
             info!(self.log, "Removing dataset: {dataset}");

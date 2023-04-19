@@ -15,7 +15,7 @@ use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use installinator_common::{
     M2Slot, StepContext, StepHandle, StepProgress, StepResult, UpdateEngine,
-    WriteComponent, WriteError, WriteSpec, WriteStepId,
+    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
@@ -281,29 +281,6 @@ impl<'a> ArtifactWriter<'a> {
             slots_attempted: self.drives.keys().copied().collect(),
             slots_written: done_drives.into_iter().collect(),
         }
-    }
-}
-
-/// The result of [`ArtifactWriter::write`].
-pub(crate) struct WriteOutput {
-    /// The slots that were requested to be written.
-    pub(crate) slots_attempted: BTreeSet<M2Slot>,
-
-    /// The slots that were actually written.
-    pub(crate) slots_written: BTreeSet<M2Slot>,
-}
-
-impl WriteOutput {
-    /// Returns a list of the slots not written.
-    pub fn slots_not_written(&self) -> Vec<M2Slot> {
-        let mut not_written = Vec::new();
-        for slot in &self.slots_attempted {
-            if !self.slots_written.contains(slot) {
-                not_written.push(*slot);
-            }
-        }
-
-        not_written
     }
 }
 
@@ -752,13 +729,13 @@ mod tests {
                 InstallinatorStepId::Write,
                 "Writing",
                 |cx| async move {
-                    let slots_written = writer
+                    let write_output = writer
                         .write_with_transport(&cx, &log, &mut transport)
                         .await;
                     StepResult::success(
                         (),
                         InstallinatorCompletionMetadata::Write {
-                            slots_written,
+                            output: write_output,
                         },
                     )
                 },
@@ -788,13 +765,14 @@ mod tests {
                     match last_outcome {
                         StepOutcome::Success {
                             metadata:
-                                InstallinatorCompletionMetadata::Write {
-                                    slots_written,
-                                    ..
-                                },
+                                InstallinatorCompletionMetadata::Write { output },
                         } => {
                             assert_eq!(
-                                slots_written.into_iter().collect(),
+                                &output
+                                    .slots_written
+                                    .iter()
+                                    .copied()
+                                    .collect::<Vec<_>>(),
                                 &vec![M2Slot::A],
                                 "correct slots written"
                             );

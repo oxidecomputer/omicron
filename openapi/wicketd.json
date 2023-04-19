@@ -524,23 +524,24 @@
           {
             "type": "object",
             "properties": {
+              "output": {
+                "description": "The output of the write operation.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WriteOutput"
+                  }
+                ]
+              },
               "reason": {
                 "type": "string",
                 "enum": [
                   "write"
                 ]
-              },
-              "slots_written": {
-                "description": "The slots to which data has been written. This is non-empty.",
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/M2Slot"
-                }
               }
             },
             "required": [
-              "reason",
-              "slots_written"
+              "output",
+              "reason"
             ]
           },
           {
@@ -3061,6 +3062,32 @@
               "kind"
             ]
           }
+        ]
+      },
+      "WriteOutput": {
+        "description": "The output of a write operation.\n\nForms part of [`InstallinatorCompletionMetadata::Write`].",
+        "type": "object",
+        "properties": {
+          "slots_attempted": {
+            "description": "The slots that were requested to be written.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/M2Slot"
+            },
+            "uniqueItems": true
+          },
+          "slots_written": {
+            "description": "The slots that were actually written.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/M2Slot"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "slots_attempted",
+          "slots_written"
         ]
       },
       "IgnitionCommand": {

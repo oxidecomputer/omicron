@@ -1126,6 +1126,15 @@
         "parameters": [
           {
             "in": "query",
+            "name": "include_silo_images",
+            "description": "Flag used to indicate if silo scoped images should be included when listing project images. Only valid when `project` is provided.",
+            "schema": {
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -1192,7 +1201,6 @@
             "in": "query",
             "name": "project",
             "description": "Name or ID of the project",
-            "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -1303,6 +1311,52 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images/{image}/promote": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Promote a project image to be visible to all projects in the silo",
+        "operationId": "image_promote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "description": "Name or ID of the image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8752,7 +8806,7 @@
         ]
       },
       "Image": {
-        "description": "Client view of project Images",
+        "description": "Client view of images",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8794,7 +8848,8 @@
             "type": "string"
           },
           "project_id": {
-            "description": "The project the image belongs to",
+            "nullable": true,
+            "description": "ID of the parent project if the image is a project image",
             "type": "string",
             "format": "uuid"
           },
@@ -8832,7 +8887,6 @@
           "id",
           "name",
           "os",
-          "project_id",
           "size",
           "time_created",
           "time_modified",

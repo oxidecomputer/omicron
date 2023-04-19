@@ -108,17 +108,39 @@ pub enum InstallinatorCompletionMetadata {
         address: SocketAddrV6,
     },
     Write {
-        /// The slots to which data was requested to be written. This is
-        /// non-empty.
-        slots_attempted: BTreeSet<M2Slot>,
-
-        /// The slots to which data has been written. This is non-empty.
-        slots_written: BTreeSet<M2Slot>,
+        /// The output of the write operation.
+        output: WriteOutput,
     },
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,
+}
+
+/// The output of a write operation.
+///
+/// Forms part of [`InstallinatorCompletionMetadata::Write`].
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct WriteOutput {
+    /// The slots that were requested to be written.
+    pub slots_attempted: BTreeSet<M2Slot>,
+
+    /// The slots that were actually written.
+    pub slots_written: BTreeSet<M2Slot>,
+}
+
+impl WriteOutput {
+    /// Returns a list of the slots not written.
+    pub fn slots_not_written(&self) -> Vec<M2Slot> {
+        let mut not_written = Vec::new();
+        for slot in &self.slots_attempted {
+            if !self.slots_written.contains(slot) {
+                not_written.push(*slot);
+            }
+        }
+
+        not_written
+    }
 }
 
 /// An M.2 slot that was written.

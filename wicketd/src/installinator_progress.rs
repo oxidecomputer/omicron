@@ -242,7 +242,7 @@ mod tests {
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorStepId, M2Slot, StepEvent, StepEventKind, StepInfo,
-        StepInfoWithMetadata, StepOutcome,
+        StepInfoWithMetadata, StepOutcome, WriteOutput,
     };
     use omicron_test_utils::dev::test_setup_log;
 
@@ -311,7 +311,14 @@ mod tests {
                     last_attempt: 1,
                     last_outcome: StepOutcome::Success {
                         metadata: InstallinatorCompletionMetadata::Write {
-                            slots_written: vec![M2Slot::A],
+                            output: WriteOutput {
+                                slots_attempted: vec![M2Slot::A, M2Slot::B]
+                                    .into_iter()
+                                    .collect(),
+                                slots_written: vec![M2Slot::A]
+                                    .into_iter()
+                                    .collect(),
+                            },
                         },
                     },
                     step_elapsed: Duration::from_secs(1),
