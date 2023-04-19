@@ -399,7 +399,7 @@ impl ServiceManager {
                     .filter(|svc| {
                         matches!(
                             svc.zone_type,
-                            ZoneType::InternalDNS | ZoneType::NTP
+                            ZoneType::InternalDns | ZoneType::Ntp
                         )
                     })
                     .collect(),
@@ -1434,7 +1434,7 @@ impl ServiceManager {
         };
 
         let ntp_zone_name =
-            InstalledZone::get_zone_name(&ZoneType::NTP.to_string(), None);
+            InstalledZone::get_zone_name(&ZoneType::Ntp.to_string(), None);
 
         let ntp_zone = existing_zones
             .iter()

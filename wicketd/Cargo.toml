@@ -39,6 +39,7 @@ installinator-artifactd.workspace = true
 installinator-common.workspace = true
 omicron-common.workspace = true
 tufaceous-lib.workspace = true
+update-engine.workspace = true
 
 [[bin]]
 name = "wicketd"

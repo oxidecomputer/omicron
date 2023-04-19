@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt,
     time::Duration,
 };
@@ -194,7 +194,7 @@ impl<'a> ArtifactWriter<'a> {
         &mut self,
         cx: &StepContext,
         log: &Logger,
-    ) -> Vec<M2Slot> {
+    ) -> WriteOutput {
         let mut transport = FileTransport;
         self.write_with_transport(cx, log, &mut transport).await
     }
@@ -204,8 +204,8 @@ impl<'a> ArtifactWriter<'a> {
         cx: &StepContext,
         log: &Logger,
         transport: &mut impl WriteTransport,
-    ) -> Vec<M2Slot> {
-        let mut done_drives = Vec::new();
+    ) -> WriteOutput {
+        let mut done_drives = BTreeSet::new();
 
         // How many drives did we finish writing this iteration?
         let mut success_this_iter = 0;
@@ -238,7 +238,7 @@ impl<'a> ArtifactWriter<'a> {
                     Ok(_) => {
                         // This drive succeeded in this iteration.
                         *progress = DriveWriteProgress::Done;
-                        done_drives.push(*drive);
+                        done_drives.insert(*drive);
                         success_this_iter += 1;
                     }
                     Err(error) => match error.component {
@@ -277,9 +277,33 @@ impl<'a> ArtifactWriter<'a> {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
 
-        done_drives.sort();
+        WriteOutput {
+            slots_attempted: self.drives.keys().copied().collect(),
+            slots_written: done_drives.into_iter().collect(),
+        }
+    }
+}
 
-        done_drives
+/// The result of [`ArtifactWriter::write`].
+pub(crate) struct WriteOutput {
+    /// The slots that were requested to be written.
+    pub(crate) slots_attempted: BTreeSet<M2Slot>,
+
+    /// The slots that were actually written.
+    pub(crate) slots_written: BTreeSet<M2Slot>,
+}
+
+impl WriteOutput {
+    /// Returns a list of the slots not written.
+    pub fn slots_not_written(&self) -> Vec<M2Slot> {
+        let mut not_written = Vec::new();
+        for slot in &self.slots_attempted {
+            if !self.slots_written.contains(slot) {
+                not_written.push(*slot);
+            }
+        }
+
+        not_written
     }
 }
 
@@ -766,10 +790,11 @@ mod tests {
                             metadata:
                                 InstallinatorCompletionMetadata::Write {
                                     slots_written,
+                                    ..
                                 },
                         } => {
                             assert_eq!(
-                                slots_written,
+                                slots_written.into_iter().collect(),
                                 &vec![M2Slot::A],
                                 "correct slots written"
                             );

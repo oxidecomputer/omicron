@@ -14,8 +14,8 @@ pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 pub enum ServiceName {
     Clickhouse,
     Cockroach,
-    InternalDNS,
-    ExternalDNS,
+    InternalDns,
+    ExternalDns,
     Nexus,
     Oximeter,
     ManagementGatewayService,
@@ -35,8 +35,8 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse => "clickhouse",
             ServiceName::Cockroach => "cockroach",
-            ServiceName::ExternalDNS => "external-dns",
-            ServiceName::InternalDNS => "nameservice",
+            ServiceName::ExternalDns => "external-dns",
+            ServiceName::InternalDns => "nameservice",
             ServiceName::Nexus => "nexus",
             ServiceName::Oximeter => "oximeter",
             ServiceName::ManagementGatewayService => "mgs",
@@ -58,8 +58,8 @@ impl ServiceName {
         match self {
             ServiceName::Clickhouse
             | ServiceName::Cockroach
-            | ServiceName::InternalDNS
-            | ServiceName::ExternalDNS
+            | ServiceName::InternalDns
+            | ServiceName::ExternalDns
             | ServiceName::Nexus
             | ServiceName::Oximeter
             | ServiceName::ManagementGatewayService

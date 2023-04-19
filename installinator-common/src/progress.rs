@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{fmt, net::SocketAddrV6, time::Duration};
+use std::{collections::BTreeSet, fmt, net::SocketAddrV6, time::Duration};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -108,8 +108,12 @@ pub enum InstallinatorCompletionMetadata {
         address: SocketAddrV6,
     },
     Write {
+        /// The slots to which data was requested to be written. This is
+        /// non-empty.
+        slots_attempted: BTreeSet<M2Slot>,
+
         /// The slots to which data has been written. This is non-empty.
-        slots_written: Vec<M2Slot>,
+        slots_written: BTreeSet<M2Slot>,
     },
 
     /// Future variants that might be unknown.

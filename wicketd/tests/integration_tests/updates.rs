@@ -18,6 +18,7 @@ use omicron_common::{
 };
 use tempfile::TempDir;
 use uuid::Uuid;
+use wicketd::RunningUpdateState;
 use wicketd_client::types::{UpdateEventKind, UpdateTerminalEventKind};
 
 #[tokio::test]
@@ -208,6 +209,13 @@ async fn test_installinator_fetch() {
     args.exec(&log.new(slog::o!("crate" => "installinator")))
         .await
         .expect("installinator succeeded");
+
+    // Check that the update status is marked as closed.
+    assert_eq!(
+        wicketd_testctx.server.ipr_update_tracker.update_state(update_id).await,
+        Some(RunningUpdateState::Closed),
+        "update should be marked as closed at the end of the run"
+    );
 
     // Check that the host and control plane artifacts were downloaded
     // correctly.

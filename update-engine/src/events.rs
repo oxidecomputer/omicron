@@ -263,20 +263,25 @@ pub enum StepEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEventKind<S> {
-    /// Returns true if this is a terminal step event.
+    /// Returns whether is a terminal step event.
     ///
-    /// Terminal events guarantee that there are no further events coming for this update engine.
-    pub fn is_terminal(&self) -> bool {
+    /// Terminal events guarantee that there are no further events coming from
+    /// this update engine.
+    pub fn is_terminal(&self) -> StepEventIsTerminal {
         match self {
             StepEventKind::NoStepsDefined
-            | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. } => true,
+            | StepEventKind::ExecutionCompleted { .. } => {
+                StepEventIsTerminal::Terminal { success: true }
+            }
+            StepEventKind::ExecutionFailed { .. } => {
+                StepEventIsTerminal::Terminal { success: false }
+            }
             StepEventKind::ExecutionStarted { .. }
             | StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::StepCompleted { .. }
             | StepEventKind::Nested { .. }
-            | StepEventKind::Unknown => false,
+            | StepEventKind::Unknown => StepEventIsTerminal::NonTerminal,
         }
     }
 
@@ -573,6 +578,24 @@ impl<S: StepSpec> StepEventKind<S> {
         };
         Ok(ret)
     }
+}
+
+/// Whether a [`StepEvent`] is a terminal event.
+///
+/// Returned by [`StepEventKind::is_terminal`].
+///
+/// The update engine guarantees that after a terminal event is seen, no further
+/// events are seen.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepEventIsTerminal {
+    /// This is not a terminal event.
+    NonTerminal,
+
+    /// This is a terminal event.
+    Terminal {
+        /// True if execution completed successfully.
+        success: bool,
+    },
 }
 
 /// The priority of a [`StepEvent`].

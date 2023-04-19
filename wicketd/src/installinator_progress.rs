@@ -12,6 +12,7 @@ use std::{collections::HashMap, sync::Arc};
 use installinator_artifactd::ProgressReportStatus;
 use installinator_common::ProgressReport;
 use tokio::sync::{mpsc, oneshot, Mutex};
+use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
 /// Creates the artifact server and update tracker's interfaces to the
@@ -124,6 +125,16 @@ impl IprUpdateTracker {
         running_updates.insert(update_id, RunningUpdate::Initial(start_sender));
         start_receiver
     }
+
+    /// Returns the status of a running update, or None if the update ID hasn't
+    /// been registered.
+    pub async fn update_state(
+        &self,
+        update_id: Uuid,
+    ) -> Option<RunningUpdateState> {
+        let running_updates = self.running_updates.lock().await;
+        running_updates.get(&update_id).map(|x| x.to_state())
+    }
 }
 
 /// Type alias for the receiver that resolves when the first message from the
@@ -160,6 +171,18 @@ enum RunningUpdate {
 }
 
 impl RunningUpdate {
+    fn to_state(&self) -> RunningUpdateState {
+        match self {
+            RunningUpdate::Initial(_) => RunningUpdateState::Initial,
+            RunningUpdate::ReportsReceived(_) => {
+                RunningUpdateState::ReportsReceived
+            }
+            RunningUpdate::Closed => RunningUpdateState::Closed,
+            RunningUpdate::Invalid => {
+                unreachable!("invalid is a transient state")
+            }
+        }
+    }
     fn take(&mut self) -> Self {
         std::mem::replace(self, Self::Invalid)
     }
@@ -178,8 +201,38 @@ impl RunningUpdate {
     }
 
     fn is_terminal(report: &ProgressReport) -> bool {
-        report.step_events.last().map(|e| e.kind.is_terminal()).unwrap_or(false)
+        report
+            .step_events
+            .last()
+            .map(|e| {
+                matches!(
+                    e.kind.is_terminal(),
+                    StepEventIsTerminal::Terminal { .. }
+                )
+            })
+            .unwrap_or(false)
     }
+}
+
+/// The current status of a running update.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunningUpdateState {
+    /// The initial state: the first message from the installinator hasn't been
+    /// received yet.
+    Initial,
+
+    /// Reports from the installinator have been received.
+    ReportsReceived,
+
+    /// All messages have been received.
+    ///
+    /// We might receive multiple "completed" updates from the installinator in
+    /// case there's a network issue between wicketd and installinator. This
+    /// state builds in idempotency to ensure that the installinator doesn't
+    /// fail for that reason: rather than removing the UUID from the running
+    /// update map once it's done, we move to this state while keeping the UUID
+    /// in the map.
+    Closed,
 }
 
 #[cfg(test)]

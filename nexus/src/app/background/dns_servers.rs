@@ -80,8 +80,8 @@ impl BackgroundTask for DnsServersWatcher {
 
             // Read the latest service configuration for this DNS group.
             let service_kind = match self.dns_group {
-                DnsGroup::Internal => ServiceKind::InternalDNSConfig,
-                DnsGroup::External => ServiceKind::ExternalDNSConfig,
+                DnsGroup::Internal => ServiceKind::InternalDnsConfig,
+                DnsGroup::External => ServiceKind::ExternalDnsConfig,
             };
 
             let pagparams = DataPageParams {
@@ -234,7 +234,7 @@ mod test {
                     Uuid::new_v4(),
                     Uuid::new_v4(),
                     SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0),
-                    ServiceKind::InternalDNSConfig,
+                    ServiceKind::InternalDnsConfig,
                 ))
                 .execute_async(datastore.pool_for_tests().await.unwrap())
                 .await
@@ -256,7 +256,7 @@ mod test {
                         Uuid::new_v4(),
                         Uuid::new_v4(),
                         SocketAddrV6::new(Ipv6Addr::LOCALHOST, i + 2, 0, 0),
-                        ServiceKind::InternalDNSConfig,
+                        ServiceKind::InternalDnsConfig,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -278,7 +278,7 @@ mod test {
             use crate::db::schema::service::dsl;
             diesel::delete(
                 dsl::service
-                    .filter(dsl::kind.eq(ServiceKind::InternalDNSConfig)),
+                    .filter(dsl::kind.eq(ServiceKind::InternalDnsConfig)),
             )
             .execute_async(datastore.pool_for_tests().await.unwrap())
             .await

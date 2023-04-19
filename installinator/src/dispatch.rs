@@ -184,7 +184,7 @@ impl InstallOpts {
         let engine = UpdateEngine::new(&log, event_sender);
 
         let host_phase_2_id = ArtifactHashId {
-            // TODO: currently we're assuming that wicket will unpack the host
+            // TODO: currently we're assuming that wicketd will unpack the host
             // phase 2 image. We may instead have the installinator do it.
             // kind: KnownArtifactKind::Host.into(),
             kind: ArtifactKind::HOST_PHASE_2,
@@ -239,7 +239,7 @@ impl InstallOpts {
         let destination = if self.install_on_gimlet {
             WriteDestination::from_hardware(&log)?
         } else {
-            // clap ensures `self.destinatino` is not `None` if
+            // clap ensures `self.destination` is not `None` if
             // `install_on_gimlet` is false.
             let destination = self.destination.as_ref().unwrap();
             WriteDestination::in_directory(destination)?
@@ -266,19 +266,30 @@ impl InstallOpts {
                         destination,
                     );
 
-                    let slots_written = writer.write(&cx, &log).await;
-
-                    // TODO: warning message in case one of the slots wasn't
-                    // written?
-
                     // TODO: verify artifact was correctly written out to disk.
 
-                    StepResult::success(
-                        (),
-                        InstallinatorCompletionMetadata::Write {
-                            slots_written,
-                        },
-                    )
+                    let write_output = writer.write(&cx, &log).await;
+                    let slots_not_written = write_output.slots_not_written();
+
+                    let metadata = InstallinatorCompletionMetadata::Write {
+                        slots_attempted: write_output.slots_attempted,
+                        slots_written: write_output.slots_written,
+                    };
+
+                    if slots_not_written.is_empty() {
+                        StepResult::success((), metadata)
+                    } else {
+                        // Some slots were not properly written out.
+                        let mut message =
+                            "Some M.2 slots were not written: ".to_owned();
+                        for (i, slot) in slots_not_written.iter().enumerate() {
+                            message.push_str(&format!("{slot}"));
+                            if i + 1 < slots_not_written.len() {
+                                message.push_str(", ");
+                            }
+                        }
+                        StepResult::warning((), metadata, message)
+                    }
                 },
             )
             .register();
