@@ -119,6 +119,12 @@ pub enum Error {
     },
 }
 
+impl Error {
+    fn io(message: &str, err: std::io::Error) -> Self {
+        Self::Io { message: message.to_string(), err }
+    }
+}
+
 /// A ZFS storage pool.
 struct Pool {
     name: ZpoolName,
@@ -236,28 +242,6 @@ impl DatasetInfo {
     }
 }
 
-async fn add_profile_to_zone(
-    log: &Logger,
-    installed_zone: &InstalledZone,
-    profile: ProfileBuilder,
-) -> Result<(), Error> {
-    info!(log, "Profile for {}:\n{}", installed_zone.name(), profile);
-
-    let profile_path = format!(
-        "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
-        zone_mountpoint = illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
-        zone = installed_zone.name(),
-    );
-
-    std::fs::write(&profile_path, format!("{profile}").as_bytes()).map_err(
-        |err| Error::Io {
-            message: format!("Cannot write to {profile_path}"),
-            err,
-        },
-    )?;
-    Ok(())
-}
-
 // Ensures that a zone backing a particular dataset is running.
 async fn ensure_running_zone(
     log: &Logger,
@@ -320,7 +304,9 @@ async fn ensure_running_zone(
                         ServiceBuilder::new("system/illumos/cockroachdb")
                             .add_property_group(config),
                     );
-                    add_profile_to_zone(log, &installed_zone, profile).await?;
+                    profile.add_to_zone(log, &installed_zone).await.map_err(
+                        |err| Error::io("Failed to setup CRDB profile", err),
+                    )?;
                     let zone = RunningZone::boot(installed_zone).await?;
 
                     // Await liveness of the cluster.
@@ -389,7 +375,11 @@ async fn ensure_running_zone(
                         ServiceBuilder::new("system/illumos/clickhouse")
                             .add_property_group(config),
                     );
-                    add_profile_to_zone(log, &installed_zone, profile).await?;
+                    profile.add_to_zone(log, &installed_zone).await.map_err(
+                        |err| {
+                            Error::io("Failed to setup clickhouse profile", err)
+                        },
+                    )?;
                     RunningZone::boot(installed_zone).await?
                 }
                 DatasetKind::Crucible => {
@@ -408,7 +398,11 @@ async fn ensure_running_zone(
                         ServiceBuilder::new("oxide/crucible/agent")
                             .add_property_group(config),
                     );
-                    add_profile_to_zone(log, &installed_zone, profile).await?;
+                    profile.add_to_zone(log, &installed_zone).await.map_err(
+                        |err| {
+                            Error::io("Failed to setup crucible profile", err)
+                        },
+                    )?;
                     RunningZone::boot(installed_zone).await?
                 }
             };

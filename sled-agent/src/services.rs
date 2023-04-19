@@ -30,6 +30,7 @@ use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
 };
+use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use illumos_utils::addrobj::AddrObject;
@@ -93,8 +94,12 @@ pub enum Error {
     #[error("Cannot deserialize TOML from file {path}: {err}")]
     TomlDeserialize { path: PathBuf, err: toml::de::Error },
 
-    #[error("I/O Error accessing {path}: {err}")]
-    Io { path: PathBuf, err: std::io::Error },
+    #[error("Failed to perform I/O: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
@@ -153,6 +158,15 @@ pub enum Error {
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
+}
+
+impl Error {
+    fn io(message: &str, err: std::io::Error) -> Self {
+        Self::Io { message: message.to_string(), err }
+    }
+    fn io_path(path: &Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {}", path.display()), err }
+    }
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -378,9 +392,9 @@ impl ServiceManager {
                 config_path.to_string_lossy()
             );
             let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await.map_err(
-                    |err| Error::Io { path: config_path.clone(), err },
-                )?,
+                &tokio::fs::read_to_string(&config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?,
             )
             .map_err(|err| Error::TomlDeserialize {
                 path: config_path.clone(),
@@ -675,11 +689,11 @@ impl ServiceManager {
             debug!(self.inner.log, "creating {}", resolv_conf.display());
             tokio::fs::write(&resolv_conf, config)
                 .await
-                .map_err(|err| Error::Io { path: resolv_conf.clone(), err })?;
+                .map_err(|err| Error::io_path(&resolv_conf, err))?;
 
             tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
                 .await
-                .map_err(|err| Error::Io { path: nsswitch_dns.clone(), err })?;
+                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
 
             smfh.refresh()?;
             smfh.enable()?;
@@ -724,6 +738,42 @@ impl ServiceManager {
             limit_priv,
         )
         .await?;
+
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
+        //
+        // These zones are self-assembling -- after they boot, there should
+        // be no "zlogin" necessary to initialize.
+        match request.zone_type {
+            ZoneType::CruciblePantry => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.addresses.len(), 1);
+                let listen_addr = &request.addresses[0].to_string();
+                let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port);
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("system/illumos/crucible_pantry")
+                        .add_property_group(config),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| Error::io("crucible pantry profile", err))?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
+                return Ok(running_zone);
+            }
+            _ => {}
+        }
 
         let running_zone = RunningZone::boot(installed_zone).await?;
 
@@ -906,10 +956,7 @@ impl ServiceManager {
                     let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
 
                     // Serialize the configuration and append it into the file.
                     let serialized_cfg =
@@ -924,13 +971,10 @@ impl ServiceManager {
                         .append(true)
                         .open(&config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
-                    file.write_all(config_str.as_bytes()).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
+                    file.write_all(config_str.as_bytes())
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?;
                 }
                 ServiceType::ExternalDns { http_address, dns_address } => {
                     info!(self.inner.log, "Setting up external-dns service");
@@ -1144,15 +1188,7 @@ impl ServiceManager {
                     smfh.refresh()?;
                 }
                 ServiceType::CruciblePantry => {
-                    info!(self.inner.log, "Setting up Crucible pantry service");
-
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
-                            "config/listen",
-                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
-                        )?;
-                    }
-                    smfh.refresh()?;
+                    panic!("CruciblePantry is self-assembling now")
                 }
                 ServiceType::Ntp {
                     ntp_servers,
@@ -1325,9 +1361,9 @@ impl ServiceManager {
         let services_to_initialize = {
             if config_path.exists() {
                 let cfg: ServiceEnsureBody = toml::from_str(
-                    &tokio::fs::read_to_string(&config_path).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?,
+                    &tokio::fs::read_to_string(&config_path)
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?,
                 )
                 .map_err(|err| Error::TomlDeserialize {
                     path: config_path.clone(),
@@ -1375,7 +1411,7 @@ impl ServiceManager {
             })?;
         tokio::fs::write(&config_path, services_str)
             .await
-            .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+            .map_err(|err| Error::io_path(&config_path, err))?;
 
         Ok(())
     }

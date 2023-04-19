@@ -4,7 +4,9 @@
 
 //! Utilities to build SMF profiles.
 
-use std::fmt::{Display, Error, Formatter};
+use illumos_utils::running_zone::InstalledZone;
+use slog::Logger;
+use std::fmt::{Display, Formatter};
 
 pub struct ProfileBuilder {
     name: String,
@@ -20,10 +22,27 @@ impl ProfileBuilder {
         self.services.push(service);
         self
     }
+
+    pub async fn add_to_zone(
+        &self,
+        log: &Logger,
+        installed_zone: &InstalledZone,
+    ) -> Result<(), std::io::Error> {
+        info!(log, "Profile for {}:\n{}", installed_zone.name(), self);
+
+        let profile_path = format!(
+            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
+            zone_mountpoint = illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
+            zone = installed_zone.name(),
+        );
+
+        tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;
+        Ok(())
+    }
 }
 
 impl Display for ProfileBuilder {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
@@ -60,7 +79,7 @@ impl ServiceBuilder {
 }
 
 impl Display for ServiceBuilder {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             r#"  <service version="1" type="service" name="{name}">
@@ -105,7 +124,7 @@ impl PropertyGroupBuilder {
 }
 
 impl Display for PropertyGroupBuilder {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             r#"      <property_group type="application" name="{name}">
@@ -131,7 +150,7 @@ pub struct Property {
 }
 
 impl Display for Property {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
             r#"        <propval type="{ty}" name="{name}" value="{value}"/>
