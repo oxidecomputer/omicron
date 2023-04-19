@@ -133,7 +133,22 @@ impl InstanceStates {
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> bool {
         // For the old and new records to match, the new record's Propolis
-        // generation must succeed the old record's.
+        // generation must immediately succeed the old record's.
+        //
+        // This is an equality check to try to avoid the following A-B-A
+        // problem:
+        //
+        // 1. Instance starts on sled 1.
+        // 2. Parallel sagas start, one to migrate the instance to sled 2
+        //    and one to migrate the instance to sled 3.
+        // 3. The "migrate to sled 2" saga completes.
+        // 4. A new migration starts that migrates the instance back to sled 1.
+        // 5. The "migrate to sled 3" saga attempts to set its migration
+        //    ID.
+        //
+        // A simple less-than check allows the migration to sled 3 to proceed
+        // even though the most-recently-expressed intent to migrate put the
+        // instance on sled 1.
         if old_runtime.propolis_gen.next() != self.current.propolis_gen {
             return false;
         }
