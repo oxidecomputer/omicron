@@ -145,9 +145,9 @@ impl fmt::Display for SpComponentUpdateStage {
     }
 }
 
-// On `allow(large_num_variant)`: "large" here is ~200 bytes, and we usually
-// expect the large variant. Clippy wants us to box the inner `ProgressEvent`
-// which is annoying, so silence the warning.
+// On `allow(clippy::large_enum_variant)`: "large" here is ~200 bytes, and we
+// usually expect the large variant. Clippy wants us to box the inner
+// `ProgressEvent` which is annoying, so silence the warning.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[allow(clippy::large_enum_variant)]
