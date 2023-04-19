@@ -1914,7 +1914,7 @@ CREATE TABLE omicron.public.dns_name (
     name TEXT NOT NULL,
     dns_record_data JSONB NOT NULL,
 
-    PRIMARY KEY (dns_zone_id, version_added, name)
+    PRIMARY KEY (dns_zone_id, name, version_added)
 );
 
 /*******************************************************************/

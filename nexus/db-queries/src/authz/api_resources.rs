@@ -311,6 +311,69 @@ impl AuthorizedResource for ConsoleSessionList {
     }
 }
 
+/// DnsConfig is a synthetic resource used for modeling access to the internal
+/// and external DNS configuration
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DnsConfig;
+
+pub const DNS_CONFIG: DnsConfig = DnsConfig {};
+
+impl oso::PolarClass for DnsConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to DnsConfig
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &DnsConfig, _actor: AuthenticatedActor, _role: String| {
+                    false
+                },
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for DnsConfig {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource(
+            opctx,
+            datastore,
+            authn,
+            ResourceType::Fleet,
+            *FLEET_ID,
+            roleset,
+        )
+        .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GlobalImageList;
 /// Singleton representing the [`GlobalImageList`] itself for authz purposes

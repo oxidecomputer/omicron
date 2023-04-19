@@ -26,6 +26,7 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -408,23 +409,41 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<IpAddr>, Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::nexus_service::dsl as nexus_dsl;
-        Ok(extip_dsl::external_ip
-            .filter(extip_dsl::id.eq_any(
-                nexus_dsl::nexus_service.select(nexus_dsl::external_ip_id),
-            ))
-            .select(ExternalIp::as_select())
-            .get_results_async(self.pool_authorized(opctx).await?)
+        type TxnError = TransactionError<()>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                // This is the rare case where we want to allow table scans.  There
+                // must not be enough Nexus instances for this to be a problem.
+                // XXX-dap copied from ALLOW_FULL_TABLE_SCAN_SQL
+                let sql = "set local disallow_full_table_scans = off; \
+                    set local large_full_scan_rows = 1000;";
+                conn.batch_execute_async(sql).await?;
+                Ok(extip_dsl::external_ip
+                    .filter(
+                        extip_dsl::id.eq_any(
+                            nexus_dsl::nexus_service
+                                .select(nexus_dsl::external_ip_id),
+                        ),
+                    )
+                    .select(ExternalIp::as_select())
+                    .get_results_async(&conn)
+                    .await?
+                    .into_iter()
+                    .map(|external_ip| external_ip.ip.ip())
+                    .collect())
+            })
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?
-            .into_iter()
-            .map(|external_ip| external_ip.ip.ip())
-            .collect())
+            .map_err(|error: TxnError| match error {
+                TransactionError::CustomError(()) => unimplemented!(),
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
     }
 }
 

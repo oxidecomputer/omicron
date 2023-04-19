@@ -44,7 +44,7 @@ impl DataStore {
         dns_group: DnsGroup,
         pagparams: &DataPageParams<'_, String>,
     ) -> ListResultVec<DnsZone> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_zone::dsl;
         paginated(dsl::dns_zone, dsl::zone_name, pagparams)
             .filter(dsl::dns_group.eq(dns_group))
@@ -68,7 +68,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> LookupResult<DnsZone> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
         use db::schema::dns_zone::dsl;
         let list = dsl::dns_zone
@@ -97,7 +97,7 @@ impl DataStore {
         opctx: &OpContext,
         dns_group: DnsGroup,
     ) -> LookupResult<DnsVersion> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_version::dsl;
         let versions = dsl::dns_version
             .filter(dsl::dns_group.eq(dns_group))
@@ -129,7 +129,7 @@ impl DataStore {
         version: Generation,
         pagparams: &DataPageParams<'_, String>,
     ) -> ListResultVec<(String, Vec<DnsRecord>)> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_name::dsl;
         Ok(paginated(dsl::dns_name, dsl::name, pagparams)
             .filter(dsl::dns_zone_id.eq(dns_zone_id))
@@ -365,6 +365,8 @@ impl DataStore {
         ConnErr: From<diesel::result::Error> + Send + 'static,
         ConnErr: Into<PoolError>,
     {
+        opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
+
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -440,7 +442,10 @@ impl DataStore {
             let to_remove = update.names_removed;
             let ntoremove = to_remove.len();
             let nremoved = diesel::update(
-                dsl::dns_name.filter(dsl::name.eq_any(to_remove)),
+                dsl::dns_name
+                    .filter(dsl::dns_zone_id.eq(update.dns_zone.id))
+                    .filter(dsl::name.eq_any(to_remove))
+                    .filter(dsl::version_removed.is_null()),
             )
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)

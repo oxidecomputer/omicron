@@ -677,6 +677,12 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     );
     assert_eq!(fetched_pool.identity.description, "IP Pool for Oxide Services");
 
+    // Fetch any ranges already present.
+    let existing_ranges =
+        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
+            .await
+            .items;
+
     // Add some ranges. Pagination is tested more explicitly in the IP pool
     // implementation, but we just check that these endpoints work here.
     let ranges = [
@@ -696,7 +702,7 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
         ),
     ];
 
-    let mut expected_ranges = Vec::with_capacity(ranges.len());
+    let mut expected_ranges = existing_ranges.clone();
     for range in ranges.iter() {
         let created_range: IpPoolRange =
             NexusRequest::objects_post(client, &ip_pool_add_range_url, &range)
@@ -717,7 +723,7 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let first_page =
         objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
             .await;
-    assert_eq!(first_page.items.len(), ranges.len());
+    assert_eq!(first_page.items.len(), expected_ranges.len());
 
     let actual_ranges = first_page.items.iter();
     for (expected_range, actual_range) in
@@ -746,7 +752,12 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let first_page =
         objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
             .await;
-    assert!(first_page.items.is_empty());
+    assert_eq!(first_page.items.len(), existing_ranges.len());
+    for (expected_range, actual_range) in
+        existing_ranges.iter().zip(first_page.items.iter())
+    {
+        assert_ranges_eq(expected_range, actual_range);
+    }
 }
 
 fn assert_pools_eq(first: &IpPool, second: &IpPool) {

@@ -104,6 +104,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         AnyActor::get_polar_class(),
         AuthenticatedActor::get_polar_class(),
         Database::get_polar_class(),
+        DnsConfig::get_polar_class(),
         Fleet::get_polar_class(),
         IpPoolList::get_polar_class(),
         GlobalImageList::get_polar_class(),
