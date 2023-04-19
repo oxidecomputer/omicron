@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifact;
+mod bootstrap;
 mod ddm_admin_client;
 mod dispatch;
 mod errors;
@@ -16,3 +17,7 @@ mod test_helpers;
 mod write;
 
 pub use dispatch::*;
+pub use write::*;
+
+#[cfg(feature = "image-standard")]
+compile_error!("Installinator should not be built with `-i standard`");

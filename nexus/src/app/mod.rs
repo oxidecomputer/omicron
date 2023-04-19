@@ -8,7 +8,6 @@ use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
 use crate::config;
-use crate::context::OpContext;
 use crate::db;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -17,6 +16,8 @@ use crate::saga_interface::SagaContext;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
+use internal_dns::ServiceName;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use slog::Logger;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
@@ -35,10 +37,8 @@ mod instance;
 mod ip_pool;
 mod metrics;
 mod network_interface;
-mod organization;
 mod oximeter;
 mod project;
-pub mod provisioning;
 mod rack;
 pub mod saga;
 mod session;
@@ -163,28 +163,36 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
-    resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
+    resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
+
+    /// Client for dataplane daemon / switch management API
+    dpd_client: Arc<dpd_client::Client>,
+
+    /// Background tasks
+    background_tasks: background::Driver,
+
+    /// task handle for the internal DNS config background task
+    task_internal_dns_config: background::TaskHandle,
+
+    /// task handle for the internal DNS servers background task
+    task_internal_dns_servers: background::TaskHandle,
+
+    /// task handle for the external DNS servers background task
+    task_external_dns_servers: background::TaskHandle,
 }
 
-// TODO Is it possible to make some of these operations more generic?  A
-// particularly good example is probably list() (or even lookup()), where
-// with the right type parameters, generic code can be written to work on all
-// types.
-//
-// TODO update and delete need to accommodate both with-etag and don't-care
-// TODO audit logging ought to be part of this structure and its functions
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
     pub async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: Arc<Mutex<dns_service_client::multiclient::Resolver>>,
+        resolver: Arc<Mutex<internal_dns::resolver::Resolver>>,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &config::Config,
         authz: Arc<authz::Authz>,
-    ) -> Arc<Nexus> {
+    ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
         let db_datastore = Arc::new(db::DataStore::new(Arc::clone(&pool)));
         db_datastore.register_producers(&producer_registry);
@@ -203,6 +211,30 @@ impl Nexus {
             sec_store,
         ));
 
+        let client_state = dpd_client::ClientState {
+            tag: String::from("nexus"),
+            log: log.new(o!(
+                "component" => "DpdClient"
+            )),
+        };
+        let (dpd_host, dpd_port) = if let Some(dpd_address) =
+            &config.pkg.dendrite.address
+        {
+            (dpd_address.ip().to_string(), dpd_address.port())
+        } else {
+            let addr = resolver
+                .lock()
+                .await
+                .lookup_socket_v6(ServiceName::Dendrite)
+                .await
+                .map_err(|e| format!("Cannot access Dendrite address: {e}"))?;
+            (addr.ip().to_string(), addr.port())
+        };
+        let dpd_client = Arc::new(dpd_client::Client::new(
+            &format!("http://[{dpd_host}]:{dpd_port}"),
+            client_state,
+        ));
+
         // Connect to clickhouse - but do so lazily.
         // Clickhouse may not be executing when Nexus starts.
         let timeseries_client = if let Some(address) =
@@ -214,10 +246,8 @@ impl Nexus {
             LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
         };
 
-        // TODO-cleanup We may want a first-class subsystem for managing startup
-        // background tasks.  It could use a Future for each one, a status enum
-        // for each one, status communication via channels, and a single task to
-        // run them all.
+        // TODO-cleanup We may want to make the populator a first-class
+        // background task.
         let populate_ctx = OpContext::for_background(
             log.new(o!("component" => "DataLoader")),
             Arc::clone(&authz),
@@ -230,6 +260,23 @@ impl Nexus {
             populate_ctx,
             Arc::clone(&db_datastore),
             populate_args,
+        );
+
+        let background_ctx = OpContext::for_background(
+            log.new(o!("component" => "BackgroundTasks")),
+            Arc::clone(&authz),
+            authn::Context::internal_api(),
+            Arc::clone(&db_datastore),
+        );
+        let (
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
+        ) = background::init(
+            &background_ctx,
+            Arc::clone(&db_datastore),
+            &config.pkg.background_tasks,
         );
 
         let nexus = Nexus {
@@ -263,6 +310,11 @@ impl Nexus {
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
             resolver,
+            dpd_client,
+            background_tasks,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_servers,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -288,7 +340,32 @@ impl Nexus {
         );
 
         *nexus.recovery_task.lock().unwrap() = Some(recovery_task);
-        nexus
+
+        // Kick all background tasks once the populate step finishes.  Among
+        // other things, the populate step installs role assignments for
+        // internal identities that are used by the background tasks.  If we
+        // don't do this here, those tasks might fail spuriously on startup and
+        // not be retried for a while.
+        let task_nexus = nexus.clone();
+        let task_log = nexus.log.clone();
+        tokio::spawn(async move {
+            match task_nexus.wait_for_populate().await {
+                Ok(_) => {
+                    info!(
+                        task_log,
+                        "populate complete; activating background tasks"
+                    );
+                    for task in task_nexus.background_tasks.tasks() {
+                        task_nexus.background_tasks.activate(task);
+                    }
+                }
+                Err(_) => {
+                    error!(task_log, "populate failed");
+                }
+            }
+        });
+
+        Ok(nexus)
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.
@@ -419,9 +496,9 @@ impl Nexus {
     /// _existence_ of this endpoint is not a secret.  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
@@ -441,9 +518,9 @@ impl Nexus {
     /// of a specific resource of type "my-new-kind-of-resource").  Use:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
@@ -483,24 +560,24 @@ impl Nexus {
     /// underneath Organizations:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
     /// use omicron_common::api::external::Error;
     ///
-    /// async fn organization_list_my_thing(
+    /// async fn project_list_my_thing(
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
+    ///     project_name: &Name,
     /// ) -> Result<(), Error>
     /// {
-    ///     let (.., _authz_org) = LookupPath::new(opctx, datastore)
-    ///         .organization_name(organization_name)
+    ///     let (.., _authz_proj) = LookupPath::new(opctx, datastore)
+    ///         .project_name(project_name)
     ///         .lookup_for(authz::Action::ListChildren)
     ///         .await?;
     ///     Err(nexus.unimplemented_todo(opctx, Unimpl::Public).await)
@@ -513,10 +590,10 @@ impl Nexus {
     /// example stub for the "get" endpoint for that same resource:
     ///
     /// ```
+    /// use nexus_db_queries::context::OpContext;
     /// use omicron_nexus::app::Nexus;
     /// use omicron_nexus::app::Unimpl;
     /// use omicron_nexus::authz;
-    /// use omicron_nexus::context::OpContext;
     /// use omicron_nexus::db::lookup::LookupPath;
     /// use omicron_nexus::db::model::Name;
     /// use omicron_nexus::db::DataStore;
@@ -528,7 +605,6 @@ impl Nexus {
     ///     nexus: &Nexus,
     ///     datastore: &DataStore,
     ///     opctx: &OpContext,
-    ///     organization_name: &Name,
     ///     the_name: &Name,
     /// ) -> Result<(), Error>
     /// {
@@ -606,12 +682,12 @@ impl Nexus {
 
     pub async fn set_resolver(
         &self,
-        resolver: dns_service_client::multiclient::Resolver,
+        resolver: internal_dns::resolver::Resolver,
     ) {
         *self.resolver.lock().await = resolver;
     }
 
-    pub async fn resolver(&self) -> dns_service_client::multiclient::Resolver {
+    pub async fn resolver(&self) -> internal_dns::resolver::Resolver {
         let resolver = self.resolver.lock().await;
         resolver.clone()
     }

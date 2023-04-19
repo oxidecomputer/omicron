@@ -19,9 +19,12 @@ use crucible_agent_client::types::{
 use crucible_client_types::VolumeConstructionRequest;
 use dropshot::HttpError;
 use futures::lock::Mutex;
-use nexus_client::types::{ByteCount, ZpoolPutRequest};
+use nexus_client::types::{
+    ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
+};
 use slog::Logger;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -368,6 +371,10 @@ impl CrucibleServer {
     }
 }
 
+struct PhysicalDisk {
+    _variant: PhysicalDiskKind,
+}
+
 struct Zpool {
     datasets: HashMap<Uuid, CrucibleServer>,
 }
@@ -423,11 +430,19 @@ impl Zpool {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct DiskName {
+    vendor: String,
+    serial: String,
+    model: String,
+}
+
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
     nexus_client: Arc<NexusClient>,
     log: Logger,
+    physical_disks: HashMap<DiskName, PhysicalDisk>,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
@@ -444,19 +459,61 @@ impl Storage {
             sled_id,
             nexus_client,
             log,
+            physical_disks: HashMap::new(),
             zpools: HashMap::new(),
             crucible_ip,
             next_crucible_port: 100,
         }
     }
 
+    pub async fn insert_physical_disk(
+        &mut self,
+        vendor: String,
+        serial: String,
+        model: String,
+        variant: PhysicalDiskKind,
+    ) {
+        let identifier = DiskName {
+            vendor: vendor.clone(),
+            serial: serial.clone(),
+            model: model.clone(),
+        };
+        self.physical_disks
+            .insert(identifier, PhysicalDisk { _variant: variant });
+
+        // Notify Nexus
+        let request = PhysicalDiskPutRequest {
+            vendor,
+            serial,
+            model,
+            variant,
+            sled_id: self.sled_id,
+        };
+        self.nexus_client
+            .physical_disk_put(&request)
+            .await
+            .expect("Failed to notify Nexus about new Physical Disk");
+    }
+
     /// Adds a Zpool to the sled's simulated storage and notifies Nexus.
-    pub async fn insert_zpool(&mut self, zpool_id: Uuid, size: u64) {
+    pub async fn insert_zpool(
+        &mut self,
+        zpool_id: Uuid,
+        disk_vendor: String,
+        disk_serial: String,
+        disk_model: String,
+        size: u64,
+    ) {
         // Update our local data
         self.zpools.insert(zpool_id, Zpool::new());
 
         // Notify Nexus
-        let request = ZpoolPutRequest { size: ByteCount(size) };
+        let request = ZpoolPutRequest {
+            size: ByteCount(size),
+            disk_vendor,
+            disk_serial,
+            disk_model,
+        };
         self.nexus_client
             .zpool_put(&self.sled_id, &zpool_id, &request)
             .await
@@ -534,6 +591,7 @@ pub struct Pantry {
     pub id: Uuid,
     vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
     sled_agent: Arc<SledAgent>,
+    jobs: Mutex<HashSet<String>>,
 }
 
 impl Pantry {
@@ -542,6 +600,19 @@ impl Pantry {
             id: Uuid::new_v4(),
             vcrs: Mutex::new(HashMap::default()),
             sled_agent,
+            jobs: Mutex::new(HashSet::default()),
+        }
+    }
+
+    pub async fn entry(
+        &self,
+        volume_id: String,
+    ) -> Result<VolumeConstructionRequest, HttpError> {
+        let vcrs = self.vcrs.lock().await;
+        match vcrs.get(&volume_id) {
+            Some(entry) => Ok(entry.clone()),
+
+            None => Err(HttpError::for_not_found(None, volume_id)),
         }
     }
 
@@ -557,25 +628,41 @@ impl Pantry {
 
     pub async fn is_job_finished(
         &self,
-        _job_id: String,
+        job_id: String,
     ) -> Result<bool, HttpError> {
+        let jobs = self.jobs.lock().await;
+        if !jobs.contains(&job_id) {
+            return Err(HttpError::for_not_found(None, job_id));
+        }
         Ok(true)
     }
 
     pub async fn get_job_result(
         &self,
-        _job_id: String,
+        job_id: String,
     ) -> Result<Result<()>, HttpError> {
+        let mut jobs = self.jobs.lock().await;
+        if !jobs.contains(&job_id) {
+            return Err(HttpError::for_not_found(None, job_id));
+        }
+        jobs.remove(&job_id);
         Ok(Ok(()))
     }
 
     pub async fn import_from_url(
         &self,
-        _volume_id: String,
+        volume_id: String,
         _url: String,
         _expected_digest: Option<ExpectedDigest>,
     ) -> Result<String, HttpError> {
-        unimplemented!();
+        self.entry(volume_id).await?;
+
+        // Make up job
+        let mut jobs = self.jobs.lock().await;
+        let job_id = Uuid::new_v4().to_string();
+        jobs.insert(job_id.clone());
+
+        Ok(job_id)
     }
 
     pub async fn snapshot(
@@ -606,15 +693,71 @@ impl Pantry {
 
     pub async fn bulk_write(
         &self,
-        _volume_id: String,
-        _offset: u64,
-        _data: Vec<u8>,
+        volume_id: String,
+        offset: u64,
+        data: Vec<u8>,
     ) -> Result<(), HttpError> {
-        unimplemented!();
+        let vcr = self.entry(volume_id).await?;
+
+        // Currently, Nexus will only make volumes where the first subvolume is
+        // a Region. This will change in the future!
+        let (region_block_size, region_size) = match vcr {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                match sub_volumes[0] {
+                    VolumeConstructionRequest::Region {
+                        block_size,
+                        blocks_per_extent,
+                        extent_count,
+                        ..
+                    } => (
+                        block_size,
+                        block_size * blocks_per_extent * (extent_count as u64),
+                    ),
+
+                    _ => {
+                        panic!("unexpected Volume layout");
+                    }
+                }
+            }
+
+            _ => {
+                panic!("unexpected Volume layout");
+            }
+        };
+
+        if (offset % region_block_size) != 0 {
+            return Err(HttpError::for_bad_request(
+                None,
+                "offset not multiple of block size!".to_string(),
+            ));
+        }
+
+        if (data.len() as u64 % region_block_size) != 0 {
+            return Err(HttpError::for_bad_request(
+                None,
+                "data length not multiple of block size!".to_string(),
+            ));
+        }
+
+        if (offset + data.len() as u64) > region_size {
+            return Err(HttpError::for_bad_request(
+                None,
+                "offset + data length off end of region!".to_string(),
+            ));
+        }
+
+        Ok(())
     }
 
-    pub async fn scrub(&self, _volume_id: String) -> Result<String, HttpError> {
-        unimplemented!();
+    pub async fn scrub(&self, volume_id: String) -> Result<String, HttpError> {
+        self.entry(volume_id).await?;
+
+        // Make up job
+        let mut jobs = self.jobs.lock().await;
+        let job_id = Uuid::new_v4().to_string();
+        jobs.insert(job_id.clone());
+
+        Ok(job_id)
     }
 
     pub async fn detach(&self, volume_id: String) -> Result<()> {
@@ -640,7 +783,9 @@ impl PantryServer {
         let server = dropshot::HttpServerStarter::new(
             &dropshot::ConfigDropshot {
                 bind_address: SocketAddr::new(ip, 0),
-                request_body_max_bytes: 1024 * 1024,
+                // This has to be large enough to support:
+                // - bulk writes into disks
+                request_body_max_bytes: 8192 * 1024,
                 ..Default::default()
             },
             super::http_entrypoints_pantry::api(),

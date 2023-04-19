@@ -14,13 +14,13 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance_with;
+use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
-use nexus_test_utils::resource_helpers::{create_organization, create_project};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
-    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount, Ipv4Net,
-    NetworkInterface,
+    ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
+    InstanceNetworkInterface, Ipv4Net,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_nexus::external_api::params;
@@ -37,7 +37,7 @@ async fn create_instance_expect_failure(
 ) -> HttpErrorResponseBody {
     let network_interfaces =
         params::InstanceNetworkInterfaceAttachment::Create(vec![
-            params::NetworkInterfaceCreate {
+            params::InstanceNetworkInterfaceCreate {
                 identity: IdentityMetadataCreateParams {
                     // We're using the name of the instance purposefully, to
                     // avoid any naming conflicts on the interface.
@@ -81,26 +81,19 @@ async fn create_instance_expect_failure(
 async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    let organization_name = "test-org";
     let project_name = "springfield-squidport";
 
     // Create a project that we'll use for testing.
     populate_ip_pool(&client, "default", None).await;
-    create_organization(&client, organization_name).await;
-    create_project(&client, organization_name, project_name).await;
-    let url_instances = format!(
-        "/organizations/{}/projects/{}/instances",
-        organization_name, project_name
-    );
+    create_project(&client, project_name).await;
+    let url_instances = format!("/v1/instances?project={}", project_name);
 
     // Create a new, small VPC Subnet, so we don't need to issue many requests
     // to test address exhaustion.
     let subnet_size =
         cptestctx.server.apictx().nexus.tunables().max_vpc_ipv4_subnet_prefix;
-    let url_subnets = format!(
-        "/organizations/{}/projects/{}/vpcs/default/subnets",
-        organization_name, project_name
-    );
+    let vpc_selector = format!("project={}&vpc=default", project_name);
+    let subnets_url = format!("/v1/vpc-subnets?{}", vpc_selector);
     let subnet_name = "small";
     let network_address = Ipv4Addr::new(192, 168, 42, 0);
     let subnet = Ipv4Network::new(network_address, subnet_size)
@@ -114,7 +107,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
         ipv4_block: Ipv4Net(subnet),
         ipv6_block: None,
     };
-    NexusRequest::objects_post(client, &url_subnets, &Some(&subnet_create))
+    NexusRequest::objects_post(client, &subnets_url, &Some(&subnet_create))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -123,7 +116,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     // The valid addresses for allocation in `subnet` are 192.168.42.5 and
     // 192.168.42.6. The rest are reserved as described in RFD21.
     let nic = params::InstanceNetworkInterfaceAttachment::Create(vec![
-        params::NetworkInterfaceCreate {
+        params::InstanceNetworkInterfaceCreate {
             identity: IdentityMetadataCreateParams {
                 name: "eth0".parse().unwrap(),
                 description: String::from("some iface"),
@@ -143,7 +136,6 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     for i in 0..subnet_size {
         create_instance_with(
             client,
-            organization_name,
             project_name,
             &format!("i{}", i),
             &nic,
@@ -164,9 +156,12 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "No available IP addresses for interface");
 
     // Verify the subnet lists the two addresses as in use
-    let url_ips = format!("{}/{}/network-interfaces", url_subnets, subnet_name);
+    let url_ips = format!(
+        "/v1/vpc-subnets/{}/network-interfaces?{}",
+        subnet_name, vpc_selector
+    );
     let mut network_interfaces =
-        objects_list_page_authz::<NetworkInterface>(client, &url_ips)
+        objects_list_page_authz::<InstanceNetworkInterface>(client, &url_ips)
             .await
             .items;
     assert_eq!(network_interfaces.len(), subnet_size);

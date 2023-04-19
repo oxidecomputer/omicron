@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
+use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -173,6 +175,13 @@ pub struct TimeseriesDbConfig {
     pub address: Option<SocketAddr>,
 }
 
+/// Configuration for the `Dendrite` dataplane daemon.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct DpdConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<SocketAddr>,
+}
+
 // A deserializable type that does no validation on the tunable parameters.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
@@ -256,6 +265,37 @@ fn default_https_port() -> u16 {
     443
 }
 
+/// Background task configuration
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BackgroundTaskConfig {
+    /// configuration for internal DNS background tasks
+    pub dns_internal: DnsTasksConfig,
+    /// configuration for external DNS background tasks
+    pub dns_external: DnsTasksConfig,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DnsTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest DNS configuration from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_config: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest list of DNS servers from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_servers: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// propagates the latest DNS configuration to the latest set of DNS servers
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_propagation: Duration,
+
+    /// maximum number of concurrent DNS server updates
+    pub max_concurrent_server_updates: usize,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -271,13 +311,18 @@ pub struct PackageConfig {
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
-    /// Updates-related configuration. Updates APIs return 400 Bad Request when this is
-    /// unconfigured.
+    /// Updates-related configuration. Updates APIs return 400 Bad Request when
+    /// this is unconfigured.
     #[serde(default)]
     pub updates: Option<UpdatesConfig>,
     /// Tunable configuration for testing and experimentation
     #[serde(default)]
     pub tunables: Tunables,
+    /// `Dendrite` dataplane daemon configuration
+    #[serde(default)]
+    pub dendrite: DpdConfig,
+    /// Background task configuration
+    pub background_tasks: BackgroundTaskConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -350,7 +395,10 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
-    use crate::nexus_config::{Database, DeploymentConfig, LoadErrorKind};
+    use crate::nexus_config::{
+        BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
+        DpdConfig, LoadErrorKind,
+    };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -360,6 +408,8 @@ mod test {
     use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
     use std::path::PathBuf;
+    use std::str::FromStr;
+    use std::time::Duration;
 
     /// Generates a temporary filesystem path unique for the given label.
     fn temp_path(label: &str) -> PathBuf {
@@ -479,6 +529,17 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [dendrite]
+            address = "[::1]:12224"
+            [background_tasks]
+            dns_internal.period_secs_config = 1
+            dns_internal.period_secs_servers = 2
+            dns_internal.period_secs_propagation = 3
+            dns_internal.max_concurrent_server_updates = 4
+            dns_external.period_secs_config = 5
+            dns_external.period_secs_servers = 6
+            dns_external.period_secs_propagation = 7
+            dns_external.max_concurrent_server_updates = 8
             "##,
         )
         .unwrap();
@@ -528,6 +589,25 @@ mod test {
                         default_base_url: "http://example.invalid/".into(),
                     }),
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    dendrite: DpdConfig {
+                        address: Some(
+                            SocketAddr::from_str("[::1]:12224").unwrap()
+                        )
+                    },
+                    background_tasks: BackgroundTaskConfig {
+                        dns_internal: DnsTasksConfig {
+                            period_secs_config: Duration::from_secs(1),
+                            period_secs_servers: Duration::from_secs(2),
+                            period_secs_propagation: Duration::from_secs(3),
+                            max_concurrent_server_updates: 4,
+                        },
+                        dns_external: DnsTasksConfig {
+                            period_secs_config: Duration::from_secs(5),
+                            period_secs_servers: Duration::from_secs(6),
+                            period_secs_propagation: Duration::from_secs(7),
+                            max_concurrent_server_updates: 8,
+                        },
+                    },
                 },
             }
         );
@@ -562,6 +642,17 @@ mod test {
             net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [dendrite]
+            address = "[::1]:12224"
+            [background_tasks]
+            dns_internal.period_secs_config = 1
+            dns_internal.period_secs_servers = 2
+            dns_internal.period_secs_propagation = 3
+            dns_internal.max_concurrent_server_updates = 4
+            dns_external.period_secs_config = 5
+            dns_external.period_secs_servers = 6
+            dns_external.period_secs_propagation = 7
+            dns_external.max_concurrent_server_updates = 8
             "##,
         )
         .unwrap();

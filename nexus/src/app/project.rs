@@ -2,19 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Project APIs, contained within organizations
+//! Project APIs
 
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -24,60 +23,40 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
 use std::sync::Arc;
 
 impl super::Nexus {
     pub fn project_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        project_selector: &'a params::ProjectSelector,
+        project_selector: params::ProjectSelector,
     ) -> LookupResult<lookup::Project<'a>> {
-        match project_selector {
-            params::ProjectSelector {
-                project: NameOrId::Id(id),
-                organization_selector: None,
-            } => {
-                let project =
-                    LookupPath::new(opctx, &self.db_datastore).project_id(*id);
-                Ok(project)
+        let lookup_path = LookupPath::new(opctx, &self.db_datastore);
+        Ok(match project_selector {
+            params::ProjectSelector { project: NameOrId::Id(id) } => {
+                lookup_path.project_id(id)
             }
-            params::ProjectSelector {
-                project: NameOrId::Name(name),
-                organization_selector: Some(organization_selector),
-            } => {
-                let project = self
-                    .organization_lookup(opctx, organization_selector)?
-                    .project_name(Name::ref_cast(name));
-                Ok(project)
+            params::ProjectSelector { project: NameOrId::Name(name) } => {
+                lookup_path.project_name_owned(name.into())
             }
-            params::ProjectSelector {
-                project: NameOrId::Id(_),
-                organization_selector: Some(_)
-            } => {
-                Err(Error::invalid_request(
-                    "when providing project as an ID, organization should not be specified",
-                ))
-            }
-            _ => Err(Error::invalid_request(
-                    "project should either be specified by id or organization should be specified"
-            )),
-        }
+        })
     }
 
     pub async fn project_create(
         self: &Arc<Self>,
         opctx: &OpContext,
-        organization_lookup: &lookup::Organization<'_>,
         new_project: &params::ProjectCreate,
     ) -> CreateResult<db::model::Project> {
-        let (.., authz_org) =
-            organization_lookup.lookup_for(authz::Action::CreateChild).await?;
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Project")?;
+        opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
         let saga_params = sagas::project_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_create: new_project.clone(),
-            authz_org,
+            authz_silo,
         };
         let saga_outputs = self
             .execute_saga::<sagas::project_create::SagaProjectCreate>(
@@ -96,12 +75,9 @@ impl super::Nexus {
     pub async fn project_list(
         &self,
         opctx: &OpContext,
-        organization_lookup: &lookup::Organization<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Project> {
-        let (.., authz_org) =
-            organization_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore.projects_list(opctx, &authz_org, pagparams).await
+        self.db_datastore.projects_list(opctx, pagparams).await
     }
 
     pub async fn project_update(

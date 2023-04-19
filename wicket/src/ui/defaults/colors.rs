@@ -27,3 +27,4 @@ pub const TUI_GREEN_DARK: Color = Color::Rgb(0x2E, 0x81, 0x60);
 pub const TUI_GREY: Color = Color::Rgb(0x78, 0x78, 0x7A);
 pub const TUI_PURPLE: Color = Color::Rgb(0xBE, 0x95, 0xEB);
 pub const TUI_PURPLE_DIM: Color = Color::Rgb(0x6C, 0x55, 0x84);
+pub const TUI_GREY_DARK: Color = Color::Rgb(66, 66, 69);

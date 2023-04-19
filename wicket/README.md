@@ -99,20 +99,38 @@ return actions when they need to be redrawn. However, the `Runner` also doesn't
 know when a screen animation is ongoing, and so it forwards all ticks to the
 `Screen` which returns an `Action::Redraw` if a redraw is necessary.
 
-# Testing wicket as a login shell
+# Testing wicket as a captive shell
 
-Wicket is meant to be used as a login shell. To test the login shell on a local Unix machine:
+Wicket is meant to be used as a captive shell over ssh. To test the captive shell support on a local Unix machine:
 
-1. Make the `wicket` available globally, at e.g. `/usr/local/bin/wicket`:
+1. Make the `wicket` available globally. For the rest of this section we're going to use the path `/usr/local/bin/wicket`.
     * If your build directory is globally readable, create a symlink to `wicket` in a well-known location. From omicron's root, run: `sudo ln -s $(readlink -f target/debug/wicket) /usr/local/bin/wicket`
     * If it isn't globally accessible, run `sudo cp target/debug/wicket /usr/local/bin`. (You'll have to copy `wicket` each time you build it.)
 2. Add a new user to test against, for example `wicket-test`:
     1. Add a group for the new user: `groupadd wicket-test`.
-    2. Add the user: `sudo useradd -m -g wicket-test -s /usr/local/bin/wicket wicket-test`
+    2. Add the user: `sudo useradd -m -g wicket-test`
+3. Set up SSH authentication for this user, using either passwords or public keys (`.ssh/authorized_keys`).
+    * To configure SSH keys, you'll need to first log in as the `wicket-test` user. To do so, run `sudo -u wicket-test -i` (Linux) or `pfexec su - wicket-test` (illumos).
+    * If using `.ssh/authorized_keys`, be sure to set up the correct permissions for `~/.ssh` and its contents. As the `wicket-test` user, run `chmod go-rwx -R ~/.ssh`.
+4. Test that you can log in as the user: run `ssh wicket-test@localhost`. If it works, move on to step 5. If it doesn't work:
+    * To debug issues related to logging in, for example `~/.ssh` permissions issues, check the sshd authentication log.
+    * On Linux, the authentication log is typically at `/var/log/auth.log`.
+    * On illumos, the authentication log is at `/var/log/authlog`. If it is empty, logging needs to be enabled. (If you're an Oxide employee, see [this issue](https://github.com/oxidecomputer/helios-engvm/issues/18) for how to enable logging.)
+5. Add this to the end of `/etc/ssh/sshd_config`:
+    ```
+    Match User wicket-test
+        ForceCommand /usr/local/bin/wicket
+    ```
+6. Restart sshd:
+    * Linux using systemd: `sudo systemctl restart ssh`
+    * illumos: `svcadm restart ssh`
 
-At this point, you can use `sudo -u wicket-test -i` (Linux) or `pfexec su - wicket-test` (illumos) to test wicket as a login shell.
+From now on, if you run `ssh wicket-test@localhost`, you should get the wicket captive shell. Also, `ssh wicket-test@localhost upload` should let you upload a zip file as a TUF repository.
 
-* A plain `sudo -u wicket-test -i` will show the TUI.
-* `sudo -u wicket-test -i upload ...` will let you upload an artifact over stdin.
+# Testing upload functionality without a captive shell
 
-If you'd like to test connections over ssh, add your ssh key to the new user's `.ssh/authorized_keys`, then run `ssh wicket-test@localhost [upload ...]`.
+If you don't want to test wicket as a captive shell and simply want to try out the upload functionality, run:
+
+```
+SSH_ORIGINAL_COMMAND=upload cargo run -p wicket
+```

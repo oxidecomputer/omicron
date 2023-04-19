@@ -39,16 +39,24 @@ use uuid::Uuid;
 
 #[async_trait]
 pub trait NexusServer {
-    async fn start_and_populate(config: &Config, log: &Logger) -> Self;
+    type InternalServer;
+
+    async fn start_internal(
+        config: &Config,
+        log: &Logger,
+    ) -> (Self::InternalServer, SocketAddr);
+
+    async fn start(
+        internal_server: Self::InternalServer,
+        config: &Config,
+        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+    ) -> Self;
 
     async fn get_http_server_external_address(&self) -> Option<SocketAddr>;
     async fn get_https_server_external_address(&self) -> Option<SocketAddr>;
     async fn get_http_server_internal_address(&self) -> SocketAddr;
 
-    async fn set_resolver(
-        &self,
-        resolver: dns_service_client::multiclient::Resolver,
-    );
+    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver);
 
     // Previously, as a dataset was created (within the sled agent),
     // we'd use an internal API from Nexus to record that the dataset

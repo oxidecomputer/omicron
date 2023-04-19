@@ -90,25 +90,23 @@
 
 use super::{
     common_storage::{
+        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
         delete_crucible_regions, ensure_all_datasets_and_regions,
+        get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
-use internal_dns_names::ServiceName;
-use internal_dns_names::SRV;
 use nexus_db_model::Generation;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
-use omicron_common::backoff;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
@@ -310,7 +308,10 @@ async fn ssc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -479,7 +480,10 @@ async fn ssc_create_destination_volume_record_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
@@ -494,7 +498,10 @@ async fn ssc_create_snapshot_record(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
@@ -555,7 +562,10 @@ async fn ssc_create_snapshot_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "deleting snapshot {}", snapshot_id);
@@ -583,7 +593,10 @@ async fn ssc_account_space(
 
     let snapshot_created =
         sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_snapshot(
@@ -605,7 +618,10 @@ async fn ssc_account_space_undo(
 
     let snapshot_created =
         sagactx.lookup::<db::model::Snapshot>("created_snapshot")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_snapshot(
@@ -624,7 +640,10 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
@@ -687,7 +706,10 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot request for {snapshot_id}");
@@ -717,22 +739,44 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
 
 async fn ssc_get_pantry_address(
     sagactx: NexusActionContext,
-) -> Result<SocketAddrV6, ActionError> {
+) -> Result<(SocketAddrV6, bool), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-    let pantry_address = osagactx
-        .nexus()
-        .resolver()
+    // If the disk is already attached to a Pantry, use that, otherwise get a
+    // random one. Return boolean indicating if additional saga nodes need to
+    // attach this disk to that random pantry.
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
         .await
-        .lookup_socket_v6(SRV::Service(ServiceName::CruciblePantry))
-        .await
-        .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
-    info!(log, "using pantry at {}", pantry_address);
+    let pantry_address = if let Some(pantry_address) = disk.pantry_address() {
+        pantry_address
+    } else {
+        get_pantry_address(osagactx.nexus()).await?
+    };
 
-    Ok(pantry_address)
+    let disk_already_attached_to_pantry = disk.pantry_address().is_some();
+
+    info!(
+        log,
+        "using pantry at {}{}",
+        pantry_address,
+        if disk_already_attached_to_pantry {
+            " (already attached)"
+        } else {
+            ""
+        }
+    );
+
+    Ok((pantry_address, disk_already_attached_to_pantry))
 }
 
 async fn ssc_attach_disk_to_pantry(
@@ -741,7 +785,10 @@ async fn ssc_attach_disk_to_pantry(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -759,7 +806,24 @@ async fn ssc_attach_disk_to_pantry(
     // generation number is too low.
     match db_disk.state().into() {
         external::DiskState::Detached => {
-            // Ok
+            info!(log, "setting state of {} to maintenance", params.disk_id);
+
+            osagactx
+                .datastore()
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &db_disk.runtime().maintenance(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+
+        external::DiskState::Finalizing => {
+            // This saga is a sub-saga of the finalize saga if the user has
+            // specified an optional snapshot should be taken. No state change
+            // is required.
+            info!(log, "disk {} in state finalizing", params.disk_id);
         }
 
         _ => {
@@ -774,25 +838,6 @@ async fn ssc_attach_disk_to_pantry(
             ));
         }
     }
-
-    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
-
-    info!(
-        log,
-        "attaching disk {} to pantry at {:?}, setting state to maintenance",
-        params.disk_id,
-        pantry_address,
-    );
-
-    osagactx
-        .datastore()
-        .disk_update_runtime(
-            &opctx,
-            &authz_disk,
-            &db_disk.runtime().maintenance(),
-        )
-        .await
-        .map_err(ActionError::action_failed)?;
 
     // Record the disk's new generation number as this saga node's output. It
     // will be important later to *only* transition this disk out of maintenance
@@ -812,7 +857,10 @@ async fn ssc_attach_disk_to_pantry_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -841,7 +889,17 @@ async fn ssc_attach_disk_to_pantry_undo(
         }
 
         external::DiskState::Detached => {
-            info!(log, "undo: disk {} already detached", params.disk_id);
+            info!(
+                log,
+                "undo: disk {} already in state detached", params.disk_id
+            );
+        }
+
+        external::DiskState::Finalizing => {
+            info!(
+                log,
+                "undo: disk {} already in state finalizing", params.disk_id
+            );
         }
 
         _ => {
@@ -852,121 +910,39 @@ async fn ssc_attach_disk_to_pantry_undo(
     Ok(())
 }
 
-#[macro_export]
-macro_rules! retry_until_known_result {
-    ( $log:ident, $func:block ) => {
-        #[derive(Debug, thiserror::Error)]
-        enum InnerError {
-            #[error("Reqwest error: {0}")]
-            Reqwest(#[from] reqwest::Error),
-
-            #[error("Pantry client error: {0}")]
-            PantryClient(
-                #[from]
-                crucible_pantry_client::Error<
-                    crucible_pantry_client::types::Error,
-                >,
-            ),
-        }
-
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service(),
-            || async {
-                match ($func).await {
-                    Err(crucible_pantry_client::Error::CommunicationError(
-                        e,
-                    )) => {
-                        warn!(
-                            $log,
-                            "saw transient communication error {}, retrying...",
-                            e,
-                        );
-
-                        Err(backoff::BackoffError::<InnerError>::transient(
-                            e.into(),
-                        ))
-                    }
-
-                    Err(e) => {
-                        warn!($log, "saw permanent error {}, aborting", e,);
-
-                        Err(backoff::BackoffError::<InnerError>::Permanent(
-                            e.into(),
-                        ))
-                    }
-
-                    Ok(_) => Ok(()),
-                }
-            },
-            |error: InnerError, delay| {
-                warn!(
-                    $log,
-                    "failed external call ({:?}), will retry in {:?}",
-                    error,
-                    delay,
-                );
-            },
-        )
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "gave up on external call due to {:?}",
-                e
-            ))
-        })?;
-    };
-}
-
 async fn ssc_call_pantry_attach_for_disk(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
-
-    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
-
-    let endpoint = format!("http://{}", pantry_address);
-
-    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
-        .disk_id(params.disk_id)
-        .fetch_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    let disk_volume = osagactx
-        .datastore()
-        .volume_checkout(disk.volume_id)
-        .await
-        .map_err(ActionError::action_failed)?;
-
-    info!(
-        log,
-        "sending attach for disk {} volume {} to endpoint {}",
-        params.disk_id,
-        disk.volume_id,
-        endpoint,
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
     );
 
-    let volume_construction_request: crucible_pantry_client::types::VolumeConstructionRequest =
-        serde_json::from_str(&disk_volume.data()).map_err(|e| {
-            ActionError::action_failed(Error::internal_error(&format!(
-                "failed to deserialize disk {} volume data: {}",
-                disk.id(),
-                e,
-            )))
-        })?;
+    let (pantry_address, disk_already_attached_to_pantry) =
+        sagactx.lookup::<(SocketAddrV6, bool)>("pantry_address")?;
 
-    let client = crucible_pantry_client::Client::new(&endpoint);
+    if !disk_already_attached_to_pantry {
+        info!(
+            log,
+            "attaching disk {:?} to pantry at {:?}",
+            params.disk_id,
+            pantry_address
+        );
 
-    let attach_request = crucible_pantry_client::types::AttachRequest {
-        volume_construction_request,
-    };
-
-    retry_until_known_result!(log, {
-        client.attach(&params.disk_id.to_string(), &attach_request)
-    });
+        call_pantry_attach_for_disk(
+            &log,
+            &opctx,
+            &osagactx.nexus(),
+            params.disk_id,
+            pantry_address,
+        )
+        .await?;
+    } else {
+        info!(log, "disk {} already attached to a pantry", params.disk_id);
+    }
 
     Ok(())
 }
@@ -977,22 +953,27 @@ async fn ssc_call_pantry_attach_for_disk_undo(
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
 
-    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+    let (pantry_address, disk_already_attached_to_pantry) =
+        sagactx.lookup::<(SocketAddrV6, bool)>("pantry_address")?;
 
-    let endpoint = format!("http://{}", pantry_address);
+    // If the disk came into this saga attached to a pantry, don't detach it
+    if !disk_already_attached_to_pantry {
+        info!(
+            log,
+            "undo: detaching disk {:?} from pantry at {:?}",
+            params.disk_id,
+            pantry_address
+        );
 
-    info!(
-        log,
-        "undo: sending detach for disk {} to endpoint {}",
-        params.disk_id,
-        endpoint,
-    );
-
-    let client = crucible_pantry_client::Client::new(&endpoint);
-
-    retry_until_known_result!(log, {
-        client.detach(&params.disk_id.to_string())
-    });
+        call_pantry_detach_for_disk(&log, params.disk_id, pantry_address)
+            .await?;
+    } else {
+        info!(
+            log,
+            "undo: not detaching disk {}, was already attached to a pantry",
+            params.disk_id
+        );
+    }
 
     Ok(())
 }
@@ -1003,7 +984,8 @@ async fn ssc_call_pantry_snapshot_for_disk(
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
 
-    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+    let (pantry_address, _) =
+        sagactx.lookup::<(SocketAddrV6, bool)>("pantry_address")?;
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
     let endpoint = format!("http://{}", pantry_address);
@@ -1039,7 +1021,10 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     let params = sagactx.saga_params::<Params>()?;
 
@@ -1074,20 +1059,20 @@ async fn ssc_call_pantry_detach_for_disk(
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
 
-    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+    let (pantry_address, disk_already_attached_to_pantry) =
+        sagactx.lookup::<(SocketAddrV6, bool)>("pantry_address")?;
 
-    let endpoint = format!("http://{}", pantry_address);
-
-    info!(
-        log,
-        "sending detach for disk {} to endpoint {}", params.disk_id, endpoint,
-    );
-
-    let client = crucible_pantry_client::Client::new(&endpoint);
-
-    retry_until_known_result!(log, {
-        client.detach(&params.disk_id.to_string())
-    });
+    // If the disk came into this saga attached to a pantry, don't detach it
+    if !disk_already_attached_to_pantry {
+        info!(
+            log,
+            "detaching disk {:?} from pantry at {:?}",
+            params.disk_id,
+            pantry_address
+        );
+        call_pantry_detach_for_disk(&log, params.disk_id, pantry_address)
+            .await?;
+    }
 
     Ok(())
 }
@@ -1098,7 +1083,10 @@ async fn ssc_detach_disk_from_pantry(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, &osagactx.datastore())
@@ -1149,7 +1137,11 @@ async fn ssc_detach_disk_from_pantry(
         }
 
         external::DiskState::Detached => {
-            info!(log, "disk {} already detached", params.disk_id);
+            info!(log, "disk {} already in state detached", params.disk_id);
+        }
+
+        external::DiskState::Finalizing => {
+            info!(log, "disk {} already in state finalizing", params.disk_id);
         }
 
         _ => {
@@ -1166,7 +1158,10 @@ async fn ssc_start_running_snapshot(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "starting running snapshot for {snapshot_id}");
@@ -1263,7 +1258,10 @@ async fn ssc_start_running_snapshot_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
     info!(log, "Undoing snapshot start running request for {snapshot_id}");
@@ -1322,7 +1320,10 @@ async fn ssc_create_volume_record(
 
     // For a snapshot, copy the volume construction request at the time the
     // snapshot was taken.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -1389,7 +1390,10 @@ async fn ssc_create_volume_record_undo(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
     info!(log, "deleting volume {}", volume_id);
@@ -1404,7 +1408,10 @@ async fn ssc_finalize_snapshot_record(
     let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     info!(log, "snapshot final lookup...");
 
@@ -1537,9 +1544,9 @@ mod test {
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
@@ -1754,15 +1761,13 @@ mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
     const DISK_NAME: &str = "disky-mcdiskface";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
-        create_project(client, ORG_NAME, PROJECT_NAME).await;
-        create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await.identity.id
+        create_project(client, PROJECT_NAME).await;
+        create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
 
     // Helper for creating snapshot create parameters
@@ -1812,7 +1817,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -1922,7 +1927,7 @@ mod test {
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -1985,12 +1990,10 @@ mod test {
                 .await
                 .expect_err("Saga should have failed");
 
-            delete_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME).await;
+            delete_disk(client, PROJECT_NAME, DISK_NAME).await;
             verify_clean_slate(cptestctx, &test).await;
-            disk_id = create_disk(client, ORG_NAME, PROJECT_NAME, DISK_NAME)
-                .await
-                .identity
-                .id;
+            disk_id =
+                create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id;
 
             let params = new_test_params(
                 &opctx,
@@ -2021,7 +2024,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2130,7 +2133,7 @@ mod test {
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
 
-        let (authz_silo, _authz_org, authz_project, _authz_disk) =
+        let (authz_silo, authz_project, _authz_disk) =
             LookupPath::new(&opctx, nexus.datastore())
                 .disk_id(disk_id)
                 .lookup_for(authz::Action::Read)
@@ -2199,10 +2202,7 @@ mod test {
         )
         .await;
 
-        let instances_url = format!(
-            "/organizations/{}/projects/{}/instances",
-            ORG_NAME, PROJECT_NAME,
-        );
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
         let instance_name = "base-instance";
 
         let instance: Instance = object_create(

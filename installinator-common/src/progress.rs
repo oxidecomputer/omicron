@@ -11,10 +11,12 @@ use schemars::{
     schema::{Schema, SchemaObject},
     JsonSchema,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A report, consisting of a list of events and some more metadata.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub struct ProgressReport {
     /// How long it's been since the installinator started running.
@@ -35,7 +37,7 @@ pub struct ProgressReport {
 /// An individual completion event.
 ///
 /// Forms part of [`ProgressReport`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub struct CompletionEvent {
     /// When this event was generated, in duration since the start of the program.
@@ -51,7 +53,7 @@ pub struct CompletionEvent {
 /// An individual kind of completion event.
 ///
 /// Forms part of [`CompletionEvent`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum CompletionEventKind {
     /// The download of an artifact failed.
@@ -242,7 +244,7 @@ impl CompletionEventKind {
 /// An individual progress event.
 ///
 /// Forms part of [`ProgressReport`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub struct ProgressEvent {
     /// When this event was generated, in duration since the start of the program.
@@ -258,7 +260,7 @@ pub struct ProgressEvent {
 /// An individual kind of progress event.
 ///
 /// Forms part of [`ProgressEvent`].
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum ProgressEventKind {
     /// An artifact is being downloaded.

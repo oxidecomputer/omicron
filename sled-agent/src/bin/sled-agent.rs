@@ -4,7 +4,7 @@
 
 //! Executable program to run the sled agent
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::{
@@ -16,6 +16,14 @@ use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+#[derive(Subcommand, Debug)]
+enum OpenapiFlavor {
+    /// Generates bootstrap agent openapi spec
+    Bootstrap,
+    /// Generates sled agent openapi spec
+    Sled,
+}
+
 #[derive(Debug, Parser)]
 #[clap(
     name = "sled_agent",
@@ -24,7 +32,9 @@ use uuid::Uuid;
 )]
 enum Args {
     /// Generates the OpenAPI specification.
-    Openapi,
+    #[command(subcommand)]
+    Openapi(OpenapiFlavor),
+
     /// Runs the Sled Agent server.
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
@@ -43,7 +53,14 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => sled_server::run_openapi().map_err(CmdError::Failure),
+        Args::Openapi(flavor) => match flavor {
+            OpenapiFlavor::Sled => {
+                sled_server::run_openapi().map_err(CmdError::Failure)
+            }
+            OpenapiFlavor::Bootstrap => {
+                bootstrap_server::run_openapi().map_err(CmdError::Failure)
+            }
+        },
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
                 .map_err(|e| CmdError::Failure(e.to_string()))?;
@@ -99,19 +116,31 @@ async fn do_run() -> Result<(), CmdError> {
                 id: Uuid::new_v4(),
                 link,
                 log: config.log.clone(),
-                rss_config,
+                updates: config.updates.clone(),
                 sp_config,
             };
 
             // TODO: It's a little silly to pass the config this way - namely,
             // that we construct the bootstrap config from `config`, but then
             // pass it separately just so the sled agent can ingest it later on.
-            bootstrap_server::Server::start(bootstrap_config, config)
-                .await
-                .map_err(CmdError::Failure)?
-                .wait_for_finish()
-                .await
-                .map_err(CmdError::Failure)?;
+            let server =
+                bootstrap_server::Server::start(bootstrap_config, config)
+                    .await
+                    .map_err(CmdError::Failure)?;
+
+            // If requested, automatically supply the RSS configuration.
+            //
+            // This should remain equivalent to the HTTP request which can
+            // be invoked by Wicket.
+            if let Some(rss_config) = rss_config {
+                server
+                    .agent()
+                    .rack_initialize(rss_config)
+                    .await
+                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+            }
+
+            server.wait_for_finish().await.map_err(CmdError::Failure)?;
 
             Ok(())
         }

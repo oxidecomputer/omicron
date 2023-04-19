@@ -6,14 +6,10 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 libc.workspace = true
 omicron-common.workspace = true
-postgres-protocol.workspace = true
-signal-hook.workspace = true
-signal-hook-tokio.workspace = true
 slog.workspace = true
 subprocess.workspace = true
 tempfile.workspace = true
@@ -21,12 +17,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-postgres.workspace = true
 usdt.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
-
-# Disable doc builds by default for our binaries to work around issue
-# rust-lang/cargo#8373.  These docs would not be very useful anyway.
-[[bin]]
-name = "omicron-dev"
-doc = false

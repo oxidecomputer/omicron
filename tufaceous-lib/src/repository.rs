@@ -7,7 +7,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use fs_err::{self as fs, File};
-use omicron_common::update::{Artifact, ArtifactsDocument};
+use omicron_common::{
+    api::external::SemverVersion,
+    update::{Artifact, ArtifactsDocument},
+};
 use std::num::NonZeroU64;
 use tough::{
     editor::{signed::SignedRole, RepositoryEditor},
@@ -18,6 +21,7 @@ use url::Url;
 
 /// A TUF repository describing Omicron.
 pub struct OmicronRepo {
+    log: slog::Logger,
     repo: Repository,
     repo_path: Utf8PathBuf,
 }
@@ -25,26 +29,32 @@ pub struct OmicronRepo {
 impl OmicronRepo {
     /// Initializes a new repository at the given path, writing it to disk.
     pub fn initialize(
+        log: &slog::Logger,
         repo_path: &Utf8Path,
+        system_version: SemverVersion,
         keys: Vec<Key>,
         expiry: DateTime<Utc>,
     ) -> Result<Self> {
         let root = crate::root::new_root(keys.clone(), expiry)?;
-        let editor = OmicronRepoEditor::initialize(repo_path.to_owned(), root)?;
+        let editor = OmicronRepoEditor::initialize(
+            repo_path.to_owned(),
+            root,
+            system_version,
+        )?;
 
         editor
             .sign_and_finish(keys, expiry)
             .context("error signing new repository")?;
 
-        Self::load(repo_path)
+        Self::load(log, repo_path)
     }
 
     /// Loads a repository from the given path.
     ///
     /// This method enforces expirations. To load without expiration enforcement, use
     /// [`Self::load_ignore_expiration`].
-    pub fn load(repo_path: &Utf8Path) -> Result<Self> {
-        Self::load_impl(repo_path, ExpirationEnforcement::Safe)
+    pub fn load(log: &slog::Logger, repo_path: &Utf8Path) -> Result<Self> {
+        Self::load_impl(log, repo_path, ExpirationEnforcement::Safe)
     }
 
     /// Loads a repository from the given path, ignoring expiration.
@@ -53,14 +63,19 @@ impl OmicronRepo {
     ///
     /// 1. When you're editing an existing repository and will re-sign it afterwards.
     /// 2. In an environment in which time isn't available.
-    pub fn load_ignore_expiration(repo_path: &Utf8Path) -> Result<Self> {
-        Self::load_impl(repo_path, ExpirationEnforcement::Unsafe)
+    pub fn load_ignore_expiration(
+        log: &slog::Logger,
+        repo_path: &Utf8Path,
+    ) -> Result<Self> {
+        Self::load_impl(log, repo_path, ExpirationEnforcement::Unsafe)
     }
 
     fn load_impl(
+        log: &slog::Logger,
         repo_path: &Utf8Path,
         exp: ExpirationEnforcement,
     ) -> Result<Self> {
+        let log = log.new(slog::o!("component" => "OmicronRepo"));
         let repo_path = repo_path.canonicalize_utf8()?;
 
         let repo = RepositoryLoader::new(
@@ -73,7 +88,7 @@ impl OmicronRepo {
         .expiration_enforcement(exp)
         .load()?;
 
-        Ok(Self { repo, repo_path })
+        Ok(Self { log, repo, repo_path })
     }
 
     /// Returns a canonicalized form of the repository path.
@@ -143,6 +158,7 @@ impl OmicronRepo {
         for (name, target) in self.repo.targets().signed.targets_iter() {
             let target_filename = self.target_filename(target, name);
             let target_path = targets_dir.join(&target_filename);
+            slog::trace!(self.log, "adding {} to archive", name.resolved());
             builder.write_file(
                 &target_path,
                 &Utf8Path::new("targets").join(&target_filename),
@@ -214,6 +230,7 @@ impl OmicronRepoEditor {
     fn initialize(
         repo_path: Utf8PathBuf,
         root: SignedRole<Root>,
+        system_version: SemverVersion,
     ) -> Result<Self> {
         let metadata_dir = repo_path.join("metadata");
         let targets_dir = repo_path.join("targets");
@@ -229,15 +246,12 @@ impl OmicronRepoEditor {
         Ok(Self {
             editor,
             repo_path,
-            artifacts: ArtifactsDocument::default(),
+            artifacts: ArtifactsDocument::empty(system_version),
             existing_targets: vec![],
         })
     }
 
-    /// Adds a zone to the repository.
-    ///
-    /// If the name isn't specified, it is derived from the zone path by taking
-    /// the file name and stripping the extension.
+    /// Adds an artifact to the repository.
     pub fn add_artifact(&mut self, new_artifact: &AddArtifact) -> Result<()> {
         let filename = format!(
             "{}-{}.tar.gz",
@@ -249,7 +263,7 @@ impl OmicronRepoEditor {
         if let Some(artifact) =
             self.artifacts.artifacts.iter_mut().find(|artifact| {
                 artifact.name == new_artifact.name()
-                    && artifact.version == new_artifact.version()
+                    && &artifact.version == new_artifact.version()
                     && artifact.kind == new_artifact.kind().clone()
             })
         {
@@ -276,8 +290,10 @@ impl OmicronRepoEditor {
 
         let targets_dir = self.repo_path.join("targets");
 
-        let mut file = TargetWriter::new(&targets_dir, filename)?;
-        std::io::copy(&mut File::open(new_artifact.path())?, &mut file)?;
+        let mut file = TargetWriter::new(&targets_dir, filename.clone())?;
+        new_artifact
+            .write_to(&mut file)
+            .with_context(|| format!("error writing artifact `{filename}"))?;
         file.finish(&mut self.editor)?;
 
         Ok(())

@@ -5,7 +5,6 @@
 
 <service name='system/illumos/mgs' type='service' version='1'>
   <create_default_instance enabled='false' />
-  <single_instance />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>

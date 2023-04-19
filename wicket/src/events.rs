@@ -1,27 +1,58 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-use crate::state::ComponentId;
-use tokio::time::Instant;
-use wicketd_client::types::RackV1Inventory;
-
-use crossterm::event::Event as TermEvent;
+use crate::{keymap::Cmd, state::ComponentId, State};
+use camino::Utf8PathBuf;
+use humantime::format_rfc3339;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::time::{Duration, SystemTime};
+use wicketd_client::types::{
+    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion, UpdateLogAll,
+};
 
 /// An event that will update state
 ///
 /// This can be a keypress, mouse event, or response from a downstream service.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Event {
-    /// An input event from the terminal
-    Term(TermEvent),
+    /// An input event from the terminal translated to a Cmd
+    Term(Cmd),
 
     /// An Inventory Update Event
-    Inventory(InventoryEvent),
+    Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
+
+    /// Update Log Event
+    UpdateLog(UpdateLogAll),
+
+    /// TUF repo artifacts unpacked by wicketd
+    UpdateArtifacts {
+        system_version: Option<SemverVersion>,
+        artifacts: Vec<ArtifactId>,
+    },
 
     /// The tick of a Timer
     /// This can be used to draw a frame to the terminal
     Tick,
+
+    /// A terminal resize event
+    Resize { width: u16, height: u16 },
+
+    /// ctrl-c was pressed
+    Shutdown,
 }
+
+impl Event {
+    pub fn is_tick(&self) -> bool {
+        if let Event::Tick = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// An event that can be recorded.
 
 /// Instructions for the [`crate::Runner`]
 ///
@@ -32,6 +63,7 @@ pub enum Event {
 pub enum Action {
     Redraw,
     Update(ComponentId),
+    Ignition(ComponentId, IgnitionCommand),
 }
 
 impl Action {
@@ -41,28 +73,87 @@ impl Action {
     /// Some downstream operations will not trigger this in the future.
     pub fn should_redraw(&self) -> bool {
         match self {
-            Action::Redraw | Action::Update(_) => true,
+            Action::Redraw | Action::Update(_) | Action::Ignition(_, _) => true,
         }
     }
 }
 
-/// An inventory event occurred.
-#[derive(Clone, Debug)]
-pub enum InventoryEvent {
-    /// Inventory was received.
-    Inventory {
-        /// This is Some if the inventory changed.
-        changed_inventory: Option<RackV1Inventory>,
+/// A recorder for [`Event`]s to allow playback and debugging later.
+///
+/// The recorder maintains a copy of state, and a log of events called the
+/// `history`. The number of events can be restricted to limit memory usage. A
+/// user can only `play` as many `frames` of a recording  of history as there
+/// are events.
+///
+/// Once the log is full of events, the recorder automatically takes an in-
+/// memory "snapshot" by saving the current state, clearing the log, and
+/// appending the event that did not fit before.
+pub struct Recorder {
+    snapshot: Snapshot,
+}
 
-        /// The time at which at which information was received from wicketd.
-        wicketd_received: Instant,
+impl Recorder {
+    pub fn new(max_events: usize) -> Self {
+        Recorder { snapshot: Snapshot::new(max_events) }
+    }
 
-        /// The time at which information was received from MGS.
-        mgs_received: libsw::TokioSw,
-    },
-    /// The inventory is unavailable.
-    Unavailable {
-        /// The time at which at which information was received from wicketd.
-        wicketd_received: Instant,
-    },
+    /// Append an event to the recorder.
+    ///
+    /// Return true if the in-memory snapshot was taken, false if not.
+    pub fn push(&mut self, state: &State, event: Event) -> bool {
+        if self.snapshot.history_full() {
+            self.snapshot.take(state, event);
+            return false;
+        }
+        self.snapshot.history.push(event);
+        true
+    }
+
+    /// Dump the current snapshot to disk
+    pub fn dump(&mut self) -> anyhow::Result<()> {
+        let timestamp = format_rfc3339(SystemTime::now());
+        let mut path: Utf8PathBuf = match std::env::var("WICKET_DUMP_PATH") {
+            Ok(path) => path.into(),
+            Err(std::env::VarError::NotPresent) => "/tmp/".into(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                anyhow::bail!("WICKET_DUMP_PATH is not valid utf8");
+            }
+        };
+        path.push(format!("{}.wicket.dump", timestamp));
+        let file = File::create(path)?;
+        ciborium::ser::into_writer(&self.snapshot, file)?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub version: usize,
+    pub start: usize,
+    pub state: State,
+    pub history: Vec<Event>,
+    pub max_events: usize,
+}
+
+impl Snapshot {
+    fn new(max_events: usize) -> Self {
+        Snapshot {
+            version: 1,
+            start: 0,
+            state: State::new(),
+            history: Vec::with_capacity(max_events),
+            max_events,
+        }
+    }
+
+    fn history_full(&self) -> bool {
+        self.max_events == self.history.len()
+    }
+
+    fn take(&mut self, state: &State, event: Event) {
+        self.start += self.history.len();
+        self.state = state.clone();
+        self.history.clear();
+        self.history.push(event);
+    }
 }

@@ -7,7 +7,6 @@
 use crate::app::sagas;
 use crate::authn;
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::identity::Resource;
@@ -15,6 +14,7 @@ use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::external_api::params;
+use nexus_db_queries::context::OpContext;
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -31,7 +31,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::internal::nexus::HostIdentifier;
-use ref_cast::RefCast;
 use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
@@ -47,29 +46,25 @@ impl super::Nexus {
     pub fn vpc_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        vpc_selector: &'a params::VpcSelector,
+        vpc_selector: params::VpcSelector,
     ) -> LookupResult<lookup::Vpc<'a>> {
         match vpc_selector {
-            params::VpcSelector {
-                vpc: NameOrId::Id(id),
-                project_selector: None,
-            } => {
-                let vpc =
-                    LookupPath::new(opctx, &self.db_datastore).vpc_id(*id);
+            params::VpcSelector { vpc: NameOrId::Id(id), project: None } => {
+                let vpc = LookupPath::new(opctx, &self.db_datastore).vpc_id(id);
                 Ok(vpc)
             }
             params::VpcSelector {
                 vpc: NameOrId::Name(name),
-                project_selector: Some(selector),
+                project: Some(project),
             } => {
                 let vpc = self
-                    .project_lookup(opctx, selector)?
-                    .vpc_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .vpc_name_owned(name.into());
                 Ok(vpc)
             }
             params::VpcSelector {
                 vpc: NameOrId::Id(_),
-                project_selector: Some(_),
+                project: Some(_),
             } => Err(Error::invalid_request(
                 "when providing vpc as an ID, project should not be specified",
             )),

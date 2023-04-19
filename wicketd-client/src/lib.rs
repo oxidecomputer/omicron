@@ -4,10 +4,6 @@
 
 //! Interface for making API requests to wicketd
 
-use std::time::Duration;
-
-use types::RackV1Inventory;
-
 progenitor::generate_api!(
     spec = "../openapi/wicketd.json",
     inner_type = slog::Logger,
@@ -24,42 +20,28 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     patch =
         {
-        SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord] },
-        SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        SpComponentInfo= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        SpIgnition= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        SpIgnitionSystemType= { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        SpInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RackV1Inventory = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
-        ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord] },
+        SpComponentCaboose = { derives = [PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpIdentifier = { derives = [Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize] },
+        SpComponentInfo= { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        SpIgnition= { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        SpIgnitionSystemType= { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        SpInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        RackV1Inventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        RotState = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        RotImageDetails = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        RotInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        UpdateComponent = { derives = [ Copy, PartialEq, Eq, PartialOrd, Ord ] },
+    },
+    replace = {
+        Duration = std::time::Duration,
+        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
+        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
     }
 );
 
-/// A domain type for the response from the `get_inventory` method.
-///
-/// This enum has the same shape as `types::GetInventoryResponse`, but uses `std::time::Duration`
-/// rather than `types::Duration`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum GetInventoryResponse {
-    Response { inventory: RackV1Inventory, received_ago: Duration },
-    Unavailable,
-}
-
-impl From<types::GetInventoryResponse> for GetInventoryResponse {
-    fn from(response: types::GetInventoryResponse) -> Self {
-        match response {
-            types::GetInventoryResponse::Response {
-                inventory,
-                received_ago,
-            } => {
-                let received_ago =
-                    Duration::new(received_ago.secs, received_ago.nanos);
-                Self::Response { inventory, received_ago }
-            }
-            types::GetInventoryResponse::Unavailable => Self::Unavailable,
-        }
-    }
-}
+pub type ProgressEventKind = types::ProgressEventKindForWicketdEngineSpec;
+pub type StepEventKind = types::StepEventKindForWicketdEngineSpec;
+pub type StepInfoWithMetadata = types::StepInfoWithMetadataForWicketdEngineSpec;

@@ -9,6 +9,7 @@ chrono.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 oximeter.workspace = true
+tokio.workspace = true
 http = { workspace = true, optional = true }
 uuid.workspace = true
 

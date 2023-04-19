@@ -25,6 +25,7 @@ table! {
         block_size -> crate::BlockSizeEnum,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
+        pantry_address -> Nullable<Text>,
     }
 }
 
@@ -36,10 +37,51 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
+        project_id -> Nullable<Uuid>,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
+        digest -> Nullable<Text>,
+        block_size -> crate::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    project_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
         project_id -> Uuid,
         volume_id -> Uuid,
         url -> Nullable<Text>,
-        version -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
+        digest -> Nullable<Text>,
+        block_size -> crate::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
+    silo_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        silo_id -> Uuid,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        os -> Text,
+        version -> Text,
         digest -> Nullable<Text>,
         block_size -> crate::BlockSizeEnum,
         size_bytes -> Int8,
@@ -104,6 +146,7 @@ table! {
         active_propolis_ip -> Nullable<Inet>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
+        propolis_generation -> Int8,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -131,7 +174,44 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::NetworkInterfaceKindEnum,
+        parent_id -> Uuid,
+        vpc_id -> Uuid,
+        subnet_id -> Uuid,
+        mac -> Int8,
+        ip -> Inet,
+        slot -> Int2,
+        is_primary -> Bool,
+    }
+}
+
+table! {
+    instance_network_interface (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
+        vpc_id -> Uuid,
+        subnet_id -> Uuid,
+        mac -> Int8,
+        ip -> Inet,
+        slot -> Int2,
+        is_primary -> Bool,
+    }
+}
+
+table! {
+    service_network_interface (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        service_id -> Uuid,
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
@@ -301,19 +381,6 @@ table! {
 }
 
 table! {
-    organization (id) {
-        id -> Uuid,
-        silo_id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-        rcgen -> Int8,
-    }
-}
-
-table! {
     oximeter (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -332,7 +399,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        organization_id -> Uuid,
+        silo_id -> Uuid,
     }
 }
 
@@ -394,9 +461,23 @@ table! {
         part_number -> Text,
         revision -> Int8,
 
+        usable_hardware_threads -> Int8,
+        usable_physical_ram -> Int8,
+
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
+    }
+}
+
+table! {
+    sled_resource (id) {
+        id -> Uuid,
+        sled_id -> Uuid,
+        kind -> crate::SledResourceKindEnum,
+        hardware_threads -> Int8,
+        rss_ram -> Int8,
+        reservoir_ram -> Int8,
     }
 }
 
@@ -408,6 +489,7 @@ table! {
 
         sled_id -> Uuid,
         ip -> Inet,
+        port -> Int4,
         kind -> crate::ServiceKindEnum,
     }
 }
@@ -490,6 +572,7 @@ table! {
         rcgen -> Int8,
 
         sled_id -> Uuid,
+        physical_disk_id -> Uuid,
 
         total_size -> Int8,
     }
@@ -641,6 +724,35 @@ table! {
 }
 
 table! {
+    dns_zone (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        dns_group -> crate::DnsGroupEnum,
+        zone_name -> Text,
+    }
+}
+
+table! {
+    dns_version (dns_group, version) {
+        dns_group -> crate::DnsGroupEnum,
+        version -> Int8,
+        time_created -> Timestamptz,
+        creator -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    dns_name (dns_zone_id, version_added, name) {
+        dns_zone_id -> Uuid,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+        name -> Text,
+        dns_record_data -> Jsonb,
+    }
+}
+
+table! {
     user_builtin (id) {
         id -> Uuid,
         name -> Text,
@@ -698,7 +810,7 @@ table! {
 }
 
 table! {
-    update_available_artifact (name, version, kind) {
+    update_artifact (name, version, kind) {
         name -> Text,
         version -> Text,
         kind -> crate::KnownArtifactKindEnum,
@@ -778,10 +890,14 @@ joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 allow_tables_to_appear_in_same_query!(
     dataset,
     disk,
+    image,
+    project_image,
+    silo_image,
     instance,
     metric_producer,
     network_interface,
-    organization,
+    instance_network_interface,
+    service_network_interface,
     oximeter,
     project,
     rack,
@@ -794,6 +910,7 @@ allow_tables_to_appear_in_same_query!(
     console_session,
     service,
     sled,
+    sled_resource,
     router_route,
     volume,
     vpc,
@@ -804,3 +921,5 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
 );
+
+allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);

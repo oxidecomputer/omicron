@@ -4,15 +4,13 @@
 
 //! Oximeter-related functionality
 
-use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
-use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::PaginationParams;
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::ServiceName;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -23,8 +21,6 @@ use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
-use oximeter_db::TimeseriesSchema;
-use oximeter_db::TimeseriesSchemaPaginationParams;
 use oximeter_producer::register;
 use slog::Logger;
 use std::convert::TryInto;
@@ -68,7 +64,7 @@ impl LazyTimeseriesClient {
                 resolver
                     .lock()
                     .await
-                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
+                    .lookup_ip(ServiceName::Clickhouse)
                     .await?,
                 CLICKHOUSE_PORT,
             ),
@@ -202,23 +198,6 @@ impl super::Nexus {
             "collector_id" => ?id,
         );
         Ok(())
-    }
-
-    /// List existing timeseries schema.
-    pub async fn timeseries_schema_list(
-        &self,
-        opctx: &OpContext,
-        pag_params: &TimeseriesSchemaPaginationParams,
-        limit: NonZeroU32,
-    ) -> Result<dropshot::ResultsPage<TimeseriesSchema>, Error> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.timeseries_client
-            .get()
-            .await
-            .map_err(|e| Error::internal_error(&e.to_string()))?
-            .timeseries_schema_list(&pag_params.page, limit)
-            .await
-            .map_err(map_oximeter_err)
     }
 
     /// Returns a results from the timeseries DB based on the provided query

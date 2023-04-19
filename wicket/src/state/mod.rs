@@ -7,36 +7,41 @@
 mod inventory;
 mod rack;
 mod status;
+mod update;
 
 pub use inventory::{
-    Component, ComponentId, Inventory, PowerState, Sp, ALL_COMPONENT_IDS,
+    Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
+    ALL_COMPONENT_IDS,
 };
 pub use rack::{KnightRiderMode, RackState};
-pub use status::{ComputedLiveness, LivenessState, ServiceStatus};
+pub use status::{Liveness, ServiceStatus};
+pub use update::{update_component_title, RackUpdateState, UpdateState};
+
+use serde::{Deserialize, Serialize};
 
 /// The global state of wicket
 ///
 /// [`State`] is not tied to any specific screen and is updated upon event
 /// receipt.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
+    pub screen_width: u16,
+    pub screen_height: u16,
     pub inventory: Inventory,
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub update_state: RackUpdateState,
 }
 
 impl State {
     pub fn new() -> State {
         State {
+            screen_height: 0,
+            screen_width: 0,
             inventory: Inventory::default(),
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
+            update_state: RackUpdateState::new(),
         }
     }
 }

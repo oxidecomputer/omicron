@@ -5,8 +5,10 @@
 use illumos_utils::fstyp::Fstyp;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
-use slog::info;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
+use slog::{info, warn};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -37,6 +39,42 @@ pub enum HardwareUpdate {
     TofinoUnloaded,
     DiskAdded(UnparsedDisk),
     DiskRemoved(UnparsedDisk),
+}
+
+// The type of networking 'ASIC' the Dendrite service is expected to manage
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum DendriteAsic {
+    TofinoAsic,
+    TofinoStub,
+    SoftNpu,
+}
+
+impl std::fmt::Display for DendriteAsic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                DendriteAsic::TofinoAsic => "tofino_asic",
+                DendriteAsic::TofinoStub => "tofino_stub",
+                DendriteAsic::SoftNpu => "soft_npu",
+            }
+        )
+    }
+}
+
+/// Configuration for forcing a sled to run as a Scrimlet or Gimlet
+#[derive(Copy, Clone, Debug)]
+pub enum SledMode {
+    /// Automatically detect whether to run as a Gimlet or Scrimlet (w/ real Tofino ASIC)
+    Auto,
+    /// Force sled to run as a Gimlet
+    Gimlet,
+    /// Force sled to run as a Scrimlet
+    Scrimlet { asic: DendriteAsic },
 }
 
 /// Describes properties that should uniquely identify a Gimlet.
@@ -98,6 +136,8 @@ pub enum DiskError {
     NotFound { path: PathBuf, partition: Partition },
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
+    #[error("Cannot import zpool: {0}")]
+    ZpoolImport(illumos_utils::zpool::Error),
     #[error("Cannot format {path}: missing a '/dev' path")]
     CannotFormatMissingDevPath { path: PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
@@ -225,6 +265,10 @@ impl UnparsedDisk {
     pub fn variant(&self) -> DiskVariant {
         self.variant
     }
+
+    pub fn identity(&self) -> &DiskIdentity {
+        &self.identity
+    }
 }
 
 /// A physical disk conforming to the expected partition layout.
@@ -283,11 +327,19 @@ impl Disk {
                     paths.devfs_path.display()
                 );
                 // If a zpool does not already exist, create one.
-                let zpool_name = ZpoolName::new(Uuid::new_v4());
+                let zpool_name = match unparsed_disk.variant {
+                    DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
+                    DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
+                };
                 Zpool::create(zpool_name.clone(), &zpool_path)?;
                 zpool_name
             }
         };
+
+        Zpool::import(zpool_name.clone()).map_err(|e| {
+            warn!(log, "Failed to import zpool {zpool_name}: {e}");
+            DiskError::ZpoolImport(e)
+        })?;
 
         Ok(Self {
             paths: unparsed_disk.paths,

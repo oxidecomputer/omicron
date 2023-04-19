@@ -376,14 +376,32 @@ impl JsonSchema for NameOrId {
 
 // TODO: remove wrapper for semver::Version once this PR goes through
 // https://github.com/GREsau/schemars/pull/195
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Display)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Display,
+    FromStr,
+)]
 #[display("{0}")]
+#[serde(transparent)]
 pub struct SemverVersion(pub semver::Version);
 
 impl SemverVersion {
-    pub fn new(major: u64, minor: u64, patch: u64) -> Self {
+    pub const fn new(major: u64, minor: u64, patch: u64) -> Self {
         Self(semver::Version::new(major, minor, patch))
     }
+
+    /// This is the official ECMAScript-compatible validation regex for
+    /// semver:
+    /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -397,7 +415,7 @@ impl JsonSchema for SemverVersion {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(r"^\d+\.\d+\.\d+([\-\+].+)?$".to_owned()),
+                pattern: Some(Self::VALIDATION_REGEX.to_owned()),
                 ..Default::default()
             })),
             ..Default::default()
@@ -674,14 +692,15 @@ pub enum ResourceType {
     DeviceAuthRequest,
     DeviceAccessToken,
     GlobalImage,
-    Organization,
     Project,
     Dataset,
     Disk,
     Image,
+    SiloImage,
+    ProjectImage,
     Instance,
     IpPool,
-    NetworkInterface,
+    InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
     Service,
@@ -697,7 +716,7 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateAvailableArtifact,
+    UpdateArtifact,
     SystemUpdate,
     ComponentUpdate,
     SystemUpdateComponentUpdate,
@@ -955,6 +974,14 @@ pub enum DiskState {
     Creating,
     /// Disk is ready but detached from any Instance
     Detached,
+    /// Disk is ready to receive blocks from an external source
+    ImportReady,
+    /// Disk is importing blocks from a URL
+    ImportingFromUrl,
+    /// Disk is importing blocks from bulk writes
+    ImportingFromBulkWrites,
+    /// Disk is being finalized to state Detached
+    Finalizing,
     /// Disk is undergoing maintenance
     Maintenance,
     /// Disk is being attached to the given Instance
@@ -984,6 +1011,12 @@ impl TryFrom<(&str, Option<Uuid>)> for DiskState {
         match (s, maybe_id) {
             ("creating", None) => Ok(DiskState::Creating),
             ("detached", None) => Ok(DiskState::Detached),
+            ("import_ready", None) => Ok(DiskState::ImportReady),
+            ("importing_from_url", None) => Ok(DiskState::ImportingFromUrl),
+            ("importing_from_bulk_writes", None) => {
+                Ok(DiskState::ImportingFromBulkWrites)
+            }
+            ("finalizing", None) => Ok(DiskState::Finalizing),
             ("maintenance", None) => Ok(DiskState::Maintenance),
             ("destroyed", None) => Ok(DiskState::Destroyed),
             ("faulted", None) => Ok(DiskState::Faulted),
@@ -1004,6 +1037,10 @@ impl DiskState {
         match self {
             DiskState::Creating => "creating",
             DiskState::Detached => "detached",
+            DiskState::ImportReady => "import_ready",
+            DiskState::ImportingFromUrl => "importing_from_url",
+            DiskState::ImportingFromBulkWrites => "importing_from_bulk_writes",
+            DiskState::Finalizing => "finalizing",
             DiskState::Maintenance => "maintenance",
             DiskState::Attaching(_) => "attaching",
             DiskState::Attached(_) => "attached",
@@ -1029,6 +1066,10 @@ impl DiskState {
 
             DiskState::Creating => None,
             DiskState::Detached => None,
+            DiskState::ImportReady => None,
+            DiskState::ImportingFromUrl => None,
+            DiskState::ImportingFromBulkWrites => None,
+            DiskState::Finalizing => None,
             DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
@@ -1883,7 +1924,12 @@ impl FromStr for MacAddr {
     type Err = macaddr::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse().map(MacAddr)
+        s.split(':')
+            .map(|b| format!("{:0>2}", b))
+            .collect::<Vec<String>>()
+            .join(":")
+            .parse()
+            .map(MacAddr)
     }
 }
 
@@ -1929,9 +1975,9 @@ impl JsonSchema for MacAddr {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(17), // 12 hex characters and 5 ":"-separators
-                min_length: Some(17),
+                min_length: Some(5),  // Just 5 ":" separators
                 pattern: Some(
-                    r#"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$"#.to_string(),
+                    r#"^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$"#.to_string(),
                 ),
             })),
             ..Default::default()
@@ -2000,9 +2046,10 @@ impl TryFrom<i32> for Vni {
     }
 }
 
-/// A `NetworkInterface` represents a virtual network interface device.
+/// An `InstanceNetworkInterface` represents a virtual network interface device
+/// attached to an instance.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct NetworkInterface {
+pub struct InstanceNetworkInterface {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -2020,9 +2067,9 @@ pub struct NetworkInterface {
     pub mac: MacAddr,
 
     /// The IP address assigned to this interface.
-    pub ip: IpAddr,
     // TODO-correctness: We need to split this into an optional V4 and optional
     // V6 address, at least one of which must be specified.
+    pub ip: IpAddr,
     /// True if this interface is the primary for the instance to which it's
     /// attached.
     pub primary: bool,
@@ -2081,9 +2128,13 @@ impl std::fmt::Display for Digest {
 
 #[cfg(test)]
 mod test {
+    use serde::Deserialize;
+    use serde::Serialize;
+
     use super::IpNet;
     use super::RouteDestination;
     use super::RouteTarget;
+    use super::SemverVersion;
     use super::VpcFirewallRuleHostFilter;
     use super::VpcFirewallRuleTarget;
     use super::{
@@ -2097,6 +2148,63 @@ mod test {
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::str::FromStr;
+
+    #[test]
+    fn test_semver_validation() {
+        // Examples copied from
+        // https://github.com/dtolnay/semver/blob/cc2cfed67c17dfe6abae18726830bdb6d7cf740d/tests/test_version.rs#L13.
+        let valid = [
+            "1.2.3",
+            "1.2.3-alpha1",
+            "1.2.3+build5",
+            "1.2.3+5build",
+            "1.2.3-alpha1+build5",
+            "1.2.3-1.alpha1.9+build5.7.3aedf",
+            "1.2.3-0a.alpha1.9+05build.7.3aed",
+            "0.4.0-beta.1+0851523",
+            "1.1.0-beta-10",
+        ];
+        let invalid = [
+            // These examples are rejected by the validation regex.
+            "",
+            "1",
+            "1.2",
+            "1.2.3-",
+            "a.b.c",
+            "1.2.3 abc",
+            "1.2.3-01",
+        ];
+
+        let r = regress::Regex::new(SemverVersion::VALIDATION_REGEX)
+            .expect("validation regex is valid");
+        for input in valid {
+            let m = r
+                .find(input)
+                .unwrap_or_else(|| panic!("input {input} did not match regex"));
+            assert_eq!(m.start(), 0, "input {input} did not match start");
+            assert_eq!(m.end(), input.len(), "input {input} did not match end");
+        }
+
+        for input in invalid {
+            assert!(
+                r.find(input).is_none(),
+                "invalid input {input} should not match validation regex"
+            );
+        }
+    }
+
+    #[test]
+    fn test_semver_serialize() {
+        #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+        struct MyStruct {
+            version: SemverVersion,
+        }
+
+        let v = MyStruct { version: SemverVersion::new(1, 2, 3) };
+        let expected = "{\"version\":\"1.2.3\"}";
+        assert_eq!(serde_json::to_string(&v).unwrap(), expected);
+        assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
+    }
 
     #[test]
     fn test_name_parse() {
@@ -2691,5 +2799,24 @@ mod test {
             net.last_address(),
             IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)),
         );
+    }
+
+    #[test]
+    fn test_macaddr() {
+        use super::MacAddr;
+        let _ = MacAddr::from_str(":::::").unwrap();
+        let _ = MacAddr::from_str("f:f:f:f:f:f").unwrap();
+        let _ = MacAddr::from_str("ff:ff:ff:ff:ff:ff").unwrap();
+
+        // Empty
+        let _ = MacAddr::from_str("").unwrap_err();
+        // Too few
+        let _ = MacAddr::from_str("::::").unwrap_err();
+        // Too many
+        let _ = MacAddr::from_str("::::::").unwrap_err();
+        // Not hex
+        let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
+        // Too many characters
+        let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
     }
 }

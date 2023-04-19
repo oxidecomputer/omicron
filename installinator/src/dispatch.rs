@@ -32,9 +32,7 @@ pub struct InstallinatorApp {
 
 impl InstallinatorApp {
     /// Executes the app.
-    pub async fn exec(self) -> Result<()> {
-        let log = Self::setup_log("/tmp/installinator.log").unwrap();
-
+    pub async fn exec(self, log: &slog::Logger) -> Result<()> {
         match self.subcommand {
             InstallinatorCommand::DebugDiscover(opts) => opts.exec(log).await,
             InstallinatorCommand::DebugHardwareScan(opts) => {
@@ -44,7 +42,9 @@ impl InstallinatorApp {
         }
     }
 
-    fn setup_log(path: impl AsRef<Utf8Path>) -> anyhow::Result<slog::Logger> {
+    pub fn setup_log(
+        path: impl AsRef<Utf8Path>,
+    ) -> anyhow::Result<slog::Logger> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
@@ -82,10 +82,10 @@ struct DebugDiscoverOpts {
 }
 
 impl DebugDiscoverOpts {
-    async fn exec(self, log: slog::Logger) -> Result<()> {
+    async fn exec(self, log: &slog::Logger) -> Result<()> {
         let peers = Peers::new(
-            &log,
-            self.opts.mechanism.discover_peers(&log).await?,
+            log,
+            self.opts.mechanism.discover_peers(log).await?,
             Duration::from_secs(10),
         );
         println!("discovered peers: {}", peers.display());
@@ -107,11 +107,11 @@ struct DiscoverOpts {
 struct DebugHardwareScan {}
 
 impl DebugHardwareScan {
-    async fn exec(self, log: slog::Logger) -> Result<()> {
+    async fn exec(self, log: &slog::Logger) -> Result<()> {
         // Finding the write destination from the gimlet hardware logs details
         // about what it's doing sufficiently for this subcommand; just create a
         // write destination and then discard it.
-        _ = WriteDestination::from_hardware(&log)?;
+        _ = WriteDestination::from_hardware(log)?;
         Ok(())
     }
 }
@@ -125,6 +125,11 @@ struct InstallOpts {
     /// Artifact ID options
     #[command(flatten)]
     artifact_ids: ArtifactIdOpts,
+
+    /// If true, perform sled-agent-like bootstrapping operations on startup
+    /// (e.g., configure and enable maghemite).
+    #[clap(long)]
+    bootstrap_sled: bool,
 
     /// If true, do not exit after successful completion (e.g., to continue
     /// running as an smf service).
@@ -149,7 +154,11 @@ struct InstallOpts {
 }
 
 impl InstallOpts {
-    async fn exec(self, log: slog::Logger) -> Result<()> {
+    async fn exec(self, log: &slog::Logger) -> Result<()> {
+        if self.bootstrap_sled {
+            crate::bootstrap::bootstrap_sled(log.clone()).await?;
+        }
+
         let image_id = self.artifact_ids.resolve()?;
 
         let host_phase_2_id = ArtifactHashId {
@@ -163,7 +172,7 @@ impl InstallOpts {
         let discovery = self.discover_opts.mechanism.clone();
         let discovery_log = log.clone();
         let (progress_reporter, event_sender) =
-            ProgressReporter::new(&log, image_id.update_id, move || {
+            ProgressReporter::new(log, image_id.update_id, move || {
                 let log = discovery_log.clone();
                 let discovery = discovery.clone();
                 async move {

@@ -2,11 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use internal_dns_names::{BackendName, ServiceName, AAAA, SRV};
-use omicron_common::address::{
-    CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, MGS_PORT, NEXUS_INTERNAL_PORT,
-    OXIMETER_PORT,
-};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
@@ -20,6 +15,7 @@ pub use illumos_utils::opte::params::NetworkInterface;
 pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
+pub use sled_hardware::DendriteAsic;
 
 /// Used to request a Disk state change
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
@@ -69,52 +65,69 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
-/// Sent to a sled agent to establish the runtime state of an Instance
+/// The body of a request to ensure that an instance is known to a sled agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
-    /// Last runtime state of the Instance known to Nexus (used if the agent
-    /// has never seen this Instance before).
+    /// A description of the instance's virtual hardware and the initial runtime
+    /// state this sled agent should store for this incarnation of the instance.
     pub initial: InstanceHardware,
-    /// requested runtime state of the Instance
-    pub target: InstanceRuntimeStateRequested,
-    /// If we're migrating this instance, the details needed to drive the migration
-    pub migrate: Option<InstanceMigrateParams>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrateParams {
+/// The body of a request to move a previously-ensured instance into a specific
+/// runtime state.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstancePutStateBody {
+    /// The state into which the instance should be driven.
+    pub state: InstanceStateRequested,
+}
+
+/// The response sent from a request to move an instance into a specific runtime
+/// state.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstancePutStateResponse {
+    /// The current runtime state of the instance after handling the request to
+    /// change its state. If the instance's state did not change, this field is
+    /// `None`.
+    pub updated_runtime: Option<InstanceRuntimeState>,
+}
+
+/// The response sent from a request to unregister an instance.
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct InstanceUnregisterResponse {
+    /// The current state of the instance after handling the request to
+    /// unregister it. If the instance's state did not change, this field is
+    /// `None`.
+    pub updated_runtime: Option<InstanceRuntimeState>,
+}
+
+/// Parameters used when directing Propolis to initialize itself via live
+/// migration.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrationTargetParams {
+    /// The Propolis ID of the migration source.
     pub src_propolis_id: Uuid,
+
+    /// The address of the Propolis server that will serve as the migration
+    /// source.
     pub src_propolis_addr: SocketAddr,
 }
 
 /// Requestable running state of an Instance.
 ///
 /// A subset of [`omicron_common::api::external::InstanceState`].
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum InstanceStateRequested {
+    /// Run this instance by migrating in from a previous running incarnation of
+    /// the instance.
+    MigrationTarget(InstanceMigrationTargetParams),
     /// Start the instance if it is not already running.
     Running,
     /// Stop the instance.
     Stopped,
-    /// Issue a reset command to the instance, such that it should
-    /// stop and then immediately become running.
+    /// Immediately reset the instance, as though it had stopped and immediately
+    /// began to run again.
     Reboot,
-    /// Migrate the instance to another node.
-    Migrating,
-    /// Stop the instance and delete it.
-    Destroyed,
 }
 
 impl Display for InstanceStateRequested {
@@ -126,110 +139,51 @@ impl Display for InstanceStateRequested {
 impl InstanceStateRequested {
     fn label(&self) -> &str {
         match self {
+            InstanceStateRequested::MigrationTarget(_) => "migrating in",
             InstanceStateRequested::Running => "running",
             InstanceStateRequested::Stopped => "stopped",
             InstanceStateRequested::Reboot => "reboot",
-            InstanceStateRequested::Migrating => "migrating",
-            InstanceStateRequested::Destroyed => "destroyed",
         }
     }
 
     /// Returns true if the state represents a stopped Instance.
     pub fn is_stopped(&self) -> bool {
         match self {
+            InstanceStateRequested::MigrationTarget(_) => false,
             InstanceStateRequested::Running => false,
             InstanceStateRequested::Stopped => true,
             InstanceStateRequested::Reboot => false,
-            InstanceStateRequested::Migrating => false,
-            InstanceStateRequested::Destroyed => true,
         }
     }
 }
 
 /// Instance runtime state to update for a migration.
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateMigrateParams {
+pub struct InstanceMigrationSourceParams {
     pub migration_id: Uuid,
     pub dst_propolis_id: Uuid,
 }
 
-/// Used to request an Instance state change from a sled agent
-///
-/// Right now, it's only the run state and migration id that can
-/// be changed, though we might want to support changing properties
-/// like "ncpus" here.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeStateRequested {
-    pub run_state: InstanceStateRequested,
-    pub migration_params: Option<InstanceRuntimeStateMigrateParams>,
-}
-
-/// Request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct InstanceSerialConsoleRequest {
-    /// Character index in the serial buffer from which to read, counting the bytes output since
-    /// instance start. If this is not provided, `most_recent` must be provided, and if this *is*
-    /// provided, `most_recent` must *not* be provided.
-    pub from_start: Option<u64>,
-    /// Character index in the serial buffer from which to read, counting *backward* from the most
-    /// recently buffered data retrieved from the instance. (See note on `from_start` about mutual
-    /// exclusivity)
-    pub most_recent: Option<u64>,
-    /// Maximum number of bytes of buffered serial console contents to return. If the requested
-    /// range runs to the end of the available buffer, the data returned will be shorter than
-    /// `max_bytes`.
-    pub max_bytes: Option<u64>,
+pub enum DiskType {
+    U2,
+    M2,
 }
 
-/// Contents of an Instance's serial console buffer.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceSerialConsoleData {
-    /// The bytes starting from the requested offset up to either the end of the buffer or the
-    /// request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.
-    pub data: Vec<u8>,
-    /// The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request)
-    /// of the last byte returned in `data`.
-    pub last_byte_offset: u64,
+impl From<sled_hardware::DiskVariant> for DiskType {
+    fn from(v: sled_hardware::DiskVariant) -> Self {
+        use sled_hardware::DiskVariant::*;
+        match v {
+            U2 => Self::U2,
+            M2 => Self::M2,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct Zpool {
     pub id: Uuid,
-}
-
-// The type of networking 'ASIC' the Dendrite service is expected to manage
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Copy, Hash,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DendriteAsic {
-    TofinoAsic,
-    TofinoStub,
-    Softnpu,
-}
-
-impl std::fmt::Display for DendriteAsic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                DendriteAsic::TofinoAsic => "tofino_asic",
-                DendriteAsic::TofinoStub => "tofino_stub",
-                DendriteAsic::Softnpu => "softnpu",
-            }
-        )
-    }
-}
-
-impl From<DendriteAsic> for sled_agent_client::types::DendriteAsic {
-    fn from(a: DendriteAsic) -> Self {
-        match a {
-            DendriteAsic::TofinoAsic => Self::TofinoAsic,
-            DendriteAsic::TofinoStub => Self::TofinoStub,
-            DendriteAsic::Softnpu => Self::Softnpu,
-        }
-    }
+    pub disk_type: DiskType,
 }
 
 /// The type of a dataset, and an auxiliary information necessary
@@ -297,28 +251,6 @@ pub struct DatasetEnsureBody {
     pub address: SocketAddrV6,
 }
 
-impl DatasetEnsureBody {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    pub fn srv(&self) -> SRV {
-        match self.dataset_kind {
-            DatasetKind::Crucible => {
-                SRV::Backend(BackendName::Crucible, self.id)
-            }
-            DatasetKind::Clickhouse => SRV::Service(ServiceName::Clickhouse),
-            DatasetKind::CockroachDb { .. } => {
-                SRV::Service(ServiceName::Cockroach)
-            }
-        }
-    }
-
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
-    }
-}
-
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
     fn from(p: DatasetEnsureBody) -> Self {
         Self {
@@ -336,20 +268,44 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
-    Nexus { internal_ip: Ipv6Addr, external_ip: IpAddr },
-    InternalDns { server_address: SocketAddrV6, dns_address: SocketAddrV6 },
+    Nexus {
+        internal_ip: Ipv6Addr,
+        external_ip: IpAddr,
+    },
+    ExternalDns {
+        http_address: SocketAddrV6,
+        dns_address: SocketAddr,
+    },
+    InternalDns {
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    },
     Oximeter,
     ManagementGatewayService,
     Wicketd,
-    Dendrite { asic: DendriteAsic },
-    Tfport { pkt_source: String },
+    Dendrite {
+        asic: DendriteAsic,
+    },
+    Tfport {
+        pkt_source: String,
+    },
     CruciblePantry,
+    Ntp {
+        ntp_servers: Vec<String>,
+        boundary: bool,
+        dns_servers: Vec<String>,
+        domain: Option<String>,
+    },
+    Maghemite {
+        mode: String,
+    },
 }
 
 impl std::fmt::Display for ServiceType {
     fn fmt(&self, f: &mut Formatter<'_>) -> FormatResult {
         match self {
             ServiceType::Nexus { .. } => write!(f, "nexus"),
+            ServiceType::ExternalDns { .. } => write!(f, "external_dns"),
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
@@ -357,7 +313,21 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
+            ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
+    }
+}
+
+impl crate::smf_helper::Service for ServiceType {
+    fn service_name(&self) -> String {
+        self.to_string()
+    }
+    fn smf_name(&self) -> String {
+        format!("svc:/system/illumos/{}", self.service_name())
+    }
+    fn should_import(&self) -> bool {
+        true
     }
 }
 
@@ -370,18 +340,36 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             St::Nexus { internal_ip, external_ip } => {
                 AutoSt::Nexus { internal_ip, external_ip }
             }
-            St::InternalDns { server_address, dns_address } => {
+            St::ExternalDns { http_address, dns_address } => {
+                AutoSt::ExternalDns {
+                    http_address: http_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                }
+            }
+            St::InternalDns { http_address, dns_address } => {
                 AutoSt::InternalDns {
-                    server_address: server_address.to_string(),
+                    http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
                 }
             }
             St::Oximeter => AutoSt::Oximeter,
             St::ManagementGatewayService => AutoSt::ManagementGatewayService,
             St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => AutoSt::Dendrite { asic: asic.into() },
+            St::Dendrite { asic } => {
+                use sled_agent_client::types::DendriteAsic as AutoAsic;
+                let asic = match asic {
+                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
+                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
+                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
+                };
+                AutoSt::Dendrite { asic }
+            }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
+            St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
+                AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
+            }
+            St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }
     }
 }
@@ -390,27 +378,27 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ZoneType {
-    #[serde(rename = "internal_dns")]
-    InternalDNS,
-    #[serde(rename = "nexus")]
+    ExternalDns,
+    InternalDns,
     Nexus,
-    #[serde(rename = "oximeter")]
     Oximeter,
-    #[serde(rename = "switch")]
     Switch,
-    #[serde(rename = "crucible_pantry")]
     CruciblePantry,
+    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
-            ZoneType::InternalDNS => Self::InternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
+            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -419,11 +407,13 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
-            InternalDNS => "internal_dns",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
+            Ntp => "ntp",
         };
         write!(f, "{name}")
     }
@@ -453,61 +443,6 @@ pub struct ServiceZoneRequest {
     pub services: Vec<ServiceType>,
 }
 
-impl ServiceZoneRequest {
-    pub fn aaaa(&self) -> AAAA {
-        AAAA::Zone(self.id)
-    }
-
-    // XXX: any reason this can't just be service.to_string()?
-    pub fn srv(&self, service: &ServiceType) -> SRV {
-        match service {
-            ServiceType::InternalDns { .. } => {
-                SRV::Service(ServiceName::InternalDNS)
-            }
-            ServiceType::Nexus { .. } => SRV::Service(ServiceName::Nexus),
-            ServiceType::Oximeter => SRV::Service(ServiceName::Oximeter),
-            ServiceType::ManagementGatewayService => {
-                SRV::Service(ServiceName::ManagementGatewayService)
-            }
-            ServiceType::Wicketd => SRV::Service(ServiceName::Wicketd),
-            ServiceType::Dendrite { .. } => SRV::Service(ServiceName::Dendrite),
-            ServiceType::Tfport { .. } => SRV::Service(ServiceName::Tfport),
-            ServiceType::CruciblePantry { .. } => {
-                SRV::Service(ServiceName::CruciblePantry)
-            }
-        }
-    }
-
-    pub fn address(&self, service: &ServiceType) -> Option<SocketAddrV6> {
-        match service {
-            ServiceType::InternalDns { server_address, .. } => {
-                Some(*server_address)
-            }
-            ServiceType::Nexus { internal_ip, .. } => {
-                Some(SocketAddrV6::new(*internal_ip, NEXUS_INTERNAL_PORT, 0, 0))
-            }
-            ServiceType::Oximeter => {
-                Some(SocketAddrV6::new(self.addresses[0], OXIMETER_PORT, 0, 0))
-            }
-            ServiceType::ManagementGatewayService => {
-                Some(SocketAddrV6::new(self.addresses[0], MGS_PORT, 0, 0))
-            }
-            // TODO: Is this correct?
-            ServiceType::Wicketd => None,
-            ServiceType::Dendrite { .. } => {
-                Some(SocketAddrV6::new(self.addresses[0], DENDRITE_PORT, 0, 0))
-            }
-            ServiceType::Tfport { .. } => None,
-            ServiceType::CruciblePantry => Some(SocketAddrV6::new(
-                self.addresses[0],
-                CRUCIBLE_PANTRY_PORT,
-                0,
-                0,
-            )),
-        }
-    }
-}
-
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
     fn from(s: ServiceZoneRequest) -> Self {
         let mut services = Vec::new();
@@ -533,4 +468,29 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ServiceEnsureBody {
     pub services: Vec<ServiceZoneRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct TimeSync {
+    /// The synchronization state of the sled, true when the system clock
+    /// and the NTP clock are in sync (to within a small window).
+    pub sync: bool,
+    // These could both be f32, but there is a problem with progenitor/typify
+    // where, although the f32 correctly becomes "float" (and not "double") in
+    // the API spec, that "float" gets converted back to f64 when generating
+    // the client.
+    /// The estimated error bound on the frequency.
+    pub skew: f64,
+    /// The current offset between the NTP clock and system clock.
+    pub correction: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
 }

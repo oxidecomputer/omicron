@@ -131,6 +131,60 @@
         }
       }
     },
+    "/local/all-sp-ids": {
+      "get": {
+        "summary": "Get the complete list of SP identifiers this MGS instance is configured to",
+        "description": "find and communicate with.\nNote that unlike most MGS endpoints, this endpoint does not send any communication on the management network.",
+        "operationId": "sp_all_ids",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SpIdentifier",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpIdentifier"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/local/switch-id": {
+      "get": {
+        "summary": "Get the identifier for the switch this MGS instance is connected to.",
+        "description": "Note that most MGS endpoints behave identically regardless of which scrimlet the MGS instance is running on; this one, however, is intentionally different. This endpoint is _probably_ only useful for clients communicating with MGS over localhost (i.e., other services in the switch zone) who need to know which sidecar they are connected to.",
+        "operationId": "sp_local_switch_id",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpIdentifier"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/recovery/host-phase2": {
       "post": {
         "summary": "Upload a host phase2 image that can be served to recovering hosts via the",
@@ -154,35 +208,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sp": {
-      "get": {
-        "summary": "List SPs",
-        "description": "Since communication with SPs may be unreliable, consumers may specify an optional timeout to override the default.\nThis interface makes use of Ignition as well as the management network. SPs that are powered off (and therefore cannot respond over the management network) are represented in the output set. SPs that Ignition reports as powered on, but that do not respond within the allotted timeout will similarly be represented in the output; these will only be included in the output when the allotted timeout has expired.\nNote that Ignition provides the full set of SPs that are plugged into the system so the gateway service knows prior to waiting for responses the expected cardinality.",
-        "operationId": "sp_list",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_SpInfo",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SpInfo"
-                  }
                 }
               }
             }
@@ -226,7 +251,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SpInfo"
+                  "$ref": "#/components/schemas/SpState"
                 }
               }
             }
@@ -288,7 +313,7 @@
     "/sp/{type}/{slot}/component/{component}": {
       "get": {
         "summary": "Get info for an SP component",
-        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.\nAs communication with SPs maybe unreliable, consumers may specify a timeout to override the default. This interface will return an error when the timeout is reached.",
+        "description": "This can be useful, for example, to poll the state of a component if another interface has changed the power state of a component or updated a component.",
         "operationId": "sp_component_get",
         "parameters": [
           {
@@ -442,6 +467,60 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sp/{type}/{slot}/component/{component}/caboose": {
+      "get": {
+        "summary": "Get the caboose of an SP component",
+        "description": "Not all components have a caboose.",
+        "operationId": "sp_component_caboose_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "component",
+            "description": "ID for the component of the SP; this is the internal identifier used by the SP itself to identify its components.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpComponentCaboose"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2085,6 +2164,29 @@
           }
         ]
       },
+      "SpComponentCaboose": {
+        "type": "object",
+        "properties": {
+          "board": {
+            "type": "string"
+          },
+          "git_commit": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "board",
+          "git_commit",
+          "name"
+        ]
+      },
       "SpComponentDetails": {
         "oneOf": [
           {
@@ -2405,24 +2507,6 @@
               "power",
               "present"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "present": {
-                "type": "string",
-                "enum": [
-                  "error"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "present"
-            ]
           }
         ]
       },
@@ -2508,96 +2592,52 @@
           }
         ]
       },
-      "SpInfo": {
+      "SpState": {
         "type": "object",
         "properties": {
-          "details": {
-            "$ref": "#/components/schemas/SpState"
+          "base_mac_address": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
-          "info": {
-            "$ref": "#/components/schemas/SpIgnitionInfo"
+          "hubris_archive_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "power_state": {
+            "$ref": "#/components/schemas/PowerState"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "rot": {
+            "$ref": "#/components/schemas/RotState"
+          },
+          "serial_number": {
+            "type": "string"
+          },
+          "version": {
+            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
-          "details",
-          "info"
-        ]
-      },
-      "SpState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "base_mac_address": {
-                "type": "array",
-                "items": {
-                  "type": "integer",
-                  "format": "uint8",
-                  "minimum": 0
-                },
-                "minItems": 6,
-                "maxItems": 6
-              },
-              "hubris_archive_id": {
-                "type": "string"
-              },
-              "model": {
-                "type": "string"
-              },
-              "power_state": {
-                "$ref": "#/components/schemas/PowerState"
-              },
-              "revision": {
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "rot": {
-                "$ref": "#/components/schemas/RotState"
-              },
-              "serial_number": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "enabled"
-                ]
-              },
-              "version": {
-                "$ref": "#/components/schemas/ImageVersion"
-              }
-            },
-            "required": [
-              "base_mac_address",
-              "hubris_archive_id",
-              "model",
-              "power_state",
-              "revision",
-              "rot",
-              "serial_number",
-              "state",
-              "version"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "message": {
-                "type": "string"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "communication_failed"
-                ]
-              }
-            },
-            "required": [
-              "message",
-              "state"
-            ]
-          }
+          "base_mac_address",
+          "hubris_archive_id",
+          "model",
+          "power_state",
+          "revision",
+          "rot",
+          "serial_number",
+          "version"
         ]
       },
       "SpType": {

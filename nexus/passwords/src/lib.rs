@@ -212,9 +212,7 @@ mod test {
 
         // Verify that salt strings are at least as long as we think they are
         // (16 bytes).
-        assert!(
-            SaltString::generate(rand::thread_rng()).as_bytes().len() >= 16
-        );
+        assert!(SaltString::generate(rand::thread_rng()).len() >= 16);
 
         // Verify that the output length produced by this crate hasn't changed
         // unexpectedly.  It may not be a big deal if this does change, but we
@@ -401,7 +399,7 @@ mod test {
         let password_bytes = PASSWORD_STR.as_bytes();
         let mut salt_buffer = [0; 32];
         let salt_bytes =
-            password_hash.salt.unwrap().b64_decode(&mut salt_buffer).unwrap();
+            password_hash.salt.unwrap().decode_b64(&mut salt_buffer).unwrap();
         let config = argon2alt::Config {
             variant: argon2alt::Variant::Argon2id,
             version: argon2alt::Version::Version13,

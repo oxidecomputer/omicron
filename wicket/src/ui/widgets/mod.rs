@@ -6,8 +6,14 @@
 
 mod animated_logo;
 mod box_connector;
+mod fade;
+mod ignition;
+mod popup;
 mod rack;
 
 pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use box_connector::{BoxConnector, BoxConnectorKind};
+pub use fade::Fade;
+pub use ignition::IgnitionPopup;
+pub use popup::{ButtonText, Popup};
 pub use rack::Rack;

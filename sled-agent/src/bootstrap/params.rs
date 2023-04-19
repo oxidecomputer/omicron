@@ -5,19 +5,49 @@
 //! Request types for the bootstrap agent
 
 use super::trust_quorum::SerializableShareDistribution;
-use macaddr::MacAddr6;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
-use serde::{Deserialize, Deserializer, Serialize};
+use omicron_common::api::external::MacAddr;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
-use serde_with::DeserializeAs;
-use serde_with::PickFirst;
 use std::borrow::Cow;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
+/// Configuration for the "rack setup service".
+///
+/// The Rack Setup Service should be responsible for one-time setup actions,
+/// such as CockroachDB placement and initialization.  Without operator
+/// intervention, however, these actions need a way to be automated in our
+/// deployment.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackInitializeRequest {
+    pub rack_subnet: Ipv6Addr,
+
+    /// The minimum number of sleds required to unlock the rack secret.
+    ///
+    /// If this value is less than 2, no rack secret will be created on startup;
+    /// this is the typical case for single-server test/development.
+    pub rack_secret_threshold: usize,
+
+    /// Internet gateway information.
+    pub gateway: Gateway,
+
+    /// The external NTP server addresses.
+    pub ntp_servers: Vec<String>,
+
+    /// The external DNS server addresses.
+    pub dns_servers: Vec<String>,
+
+    /// Ranges of the service IP pool which may be used for internal services.
+    // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
+    // we want to configure multiple pools.
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+}
+
 /// Information about the internet gateway used for externally-facing services.
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct Gateway {
     /// IP address of the Internet gateway, which is particularly
     /// relevant for external-facing services (such as Nexus).
@@ -26,31 +56,7 @@ pub struct Gateway {
     /// MAC address of the internet gateway above. This is used to provide
     /// external connectivity into guests, by allowing OPTE to forward traffic
     /// destined for the broader network to the gateway.
-    // This uses the `serde_with` crate's `serde_as` attribute, which tries
-    // each of the listed serialization types (starting with the default) until
-    // one succeeds. This supports deserialization from either an array of u8,
-    // or the display-string representation. (Our custom `ZeroPadded` adapter
-    // works around non-zero-padded MAC address bytes as seen in illumos
-    // `dladm`, which the macaddr crate refuses to parse.)
-    #[serde_as(as = "PickFirst<(_, ZeroPadded)>")]
-    pub mac: MacAddr6,
-}
-
-struct ZeroPadded;
-
-impl<'de> DeserializeAs<'de, MacAddr6> for ZeroPadded {
-    fn deserialize_as<D>(deserializer: D) -> Result<MacAddr6, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        String::deserialize(deserializer)?
-            .split(':')
-            .map(|segment| format!("{:0>2}", segment))
-            .collect::<Vec<String>>()
-            .join(":")
-            .parse()
-            .map_err(serde::de::Error::custom)
-    }
+    pub mac: MacAddr,
 }
 
 /// Configuration information for launching a Sled Agent.
@@ -70,6 +76,12 @@ pub struct SledAgentRequest {
     // Longer-term, it probably makes sense to store this in CRDB and transfer
     // it to Sled Agent as part of the request to launch Nexus.
     pub gateway: Gateway,
+
+    /// The external NTP servers to use
+    pub ntp_servers: Vec<String>,
+    //
+    /// The external DNS servers to use
+    pub dns_servers: Vec<String>,
 
     // Note: The order of these fields is load bearing, because we serialize
     // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
@@ -160,6 +172,35 @@ mod tests {
     use super::*;
     use crate::bootstrap::trust_quorum::RackSecret;
     use crate::bootstrap::trust_quorum::ShareDistribution;
+    use macaddr::MacAddr6;
+    use std::path::PathBuf;
+
+    #[test]
+    fn parse_rack_initialization() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let manifest = PathBuf::from(manifest);
+
+        let path =
+            manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
+        let contents = std::fs::read_to_string(path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+
+        let path = manifest
+            .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
+        let contents = std::fs::read_to_string(path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+    }
+
+    #[test]
+    fn parse_gateway() {
+        let _: Gateway = toml::from_str(
+            r#"
+            mac = "18:c0:4d:d:a0:2a"
+        "#,
+        )
+        .unwrap();
+    }
 
     #[test]
     fn json_serialization_round_trips() {
@@ -172,7 +213,12 @@ mod tests {
                 Cow::Owned(SledAgentRequest {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
-                    gateway: Gateway { address: None, mac: MacAddr6::nil() },
+                    gateway: Gateway {
+                        address: None,
+                        mac: MacAddr6::nil().into(),
+                    },
+                    ntp_servers: vec![String::from("test.pool.example.com")],
+                    dns_servers: vec![String::from("1.1.1.1")],
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                 }),
                 Some(

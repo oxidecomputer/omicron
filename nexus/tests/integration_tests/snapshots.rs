@@ -9,10 +9,10 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
-use nexus_test_utils::resource_helpers::create_organization;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
@@ -27,7 +27,6 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_nexus::authz;
-use omicron_nexus::context::OpContext;
 use omicron_nexus::db;
 use omicron_nexus::db::identity::Resource;
 use omicron_nexus::db::lookup::LookupPath;
@@ -40,16 +39,14 @@ use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
-const ORG_NAME: &str = "test-org";
 const PROJECT_NAME: &str = "springfield-squidport-disks";
 
 fn get_disks_url() -> String {
-    format!("/v1/disks?organization={}&project={}", ORG_NAME, PROJECT_NAME)
+    format!("/v1/disks?project={}", PROJECT_NAME)
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    create_organization(&client, ORG_NAME).await;
-    let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+    let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
 
@@ -74,7 +71,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -84,24 +81,17 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -111,9 +101,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -130,10 +118,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Boot instance with disk
-    let instances_url = format!(
-        "/v1/instances?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME,
-    );
+    let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
     let instance: Instance = object_create(
@@ -166,10 +151,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     instance_simulate(nexus, &instance.identity.id).await;
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     let snapshot: views::Snapshot = object_create(
         client,
@@ -209,7 +191,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             ),
     );
 
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "alpine-edge".parse().unwrap(),
             description: String::from(
@@ -219,24 +201,17 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
         source: params::ImageSource::Url {
             url: server.url("/image.raw").to_string(),
         },
-        distribution: params::Distribution {
-            name: "alpine".parse().unwrap(),
-            version: "edge".into(),
-        },
+        os: "alpine".to_string(),
+        version: "edge".to_string(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    let image =
+        NexusRequest::objects_post(client, &images_url, &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute_and_parse_unwrap::<views::Image>()
+            .await;
 
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
@@ -246,9 +221,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::GlobalImage {
-            image_id: global_image.identity.id,
-        },
+        disk_source: params::DiskSource::Image { image_id: image.identity.id },
         size: disk_size,
     };
 
@@ -265,10 +238,8 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
 
     // Assert disk is detached
-    let disk_url = format!(
-        "/v1/disks/{}?organization={}&project={}",
-        base_disk_name, ORG_NAME, PROJECT_NAME
-    );
+    let disk_url =
+        format!("/v1/disks/{}?project={}", base_disk_name, PROJECT_NAME);
     let disk: Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -280,10 +251,7 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disk.state, DiskState::Detached);
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     let snapshot: views::Snapshot = object_create(
         client,
@@ -302,10 +270,8 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(snapshot.size, base_disk.size);
 
     // Assert disk is still detached
-    let disk_url = format!(
-        "/v1/disks/{}?organization={}&project={}",
-        base_disk_name, ORG_NAME, PROJECT_NAME
-    );
+    let disk_url =
+        format!("/v1/disks/{}?project={}", base_disk_name, PROJECT_NAME);
     let disk: Disk = NexusRequest::object_get(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -362,10 +328,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Issue snapshot request
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     let snapshot: views::Snapshot = object_create(
         client,
@@ -427,10 +390,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Delete snapshot
-    let snapshot_url = format!(
-        "/v1/snapshots/not-attached?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshot_url =
+        format!("/v1/snapshots/not-attached?project={}", PROJECT_NAME);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &snapshot_url)
@@ -451,10 +412,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     );
 
     // Delete the disk using the snapshot
-    let disk_url = format!(
-        "/v1/disks/{}?organization={}&project={}",
-        snap_disk_name, ORG_NAME, PROJECT_NAME
-    );
+    let disk_url =
+        format!("/v1/disks/{}?project={}", snap_disk_name, PROJECT_NAME);
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -467,10 +426,8 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(provision.virtual_disk_bytes_provisioned.0, disk_size);
 
     // Delete the original base disk
-    let disk_url = format!(
-        "/v1/disks/{}?organization={}&project={}",
-        base_disk_name, ORG_NAME, PROJECT_NAME
-    );
+    let disk_url =
+        format!("/v1/disks/{}?project={}", base_disk_name, PROJECT_NAME);
     NexusRequest::object_delete(client, &disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -570,7 +527,7 @@ async fn test_reject_creating_disk_from_snapshot(
     .unwrap();
     assert_eq!(
         error.message,
-        "unsupported value for \"size and block_size\": total size must be a multiple of snapshot's block size",
+        "unsupported value for \"size and block_size\": total size must be a multiple of block size 4096",
     );
 
     // Reject where size of snapshot is greater than the disk's
@@ -771,10 +728,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     .expect("unexpected error creating disk");
 
     // Issue snapshot request, expect it to fail
-    let snapshots_url = format!(
-        "/v1/snapshots?organization={}&project={}",
-        ORG_NAME, PROJECT_NAME
-    );
+    let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &snapshots_url)

@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for wicketd
 
+use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
 use crate::update_events::UpdateLog;
 use dropshot::endpoint;
@@ -13,11 +14,17 @@ use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
-use dropshot::UntypedBody;
+use dropshot::StreamingBody;
+use dropshot::TypedBody;
+use futures::TryStreamExt;
+use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
+use http::StatusCode;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -37,6 +44,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(post_start_update)?;
         api.register(get_update_all)?;
         api.register(get_update_sp)?;
+        api.register(post_ignition_command)?;
         Ok(())
     }
 
@@ -45,6 +53,13 @@ pub fn api() -> WicketdApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GetInventoryParams {
+    /// If true, refresh the state of these SPs from MGS prior to returning
+    /// (instead of returning cached data).
+    pub force_refresh: Vec<SpIdentifier>,
 }
 
 /// A status endpoint used to report high level information known to wicketd.
@@ -60,10 +75,18 @@ pub fn api() -> WicketdApiDescription {
 }]
 async fn get_inventory(
     rqctx: RequestContext<ServerContext>,
+    body_params: TypedBody<GetInventoryParams>,
 ) -> Result<HttpResponseOk<GetInventoryResponse>, HttpError> {
-    match rqctx.context().mgs_handle.get_inventory().await {
+    let GetInventoryParams { force_refresh } = body_params.into_inner();
+    match rqctx.context().mgs_handle.get_inventory(force_refresh).await {
         Ok(response) => Ok(HttpResponseOk(response)),
-        Err(_) => {
+        Err(GetInventoryError::InvalidSpIdentifier) => {
+            Err(HttpError::for_unavail(
+                None,
+                "Invalid SP identifier in request".into(),
+            ))
+        }
+        Err(GetInventoryError::ShutdownInProgress) => {
             Err(HttpError::for_unavail(None, "Server is shutting down".into()))
         }
     }
@@ -79,24 +102,25 @@ async fn get_inventory(
 }]
 async fn put_repository(
     rqctx: RequestContext<ServerContext>,
-    body: UntypedBody,
+    body: StreamingBody,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
     // TODO: do we need to return more information with the response?
 
-    // TODO: `UntypedBody` is currently inefficient for large request bodies -- it does many copies
-    // and allocations. Replace this with a better solution once it's available in dropshot.
-    rqctx.artifact_store.put_repository(body.as_bytes())?;
+    rqctx
+        .artifact_store
+        .put_repository(body.into_stream().try_collect().await?)?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
 
-/// The response to a `get_artifacts` call: the list of all artifacts currently
-/// held by wicketd.
+/// The response to a `get_artifacts` call: the system version, and the list of
+/// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetArtifactsResponse {
+    pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
 }
 
@@ -111,8 +135,9 @@ pub struct GetArtifactsResponse {
 async fn get_artifacts(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
-    let artifacts = rqctx.context().artifact_store.artifact_ids();
-    Ok(HttpResponseOk(GetArtifactsResponse { artifacts }))
+    let (system_version, artifacts) =
+        rqctx.context().artifact_store.system_version_and_artifact_ids();
+    Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
 }
 
 /// An endpoint to start updating a sled.
@@ -186,4 +211,55 @@ async fn get_update_sp(
     let update_log =
         rqctx.context().update_tracker.update_log(target.into_inner()).await;
     Ok(HttpResponseOk(update_log))
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+struct PathSpIgnitionCommand {
+    #[serde(rename = "type")]
+    type_: SpType,
+    slot: u32,
+    command: IgnitionCommand,
+}
+
+/// Send an ignition command targeting a specific SP.
+///
+/// This endpoint acts as a proxy to the MGS endpoint performing the same
+/// function, allowing wicket to communicate exclusively with wicketd (even
+/// though wicketd adds no meaningful functionality here beyond what MGS
+/// offers).
+#[endpoint {
+    method = POST,
+    path = "/ignition/{type}/{slot}/{command}",
+}]
+async fn post_ignition_command(
+    rqctx: RequestContext<ServerContext>,
+    path: Path<PathSpIgnitionCommand>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let PathSpIgnitionCommand { type_, slot, command } = path.into_inner();
+
+    apictx
+        .mgs_client
+        .ignition_command(type_, slot, command)
+        .await
+        .map_err(http_error_from_client_error)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+fn http_error_from_client_error(
+    err: gateway_client::Error<gateway_client::types::Error>,
+) -> HttpError {
+    // Most errors have a status code; the only one that definitely doesn't is
+    // `Error::InvalidRequest`, for which we'll use `BAD_REQUEST`.
+    let status_code = err.status().unwrap_or(StatusCode::BAD_REQUEST);
+
+    let message = format!("request to MGS failed: {err}");
+
+    HttpError {
+        status_code,
+        error_code: None,
+        external_message: message.clone(),
+        internal_message: message,
+    }
 }

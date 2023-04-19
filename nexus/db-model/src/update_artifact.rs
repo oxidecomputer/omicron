@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_wrapper;
-use crate::schema::update_available_artifact;
+use crate::schema::update_artifact;
+use crate::SemverVersion;
 use chrono::{DateTime, Utc};
 use omicron_common::api::internal;
 use parse_display::Display;
@@ -36,12 +37,12 @@ impl_enum_wrapper!(
 #[derive(
     Queryable, Insertable, Clone, Debug, Display, Selectable, AsChangeset,
 )]
-#[diesel(table_name = update_available_artifact)]
+#[diesel(table_name = update_artifact)]
 #[display("{kind} \"{name}\" v{version}")]
-pub struct UpdateAvailableArtifact {
+pub struct UpdateArtifact {
     pub name: String,
     /// Version of the artifact itself
-    pub version: String,
+    pub version: SemverVersion,
     pub kind: KnownArtifactKind,
     /// `version` field of targets.json from the repository
     // FIXME this *should* be a NonZeroU64
@@ -54,8 +55,8 @@ pub struct UpdateAvailableArtifact {
     pub target_length: i64,
 }
 
-impl UpdateAvailableArtifact {
-    pub fn id(&self) -> (String, String, KnownArtifactKind) {
+impl UpdateArtifact {
+    pub fn id(&self) -> (String, SemverVersion, KnownArtifactKind) {
         (self.name.clone(), self.version.clone(), self.kind)
     }
 }

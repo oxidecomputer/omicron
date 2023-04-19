@@ -19,16 +19,25 @@ function on_exit
 
 trap on_exit ERR
 
-# Parse command line options:
-#
-# -y  Assume "yes" intead of showing confirmation prompts.
-# -p  Skip checking paths (currently unused)
+function usage
+{
+  echo "Usage: ./install_runner_prerequisites.sh <OPTIONS>"
+  echo "  Options: "
+  echo "   -y: Assume 'yes' instead of showing confirmation prompts"
+  echo "   -p: Skip checking paths"
+  echo "   -r: Number of retries to perform for network operations (default: 3)"
+  exit 1
+}
+
 ASSUME_YES="false"
-while getopts yp flag
+RETRY_ATTEMPTS=3
+while getopts ypr: flag
 do
   case "${flag}" in
     y) ASSUME_YES="true" ;;
     p) continue ;;
+    r) RETRY_ATTEMPTS=${OPTARG} ;;
+    *) usage
   esac
 done
 
@@ -53,6 +62,28 @@ function confirm
   esac
 }
 
+# Function which executes all provided arguments, up to ${RETRY_ATTEMPTS}
+# times, or until the command succeeds.
+function retry
+{
+  attempts="${RETRY_ATTEMPTS}"
+  # Always try at least once
+  attempts=$((attempts < 1 ? 1 : attempts))
+  retry_rc=0
+  for i in $(seq 1 $attempts); do
+    "$@" || retry_rc=$?;
+    if [[ "$retry_rc" -eq 0 ]]; then
+      return
+    fi
+
+    if [[ $i -ne $attempts ]]; then
+      echo "Failed to run command -- will try $((attempts - i)) more times"
+    fi
+  done
+
+  exit $retry_rc
+}
+
 # Packages to be installed Helios:
 #
 # - libpq, the PostgreSQL client lib.
@@ -65,54 +96,64 @@ function confirm
 # - pkg, the IPS client (though likely it will just be updated)
 # - brand/omicron1/tools: Oxide's omicron1-brand Zone
 HOST_OS=$(uname -s)
-if [[ "${HOST_OS}" == "SunOS" ]]; then
-  packages=(
-    'pkg:/package/pkg'
-    'library/postgresql-13'
-    'pkg-config'
-    'brand/omicron1/tools'
-    'library/libxmlsec1'
-  )
 
-  # Install/update the set of packages.
-  # Explicitly manage the return code using "rc" to observe the result of this
-  # command without exiting the script entirely (due to bash's "errexit").
-  rc=0
-  confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
-  # Return codes:
-  #  0: Normal Success
-  #  4: Failure because we're already up-to-date. Also acceptable.
-  if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
-    exit "$rc"
-  fi
+function install_packages {
+  if [[ "${HOST_OS}" == "SunOS" ]]; then
+    packages=(
+      'pkg:/package/pkg'
+      'library/postgresql-13'
+      'pkg-config'
+      'brand/omicron1/tools'
+      'library/libxmlsec1'
+    )
 
-  pkg list -v "${packages[@]}"
-elif [[ "${HOST_OS}" == "Linux" ]]; then
-  packages=(
-    'ca-certificates'
-    'libpq5'
-    'libsqlite3-0'
-    'libssl1.1'
-    'libxmlsec1-openssl'
-  )
-  sudo apt-get update
-  if [[ "${ASSUME_YES}" == "true" ]]; then
-    sudo apt-get install -y ${packages[@]}
+    # Install/update the set of packages.
+    # Explicitly manage the return code using "rc" to observe the result of this
+    # command without exiting the script entirely (due to bash's "errexit").
+    rc=0
+    confirm "Install (or update) [${packages[*]}]?" && { pfexec pkg install -v "${packages[@]}" || rc=$?; }
+    # Return codes:
+    #  0: Normal Success
+    #  4: Failure because we're already up-to-date. Also acceptable.
+    if [[ "$rc" -ne 4 ]] && [[ "$rc" -ne 0 ]]; then
+      exit "$rc"
+    fi
+
+    pkg list -v "${packages[@]}"
+  elif [[ "${HOST_OS}" == "Linux" ]]; then
+    packages=(
+      'ca-certificates'
+      'libpq5'
+      'libsqlite3-0'
+      'libssl1.1'
+      'libxmlsec1-openssl'
+    )
+    sudo apt-get update
+    if [[ "${ASSUME_YES}" == "true" ]]; then
+      sudo apt-get install -y "${packages[@]}"
+    else
+      confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install "${packages[@]}"
+    fi
   else
-    confirm "Install (or update) [${packages[*]}]?" && sudo apt-get install ${packages[@]}
+    echo "Unsupported OS: ${HOST_OS}"
+    exit 1
   fi
-else
-  echo "Unsupported OS: ${HOST_OS}"
-  exit -1
-fi
+}
 
-# Install OPTE
-#
-# OPTE is a Rust package that is consumed by a kernel module called xde. This
-# installs the `xde` driver and some kernel bits required to work with that
-# driver.
+retry install_packages
+
 if [[ "${HOST_OS}" == "SunOS" ]]; then
-    ./tools/install_opte.sh
+    # Install OPTE
+    #
+    # OPTE is a Rust package that is consumed by a kernel module called xde. This
+    # installs the `xde` driver and some kernel bits required to work with that
+    # driver.
+    retry ./tools/install_opte.sh
+
+    # Grab the SoftNPU machinery (ASIC simulator, scadm, P4 program, etc.)
+    #
+    # create_virtual_hardware.sh will use those to setup the softnpu zone
+    retry ./tools/ci_download_softnpu_machinery
 fi
 
 echo "All runner prerequisites installed successfully"

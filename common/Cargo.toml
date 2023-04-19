@@ -42,6 +42,7 @@ progenitor.workspace = true
 [dev-dependencies]
 expectorate.workspace = true
 libc.workspace = true
+regress.workspace = true
 serde_urlencoded.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 

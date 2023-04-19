@@ -188,9 +188,9 @@ lazy_static! {
     static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
         // Create a separate Silo
         SetupReq::Post {
-            url: "/system/silos",
+            url: "/v1/system/silos",
             body: serde_json::to_value(&*DEMO_SILO_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/silos/{id}"],
+            id_routes: vec![],
         },
         // Create a local User
         SetupReq::Post {
@@ -205,7 +205,7 @@ lazy_static! {
         // Get the default IP pool
         SetupReq::Get {
             url: &DEMO_IP_POOL_URL,
-            id_routes: vec!["/system/by-id/ip-pools/{id}"],
+            id_routes: vec![],
         },
         // Create an IP pool range
         SetupReq::Post {
@@ -213,15 +213,9 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
             id_routes: vec![],
         },
-        // Create an Organization
-        SetupReq::Post {
-            url: "/v1/organizations",
-            body: serde_json::to_value(&*DEMO_ORG_CREATE).unwrap(),
-            id_routes: vec![],
-        },
         // Create a Project in the Organization
         SetupReq::Post {
-            url: &DEMO_ORG_PROJECTS_URL,
+            url: "/v1/projects",
             body: serde_json::to_value(&*DEMO_PROJECT_CREATE).unwrap(),
             id_routes: vec![],
         },
@@ -255,6 +249,12 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_DISK_CREATE).unwrap(),
             id_routes: vec!["/v1/disks/{id}"],
         },
+        // Create a Disk in the Project with state ImportReady
+        SetupReq::Post {
+            url: &DEMO_DISKS_URL,
+            body: serde_json::to_value(&*DEMO_IMPORT_DISK_CREATE).unwrap(),
+            id_routes: vec!["/v1/disks/{id}"],
+        },
         // Create an Instance in the Project
         SetupReq::Post {
             url: &DEMO_PROJECT_URL_INSTANCES,
@@ -272,11 +272,11 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_SNAPSHOT_CREATE).unwrap(),
             id_routes: vec!["/by-id/snapshots/{id}"],
         },
-        // Create a GlobalImage
+        // Create an Image in the Project
         SetupReq::Post {
-            url: "/system/images",
-            body: serde_json::to_value(&*DEMO_GLOBAL_IMAGE_CREATE).unwrap(),
-            id_routes: vec!["/system/by-id/images/{id}"],
+            url: &DEMO_PROJECT_IMAGES_URL,
+            body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
+            id_routes: vec!["/v1/images/{id}"],
         },
         // Create a SAML identity provider
         SetupReq::Post {
@@ -311,7 +311,7 @@ struct IdMetadata {
 /// Verifies a single API endpoint, described with `endpoint`
 ///
 /// (Technically, a single `VerifyEndpoint` struct describes an HTTP resource,
-/// like "/organizations".  There are several API endpoints there, like "GET
+/// like "/v1/organizations".  There are several API endpoints there, like "GET
 /// /organizations" and "POST /organizations".  We're a little loose with the
 /// terminology here.)
 ///
@@ -337,7 +337,7 @@ struct IdMetadata {
 /// - If the resource is publicly visible (based on `endpoint.visibility`), then
 ///   we expect a 401 for unauthenticated users and a 403 for unauthenticated,
 ///   unauthorized users.  Note that "visible" here doesn't mean "accessible".
-///   We assume that everybody is allowed to know that "/organizations" exists.
+///   We assume that everybody is allowed to know that "/v1/organizations" exists.
 ///   But they're not necessarily allowed to _use_ it.  That's why it's correct
 ///   to get 401/403 on "GET /organizations", even though it's a GET and you
 ///   might think all GETs to things you can't access should be 404s.

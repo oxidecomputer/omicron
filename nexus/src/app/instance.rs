@@ -11,7 +11,6 @@ use crate::app::sagas;
 use crate::authn;
 use crate::authz;
 use crate::cidata::InstanceCiData;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Resource;
 use crate::db::lookup;
@@ -20,7 +19,7 @@ use crate::external_api::params;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
-use nexus_db_model::Name;
+use nexus_db_queries::context::OpContext;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -36,9 +35,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
-use ref_cast::RefCast;
-use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
+use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
 use sled_agent_client::Client as SledAgentClient;
@@ -58,32 +55,32 @@ impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        instance_selector: &'a params::InstanceSelector,
+        instance_selector: params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
             params::InstanceSelector {
-                project_selector: None,
                 instance: NameOrId::Id(id),
+                project: None
             } => {
                 let instance =
-                    LookupPath::new(opctx, &self.db_datastore).instance_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
             }
             params::InstanceSelector {
-                project_selector: Some(project_selector),
                 instance: NameOrId::Name(name),
+                project: Some(project)
             } => {
                 let instance = self
-                    .project_lookup(opctx, project_selector)?
-                    .instance_name(Name::ref_cast(name));
+                    .project_lookup(opctx, params::ProjectSelector { project })?
+                    .instance_name_owned(name.into());
                 Ok(instance)
             }
             params::InstanceSelector {
-                project_selector: Some(_),
                 instance: NameOrId::Id(_),
+                ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing instance as an ID, project should not be specified",
+                    "when providing instance as an ID project should not be specified",
                 ))
             }
             _ => {
@@ -293,11 +290,14 @@ impl super::Nexus {
     /// Idempotently place the instance in a 'Migrating' state.
     pub async fn instance_start_migrate(
         &self,
-        opctx: &OpContext,
-        instance_id: Uuid,
-        migration_id: Uuid,
-        dst_propolis_id: Uuid,
+        _opctx: &OpContext,
+        _instance_id: Uuid,
+        _migration_id: Uuid,
+        _dst_propolis_id: Uuid,
     ) -> UpdateResult<db::model::Instance> {
+        todo!("Migration endpoint not yet implemented in sled agent");
+
+        /*
         let (.., authz_instance, db_instance) =
             LookupPath::new(opctx, &self.db_datastore)
                 .instance_id(instance_id)
@@ -319,6 +319,7 @@ impl super::Nexus {
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
+        */
     }
 
     /// Reboot the specified instance.
@@ -327,27 +328,12 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        // To implement reboot, we issue a call to the sled agent to set a
-        // runtime state of "reboot". We cannot simply stop the Instance and
-        // start it again here because if we crash in the meantime, we might
-        // leave it stopped.
-        //
-        // When an instance is rebooted, the "rebooting" flag remains set on
-        // the runtime state as it transitions to "Stopping" and "Stopped".
-        // This flag is cleared when the state goes to "Starting".  This way,
-        // even if the whole rack powered off while this was going on, we would
-        // never lose track of the fact that this Instance was supposed to be
-        // running.
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Reboot,
-            migration_params: None,
-        };
-        self.instance_set_runtime(
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Reboot,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
@@ -359,16 +345,33 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Running,
-            migration_params: None,
+        // TODO(#2824): This needs to be a saga for crash resiliency
+        // purposes (otherwise the instance can be leaked if Nexus crashes
+        // between registration and instance start).
+        let (.., authz_instance, mut db_instance) =
+            instance_lookup.fetch().await?;
+
+        // The instance is not really being "created" (it already exists from
+        // the caller's perspective), but if it does not exist on its sled, the
+        // target sled agent will populate its instance manager with the
+        // contents of this modified record, and that record needs to allow a
+        // transition to the Starting state.
+        //
+        // If the instance does exist on this sled, this initial runtime state
+        // is ignored.
+        let initial_runtime = nexus_db_model::InstanceRuntimeState {
+            state: nexus_db_model::InstanceState(InstanceState::Creating),
+            ..db_instance.runtime_state
         };
-        self.instance_set_runtime(
+        db_instance.runtime_state = initial_runtime;
+        self.instance_ensure_registered(opctx, &authz_instance, &db_instance)
+            .await?;
+
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Running,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
@@ -381,18 +384,32 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
     ) -> UpdateResult<db::model::Instance> {
         let (.., authz_instance, db_instance) = instance_lookup.fetch().await?;
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Stopped,
-            migration_params: None,
-        };
-        self.instance_set_runtime(
+        self.instance_request_state(
             opctx,
             &authz_instance,
             &db_instance,
-            requested,
+            InstanceStateRequested::Stopped,
         )
         .await?;
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
+    }
+
+    /// Idempotently ensures that the sled specified in `db_instance` does not
+    /// have a record of the instance. If the instance is currently running on
+    /// this sled, this operation rudely terminates it.
+    pub(crate) async fn instance_ensure_unregistered(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let sa = self.instance_sled(&db_instance).await?;
+        let result = sa
+            .instance_unregister(&db_instance.id())
+            .await
+            .map(|res| res.into_inner().updated_runtime);
+        self.handle_instance_put_result(db_instance, result).await.map(|_| ())
     }
 
     /// Returns the SledAgentClient for the host where this Instance is running.
@@ -407,15 +424,20 @@ impl super::Nexus {
     fn check_runtime_change_allowed(
         &self,
         runtime: &nexus::InstanceRuntimeState,
-        requested: &InstanceRuntimeStateRequested,
+        requested: &InstanceStateRequested,
     ) -> Result<(), Error> {
         // Users are allowed to request a start or stop even if the instance is
         // already in the desired state (or moving to it), and we will issue a
         // request to the SA to make the state change in these cases in case the
-        // runtime state we saw here was stale.  However, users are not allowed
-        // to change the state of an instance that's migrating, failed or
-        // destroyed.  But if we're already migrating, requesting a migration is
-        // allowed to allow for idempotency.
+        // runtime state we saw here was stale.
+        //
+        // Users cannot change the state of a failed or destroyed instance.
+        // TODO(#2825): Failed instances should be allowed to stop.
+        //
+        // Migrating instances can't change state until they're done migrating,
+        // but for idempotency, a request to make an incarnation of an instance
+        // into a migration target is allowed if the incarnation is already a
+        // migration target.
         let allowed = match runtime.run_state {
             InstanceState::Creating => true,
             InstanceState::Starting => true,
@@ -423,9 +445,8 @@ impl super::Nexus {
             InstanceState::Stopping => true,
             InstanceState::Stopped => true,
             InstanceState::Rebooting => true,
-
             InstanceState::Migrating => {
-                requested.run_state == InstanceStateRequested::Migrating
+                matches!(requested, InstanceStateRequested::MigrationTarget(_))
             }
             InstanceState::Repairing => false,
             InstanceState::Failed => false,
@@ -444,21 +465,42 @@ impl super::Nexus {
         }
     }
 
-    /// Modifies the runtime state of the Instance as requested.  This generally
-    /// means booting or halting the Instance.
-    pub(crate) async fn instance_set_runtime(
+    pub(crate) async fn instance_request_state(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
-        requested: InstanceRuntimeStateRequested,
+        requested: InstanceStateRequested,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-
         self.check_runtime_change_allowed(
             &db_instance.runtime().clone().into(),
             &requested,
         )?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let instance_put_result = sa
+            .instance_put_state(
+                &db_instance.id(),
+                &InstancePutStateBody { state: requested },
+            )
+            .await
+            .map(|res| res.into_inner().updated_runtime);
+
+        self.handle_instance_put_result(db_instance, instance_put_result)
+            .await
+            .map(|_| ())
+    }
+
+    /// Modifies the runtime state of the Instance as requested.  This generally
+    /// means booting or halting the Instance.
+    pub(crate) async fn instance_ensure_registered(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
@@ -571,12 +613,12 @@ impl super::Nexus {
             .ssh_keys_list(
                 opctx,
                 &authz_user,
-                &DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
                         .unwrap(),
-                },
+                }),
             )
             .await?
             .into_iter()
@@ -605,31 +647,73 @@ impl super::Nexus {
 
         let sa = self.instance_sled(&db_instance).await?;
 
-        let instance_put_result = sa
-            .instance_put(
+        let instance_register_result = sa
+            .instance_register(
                 &db_instance.id(),
                 &sled_agent_client::types::InstanceEnsureBody {
                     initial: instance_hardware,
-                    target: requested.clone(),
-                    migrate: None,
                 },
             )
-            .await;
+            .await
+            .map(|res| Some(res.into_inner()));
 
-        match instance_put_result {
-            Ok(new_runtime) => {
+        self.handle_instance_put_result(db_instance, instance_register_result)
+            .await
+            .map(|_| ())
+    }
+
+    /// Updates an instance's CRDB record based on the result of a call to sled
+    /// agent that tried to update the instance's state.
+    ///
+    /// # Parameters
+    ///
+    /// - `db_instance`: The CRDB instance record observed by the caller before
+    ///   it attempted to update the instance's state.
+    /// - `result`: The result of the relevant sled agent operation. If this is
+    ///   `Ok`, the payload is the updated instance runtime state returned from
+    ///   sled agent, if there was one.
+    ///
+    /// # Return value
+    ///
+    /// - `Ok(true)` if the caller supplied an updated instance record and this
+    ///   routine successfully wrote it to CRDB.
+    /// - `Ok(false)` if the sled agent call succeeded, but this routine did not
+    ///   update CRDB.
+    ///   This can happen either because sled agent didn't return an updated
+    ///   record or because the updated record was superseded by a state update
+    ///   with a more advanced generation number.
+    /// - `Err` if the sled agent operation failed or this routine received an
+    ///   error while trying to update CRDB.
+    async fn handle_instance_put_result(
+        &self,
+        db_instance: &db::model::Instance,
+        result: Result<
+            Option<sled_agent_client::types::InstanceRuntimeState>,
+            sled_agent_client::Error<sled_agent_client::types::Error>,
+        >,
+    ) -> Result<bool, Error> {
+        slog::debug!(&self.log, "Handling sled agent instance PUT result";
+                     "result" => ?result);
+
+        match result {
+            Ok(Some(new_runtime)) => {
                 let new_runtime: nexus::InstanceRuntimeState =
-                    new_runtime.into_inner().into();
+                    new_runtime.into();
 
-                self.db_datastore
+                let update_result = self
+                    .db_datastore
                     .instance_update_runtime(
                         &db_instance.id(),
                         &new_runtime.into(),
                     )
-                    .await
-                    .map(|_| ())
-            }
+                    .await;
 
+                slog::debug!(&self.log,
+                             "Attempted DB update after instance PUT";
+                             "result" => ?update_result);
+                update_result
+            }
+            Ok(None) => Ok(false),
             Err(e) => {
                 // The sled-agent has told us that it can't do what we
                 // requested, but does that mean a failure? One example would be
@@ -711,11 +795,10 @@ impl super::Nexus {
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector::new(
-                    None,
-                    Some(authz_project.id().into()),
+                params::DiskSelector {
+                    project: Some(authz_project.id().into()),
                     disk,
-                ),
+                },
             )?
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -769,11 +852,10 @@ impl super::Nexus {
         let (.., authz_disk) = self
             .disk_lookup(
                 opctx,
-                &params::DiskSelector::new(
-                    None,
-                    Some(authz_project.id().into()),
+                params::DiskSelector {
+                    project: Some(authz_project.id().into()),
                     disk,
-                ),
+                },
             )?
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -857,29 +939,37 @@ impl super::Nexus {
     }
 
     /// Returns the requested range of serial console output bytes,
-    /// provided they are still in the sled-agent's cache.
+    /// provided they are still in the propolis-server's cache.
     pub(crate) async fn instance_serial_console_data(
         &self,
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleRequest,
     ) -> Result<params::InstanceSerialConsoleData, Error> {
-        let (.., db_instance) = instance_lookup.fetch().await?;
-
-        let sa = self.instance_sled(&db_instance).await?;
-        let data = sa
-            .instance_serial_get(
-                &db_instance.identity().id,
-                // these parameters are all the same type; OpenAPI puts them in alphabetical order.
-                params.from_start,
-                params.max_bytes,
-                params.most_recent,
-            )
+        let client = self
+            .propolis_client_for_instance(instance_lookup, authz::Action::Read)
             .await?;
-        let sa_data: sled_agent_client::types::InstanceSerialConsoleData =
-            data.into_inner();
+        let mut request = client.instance_serial_history_get();
+        if let Some(max_bytes) = params.max_bytes {
+            request = request.max_bytes(max_bytes);
+        }
+        if let Some(from_start) = params.from_start {
+            request = request.from_start(from_start);
+        }
+        if let Some(most_recent) = params.most_recent {
+            request = request.most_recent(most_recent);
+        }
+        let data = request
+            .send()
+            .await
+            .map_err(|_| {
+                Error::internal_error(
+                    "failed to connect to instance's propolis server",
+                )
+            })?
+            .into_inner();
         Ok(params::InstanceSerialConsoleData {
-            data: sa_data.data,
-            last_byte_offset: sa_data.last_byte_offset,
+            data: data.data,
+            last_byte_offset: data.last_byte_offset,
         })
     }
 
@@ -887,23 +977,21 @@ impl super::Nexus {
         &self,
         conn: dropshot::WebsocketConnection,
         instance_lookup: &lookup::Instance<'_>,
+        params: &params::InstanceSerialConsoleRequest,
     ) -> Result<(), Error> {
-        // TODO: Technically the stream is two way so the user of this method can modify the instance in some way. Should we use different permissions?
-        let (.., instance) = instance_lookup.fetch().await?;
-        let ip_addr = instance
-            .runtime_state
-            .propolis_ip
-            .ok_or_else(|| {
-                Error::internal_error(
-                    "instance's propolis server ip address not found",
-                )
-            })?
-            .ip();
-        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
-        let client =
-            propolis_client::Client::new(&format!("http://{}", socket_addr));
-        let propolis_upgraded = client
-            .instance_serial()
+        let client = self
+            .propolis_client_for_instance(
+                instance_lookup,
+                authz::Action::Modify,
+            )
+            .await?;
+        let mut req = client.instance_serial();
+        if let Some(from_start) = params.from_start {
+            req = req.from_start(from_start);
+        } else if let Some(most_recent) = params.most_recent {
+            req = req.most_recent(most_recent);
+        }
+        let propolis_upgraded = req
             .send()
             .await
             .map_err(|_| {
@@ -916,6 +1004,25 @@ impl super::Nexus {
         Self::proxy_instance_serial_ws(conn.into_inner(), propolis_upgraded)
             .await
             .map_err(|e| Error::internal_error(&format!("{}", e)))
+    }
+
+    async fn propolis_client_for_instance(
+        &self,
+        instance_lookup: &lookup::Instance<'_>,
+        action: authz::Action,
+    ) -> Result<propolis_client::Client, Error> {
+        let (.., instance) = instance_lookup.fetch_for(action).await?;
+        let ip_addr = instance
+            .runtime_state
+            .propolis_ip
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "instance's propolis server ip address not found",
+                )
+            })?
+            .ip();
+        let socket_addr = SocketAddr::new(ip_addr, PROPOLIS_PORT);
+        Ok(propolis_client::Client::new(&format!("http://{}", socket_addr)))
     }
 
     async fn proxy_instance_serial_ws(

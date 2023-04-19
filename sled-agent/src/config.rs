@@ -4,6 +4,7 @@
 
 //! Interfaces for working with sled agent configuration
 
+use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -15,20 +16,29 @@ use serde::Deserialize;
 use sled_hardware::is_gimlet;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SledMode {
+    Auto,
+    Gimlet,
+    Scrimlet,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
-    /// Optionally force the sled to self-identify as a scrimlet (or gimlet,
-    /// if set to false).
-    pub stub_scrimlet: Option<bool>,
+    /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
+    pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: String,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
     pub zpools: Option<Vec<ZpoolName>>,
+    /// Optionally skip waiting for time synchronization
+    pub skip_timesync: Option<bool>,
 
     /// The data link on which we infer the bootstrap address.
     ///
@@ -40,6 +50,19 @@ pub struct Config {
     /// This allows continued support for development and testing on emulated
     /// systems.
     pub data_link: Option<PhysicalLink>,
+
+    #[serde(default)]
+    pub updates: ConfigUpdates,
+
+    /// When running on a scrimlet, tfportd in the switch zone will create links
+    /// when it boots, and maghemite in the switch zone is configured to use
+    /// those in transit mode in order to transit prefix announcements to sleds.
+    ///
+    /// For non-gimlet based testing, tfportd will not add create links when it
+    /// boots. Map these links into the switch zone for use with the transit
+    /// mode maghemite there.
+    #[serde(default)]
+    pub switch_zone_maghemite_links: Vec<PhysicalLink>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,5 +113,37 @@ impl Config {
                 Dladm::find_physical().map_err(ConfigError::FindLinks)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_smf_configs() {
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .expect("Cannot access manifest directory");
+        let smf = PathBuf::from(manifest).join("../smf/sled-agent");
+
+        let mut configs_seen = 0;
+        for variant in std::fs::read_dir(smf).unwrap() {
+            let variant = variant.unwrap();
+            if variant.file_type().unwrap().is_dir() {
+                for entry in std::fs::read_dir(variant.path()).unwrap() {
+                    let entry = entry.unwrap();
+                    if entry.file_name() == "config.toml" {
+                        Config::from_file(entry.path()).unwrap_or_else(|_| {
+                            panic!(
+                                "Failed to parse config {}",
+                                entry.path().display()
+                            )
+                        });
+                        configs_seen += 1;
+                    }
+                }
+            }
+        }
+        assert!(configs_seen > 0, "No sled-agent configs found");
     }
 }

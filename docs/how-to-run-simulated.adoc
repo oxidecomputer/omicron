@@ -42,6 +42,32 @@ the database files will be deleted when you stop the program.
 
 The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
 
+=== Quick start
+
+. Run `omicron-dev run-all`.  This will run all of these components with a default configuration that should work in a typical development environment.  The database will be stored in a temporary directory.  Logs for all services will go to a single, unified log file.  The tool will print information about reaching Nexus as well as CockroachDB:
++
+[source,text]
+----
+$ omicron-dev run-all
+omicron-dev: setting up all services ...
+log file: /dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log
+note: configured to log to "/dangerzone/omicron_tmp/omicron-dev-omicron-dev.4647.0.log"
+omicron-dev: services are running.
+omicron-dev: nexus external API:    127.0.0.1:12220
+omicron-dev: nexus internal API:    127.0.0.1:12221
+omicron-dev: cockroachdb:           postgresql://root@127.0.0.1:54649/omicron?sslmode=disable
+omicron-dev: cockroachdb directory: /dangerzone/omicron_tmp/.tmpB8FNBT
+----
++
+. If you use CTRL-C to shut this down, it will gracefully terminate CockroachDB and remove the temporary directory:
++
+[source,text]
+----
+^Comicron-dev: caught signal, shutting down and removing temporary directory
+----
+
+=== Running the pieces by hand
+
 . Start CockroachDB using `omicron-dev db-run`:
 +
 [source,text]
@@ -139,5 +165,5 @@ Dec 02 18:00:01.093 DEBG registered endpoint, path: /producers, method: POST, lo
 
 Once everything is up and running, you can use the system in a few ways:
 
-* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/orgs`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
+* Use the browser-based console.  The Nexus log output will show what IP address and port it's listening on.  This is also configured in the config file.  If you're using the defaults, you can reach the console at `http://127.0.0.1:12220/projects`.  Depending on the environment where you're running this, you may need an ssh tunnel or the like to reach this from your browser.
 * Use the xref:cli.adoc[`oxide` CLI].

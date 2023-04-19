@@ -4,12 +4,12 @@
 
 use dropshot::ResultsPage;
 use http::{method::Method, StatusCode};
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::SemverVersion;
-use omicron_nexus::{
-    context::OpContext,
-    external_api::{params, shared::UpdateableComponentType, views},
+use omicron_nexus::external_api::{
+    params, shared::UpdateableComponentType, views,
 };
 
 type ControlPlaneTestContext =
@@ -32,13 +32,13 @@ async fn populate_db(cptestctx: &ControlPlaneTestContext) {
     let create_su =
         params::SystemUpdateCreate { version: SemverVersion::new(0, 2, 0) };
     nexus
-        .create_system_update(&opctx, create_su)
+        .upsert_system_update(&opctx, create_su)
         .await
         .expect("Failed to create system update");
     let create_su =
         params::SystemUpdateCreate { version: SemverVersion::new(1, 0, 1) };
     nexus
-        .create_system_update(&opctx, create_su)
+        .upsert_system_update(&opctx, create_su)
         .await
         .expect("Failed to create system update");
 

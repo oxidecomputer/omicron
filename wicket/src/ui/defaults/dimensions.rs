@@ -30,7 +30,7 @@ pub trait RectExt {
 
 impl RectExt for Rect {
     fn center_horizontally(mut self, width: u16) -> Self {
-        let center = (self.width - width) / 2;
+        let center = (self.width.saturating_sub(width)) / 2;
         self.x += center;
         self.width = width;
         self

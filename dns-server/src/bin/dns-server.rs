@@ -2,17 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// See RFD 248
-// See https://github.com/oxidecomputer/omicron/issues/718
-//
-// Milestones:
-// - Dropshot server
-// - Sqlite task
-// - DNS task
+//! Executable that starts the HTTP-configurable DNS server used for both
+//! internal DNS (RFD 248) and extenral DNS (RFD 357) for the Oxide system
 
 use anyhow::anyhow;
 use anyhow::Context;
 use clap::Parser;
+use serde::Deserialize;
+use slog::info;
+use slog::o;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 
@@ -22,13 +20,17 @@ struct Args {
     config_file: PathBuf,
 
     #[clap(long, action)]
-    server_address: SocketAddrV6,
+    http_address: SocketAddrV6,
 
     #[clap(long, action)]
-    dns_address: SocketAddrV6,
+    dns_address: SocketAddr,
+}
 
-    #[clap(long, action)]
-    dns_zone: String,
+#[derive(Deserialize, Debug)]
+pub struct Config {
+    pub log: dropshot::ConfigLogging,
+    pub dropshot: dropshot::ConfigDropshot,
+    pub storage: dns_server::storage::Config,
 }
 
 #[tokio::main]
@@ -37,10 +39,10 @@ async fn main() -> Result<(), anyhow::Error> {
     let config_file = &args.config_file;
     let config_file_contents = std::fs::read_to_string(config_file)
         .with_context(|| format!("read config file {:?}", config_file))?;
-    let mut config: dns_server::Config = toml::from_str(&config_file_contents)
+    let mut config: Config = toml::from_str(&config_file_contents)
         .with_context(|| format!("parse config file {:?}", config_file))?;
 
-    config.dropshot.bind_address = SocketAddr::V6(args.server_address);
+    config.dropshot.bind_address = SocketAddr::V6(args.http_address);
     eprintln!("{:?}", config);
 
     let log = config
@@ -48,9 +50,27 @@ async fn main() -> Result<(), anyhow::Error> {
         .to_logger("dns-server")
         .context("failed to create logger")?;
 
-    let (_dns_server, dropshot_server) =
-        dns_server::start(log, config, args.dns_zone, args.dns_address.into())
-            .await?;
+    let dns_server_config =
+        dns_server::dns_server::Config { bind_address: args.dns_address };
+
+    info!(&log, "config";
+        "config" => ?config,
+        "dns_config" => ?dns_server_config
+    );
+
+    let store = dns_server::storage::Store::new(
+        log.new(o!("component" => "store")),
+        &config.storage,
+    )
+    .context("initializing persistent storage")?;
+
+    let (_dns_server, dropshot_server) = dns_server::start_servers(
+        log,
+        store,
+        &dns_server_config,
+        &config.dropshot,
+    )
+    .await?;
 
     dropshot_server
         .await

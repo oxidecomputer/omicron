@@ -18,7 +18,6 @@ use omicron_common::api::external::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 // SILOS
@@ -80,16 +79,6 @@ pub struct SamlIdentityProvider {
     pub public_cert: Option<String>,
 }
 
-// ORGANIZATIONS
-
-/// Client view of an [`Organization`]
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct Organization {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-    // Important: Silo ID does not get presented to user
-}
-
 // PROJECTS
 
 /// Client view of a [`Project`]
@@ -99,7 +88,7 @@ pub struct Project {
     // intent in RFD 4?
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub organization_id: Uuid,
+    // Important: Silo ID does not get presented to user
 }
 
 // CERTIFICATES
@@ -139,20 +128,23 @@ pub struct GlobalImage {
     pub size: ByteCount,
 }
 
-/// Client view of project Images
+/// Client view of images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The project the disk belongs to
-    pub project_id: Uuid,
+    /// ID of the parent project if the image is a project image
+    pub project_id: Option<Uuid>,
 
     /// URL source of this image, if any
     pub url: Option<String>,
 
-    /// Version of this, if any
-    pub version: Option<String>,
+    /// The family of the operating system like Debian, Ubuntu, etc.
+    pub os: String,
+
+    /// Version of the operating system
+    pub version: String,
 
     /// Hash of the image contents, if applicable
     pub digest: Option<Digest>,
@@ -285,7 +277,7 @@ pub struct Rack {
 
 // SLEDS
 
-/// Describes properties that should uniquely identify a Gimlet.
+/// Properties that should uniquely identify a Sled.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
@@ -293,14 +285,18 @@ pub struct Baseboard {
     pub revision: i64,
 }
 
-/// Client view of a [`Sled`]
+/// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-    pub service_address: SocketAddrV6,
     pub baseboard: Baseboard,
+    /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
+    /// The number of hardware threads which can execute on this sled
+    pub usable_hardware_threads: u32,
+    /// Amount of RAM which may be used by the Sled's OS
+    pub usable_physical_ram: ByteCount,
 }
 
 // PHYSICAL DISKS
@@ -339,6 +335,19 @@ pub struct User {
 
     /** Uuid of the silo to which this user belongs */
     pub silo_id: Uuid,
+}
+
+// SESSION
+
+// Add silo name to User because the console needs to display it
+/// Info about the current user
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+pub struct CurrentUser {
+    #[serde(flatten)]
+    pub user: User,
+
+    /** Name of the silo to which this user belongs. */
+    pub silo_name: Name,
 }
 
 // SILO GROUPS
@@ -406,10 +415,6 @@ pub struct DeviceAuthResponse {
     /// The URI should be short and easy to remember as end users
     /// may be asked to manually type it into their user agent.
     pub verification_uri: String,
-
-    /// A verification URI that includes the `user_code`,
-    /// which is designed for non-textual transmission.
-    pub verification_uri_complete: String,
 
     /// The lifetime in seconds of the `device_code` and `user_code`.
     pub expires_in: u16,

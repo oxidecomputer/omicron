@@ -8,16 +8,17 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
-use crate::params::VpcFirewallRule;
 use crate::params::{
-    DatasetKind, DiskStateRequested, InstanceHardware, InstanceMigrateParams,
-    InstanceRuntimeStateRequested, InstanceSerialConsoleData,
-    ServiceEnsureBody, Zpool,
+    DatasetKind, DiskStateRequested, InstanceHardware,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -37,7 +38,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::serial::ByteOffset;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -88,7 +88,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] dns_service_client::multiclient::ResolveError),
+    ResolveError(#[from] internal_dns::resolver::ResolveError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -209,11 +209,6 @@ impl SledAgent {
             .map_err(|e| Error::EtherstubVnic(e))?;
 
         // Ensure the global zone has a functioning IPv6 address.
-        //
-        // TODO(https://github.com/oxidecomputer/omicron/issues/821): This
-        // should be removed once the Sled Agent is initialized with a
-        // RSS-provided IP address. In the meantime, we use one from the
-        // configuration file.
         let sled_address = request.sled_address();
         Zones::ensure_has_global_zone_v6_address(
             etherstub_vnic.clone(),
@@ -254,7 +249,7 @@ impl SledAgent {
                     "Sled Agent upserting zpool to Storage Manager: {}",
                     pool.to_string()
                 );
-                storage.upsert_zpool(pool.clone()).await;
+                storage.upsert_synthetic_disk(pool.clone()).await;
             }
         }
         let instances = InstanceManager::new(
@@ -262,7 +257,7 @@ impl SledAgent {
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
-            request.gateway.mac,
+            request.gateway.mac.0,
         )?;
 
         let svc_config = services::Config::new(
@@ -270,7 +265,7 @@ impl SledAgent {
             request.gateway.address,
         );
 
-        let hardware = HardwareManager::new(&parent_log, config.stub_scrimlet)
+        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
         let update_config =
@@ -328,7 +323,9 @@ impl SledAgent {
         info!(log, "Performing full hardware scan");
         self.notify_nexus_about_self(log);
 
-        if self.inner.hardware.is_scrimlet_driver_loaded() {
+        let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
+
+        if scrimlet {
             let switch_zone_ip = Some(self.inner.switch_zone_ip());
             if let Err(e) =
                 self.inner.services.activate_switch(switch_zone_ip).await
@@ -418,11 +415,16 @@ impl SledAgent {
         let baseboard = nexus_client::types::Baseboard::from(
             self.inner.hardware.baseboard(),
         );
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped exponential
-            // backoff.
+            // until it succeeds. We retry with an randomized, capped
+            // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
             // return a permanent error from the `notify_nexus` closure.
@@ -450,6 +452,10 @@ impl SledAgent {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
+                            usable_hardware_threads,
+                            usable_physical_ram: nexus_client::types::ByteCount(
+                                usable_physical_ram,
+                            ),
                         },
                     )
                     .await
@@ -496,6 +502,15 @@ impl SledAgent {
         Ok(zpools)
     }
 
+    /// Returns whether or not the sled believes itself to be a scrimlet
+    pub async fn get_role(&self) -> SledRole {
+        if self.inner.hardware.is_scrimlet() {
+            SledRole::Scrimlet
+        } else {
+            SledRole::Gimlet
+        }
+    }
+
     /// Ensures that a filesystem type exists within the zpool.
     pub async fn filesystem_ensure(
         &self,
@@ -510,17 +525,47 @@ impl SledAgent {
         Ok(())
     }
 
-    /// Idempotently ensures that a given Instance is running on the sled.
-    pub async fn instance_ensure(
+    /// Idempotently ensures that a given instance is registered with this sled,
+    /// i.e., that it can be addressed by future calls to
+    /// [`instance_ensure_state`].
+    pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
         initial: InstanceHardware,
-        target: InstanceRuntimeStateRequested,
-        migrate: Option<InstanceMigrateParams>,
     ) -> Result<InstanceRuntimeState, Error> {
         self.inner
             .instances
-            .ensure(instance_id, initial, target, migrate)
+            .ensure_registered(instance_id, initial)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that the specified instance is no longer registered
+    /// on this sled.
+    ///
+    /// If the instance is registered and has a running Propolis, this operation
+    /// rudely terminates the instance.
+    pub async fn instance_ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        self.inner
+            .instances
+            .ensure_unregistered(instance_id)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently drives the specified instance into the specified target
+    /// state.
+    pub async fn instance_ensure_state(
+        &self,
+        instance_id: Uuid,
+        target: InstanceStateRequested,
+    ) -> Result<InstancePutStateResponse, Error> {
+        self.inner
+            .instances
+            .ensure_state(instance_id, target)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -546,23 +591,6 @@ impl SledAgent {
         let nexus_client = self.inner.lazy_nexus_client.get().await?;
         self.inner.updates.download_artifact(artifact, &nexus_client).await?;
         Ok(())
-    }
-
-    pub async fn instance_serial_console_data(
-        &self,
-        instance_id: Uuid,
-        byte_offset: ByteOffset,
-        max_bytes: Option<usize>,
-    ) -> Result<InstanceSerialConsoleData, Error> {
-        self.inner
-            .instances
-            .instance_serial_console_buffer_data(
-                instance_id,
-                byte_offset,
-                max_bytes,
-            )
-            .await
-            .map_err(Error::from)
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance
@@ -593,5 +621,32 @@ impl SledAgent {
             .firewall_rules_ensure(rules)
             .await
             .map_err(Error::from)
+    }
+
+    pub async fn set_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .set_virtual_nic_host(mapping)
+            .await
+            .map_err(Error::from)
+    }
+
+    pub async fn unset_virtual_nic_host(
+        &self,
+        mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .unset_virtual_nic_host(mapping)
+            .await
+            .map_err(Error::from)
+    }
+
+    /// Gets the sled's current time synchronization state
+    pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
+        self.inner.services.timesync_get().await.map_err(Error::from)
     }
 }

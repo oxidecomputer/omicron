@@ -5,9 +5,9 @@
 //! Metrics
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::http_entrypoints::SystemMetricParams;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use oximeter_db::Measurement;
 use std::num::NonZeroU32;

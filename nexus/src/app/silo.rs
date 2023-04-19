@@ -5,7 +5,6 @@
 //! Silos, Users, and SSH Keys.
 
 use crate::authz::ApiResource;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
@@ -16,14 +15,15 @@ use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
+use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use std::str::FromStr;
@@ -31,20 +31,31 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
+    pub fn current_silo_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+    ) -> LookupResult<lookup::Silo<'a>> {
+        let silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up current silo")?;
+        let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        Ok(silo)
+    }
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        silo: &'a NameOrId,
+        silo: NameOrId,
     ) -> LookupResult<lookup::Silo<'a>> {
         match silo {
             NameOrId::Id(id) => {
                 let silo =
-                    LookupPath::new(opctx, &self.db_datastore).silo_id(*id);
+                    LookupPath::new(opctx, &self.db_datastore).silo_id(id);
                 Ok(silo)
             }
             NameOrId::Name(name) => {
                 let silo = LookupPath::new(opctx, &self.db_datastore)
-                    .silo_name(Name::ref_cast(name));
+                    .silo_name_owned(name.into());
                 Ok(silo)
             }
         }
@@ -558,6 +569,31 @@ impl super::Nexus {
     }
 
     // SSH Keys
+    pub fn ssh_key_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        ssh_key_selector: &'a params::SshKeySelector,
+    ) -> LookupResult<lookup::SshKey<'a>> {
+        match ssh_key_selector {
+            params::SshKeySelector {
+                silo_user_id: _,
+                ssh_key: NameOrId::Id(id),
+            } => {
+                let ssh_key =
+                    LookupPath::new(opctx, &self.db_datastore).ssh_key_id(*id);
+                Ok(ssh_key)
+            }
+            params::SshKeySelector {
+                silo_user_id,
+                ssh_key: NameOrId::Name(name),
+            } => {
+                let ssh_key = LookupPath::new(opctx, &self.db_datastore)
+                    .silo_user_id(*silo_user_id)
+                    .ssh_key_name(Name::ref_cast(name));
+                Ok(ssh_key)
+            }
+        }
+    }
 
     pub async fn ssh_key_create(
         &self,
@@ -578,7 +614,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        page_params: &DataPageParams<'_, Name>,
+        page_params: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
         let (.., authz_user) = LookupPath::new(opctx, &self.datastore())
             .silo_user_id(silo_user_id)
@@ -588,34 +624,15 @@ impl super::Nexus {
         self.db_datastore.ssh_keys_list(opctx, &authz_user, page_params).await
     }
 
-    pub async fn ssh_key_fetch(
-        &self,
-        opctx: &OpContext,
-        silo_user_id: Uuid,
-        ssh_key_name: &Name,
-    ) -> LookupResult<SshKey> {
-        let (.., ssh_key) = LookupPath::new(opctx, &self.datastore())
-            .silo_user_id(silo_user_id)
-            .ssh_key_name(ssh_key_name)
-            .fetch()
-            .await?;
-        assert_eq!(ssh_key.name(), &ssh_key_name.0);
-        Ok(ssh_key)
-    }
-
     pub async fn ssh_key_delete(
         &self,
         opctx: &OpContext,
         silo_user_id: Uuid,
-        ssh_key_name: &Name,
+        ssh_key_lookup: &lookup::SshKey<'_>,
     ) -> DeleteResult {
-        let (.., authz_user, authz_ssh_key) =
-            LookupPath::new(opctx, &self.datastore())
-                .silo_user_id(silo_user_id)
-                .ssh_key_name(ssh_key_name)
-                .lookup_for(authz::Action::Delete)
-                .await?;
-        assert_eq!(authz_user.id(), silo_user_id);
+        let (.., authz_silo_user, authz_ssh_key) =
+            ssh_key_lookup.lookup_for(authz::Action::Delete).await?;
+        assert_eq!(authz_silo_user.id(), silo_user_id);
         self.db_datastore.ssh_key_delete(opctx, &authz_ssh_key).await
     }
 
@@ -624,30 +641,30 @@ impl super::Nexus {
     pub fn saml_identity_provider_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        saml_identity_provider_selector: &'a params::SamlIdentityProviderSelector,
+        saml_identity_provider_selector: params::SamlIdentityProviderSelector,
     ) -> LookupResult<lookup::SamlIdentityProvider<'a>> {
         match saml_identity_provider_selector {
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(id),
-                silo_selector: None,
+                silo: None,
             } => {
 
                 let saml_provider = LookupPath::new(opctx, &self.db_datastore)
-                    .saml_identity_provider_id(*id);
+                    .saml_identity_provider_id(id);
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Name(name),
-                silo_selector: Some(silo_selector),
+                silo: Some(silo),
             } => {
                 let saml_provider = self
-                    .silo_lookup(opctx, &silo_selector.silo)?
-                    .saml_identity_provider_name(Name::ref_cast(name));
+                    .silo_lookup(opctx, silo)?
+                    .saml_identity_provider_name_owned(name.into());
                 Ok(saml_provider)
             }
             params::SamlIdentityProviderSelector {
                 saml_identity_provider: NameOrId::Id(_),
-                silo_selector: Some(_),
+                silo: _,
             } => Err(Error::invalid_request("when providing provider as an ID, silo should not be specified")),
             _ => Err(Error::invalid_request("provider should either be a UUID or silo should be specified"))
         }

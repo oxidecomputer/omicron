@@ -4,11 +4,12 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use super::setup;
 use dropshot::test_util;
 use gateway_messages::SpPort;
-use omicron_gateway::http_entrypoints::SpInfo;
+use gateway_test_utils::setup;
 use omicron_gateway::http_entrypoints::SpState;
+use omicron_gateway::http_entrypoints::SpType;
+use omicron_gateway::SpIdentifier;
 
 #[tokio::test]
 async fn discovery_both_locations() {
@@ -23,12 +24,12 @@ async fn discovery_both_locations() {
     // the two instances should've discovered that they were switch0 and
     // switch1, respectively
     assert_eq!(
-        testctx0.server.management_switch().location_name().unwrap(),
-        "switch0"
+        testctx0.server.management_switch().local_switch().unwrap(),
+        SpIdentifier { typ: SpType::Switch.into(), slot: 0 },
     );
     assert_eq!(
-        testctx1.server.management_switch().location_name().unwrap(),
-        "switch1"
+        testctx1.server.management_switch().local_switch().unwrap(),
+        SpIdentifier { typ: SpType::Switch.into(), slot: 1 },
     );
 
     // both instances should report the same serial number for switch 0 and
@@ -38,13 +39,8 @@ async fn discovery_both_locations() {
             let url =
                 format!("{}", client0.url(&format!("/sp/switch/{}", switch)));
 
-            let resp: SpInfo = test_util::object_get(client, &url).await;
-            match resp.details {
-                SpState::Enabled { serial_number, .. } => {
-                    assert_eq!(serial_number, expected_serial)
-                }
-                other => panic!("unexpected state {:?}", other),
-            }
+            let state: SpState = test_util::object_get(client, &url).await;
+            assert_eq!(state.serial_number, expected_serial);
         }
     }
 

@@ -4,14 +4,15 @@
 
 //! Utilities for managing Zpools.
 
-use crate::{execute, PFEXEC};
+use crate::{execute, ExecutionError, PFEXEC};
 use serde::{Deserialize, Deserializer};
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
-const ZPOOL_PREFIX: &str = "oxp_";
+const ZPOOL_EXTERNAL_PREFIX: &str = "oxp_";
+const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
 const ZPOOL: &str = "/usr/sbin/zpool";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
@@ -19,7 +20,7 @@ const ZPOOL: &str = "/usr/sbin/zpool";
 pub struct ParseError(String);
 
 #[derive(thiserror::Error, Debug)]
-enum Error {
+pub enum Error {
     #[error("Zpool execution error: {0}")]
     Execution(#[from] crate::ExecutionError),
 
@@ -170,7 +171,42 @@ impl Zpool {
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
         execute(&mut cmd).map_err(Error::from)?;
+
+        // Ensure that this zpool has the encryption feature enabled
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("feature@encryption=enabled")
+            .arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+
         Ok(())
+    }
+
+    pub fn import(name: ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL).arg("import").arg("-f");
+        cmd.arg(&name.to_string());
+        match execute(&mut cmd) {
+            Ok(_) => Ok(()),
+            Err(ExecutionError::CommandFailure(err_info)) => {
+                // I'd really prefer to match on a specific error code, but the
+                // command always returns "1" on failure.
+                if err_info
+                    .stderr
+                    .contains("a pool with that name is already created")
+                {
+                    Ok(())
+                } else {
+                    Err(ExecutionError::CommandFailure(err_info).into())
+                }
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
@@ -208,21 +244,39 @@ impl Zpool {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum ZpoolKind {
+    // This zpool is used for external storage (u.2)
+    External,
+    // This zpool is used for internal storage (m.2)
+    Internal,
+}
+
 /// A wrapper around a zpool name.
 ///
-/// This expects that the format will be: `oxp_<UUID>` - we parse
-/// the prefix when reading the structure, and validate that the UUID
-/// can be utilized.
+/// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
+/// when reading the structure, and validate that the UUID can be utilized.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct ZpoolName(Uuid);
+pub struct ZpoolName {
+    id: Uuid,
+    kind: ZpoolKind,
+}
 
 impl ZpoolName {
-    pub fn new(id: Uuid) -> Self {
-        Self(id)
+    pub fn new_internal(id: Uuid) -> Self {
+        Self { id, kind: ZpoolKind::Internal }
+    }
+
+    pub fn new_external(id: Uuid) -> Self {
+        Self { id, kind: ZpoolKind::External }
     }
 
     pub fn id(&self) -> Uuid {
-        self.0
+        self.id
+    }
+
+    pub fn kind(&self) -> ZpoolKind {
+        self.kind
     }
 }
 
@@ -232,13 +286,7 @@ impl<'de> Deserialize<'de> for ZpoolName {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let s = s.strip_prefix(ZPOOL_PREFIX).ok_or_else(|| {
-            serde::de::Error::custom(
-                "Bad zpool prefix - must start with 'oxp_'",
-            )
-        })?;
-        let id = Uuid::from_str(s).map_err(serde::de::Error::custom)?;
-        Ok(ZpoolName(id))
+        ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -246,17 +294,27 @@ impl FromStr for ZpoolName {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.strip_prefix(ZPOOL_PREFIX).ok_or_else(|| {
-            format!("Bad zpool name {}; must start with {}", s, ZPOOL_PREFIX)
-        })?;
-        let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
-        Ok(ZpoolName(id))
+        if let Some(s) = s.strip_prefix(ZPOOL_EXTERNAL_PREFIX) {
+            let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
+            Ok(ZpoolName::new_external(id))
+        } else if let Some(s) = s.strip_prefix(ZPOOL_INTERNAL_PREFIX) {
+            let id = Uuid::from_str(s).map_err(|e| e.to_string())?;
+            Ok(ZpoolName::new_internal(id))
+        } else {
+            Err(format!(
+                "Bad zpool name {s}; must start with '{ZPOOL_EXTERNAL_PREFIX}' or '{ZPOOL_INTERNAL_PREFIX}'",
+            ))
+        }
     }
 }
 
 impl fmt::Display for ZpoolName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", ZPOOL_PREFIX, self.0)
+        let prefix = match self.kind {
+            ZpoolKind::External => ZPOOL_EXTERNAL_PREFIX,
+            ZpoolKind::Internal => ZPOOL_INTERNAL_PREFIX,
+        };
+        write!(f, "{prefix}{}", self.id)
     }
 }
 
@@ -279,13 +337,25 @@ mod test {
     }
 
     #[test]
-    fn test_parse_zpool_name() {
+    fn test_parse_external_zpool_name() {
         let uuid: Uuid =
             "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
-        let good_name = format!("{}{}", ZPOOL_PREFIX, uuid);
+        let good_name = format!("{}{}", ZPOOL_EXTERNAL_PREFIX, uuid);
 
         let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
         assert_eq!(uuid, name.id());
+        assert_eq!(ZpoolKind::External, name.kind());
+    }
+
+    #[test]
+    fn test_parse_internal_zpool_name() {
+        let uuid: Uuid =
+            "d462a7f7-b628-40fe-80ff-4e4189e2d62b".parse().unwrap();
+        let good_name = format!("{}{}", ZPOOL_INTERNAL_PREFIX, uuid);
+
+        let name = parse_name(&good_name).expect("Cannot parse as ZpoolName");
+        assert_eq!(uuid, name.id());
+        assert_eq!(ZpoolKind::Internal, name.kind());
     }
 
     #[test]

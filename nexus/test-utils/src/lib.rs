@@ -10,6 +10,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
+use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::ServicePutRequest;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
@@ -34,6 +36,11 @@ pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
+/// The reported amount of hardware threads for an emulated sled agent.
+pub const TEST_HARDWARE_THREADS: u32 = 16;
+/// The reported amount of physical RAM for an emulated sled agent.
+pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
@@ -45,6 +52,7 @@ pub struct ControlPlaneTestContext<N> {
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
+    pub dendrite: dev::dendrite::DendriteInstance,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -55,6 +63,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.sled_agent.http_server.close().await.unwrap();
         self.oximeter.close().await.unwrap();
         self.producer.close().await.unwrap();
+        self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
 
@@ -117,12 +126,14 @@ pub async fn test_setup<N: NexusServer>(
     test_name: &str,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config::<N>(test_name, &mut config).await
+    test_setup_with_config::<N>(test_name, &mut config, sim::SimMode::Explicit)
+        .await
 }
 
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
+    sim_mode: sim::SimMode,
 ) -> ControlPlaneTestContext<N> {
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
@@ -132,6 +143,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     // Start ClickHouse database server.
     let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+
+    // Set up a stub instance of dendrite
+    let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
 
     // Store actual address/port information for the databases after they start.
     config.deployment.database =
@@ -143,8 +157,48 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .as_mut()
         .expect("Tests expect to set a port of Clickhouse")
         .set_port(clickhouse.port());
+    config
+        .pkg
+        .dendrite
+        .address
+        .as_mut()
+        .expect("Tests expect an explicit dendrite address")
+        .set_port(dendrite.port);
 
-    let server = N::start_and_populate(&config, &logctx.log).await;
+    // Begin starting Nexus.
+    let (nexus_internal, nexus_internal_addr) =
+        N::start_internal(&config, &logctx.log).await;
+
+    // Set up a single sled agent.
+    let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+    let tempdir = tempfile::tempdir().unwrap();
+    let sled_agent = start_sled_agent(
+        logctx.log.new(o!(
+            "component" => "omicron_sled_agent::sim::Server",
+            "sled_id" => sa_id.to_string(),
+        )),
+        nexus_internal_addr,
+        sa_id,
+        tempdir.path(),
+        sim_mode,
+    )
+    .await
+    .unwrap();
+
+    // Finish setting up Nexus by initializing the rack.  We need to include
+    // information about the internal DNS server started within the simulated
+    // Sled Agent.
+    let dns_server_address = match sled_agent.dns_dropshot_server.local_addr() {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => addr,
+    };
+    let dns_service = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        address: dns_server_address,
+        kind: ServiceKind::InternalDnsConfig,
+    };
+    let server = N::start(nexus_internal, &config, vec![dns_service]).await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();
@@ -159,30 +213,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
         logctx.log.new(o!("component" => "internal client test context")),
     );
 
-    // Set up a single sled agent.
-    let tempdir = tempfile::tempdir().unwrap();
-    let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let sled_agent = start_sled_agent(
-        logctx.log.new(o!(
-            "component" => "omicron_sled_agent::sim::Server",
-            "sled_id" => sa_id.to_string(),
-        )),
-        internal_server_addr,
-        sa_id,
-        tempdir.path(),
-    )
-    .await
-    .unwrap();
-
     // Set Nexus' shared resolver to point to the simulated sled agent's
     // internal DNS server
     server
         .set_resolver(
-            dns_service_client::multiclient::Resolver::new(
-                &dns_service_client::multiclient::ServerAddresses {
-                    dropshot_server_addrs: vec![],
-                    dns_server_addrs: vec![sled_agent.dns_server.address],
-                },
+            internal_dns::resolver::Resolver::new_from_addrs(
+                logctx.log.new(o!("component" => "DnsResolver")),
+                vec![*sled_agent.dns_server.local_address()],
             )
             .unwrap(),
         )
@@ -216,6 +253,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         oximeter,
         producer,
         logctx,
+        dendrite,
     }
 }
 
@@ -224,10 +262,11 @@ pub async fn start_sled_agent(
     nexus_address: SocketAddr,
     id: Uuid,
     update_directory: &Path,
+    sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
         id,
-        sim_mode: sim::SimMode::Explicit,
+        sim_mode,
         nexus_address,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
@@ -242,6 +281,10 @@ pub async fn start_sled_agent(
         },
         updates: sim::ConfigUpdates {
             zone_artifact_path: update_directory.to_path_buf(),
+        },
+        hardware: sim::ConfigHardware {
+            hardware_threads: TEST_HARDWARE_THREADS,
+            physical_ram: TEST_PHYSICAL_RAM,
         },
     };
 

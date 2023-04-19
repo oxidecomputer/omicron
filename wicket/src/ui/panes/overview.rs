@@ -9,18 +9,24 @@ use super::Control;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
+use crate::ui::panes::compute_scroll_offset;
+use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
-use crate::{Action, Event, Frame, State};
-use crossterm::event::Event as TermEvent;
-use crossterm::event::KeyCode;
+use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::style::Style;
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 
+enum PopupKind {
+    Ignition,
+}
+
 /// The OverviewPane shows a rendering of the rack.
 ///
 /// This is useful for getting a quick view of the state of the rack.
+///
+// TODO: Move this state into global `State` so `Recorder` snapshots work
 pub struct OverviewPane {
     rack_view: RackView,
     inventory_view: InventoryView,
@@ -36,31 +42,39 @@ impl OverviewPane {
         }
     }
 
-    pub fn dispatch(
-        &mut self,
-        state: &mut State,
-        event: Event,
-    ) -> Option<Action> {
+    pub fn dispatch(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
         if self.rack_view_selected {
-            self.rack_view.on(state, event)
+            self.rack_view.on(state, cmd)
         } else {
-            self.inventory_view.on(state, event)
+            self.inventory_view.on(state, cmd)
         }
     }
 }
 
 impl Control for OverviewPane {
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Enter => {
-                    // Switch between rack and inventory view
-                    self.rack_view_selected = !self.rack_view_selected;
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Enter => {
+                // Transition to the inventory view `Enter` makes sense here
+                // because we are entering a view of the given component.
+                if self.rack_view_selected {
+                    self.rack_view_selected = false;
                     Some(Action::Redraw)
+                } else {
+                    self.inventory_view.on(state, cmd)
                 }
-                _ => self.dispatch(state, event),
-            },
-            _ => self.dispatch(state, event),
+            }
+            Cmd::Exit => {
+                // Transition to the rack view. `Exit` makes sense here
+                // because we are exiting a subview of the rack.
+                if !self.rack_view_selected {
+                    self.rack_view_selected = true;
+                    Some(Action::Redraw)
+                } else {
+                    self.inventory_view.on(state, cmd)
+                }
+            }
+            _ => self.dispatch(state, cmd),
         }
     }
 
@@ -83,28 +97,25 @@ impl Control for OverviewPane {
 pub struct RackView {}
 
 impl Control for RackView {
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Up => {
-                    state.rack_state.up();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Down => {
-                    state.rack_state.down();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Char('k') => {
-                    state.rack_state.toggle_knight_rider_mode();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Left | KeyCode::Right => {
-                    state.rack_state.left_or_right();
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Event::Tick => {
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        match cmd {
+            Cmd::Up => {
+                state.rack_state.up();
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                state.rack_state.down();
+                Some(Action::Redraw)
+            }
+            Cmd::KnightRiderMode => {
+                state.rack_state.toggle_knight_rider_mode();
+                Some(Action::Redraw)
+            }
+            Cmd::Left | Cmd::Right => {
+                state.rack_state.left_or_right();
+                Some(Action::Redraw)
+            }
+            Cmd::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
                 // tick into the wizard instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
@@ -188,20 +199,73 @@ pub struct InventoryView {
     help: Vec<(&'static str, &'static str)>,
     // Vertical offset used for scrolling
     scroll_offsets: BTreeMap<ComponentId, usize>,
+    ignition: IgnitionPopup,
+    popup: Option<PopupKind>,
 }
 
 impl InventoryView {
     pub fn new() -> InventoryView {
         InventoryView {
             help: vec![
-                ("RACK VIEW", "<ENTER>"),
-                ("SWITCH COMPONENT", "<LEFT/RIGHT>"),
-                ("SCROLL", "<UP/DOWN>"),
+                ("Rack View", "<ENTER>"),
+                ("Switch Component", "<LEFT/RIGHT>"),
+                ("Scroll", "<UP/DOWN>"),
+                ("Ignition", "<I>"),
             ],
             scroll_offsets: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, 0))
                 .collect(),
+            ignition: IgnitionPopup::default(),
+            popup: None,
+        }
+    }
+
+    pub fn draw_ignition_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = self.ignition.popup(state.rack_state.selected);
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn handle_cmd_in_popup(
+        &mut self,
+        state: &mut State,
+        cmd: Cmd,
+    ) -> Option<Action> {
+        if cmd == Cmd::Exit {
+            self.popup = None;
+            return Some(Action::Redraw);
+        }
+        match self.popup.as_ref().unwrap() {
+            PopupKind::Ignition => match cmd {
+                Cmd::Up => {
+                    self.ignition.key_up();
+                    Some(Action::Redraw)
+                }
+                Cmd::Down => {
+                    self.ignition.key_down();
+                    Some(Action::Redraw)
+                }
+                Cmd::Enter => {
+                    // Note: If making changes here, consider making them to the
+                    // same arm of `UpdatePane::handle_cmd_in_popup()` in the
+                    // `update` pane.
+                    let command = self.ignition.selected_command();
+                    let selected = state.rack_state.selected;
+                    self.popup = None;
+                    Some(Action::Ignition(selected, command))
+                }
+                _ => None,
+            },
         }
     }
 }
@@ -261,36 +325,13 @@ impl Control for InventoryView {
             None => Text::styled("Inventory Unavailable", inventory_style),
         };
 
-        // Scroll offset is in terms of lines of text.
-        // We must compute it to be in terms of the number of terminal rows.
-        //
-        // XXX: This whole paragraph scroll only allows length of less than
-        // 64k rows even though it shouldn't be limited. We can do our own
-        // scrolling instead to obviate this limit. we may want to anyway, as
-        // it's less data to be formatted for the Paragraph.
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
-
-        // Note that this check doesn't actually work with line wraps.
-        // See https://github.com/tui-rs-revival/ratatui/pull/7
-        if *scroll_offset > text.height() {
-            *scroll_offset = text.height();
-        }
-
-        let num_lines = chunks[1].height as usize;
-        if text.height() <= num_lines {
-            *scroll_offset = 0;
-        } else {
-            if text.height() - *scroll_offset < num_lines {
-                // Don't allow scrolling past bottom of content
-                //
-                // Reset the scroll_offset, so that an up arrow
-                // will scroll up on the next try.
-                *scroll_offset = text.height() - num_lines;
-            }
-        }
-        // This doesn't allow data more than 64k rows. We shouldn't need
-        // more than that for wicket, but who knows!
-        let y_offset = u16::try_from(*scroll_offset).unwrap();
+        let y_offset = compute_scroll_offset(
+            *scroll_offset,
+            text.height(),
+            chunks[1].height as usize,
+        );
+        *scroll_offset = y_offset as usize;
 
         let inventory = Paragraph::new(text)
             .block(contents_block.clone())
@@ -306,46 +347,63 @@ impl Control for InventoryView {
             BoxConnector::new(BoxConnectorKind::Bottom),
             chunks[1],
         );
+
+        match self.popup {
+            Some(PopupKind::Ignition) => self.draw_ignition_popup(state, frame),
+            None => (),
+        }
     }
 
-    fn on(&mut self, state: &mut State, event: Event) -> Option<Action> {
-        match event {
-            Event::Term(TermEvent::Key(e)) => match e.code {
-                KeyCode::Left => {
-                    state.rack_state.prev();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Right => {
-                    state.rack_state.next();
-                    Some(Action::Redraw)
-                }
-                KeyCode::Down => {
-                    let component_id = state.rack_state.selected;
+    fn on(&mut self, state: &mut State, cmd: Cmd) -> Option<Action> {
+        if self.popup.is_some() {
+            return self.handle_cmd_in_popup(state, cmd);
+        }
+        match cmd {
+            Cmd::Left => {
+                state.rack_state.prev();
+                Some(Action::Redraw)
+            }
+            Cmd::Right => {
+                state.rack_state.next();
+                Some(Action::Redraw)
+            }
+            Cmd::Down => {
+                let component_id = state.rack_state.selected;
 
-                    // We currently debug print inventory on each call to
-                    // `draw`, so we don't know  how many lines the total text is.
-                    // We also don't know the Rect containing this Control, since
-                    // we don't keep track of them anymore, and only know during
-                    // rendering. Therefore, we just increment and correct
-                    // for more incrments than lines exist during render, since
-                    // `self` is passed mutably.
-                    //
-                    // It's also worth noting that the inventory may update
-                    // before rendering, and so this is a somewhat sensible
-                    // strategy.
-                    *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
-                    Some(Action::Redraw)
-                }
-                KeyCode::Up => {
-                    let component_id = state.rack_state.selected;
-                    let offset =
-                        self.scroll_offsets.get_mut(&component_id).unwrap();
-                    *offset = offset.saturating_sub(1);
-                    Some(Action::Redraw)
-                }
-                _ => None,
-            },
-            Event::Tick => {
+                // We currently debug print inventory on each call to
+                // `draw`, so we don't know  how many lines the total text is.
+                // We also don't know the Rect containing this Control, since
+                // we don't keep track of them anymore, and only know during
+                // rendering. Therefore, we just increment and correct
+                // for more incrments than lines exist during render, since
+                // `self` is passed mutably.
+                //
+                // It's also worth noting that the inventory may update
+                // before rendering, and so this is a somewhat sensible
+                // strategy.
+                *self.scroll_offsets.get_mut(&component_id).unwrap() += 1;
+                Some(Action::Redraw)
+            }
+            Cmd::Up => {
+                let component_id = state.rack_state.selected;
+                let offset =
+                    self.scroll_offsets.get_mut(&component_id).unwrap();
+                *offset = offset.saturating_sub(1);
+                Some(Action::Redraw)
+            }
+            Cmd::GotoTop => {
+                let component_id = state.rack_state.selected;
+                *self.scroll_offsets.get_mut(&component_id).unwrap() = 0;
+                Some(Action::Redraw)
+            }
+            Cmd::GotoBottom => {
+                let component_id = state.rack_state.selected;
+                // This will get corrected to be the bottom line during `draw`
+                *self.scroll_offsets.get_mut(&component_id).unwrap() =
+                    usize::MAX;
+                Some(Action::Redraw)
+            }
+            Cmd::Tick => {
                 // TODO: This only animates when the pane is active. Should we move the
                 // tick into the [`Runner`] instead?
                 if let Some(k) = state.rack_state.knight_rider_mode.as_mut() {
@@ -354,6 +412,11 @@ impl Control for InventoryView {
                 } else {
                     None
                 }
+            }
+            Cmd::Ignition => {
+                self.ignition.reset();
+                self.popup = Some(PopupKind::Ignition);
+                Some(Action::Redraw)
             }
             _ => None,
         }

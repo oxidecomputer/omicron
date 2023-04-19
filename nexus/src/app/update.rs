@@ -5,13 +5,13 @@
 //! Software Updates
 
 use crate::authz;
-use crate::context::OpContext;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
 use crate::db::model::KnownArtifactKind;
 use chrono::Utc;
 use hex;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, Error, ListResultVec, LookupResult,
@@ -82,17 +82,14 @@ impl super::Nexus {
         for artifact in &artifacts {
             current_version = Some(artifact.targets_role_version);
             self.db_datastore
-                .update_available_artifact_upsert(&opctx, artifact.clone())
+                .update_artifact_upsert(&opctx, artifact.clone())
                 .await?;
         }
 
         // ensure table is in sync with current copy of artifacts.json
         if let Some(current_version) = current_version {
             self.db_datastore
-                .update_available_artifact_hard_delete_outdated(
-                    &opctx,
-                    current_version,
-                )
+                .update_artifact_hard_delete_outdated(&opctx, current_version)
                 .await?;
         }
 
@@ -121,7 +118,7 @@ impl super::Nexus {
                     .update_artifact(
                         &sled_agent_client::types::UpdateArtifactId {
                             name: artifact.name.clone(),
-                            version: artifact.version.clone(),
+                            version: artifact.version.0.clone().into(),
                             kind: artifact.kind.0.into(),
                         },
                     )
@@ -151,9 +148,9 @@ impl super::Nexus {
         // We cache the artifact based on its checksum, so fetch that from the
         // database.
         let (.., artifact_entry) = LookupPath::new(opctx, &self.db_datastore)
-            .update_available_artifact_tuple(
+            .update_artifact_tuple(
                 &artifact.name,
-                &artifact.version,
+                db::model::SemverVersion(artifact.version.clone()),
                 KnownArtifactKind(artifact.kind),
             )
             .fetch()
@@ -282,13 +279,13 @@ impl super::Nexus {
         Ok(body)
     }
 
-    pub async fn create_system_update(
+    pub async fn upsert_system_update(
         &self,
         opctx: &OpContext,
         create_update: params::SystemUpdateCreate,
     ) -> CreateResult<db::model::SystemUpdate> {
         let update = db::model::SystemUpdate::new(create_update.version)?;
-        self.db_datastore.create_system_update(opctx, update).await
+        self.db_datastore.upsert_system_update(opctx, update).await
     }
 
     pub async fn create_component_update(
@@ -484,7 +481,7 @@ impl super::Nexus {
         for v in [1, 2, 3] {
             let version = external::SemverVersion::new(v, 0, 0);
             let su = self
-                .create_system_update(
+                .upsert_system_update(
                     opctx,
                     params::SystemUpdateCreate { version: version.clone() },
                 )
@@ -582,9 +579,9 @@ mod tests {
     use assert_matches::assert_matches;
     use std::num::NonZeroU32;
 
-    use crate::context::OpContext;
     use crate::db::model::UpdateStatus;
     use dropshot::PaginationOrder;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::{
         params::{
@@ -630,18 +627,18 @@ mod tests {
         let su1_create = SystemUpdateCreate {
             version: external::SemverVersion::new(5, 0, 0),
         };
-        let su1 = nexus.create_system_update(&opctx, su1_create).await.unwrap();
+        let su1 = nexus.upsert_system_update(&opctx, su1_create).await.unwrap();
 
         // weird order is deliberate
         let su3_create = SystemUpdateCreate {
             version: external::SemverVersion::new(10, 0, 0),
         };
-        nexus.create_system_update(&opctx, su3_create).await.unwrap();
+        nexus.upsert_system_update(&opctx, su3_create).await.unwrap();
 
         let su2_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 7, 0),
         };
-        let su2 = nexus.create_system_update(&opctx, su2_create).await.unwrap();
+        let su2 = nexus.upsert_system_update(&opctx, su2_create).await.unwrap();
 
         // now there should be a bunch of system updates, sorted by version descending
         let versions: Vec<String> = nexus
@@ -722,21 +719,21 @@ mod tests {
             version: external::SemverVersion::new(100000000, 0, 0),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 100000000, 0),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
 
         let su_create = SystemUpdateCreate {
             version: external::SemverVersion::new(0, 0, 100000000),
         };
         let error =
-            nexus.create_system_update(&opctx, su_create).await.unwrap_err();
+            nexus.upsert_system_update(&opctx, su_create).await.unwrap_err();
         assert!(error.to_string().contains(expected));
     }
 
@@ -780,17 +777,17 @@ mod tests {
         // create system updates for the component updates to hang off of
         let v020 = external::SemverVersion::new(0, 2, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v020 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v020 })
             .await
             .expect("Failed to create system update");
         let v3 = external::SemverVersion::new(4, 0, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v3 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v3 })
             .await
             .expect("Failed to create system update");
         let v10 = external::SemverVersion::new(10, 0, 0);
         nexus
-            .create_system_update(&opctx, SystemUpdateCreate { version: v10 })
+            .upsert_system_update(&opctx, SystemUpdateCreate { version: v10 })
             .await
             .expect("Failed to create system update");
 

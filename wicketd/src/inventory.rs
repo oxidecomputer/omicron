@@ -5,32 +5,44 @@
 //! Rack inventory for display by wicket
 
 use gateway_client::types::{
-    SpComponentInfo, SpIdentifier, SpIgnition, SpState,
+    SpComponentCaboose, SpComponentInfo, SpIdentifier, SpIgnition, SpState,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 
-/// SP related data
+/// SP-related data
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "sp_inventory", rename_all = "snake_case")]
 pub struct SpInventory {
     pub id: SpIdentifier,
-    pub ignition: SpIgnition,
-    pub state: SpState,
+    pub ignition: Option<SpIgnition>,
+    pub state: Option<SpState>,
     pub components: Option<Vec<SpComponentInfo>>,
+    pub caboose: Option<SpComponentCaboose>,
+    pub rot: RotInventory,
 }
 
 impl SpInventory {
-    /// The ignition info and state of the SP are retrieved initiailly
+    /// Create an empty inventory with the given id.
     ///
-    /// The components are filled in via a separate call
-    pub fn new(
-        id: SpIdentifier,
-        ignition: SpIgnition,
-        state: SpState,
-    ) -> SpInventory {
-        SpInventory { id, ignition, state, components: None }
+    /// All remaining fields are populated later as MGS responds.
+    pub fn new(id: SpIdentifier) -> SpInventory {
+        SpInventory {
+            id,
+            ignition: None,
+            state: None,
+            components: None,
+            caboose: None,
+            rot: RotInventory::default(),
+        }
     }
+}
+
+/// RoT-related data that isn't already supplied in [`SpState`].
+#[derive(Default, Debug, Clone, Serialize, JsonSchema)]
+#[serde(tag = "sp_inventory", rename_all = "snake_case")]
+pub struct RotInventory {
+    pub caboose: Option<SpComponentCaboose>,
 }
 
 /// The current state of the v1 Rack as known to wicketd

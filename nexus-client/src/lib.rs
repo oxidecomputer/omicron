@@ -26,6 +26,12 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             types::DiskState::Creating => Self::Creating,
             types::DiskState::Detached => Self::Detached,
+            types::DiskState::ImportReady => Self::ImportReady,
+            types::DiskState::ImportingFromUrl => Self::ImportingFromUrl,
+            types::DiskState::ImportingFromBulkWrites => {
+                Self::ImportingFromBulkWrites
+            }
+            types::DiskState::Finalizing => Self::Finalizing,
             types::DiskState::Maintenance => Self::Maintenance,
             types::DiskState::Attaching(u) => Self::Attaching(u),
             types::DiskState::Attached(u) => Self::Attached(u),
@@ -68,6 +74,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             dst_propolis_id: s.dst_propolis_id,
             propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             migration_id: s.migration_id,
+            propolis_gen: s.propolis_gen.into(),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -129,6 +136,10 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             DiskState::Creating => Self::Creating,
             DiskState::Detached => Self::Detached,
+            DiskState::ImportReady => Self::ImportReady,
+            DiskState::ImportingFromUrl => Self::ImportingFromUrl,
+            DiskState::ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
+            DiskState::Finalizing => Self::Finalizing,
             DiskState::Maintenance => Self::Maintenance,
             DiskState::Attaching(u) => Self::Attaching(u),
             DiskState::Attached(u) => Self::Attached(u),
@@ -173,6 +184,16 @@ impl From<&omicron_common::api::internal::nexus::ProducerEndpoint>
     }
 }
 
+impl From<omicron_common::api::external::SemverVersion>
+    for types::SemverVersion
+{
+    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
+        s.to_string().parse().expect(
+            "semver should generate output that matches validation regex",
+        )
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
     for types::KnownArtifactKind
 {
@@ -202,5 +223,27 @@ impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
 impl From<std::time::Duration> for types::Duration {
     fn from(s: std::time::Duration) -> Self {
         Self { secs: s.as_secs(), nanos: s.subsec_nanos() }
+    }
+}
+
+impl From<omicron_common::address::IpRange> for types::IpRange {
+    fn from(r: omicron_common::address::IpRange) -> Self {
+        use omicron_common::address::IpRange;
+        match r {
+            IpRange::V4(r) => types::IpRange::V4(r.into()),
+            IpRange::V6(r) => types::IpRange::V6(r.into()),
+        }
+    }
+}
+
+impl From<omicron_common::address::Ipv4Range> for types::Ipv4Range {
+    fn from(r: omicron_common::address::Ipv4Range) -> Self {
+        Self { first: r.first, last: r.last }
+    }
+}
+
+impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
+    fn from(r: omicron_common::address::Ipv6Range) -> Self {
+        Self { first: r.first, last: r.last }
     }
 }

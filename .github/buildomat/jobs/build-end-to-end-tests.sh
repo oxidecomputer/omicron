@@ -3,11 +3,10 @@
 #: name = "helios / build-end-to-end-tests"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.66.1"
+#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"=/work/*.gz",
 #: ]
-#:
 
 set -o errexit
 set -o pipefail

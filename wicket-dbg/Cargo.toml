@@ -1,0 +1,30 @@
+[package]
+name = "wicket-dbg"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+camino.workspace = true
+ciborium.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+slog-envlogger.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tui.workspace = true
+wicket.workspace = true
+
+# used only by wicket-dbg binary
+reedline = "0.18.0"
+
+[[bin]]
+name = "wicket-dbg"
+
+[[bin]]
+name = "wicket-dbg-server"

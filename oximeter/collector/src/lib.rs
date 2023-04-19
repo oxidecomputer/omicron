@@ -6,13 +6,13 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dns_service_client::multiclient::{ResolveError, Resolver};
 use dropshot::{
     endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
     HttpResponseUpdatedNoContent, HttpServer, HttpServerStarter,
     RequestContext, TypedBody,
 };
-use internal_dns_names::{ServiceName, SRV};
+use internal_dns::resolver::{ResolveError, Resolver};
+use internal_dns::ServiceName;
 use omicron_common::address::{CLICKHOUSE_PORT, NEXUS_INTERNAL_PORT};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
@@ -316,9 +316,7 @@ impl OximeterAgent {
             address
         } else {
             SocketAddr::new(
-                resolver
-                    .lookup_ip(SRV::Service(ServiceName::Clickhouse))
-                    .await?,
+                resolver.lookup_ip(ServiceName::Clickhouse).await?,
                 CLICKHOUSE_PORT,
             )
         };
@@ -484,7 +482,10 @@ impl Oximeter {
         }
         info!(log, "starting oximeter server");
 
-        let resolver = Resolver::new_from_ip(*args.address.ip())?;
+        let resolver = Resolver::new_from_ip(
+            log.new(o!("component" => "DnsResolver")),
+            *args.address.ip(),
+        )?;
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
@@ -529,12 +530,9 @@ impl Oximeter {
                 address
             } else {
                 SocketAddr::V6(SocketAddrV6::new(
-                    resolver
-                        .lookup_ipv6(SRV::Service(ServiceName::Nexus))
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::transient(e.to_string())
-                        })?,
+                    resolver.lookup_ipv6(ServiceName::Nexus).await.map_err(
+                        |e| backoff::BackoffError::transient(e.to_string()),
+                    )?,
                     NEXUS_INTERNAL_PORT,
                     0,
                     0,

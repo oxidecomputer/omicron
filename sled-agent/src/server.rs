@@ -76,8 +76,12 @@ impl Server {
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
-    pub async fn wait_for_finish(self) -> Result<(), String> {
-        self.http_server.await
+    pub async fn wait_for_finish(&self) -> Result<(), String> {
+        self.http_server.wait_for_shutdown().await
+    }
+
+    pub async fn close(self) -> Result<(), String> {
+        self.http_server.close().await
     }
 }
 

@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use omicron_zone_package::config::Config;
 use omicron_zone_package::package::PackageOutput;
 use omicron_zone_package::package::PackageSource;
+use omicron_zone_package::target::Target;
 use petgraph::dot::Dot;
 use petgraph::graph::EdgeReference;
 use petgraph::graph::NodeIndex;
@@ -69,7 +70,10 @@ impl std::fmt::Display for GraphNode {
 }
 
 // Returns a string that can be passed to dot(1) to visualize a package manifest
-pub fn do_dot(package_config: &Config) -> anyhow::Result<String> {
+pub fn do_dot(
+    target: &Target,
+    package_config: &Config,
+) -> anyhow::Result<String> {
     let packages = &package_config.packages;
 
     // We'll use petgraph's facilities to build a directed acyclic graph that
@@ -200,12 +204,12 @@ pub fn do_dot(package_config: &Config) -> anyhow::Result<String> {
                     let paths = paths
                         .iter()
                         .map(|mapping| {
-                            (
-                                mapping.from.display().to_string(),
-                                mapping.to.display().to_string(),
-                            )
+                            Ok((
+                                mapping.from.interpolate(&target)?,
+                                mapping.to.interpolate(&target)?,
+                            ))
                         })
-                        .collect();
+                        .collect::<anyhow::Result<_>>()?;
                     let path_node = graph.add_node(GraphNode::Paths { paths });
                     graph.add_edge(*pkg_node, path_node, "include");
                 }
@@ -289,13 +293,13 @@ fn node_attributes(
 
 #[cfg(test)]
 mod test {
-    use super::do_dot;
+    use super::*;
     use omicron_zone_package::config::parse_manifest;
 
     fn dot_output_for(raw_toml: &str) -> Result<String, anyhow::Error> {
         let package_config =
             parse_manifest(raw_toml).expect("test toml was invalid");
-        do_dot(&package_config)
+        do_dot(&Target::default(), &package_config)
     }
 
     #[test]

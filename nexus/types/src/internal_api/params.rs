@@ -10,7 +10,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
-use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::str::FromStr;
@@ -49,6 +48,12 @@ pub struct SledAgentStartupInfo {
 
     /// Describes the sled's identity
     pub baseboard: Baseboard,
+
+    /// The number of hardware threads which can execute on this sled
+    pub usable_hardware_threads: u32,
+
+    /// Amount of RAM which may be used by the Sled's OS
+    pub usable_physical_ram: ByteCount,
 }
 
 /// Describes the type of physical disk.
@@ -88,6 +93,11 @@ pub struct PhysicalDiskDeleteRequest {
 pub struct ZpoolPutRequest {
     /// Total size of the pool.
     pub size: ByteCount,
+
+    // Information to identify the disk to which this zpool belongs
+    pub disk_vendor: String,
+    pub disk_serial: String,
+    pub disk_model: String,
     // TODO: We could include any other data from `ZpoolInfo` we want,
     // such as "allocated/free" space and pool health?
 }
@@ -151,30 +161,32 @@ pub struct DatasetPutRequest {
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
-    InternalDNS,
-    Nexus {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1530):
-        // While it's true that Nexus will only run with a single address,
-        // we want to convey information about the available pool of addresses
-        // when handing off from RSS -> Nexus.
-        external_address: IpAddr,
-    },
+    ExternalDns,
+    ExternalDnsConfig,
+    InternalDns,
+    InternalDnsConfig,
+    Nexus { external_address: IpAddr },
     Oximeter,
     Dendrite,
     Tfport,
     CruciblePantry,
+    Ntp,
 }
 
 impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
-            InternalDNS => "internal_dns",
+            ExternalDnsConfig => "external_dns_config",
+            ExternalDns => "external_dns",
+            InternalDnsConfig => "internal_dns_config",
+            InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
+            Ntp => "ntp",
         };
         write!(f, "{}", s)
     }
@@ -187,7 +199,7 @@ pub struct ServicePutRequest {
     pub sled_id: Uuid,
 
     /// Address on which a service is responding to requests.
-    pub address: Ipv6Addr,
+    pub address: SocketAddrV6,
 
     /// Type of service being inserted.
     pub kind: ServiceKind,
@@ -226,7 +238,14 @@ pub struct RackInitializationRequest {
     pub internal_services_ip_pool_ranges: Vec<IpRange>,
     /// x.509 Certificates used to encrypt communication with the external API.
     pub certs: Vec<Certificate>,
+    /// initial internal DNS config
+    pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
 }
+
+pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
+pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
+pub type DnsRecord = dns_service_client::types::DnsRecord;
+pub type Srv = dns_service_client::types::Srv;
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

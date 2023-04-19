@@ -20,8 +20,9 @@ use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::console_api::SpoofLoginBody;
-use omicron_nexus::external_api::params::OrganizationCreate;
+use omicron_nexus::external_api::params::ProjectCreate;
 use omicron_nexus::external_api::{shared, views};
+use omicron_sled_agent::sim;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -44,23 +45,23 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // log in and pull the token out of the header so we can use it for authed requests
     let session_token = log_in_and_extract_token(&testctx).await;
 
-    let org_params = OrganizationCreate {
+    let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
-            name: "my-org".parse().unwrap(),
-            description: "an org".to_string(),
+            name: "my-proj".parse().unwrap(),
+            description: "a project".to_string(),
         },
     };
 
     // hitting auth-gated API endpoint without session cookie 401s
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
-        .body(Some(&org_params))
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed API request");
 
     // console pages don't 401, they 302
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -70,7 +71,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // without other privileges.  However, they _do_ need the privilege to
     // create Organizations because we'll be testing that as a smoke test.
     // We'll remove that privilege afterwards.
-    let silo_url = format!("/system/silos/{}", DEFAULT_SILO.identity().name);
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
     let policy_url = format!("{}/policy", silo_url);
     let initial_policy: shared::Policy<SiloRole> =
         NexusRequest::object_get(testctx, &policy_url)
@@ -90,16 +91,16 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // now make same requests with cookie
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
         .execute()
         .await
         .expect("failed to create org with session cookie");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::OK))
         .execute()
@@ -127,15 +128,15 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
-    RequestBuilder::new(&testctx, Method::POST, "/organizations")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
         .header(header::COOKIE, &session_token)
-        .body(Some(&org_params))
+        .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to get 401 for unauthed API request");
 
-    RequestBuilder::new(&testctx, Method::GET, "/orgs/whatever")
+    RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
@@ -148,22 +149,23 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let _ = RequestBuilder::new(&testctx, Method::GET, "/orgs/irrelevant-path")
-        .expect_status(Some(StatusCode::FOUND))
-        .expect_response_header(
-            header::LOCATION,
-            "/spoof_login?state=%2Forgs%2Firrelevant-path",
-        )
-        .execute()
-        .await
-        .expect("failed to redirect to IdP on auth failure");
+    let _ =
+        RequestBuilder::new(&testctx, Method::GET, "/projects/irrelevant-path")
+            .expect_status(Some(StatusCode::FOUND))
+            .expect_response_header(
+                header::LOCATION,
+                "/spoof_login?state=%2Fprojects%2Firrelevant-path",
+            )
+            .execute()
+            .await
+            .expect("failed to redirect to IdP on auth failure");
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
         "/",
-        "/orgs/irrelevant-path",
+        "/projects/irrelevant-path",
         "/settings/irrelevant-path",
         "/sys/irrelevant-path",
         "/device/success",
@@ -308,6 +310,7 @@ async fn test_absolute_static_dir() {
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_absolute_static_dir",
         &mut config,
+        sim::SimMode::Explicit,
     )
     .await;
     let testctx = &cptestctx.external_client;
@@ -327,45 +330,48 @@ async fn test_absolute_static_dir() {
 async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me")
+    // hitting /v1/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/me")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user = NexusRequest::object_get(testctx, "/session/me")
+    let priv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .expect("failed to get current user")
-        .parsed_body::<views::User>()
+        .parsed_body::<views::CurrentUser>()
         .unwrap();
 
     assert_eq!(
         priv_user,
-        views::User {
-            id: USER_TEST_PRIVILEGED.id(),
-            display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-            silo_id: DEFAULT_SILO.id(),
+        views::CurrentUser {
+            user: views::User {
+                id: USER_TEST_PRIVILEGED.id(),
+                display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+                silo_id: DEFAULT_SILO.id(),
+            },
+            silo_name: DEFAULT_SILO.name().clone()
         }
     );
 
-    let unpriv_user = NexusRequest::object_get(testctx, "/session/me")
+    let unpriv_user = NexusRequest::object_get(testctx, "/v1/me")
         .authn_as(AuthnMode::UnprivilegedUser)
-        .execute()
-        .await
-        .expect("failed to get current user")
-        .parsed_body::<views::User>()
-        .unwrap();
+        .execute_and_parse_unwrap::<views::CurrentUser>()
+        .await;
 
     assert_eq!(
         unpriv_user,
-        views::User {
-            id: USER_TEST_UNPRIVILEGED.id(),
-            display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-            silo_id: DEFAULT_SILO.id(),
+        views::CurrentUser {
+            user: views::User {
+                id: USER_TEST_UNPRIVILEGED.id(),
+                display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+                silo_id: DEFAULT_SILO.id(),
+            },
+            silo_name: DEFAULT_SILO.name().clone()
         }
     );
 }
@@ -374,33 +380,31 @@ async fn test_session_me(cptestctx: &ControlPlaneTestContext) {
 async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // hitting /session/me without being logged in is a 401
-    RequestBuilder::new(&testctx, Method::GET, "/session/me/groups")
+    // hitting /v1/me without being logged in is a 401
+    RequestBuilder::new(&testctx, Method::GET, "/v1/me/groups")
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("failed to 401 on unauthed request");
 
     // now make same request with auth
-    let priv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let priv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(priv_user_groups.items, vec![]);
 
-    let unpriv_user_groups =
-        NexusRequest::object_get(testctx, "/session/me/groups")
-            .authn_as(AuthnMode::UnprivilegedUser)
-            .execute()
-            .await
-            .expect("failed to get current user")
-            .parsed_body::<ResultsPage<views::Group>>()
-            .unwrap();
+    let unpriv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute()
+        .await
+        .expect("failed to get current user")
+        .parsed_body::<ResultsPage<views::Group>>()
+        .unwrap();
 
     assert_eq!(unpriv_user_groups.items, vec![]);
 }

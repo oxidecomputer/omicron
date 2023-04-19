@@ -6,11 +6,15 @@
 
 use anyhow::anyhow;
 use lazy_static::lazy_static;
+use omicron_common::api::internal::nexus::KnownArtifactKind;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::iter::Iterator;
+use tui::text::Text;
 use wicketd_client::types::{
-    RackV1Inventory, SpComponentInfo, SpIgnition, SpState, SpType,
+    RackV1Inventory, RotInventory, SpComponentCaboose, SpComponentInfo,
+    SpIgnition, SpState, SpType,
 };
 
 lazy_static! {
@@ -24,7 +28,7 @@ lazy_static! {
 
 /// Inventory is the most recent information about rack composition as
 /// received from MGS.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Inventory {
     power: BTreeMap<ComponentId, PowerState>,
     inventory: BTreeMap<ComponentId, Component>,
@@ -55,7 +59,9 @@ impl Inventory {
             let sp = Sp {
                 ignition: sp.ignition,
                 state: sp.state,
+                caboose: sp.caboose,
                 components: sp.components,
+                rot: sp.rot,
             };
 
             // Validate and get a ComponentId
@@ -94,23 +100,56 @@ impl Inventory {
 
 // We just print the debug info on the screen for now
 #[allow(unused)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sp {
-    ignition: SpIgnition,
-    state: SpState,
+    ignition: Option<SpIgnition>,
+    state: Option<SpState>,
+    caboose: Option<SpComponentCaboose>,
     components: Option<Vec<SpComponentInfo>>,
+    rot: RotInventory,
 }
 
 // XXX: Eventually a Sled will have a host component.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Component {
     Sled(Sp),
     Switch(Sp),
     Psc(Sp),
 }
 
+impl Component {
+    pub fn sp(&self) -> &Sp {
+        match self {
+            Component::Sled(sp) => sp,
+            Component::Switch(sp) => sp,
+            Component::Psc(sp) => sp,
+        }
+    }
+
+    pub fn sp_version(&self) -> String {
+        self.sp()
+            .caboose
+            .as_ref()
+            .and_then(|caboose| caboose.version.as_deref())
+            .unwrap_or("UNKNOWN")
+            .to_string()
+    }
+
+    pub fn rot_version(&self) -> String {
+        self.sp()
+            .rot
+            .caboose
+            .as_ref()
+            .and_then(|caboose| caboose.version.as_deref())
+            .unwrap_or("UNKNOWN")
+            .to_string()
+    }
+}
+
 // The component type and its slot.
-#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize,
+)]
 pub enum ComponentId {
     Sled(u8),
     Switch(u8),
@@ -120,6 +159,22 @@ pub enum ComponentId {
 impl ComponentId {
     pub fn name(&self) -> String {
         self.to_string()
+    }
+
+    pub fn sp_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletSp,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchSp,
+            ComponentId::Psc(_) => KnownArtifactKind::PscSp,
+        }
+    }
+
+    pub fn rot_known_artifact_kind(&self) -> KnownArtifactKind {
+        match self {
+            ComponentId::Sled(_) => KnownArtifactKind::GimletRot,
+            ComponentId::Switch(_) => KnownArtifactKind::SwitchRot,
+            ComponentId::Psc(_) => KnownArtifactKind::PscRot,
+        }
     }
 }
 
@@ -133,7 +188,31 @@ impl Display for ComponentId {
     }
 }
 
-#[derive(Debug)]
+impl From<ComponentId> for Text<'_> {
+    fn from(value: ComponentId) -> Self {
+        value.to_string().into()
+    }
+}
+
+pub struct ParsableComponentId<'a> {
+    pub sp_type: &'a str,
+    pub i: &'a str,
+}
+
+impl<'a> TryFrom<ParsableComponentId<'a>> for ComponentId {
+    type Error = ();
+    fn try_from(value: ParsableComponentId<'a>) -> Result<Self, Self::Error> {
+        let i: u8 = value.i.parse().map_err(|_| ())?;
+        match (value.sp_type, i) {
+            ("sled", 0..=31) => Ok(ComponentId::Sled(i)),
+            ("switch", 0..=1) => Ok(ComponentId::Switch(i)),
+            ("power", 0..=1) => Ok(ComponentId::Psc(i)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 pub enum PowerState {
     /// Working
     A0,

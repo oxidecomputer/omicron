@@ -13,12 +13,9 @@
 #![allow(clippy::style)]
 
 pub mod app; // Public for documentation examples
-pub mod authn; // Public only for testing
-pub mod authz; // Public for documentation examples
 mod cidata;
 pub mod config; // Public for testing
 pub mod context; // Public for documentation examples
-pub mod db; // Public for documentation examples
 pub mod external_api; // Public for testing
 pub mod internal_api; // Public for testing
 mod populate;
@@ -32,18 +29,18 @@ pub use context::ServerContext;
 pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use internal_dns::DnsConfigBuilder;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
+// These modules used to be within nexus, but have been moved to
+// nexus-db-queries. Keeping these around temporarily for migration reasons.
+pub use nexus_db_queries::{authn, authz, db};
+
 #[macro_use]
 extern crate slog;
-#[macro_use]
-extern crate newtype_derive;
-#[cfg(test)]
-#[macro_use]
-extern crate diesel;
 
 /// Run the OpenAPI generator for the external API, which emits the OpenAPI spec
 /// to stdout.
@@ -69,22 +66,22 @@ pub fn run_openapi_internal() -> Result<(), String> {
 
 /// A partially-initialized Nexus server, which exposes an internal interface,
 /// but is not ready to receive external requests.
-pub struct InternalServer<'a> {
+pub struct InternalServer {
     /// shared state used by API request handlers
     pub apictx: Arc<ServerContext>,
     /// dropshot server for internal API
     pub http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
-    config: &'a Config,
+    config: Config,
     log: Logger,
 }
 
-impl<'a> InternalServer<'a> {
+impl InternalServer {
     /// Start a nexus server.
     pub async fn start(
-        config: &'a Config,
+        config: &Config,
         log: &Logger,
-    ) -> Result<InternalServer<'a>, String> {
+    ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
 
@@ -104,7 +101,7 @@ impl<'a> InternalServer<'a> {
         .map_err(|error| format!("initializing internal server: {}", error))?;
         let http_server_internal = server_starter_internal.start();
 
-        Ok(Self { apictx, http_server_internal, config, log })
+        Ok(Self { apictx, http_server_internal, config: config.clone(), log })
     }
 }
 
@@ -118,7 +115,7 @@ pub struct Server {
 }
 
 impl Server {
-    async fn start(internal: InternalServer<'_>) -> Result<Self, String> {
+    async fn start(internal: InternalServer) -> Result<Self, String> {
         let apictx = internal.apictx;
         let http_server_internal = internal.http_server_internal;
         let log = internal.log;
@@ -191,11 +188,24 @@ impl Server {
 
 #[async_trait::async_trait]
 impl nexus_test_interface::NexusServer for Server {
-    async fn start_and_populate(config: &Config, log: &Logger) -> Self {
+    type InternalServer = InternalServer;
+
+    async fn start_internal(
+        config: &Config,
+        log: &Logger,
+    ) -> (InternalServer, SocketAddr) {
         let internal_server =
             InternalServer::start(config, &log).await.unwrap();
         internal_server.apictx.nexus.wait_for_populate().await.unwrap();
+        let addr = internal_server.http_server_internal.local_addr();
+        (internal_server, addr)
+    }
 
+    async fn start(
+        internal_server: InternalServer,
+        config: &Config,
+        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+    ) -> Self {
         // Perform the "handoff from RSS".
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
@@ -206,14 +216,12 @@ impl nexus_test_interface::NexusServer for Server {
             .rack_initialize(
                 &opctx,
                 config.deployment.rack_id,
-                // NOTE: In the context of this test utility, we arguably do have an
-                // instance of CRDB and Nexus running. However, as this info isn't
-                // necessary for most tests, we pass no information here.
                 internal_api::params::RackInitializationRequest {
-                    services: vec![],
+                    services,
                     datasets: vec![],
                     internal_services_ip_pool_ranges: vec![],
                     certs: vec![],
+                    internal_dns_zone_config: DnsConfigBuilder::new().build(),
                 },
             )
             .await
@@ -235,10 +243,7 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.nexus.get_internal_server_address().await.unwrap()
     }
 
-    async fn set_resolver(
-        &self,
-        resolver: dns_service_client::multiclient::Resolver,
-    ) {
+    async fn set_resolver(&self, resolver: internal_dns::resolver::Resolver) {
         self.apictx.nexus.set_resolver(resolver).await
     }
 

@@ -4,17 +4,16 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
-use crate::params::VpcFirewallRulesEnsureBody;
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
-    InstanceSerialConsoleData, InstanceSerialConsoleRequest, ServiceEnsureBody,
-    Zpool,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
-use crate::serial::ByteOffset;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
+use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -30,15 +29,20 @@ type SledApiDescription = ApiDescription<SledAgent>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
-        api.register(services_put)?;
-        api.register(zpools_get)?;
-        api.register(filesystem_put)?;
-        api.register(instance_put)?;
         api.register(disk_put)?;
-        api.register(update_artifact)?;
-        api.register(instance_serial_get)?;
+        api.register(filesystem_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
+        api.register(instance_put_state)?;
+        api.register(instance_register)?;
+        api.register(instance_unregister)?;
+        api.register(services_put)?;
+        api.register(sled_role_get)?;
+        api.register(set_v2p)?;
+        api.register(del_v2p)?;
+        api.register(timesync_get)?;
+        api.register(update_artifact)?;
         api.register(vpc_firewall_rules_put)?;
+        api.register(zpools_get)?;
 
         Ok(())
     }
@@ -76,6 +80,17 @@ async fn zpools_get(
 }
 
 #[endpoint {
+    method = GET,
+    path = "/sled-role",
+}]
+async fn sled_role_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<SledRole>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.get_role().await))
+}
+
+#[endpoint {
     method = PUT,
     path = "/filesystem",
 }]
@@ -105,7 +120,7 @@ struct InstancePathParam {
     method = PUT,
     path = "/instances/{instance_id}",
 }]
-async fn instance_put(
+async fn instance_register(
     rqctx: RequestContext<SledAgent>,
     path_params: Path<InstancePathParam>,
     body: TypedBody<InstanceEnsureBody>,
@@ -114,14 +129,45 @@ async fn instance_put(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure(
-            instance_id,
-            body_args.initial,
-            body_args.target,
-            body_args.migrate,
-        )
-        .await
-        .map_err(Error::from)?,
+        sa.instance_ensure_registered(instance_id, body_args.initial)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}",
+}]
+async fn instance_unregister(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    Ok(HttpResponseOk(
+        sa.instance_ensure_unregistered(instance_id)
+            .await
+            .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/state",
+}]
+async fn instance_put_state(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutStateBody>,
+) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_ensure_state(instance_id, body_args.state)
+            .await
+            .map_err(Error::from)?,
     ))
 }
 
@@ -165,51 +211,6 @@ async fn update_artifact(
     let sa = rqctx.context();
     sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
     Ok(HttpResponseUpdatedNoContent())
-}
-
-#[endpoint {
-    method = GET,
-    path = "/instances/{instance_id}/serial",
-}]
-async fn instance_serial_get(
-    rqctx: RequestContext<SledAgent>,
-    path_params: Path<InstancePathParam>,
-    query: Query<InstanceSerialConsoleRequest>,
-) -> Result<HttpResponseOk<InstanceSerialConsoleData>, HttpError> {
-    // TODO: support websocket in dropshot, detect websocket upgrade header and proxy the data
-
-    let sa = rqctx.context();
-    let instance_id = path_params.into_inner().instance_id;
-    let query_params = query.into_inner();
-
-    let byte_offset = match query_params {
-        InstanceSerialConsoleRequest {
-            from_start: Some(offset),
-            most_recent: None,
-            ..
-        } => ByteOffset::FromStart(offset as usize),
-        InstanceSerialConsoleRequest {
-            from_start: None,
-            most_recent: Some(offset),
-            ..
-        } => ByteOffset::MostRecent(offset as usize),
-        _ => return Err(HttpError::for_bad_request(
-            None,
-            "Exactly one of 'from_start' or 'most_recent' must be specified."
-                .to_string(),
-        )),
-    };
-
-    let data = sa
-        .instance_serial_console_data(
-            instance_id,
-            byte_offset,
-            query_params.max_bytes.map(|x| x as usize),
-        )
-        .await
-        .map_err(Error::from)?;
-
-    Ok(HttpResponseOk(data))
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -279,4 +280,62 @@ async fn vpc_firewall_rules_put(
         .map_err(Error::from)?;
 
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Path parameters for V2P mapping related requests (sled agent API)
+#[allow(dead_code)]
+#[derive(Deserialize, JsonSchema)]
+struct V2pPathParam {
+    interface_id: Uuid,
+}
+
+/// Create a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
+#[endpoint {
+    method = PUT,
+    path = "/v2p/{interface_id}",
+}]
+async fn set_v2p(
+    rqctx: RequestContext<SledAgent>,
+    _path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.set_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Delete a mapping from a virtual NIC to a physical host
+// Keep interface_id to maintain parity with the simulated sled agent, which
+// requires interface_id on the path.
+#[endpoint {
+    method = DELETE,
+    path = "/v2p/{interface_id}",
+}]
+async fn del_v2p(
+    rqctx: RequestContext<SledAgent>,
+    _path_params: Path<V2pPathParam>,
+    body: TypedBody<SetVirtualNetworkInterfaceHost>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+
+    sa.unset_virtual_nic_host(&body_args).await.map_err(Error::from)?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = GET,
+    path = "/timesync",
+}]
+async fn timesync_get(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<TimeSync>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.timesync_get().await.map_err(|e| Error::from(e))?))
 }

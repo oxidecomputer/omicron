@@ -7,7 +7,6 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::authn;
-use crate::context::OpContext;
 use crate::db;
 use serde::Deserialize;
 use serde::Serialize;
@@ -88,7 +87,10 @@ async fn sdd_account_space(
     let params = sagactx.saga_params::<Params>()?;
 
     let deleted_disk = sagactx.lookup::<db::model::Disk>("deleted_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -109,7 +111,10 @@ async fn sdd_account_space_undo(
     let params = sagactx.saga_params::<Params>()?;
 
     let deleted_disk = sagactx.lookup::<db::model::Disk>("deleted_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -128,7 +133,10 @@ async fn sdd_delete_volume(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id =
         sagactx.lookup::<db::model::Disk>("deleted_disk")?.volume_id;
     osagactx
@@ -144,11 +152,10 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete, authn::saga::Serialized,
-        context::OpContext,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
@@ -160,13 +167,11 @@ pub(crate) mod test {
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -181,12 +186,11 @@ pub(crate) mod test {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
 
-        let project_selector = params::ProjectSelector::new(
-            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
-            Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
-        );
+        let project_selector = params::ProjectSelector {
+            project: Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
+        };
         let project_lookup =
-            nexus.project_lookup(&opctx, &project_selector).unwrap();
+            nexus.project_lookup(&opctx, project_selector).unwrap();
 
         nexus
             .project_create_disk(

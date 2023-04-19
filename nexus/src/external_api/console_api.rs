@@ -7,11 +7,9 @@
 //! This was originally conceived as a separate dropshot server from the
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
-use super::views;
 use crate::authn::{
     silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
 };
-use crate::context::OpContext;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -26,18 +24,15 @@ use crate::{
 use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
-    HttpResponseFound, HttpResponseHeaders, HttpResponseOk,
-    HttpResponseSeeOther, HttpResponseUpdatedNoContent, Path, Query,
-    RequestContext, ResultsPage, TypedBody,
+    HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
+    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
+use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::params;
-use omicron_common::api::external::http_pagination::{
-    data_page_params_for, PaginatedById, ScanById, ScanParams,
-};
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -420,7 +415,7 @@ pub async fn login_local(
         // happen using the Nexus "external authentication" context, which we
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
-        let silo_lookup = nexus.silo_lookup(&opctx, &silo)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
         login_finish(&opctx, apictx, user, None).await
     };
@@ -484,7 +479,7 @@ pub async fn logout(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
-        let opctx = OpContext::for_external_api(&rqctx).await;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await;
         let token = cookies.get(SESSION_COOKIE_COOKIE_NAME);
 
         if let Ok(opctx) = opctx {
@@ -615,68 +610,10 @@ pub async fn login_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the user associated with the current session
-#[endpoint {
-   method = GET,
-   path = "/session/me",
-   tags = ["hidden"],
-}]
-pub async fn session_me(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::User>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let user = nexus.silo_user_fetch_self(&opctx).await?;
-        Ok(HttpResponseOk(user.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch the silo groups the current user belongs to
-#[endpoint {
-    method = GET,
-    path = "/session/me/groups",
-    tags = ["hidden"],
- }]
-pub async fn session_me_groups(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::Group>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        // We don't care about authentication method, as long as they are authed
-        // as _somebody_. We could restrict this to session auth only, but it's
-        // not clear what the advantage would be.
-        let opctx = OpContext::for_external_api(&rqctx).await?;
-        let groups = nexus
-            .silo_user_fetch_groups_for_self(
-                &opctx,
-                &data_page_params_for(&rqctx, &query)?,
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            groups,
-            &|_, group: &views::Group| group.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 pub async fn console_index_or_login_redirect(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
-    let opctx = OpContext::for_external_api(&rqctx).await;
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
     // if authed, serve console index.html with JS bundle in script tag
     if let Ok(opctx) = opctx {
@@ -707,11 +644,10 @@ pub async fn console_index_or_login_redirect(
 // because it's a more specific match. So for now we simply give the console
 // catchall route a prefix to avoid overlap. Long-term, if a route prefix is
 // part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages. Conveniently, all the console page routes start
-// with /orgs already.
+// not on the console pages.
 #[endpoint {
    method = GET,
-   path = "/orgs/{path:.*}",
+   path = "/projects/{path:.*}",
    unpublished = true,
 }]
 pub async fn console_page(
@@ -868,7 +804,7 @@ lazy_static! {
     static ref ALLOWED_EXTENSIONS: HashSet<OsString> = HashSet::from(
         [
             "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf",
-            "txt", "woff", "woff2",
+            "txt", "webp", "woff", "woff2",
         ]
         .map(|s| OsString::from(s))
     );

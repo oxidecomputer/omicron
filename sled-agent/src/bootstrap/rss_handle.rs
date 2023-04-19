@@ -9,7 +9,9 @@ use super::params::SledAgentRequest;
 use super::trust_quorum::ShareDistribution;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
+use crate::rack_setup::service::SetupServiceError;
 use crate::sp::SpHandle;
+use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
@@ -40,15 +42,17 @@ impl Drop for RssHandle {
 }
 
 impl RssHandle {
-    // Start the Rack setup service.
-    pub(super) fn start_rss(
+    /// Executes the rack setup service until it has completed
+    pub(super) async fn run_rss(
         log: &Logger,
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
-    ) -> Self {
-        let (tx, rx) = rss_channel(our_bootstrap_address);
+    ) -> Result<(), SetupServiceError> {
+        let (tx, rx) =
+            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
@@ -57,10 +61,27 @@ impl RssHandle {
             member_device_id_certs,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        let task = tokio::spawn(async move {
-            rx.initialize_sleds(&log, &sp).await;
-        });
-        Self { _rss: rss, task }
+        rx.await_local_request(&log, &sp).await;
+        rss.join().await
+    }
+
+    /// Executes the rack setup service (reset mode) until it has completed
+    pub(super) async fn run_rss_reset(
+        log: &Logger,
+        our_bootstrap_address: Ipv6Addr,
+        switch_zone_bootstrap_address: Ipv6Addr,
+        sp: Option<SpHandle>,
+    ) -> Result<(), SetupServiceError> {
+        let (tx, rx) =
+            rss_channel(our_bootstrap_address, switch_zone_bootstrap_address);
+
+        let rss = RackSetupService::new_reset_rack(
+            log.new(o!("component" => "RSS")),
+            tx,
+        );
+        let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
+        rx.await_local_request(&log, &sp).await;
+        rss.join().await
     }
 }
 
@@ -116,22 +137,39 @@ async fn initialize_sled_agent(
 // communication mechanism.
 fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
+    switch_zone_bootstrap_address: Ipv6Addr,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
-        BootstrapAgentHandle { inner: tx, our_bootstrap_address },
+        BootstrapAgentHandle {
+            inner: tx,
+            our_bootstrap_address,
+            switch_zone_bootstrap_address,
+        },
         BootstrapAgentHandleReceiver { inner: rx },
     )
 }
 
-type InnerInitRequest = (
-    Vec<(SocketAddrV6, SledAgentRequest, Option<ShareDistribution>)>,
-    oneshot::Sender<Result<(), String>>,
-);
+type InnerInitRequest =
+    Vec<(SocketAddrV6, SledAgentRequest, Option<ShareDistribution>)>;
+type InnerResetRequest = Vec<SocketAddrV6>;
+
+#[derive(Debug)]
+struct Request {
+    kind: RequestKind,
+    tx: oneshot::Sender<Result<(), String>>,
+}
+
+#[derive(Debug)]
+enum RequestKind {
+    Init(InnerInitRequest),
+    Reset(InnerResetRequest),
+}
 
 pub(crate) struct BootstrapAgentHandle {
-    inner: mpsc::Sender<InnerInitRequest>,
+    inner: mpsc::Sender<Request>,
     our_bootstrap_address: Ipv6Addr,
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 impl BootstrapAgentHandle {
@@ -159,87 +197,148 @@ impl BootstrapAgentHandle {
         //
         // Moving from channels to IPC will happen as a part of
         // https://github.com/oxidecomputer/omicron/issues/820.
-        self.inner.send((requests, tx)).await.unwrap();
+        self.inner
+            .send(Request { kind: RequestKind::Init(requests), tx })
+            .await
+            .unwrap();
+        rx.await.unwrap()
+    }
+
+    pub(crate) async fn reset_sleds(
+        self,
+        requests: Vec<SocketAddrV6>,
+    ) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .send(Request { kind: RequestKind::Reset(requests), tx })
+            .await
+            .unwrap();
         rx.await.unwrap()
     }
 
     pub(crate) fn our_address(&self) -> Ipv6Addr {
         self.our_bootstrap_address
     }
+
+    pub(crate) fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
+        self.switch_zone_bootstrap_address
+    }
 }
 
 struct BootstrapAgentHandleReceiver {
-    inner: mpsc::Receiver<InnerInitRequest>,
+    inner: mpsc::Receiver<Request>,
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn initialize_sleds(mut self, log: &Logger, sp: &Option<SpHandle>) {
-        let (requests, tx_response) = match self.inner.recv().await {
+    async fn await_local_request(
+        mut self,
+        log: &Logger,
+        sp: &Option<SpHandle>,
+    ) {
+        let Request { kind, tx } = match self.inner.recv().await {
             Some(requests) => requests,
             None => {
-                warn!(
-                    log,
-                    "Failed receiving sled initialization requests from RSS",
-                );
+                warn!(log, "Failed receiving local requests from RSS",);
                 return;
             }
         };
 
-        // Convert the vec of requests into a `FuturesUnordered` containing all
-        // of the initialization requests, allowing them to run concurrently.
-        let mut futs = requests
-            .into_iter()
-            .map(|(bootstrap_addr, request, trust_quorum_share)| async move {
-                info!(
-                    log, "Received initialization request from RSS";
-                    "request" => ?request,
-                    "target_sled" => %bootstrap_addr,
-                );
+        match kind {
+            RequestKind::Init(requests) => {
+                // Convert the vec of requests into a `FuturesUnordered` containing all
+                // of the initialization requests, allowing them to run concurrently.
+                let mut futs = requests
+                    .into_iter()
+                    .map(|(bootstrap_addr, request, trust_quorum_share)| async move {
+                        info!(
+                            log, "Received initialization request from RSS";
+                            "request" => ?request,
+                            "target_sled" => %bootstrap_addr,
+                        );
 
-                initialize_sled_agent(
-                    log,
-                    bootstrap_addr,
-                    &request,
-                    trust_quorum_share,
-                    sp,
-                )
-                .await
-                .map_err(|err| {
-                    format!(
-                        "Failed to initialize sled agent at {}: {}",
-                        bootstrap_addr, err
-                    )
-                })?;
+                        initialize_sled_agent(
+                            log,
+                            bootstrap_addr,
+                            &request,
+                            trust_quorum_share,
+                            sp,
+                        )
+                        .await
+                        .map_err(|err| {
+                            format!(
+                                "Failed to initialize sled agent at {}: {}",
+                                bootstrap_addr, err
+                            )
+                        })?;
 
-                info!(
-                    log, "Initialized sled agent";
-                    "target_sled" => %bootstrap_addr,
-                );
+                        info!(
+                            log, "Initialized sled agent";
+                            "target_sled" => %bootstrap_addr,
+                        );
 
-                Ok(())
-            })
-            .collect::<FuturesUnordered<_>>();
+                        Ok(())
+                    })
+                    .collect::<FuturesUnordered<_>>();
 
-        // Wait for all initialization requests to complete, but stop on the
-        // first error.
-        //
-        // We `.unwrap()` when sending a result on `tx_response` (either in this
-        // loop or afterwards if all requests succeed), which is okay because we
-        // know RSS is waiting for our response (i.e., we can only panic if RSS
-        // already panicked itself). When we move RSS
-        // out-of-process, tracked by
-        // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
-        // replace these channels with IPC, which will also eliminiate these
-        // unwraps.
-        while let Some(result) = futs.next().await {
-            if result.is_err() {
-                tx_response.send(result).unwrap();
-                return;
+                // Wait for all initialization requests to complete, but stop on the
+                // first error.
+                //
+                // We `.unwrap()` when sending a result on `tx` (either in this
+                // loop or afterwards if all requests succeed), which is okay because we
+                // know RSS is waiting for our response (i.e., we can only panic if RSS
+                // already panicked itself). When we move RSS
+                // out-of-process, tracked by
+                // https://github.com/oxidecomputer/omicron/issues/820, we'll have to
+                // replace these channels with IPC, which will also eliminiate these
+                // unwraps.
+                while let Some(result) = futs.next().await {
+                    if result.is_err() {
+                        tx.send(result).unwrap();
+                        return;
+                    }
+                }
+            }
+            RequestKind::Reset(requests) => {
+                let mut futs = requests
+                    .into_iter()
+                    .map(|bootstrap_addr| async move {
+                        info!(
+                            log, "Received reset request from RSS";
+                            "target_sled" => %bootstrap_addr,
+                        );
+
+                        let dur = std::time::Duration::from_secs(60);
+                        let client = reqwest::ClientBuilder::new()
+                            .connect_timeout(dur)
+                            .timeout(dur)
+                            .build()
+                            .map_err(|e| e.to_string())?;
+                        let client = BootstrapAgentClient::new_with_client(
+                            &format!("http://{}", bootstrap_addr),
+                            client,
+                            log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
+                        );
+                        client.sled_reset().await.map_err(|e| e.to_string())?;
+
+                        info!(
+                            log, "Reset sled";
+                            "target_sled" => %bootstrap_addr,
+                        );
+
+                        Ok(())
+                    })
+                    .collect::<FuturesUnordered<_>>();
+                while let Some(result) = futs.next().await {
+                    if result.is_err() {
+                        tx.send(result).unwrap();
+                        return;
+                    }
+                }
             }
         }
 
-        // All init requests succeeded; inform RSS of completion.
-        tx_response.send(Ok(())).unwrap();
+        // All requests succeeded; inform RSS of completion.
+        tx.send(Ok(())).unwrap();
     }
 }
 

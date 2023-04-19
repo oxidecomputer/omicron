@@ -5,9 +5,7 @@
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
-use nexus_test_utils::resource_helpers::{
-    create_organization, create_project, create_vpc,
-};
+use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::{
     IdentityMetadata, L4Port, L4PortRange, VpcFirewallRule,
@@ -28,15 +26,12 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
     // Create a project that we'll use for testing.
-    let org_name = "test-org";
-    create_organization(&client, &org_name).await;
     let project_name = "springfield-squidport";
-    let vpcs_url =
-        format!("/organizations/{}/projects/{}/vpcs", org_name, project_name);
-    create_project(&client, &org_name, &project_name).await;
+    create_project(&client, &project_name).await;
 
+    let project_selector = format!("project={}", project_name);
     // Each project has a default VPC. Make sure it has the default rules.
-    let default_vpc_url = format!("{}/default", vpcs_url);
+    let default_vpc_url = format!("/v1/vpcs/default?{}", project_selector);
     let default_vpc: Vpc = NexusRequest::object_get(client, &default_vpc_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -45,16 +40,18 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
         .parsed_body()
         .unwrap();
 
-    let default_vpc_firewall = format!("{}/firewall/rules", default_vpc_url);
+    let default_vpc_firewall =
+        format!("/v1/vpc-firewall-rules?vpc=default&{}", project_selector,);
     let rules = get_rules(client, &default_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == default_vpc.identity.id));
     assert!(is_default_firewall_rules("default", &rules));
 
     // Create another VPC and make sure it gets the default rules.
     let other_vpc = "second-vpc";
+    let other_vpc_selector = format!("{}&vpc={}", project_selector, other_vpc);
     let other_vpc_firewall =
-        format!("{}/{}/firewall/rules", vpcs_url, other_vpc);
-    let vpc2 = create_vpc(&client, &org_name, &project_name, &other_vpc).await;
+        format!("/v1/vpc-firewall-rules?{}", other_vpc_selector);
+    let vpc2 = create_vpc(&client, &project_name, &other_vpc).await;
     let rules = get_rules(client, &other_vpc_firewall).await;
     assert!(rules.iter().all(|r| r.vpc_id == vpc2.identity.id));
     assert!(is_default_firewall_rules(other_vpc, &rules));
@@ -139,7 +136,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     // Delete a VPC Subnet / VPC and ensure we can't read its firewall anymore
     NexusRequest::object_delete(
         client,
-        format!("{}/{}/subnets/default", vpcs_url, other_vpc).as_str(),
+        &format!("/v1/vpc-subnets/default?{}", other_vpc_selector),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -147,7 +144,7 @@ async fn test_vpc_firewall(cptestctx: &ControlPlaneTestContext) {
     .unwrap();
     NexusRequest::object_delete(
         client,
-        format!("{}/{}", vpcs_url, other_vpc).as_str(),
+        &format!("/v1/vpcs/{}?{}", other_vpc, project_selector),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

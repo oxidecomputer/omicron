@@ -4,13 +4,14 @@
 
 use super::{
     common_storage::{
+        call_pantry_attach_for_disk, call_pantry_detach_for_disk,
         delete_crucible_regions, ensure_all_datasets_and_regions,
+        get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::context::OpContext;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
@@ -21,6 +22,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
 use std::convert::TryFrom;
+use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
 use uuid::Uuid;
@@ -61,6 +63,13 @@ declare_saga_actions! {
     FINALIZE_DISK_RECORD -> "disk_runtime" {
         + sdc_finalize_disk_record
     }
+    GET_PANTRY_ADDRESS -> "pantry_address" {
+        + sdc_get_pantry_address
+    }
+    CALL_PANTRY_ATTACH_FOR_DISK -> "call_pantry_attach_for_disk" {
+        + sdc_call_pantry_attach_for_disk
+        - sdc_call_pantry_attach_for_disk_undo
+    }
 }
 
 // disk create saga: definition
@@ -76,7 +85,7 @@ impl NexusSaga for SagaDiskCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(Node::action(
@@ -98,6 +107,15 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(create_volume_record_action());
         builder.append(finalize_disk_record_action());
 
+        match &params.create_params.disk_source {
+            params::DiskSource::ImportingBlocks { .. } => {
+                builder.append(get_pantry_address_action());
+                builder.append(call_pantry_attach_for_disk_action());
+            }
+
+            _ => {}
+        }
+
         Ok(builder.build()?)
     }
 }
@@ -115,48 +133,70 @@ async fn sdc_create_disk_record(
     // but this should be acceptable because the disk remains in a "Creating"
     // state until the saga has completed.
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
-    let block_size: db::model::BlockSize = match &params
-        .create_params
-        .disk_source
-    {
-        params::DiskSource::Blank { block_size } => {
-            db::model::BlockSize::try_from(*block_size).map_err(|e| {
-                ActionError::action_failed(Error::internal_error(
-                    &e.to_string(),
-                ))
-            })?
-        }
-        params::DiskSource::Snapshot { snapshot_id } => {
-            let (.., db_snapshot) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .snapshot_id(*snapshot_id)
-                    .fetch()
-                    .await
-                    .map_err(ActionError::action_failed)?;
+    let block_size: db::model::BlockSize =
+        match &params.create_params.disk_source {
+            params::DiskSource::Blank { block_size } => {
+                db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                    ActionError::action_failed(Error::internal_error(
+                        &e.to_string(),
+                    ))
+                })?
+            }
+            params::DiskSource::Snapshot { snapshot_id } => {
+                let (.., db_snapshot) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .snapshot_id(*snapshot_id)
+                        .fetch()
+                        .await
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
 
-            db_snapshot.block_size
-        }
-        params::DiskSource::Image { image_id: _ } => {
-            // Until we implement project images, do not allow disks to be
-            // created from a project image.
-            return Err(ActionError::action_failed(Error::InvalidValue {
-                label: String::from("image"),
-                message: String::from("project image are not yet supported"),
-            }));
-        }
-        params::DiskSource::GlobalImage { image_id } => {
-            let (.., global_image) =
-                LookupPath::new(&opctx, &osagactx.datastore())
-                    .global_image_id(*image_id)
-                    .fetch()
-                    .await
-                    .map_err(ActionError::action_failed)?;
+                db_snapshot.block_size
+            }
+            params::DiskSource::Image { image_id } => {
+                let (.., image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
 
-            global_image.block_size
-        }
-    };
+                image.block_size
+            }
+            params::DiskSource::GlobalImage { image_id } => {
+                let (.., global_image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .global_image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(|e| {
+                            ActionError::action_failed(Error::internal_error(
+                                &e.to_string(),
+                            ))
+                        })?;
+
+                global_image.block_size
+            }
+            params::DiskSource::ImportingBlocks { block_size } => {
+                db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                    ActionError::action_failed(Error::internal_error(
+                        &e.to_string(),
+                    ))
+                })?
+            }
+        };
 
     let disk = db::model::Disk::new(
         disk_id,
@@ -213,7 +253,10 @@ async fn sdc_alloc_regions(
     // https://github.com/oxidecomputer/omicron/issues/613 , we
     // should consider using a paginated API to access regions, rather than
     // returning all of them at once.
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let datasets_and_regions = osagactx
         .datastore()
         .region_allocate(
@@ -251,7 +294,10 @@ async fn sdc_account_space(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
@@ -272,7 +318,10 @@ async fn sdc_account_space_undo(
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
@@ -308,7 +357,10 @@ async fn sdc_regions_ensure(
     // If a disk source was requested, set the read-only parent of this disk.
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
         match &params.create_params.disk_source {
@@ -354,15 +406,48 @@ async fn sdc_regions_ensure(
                     },
                 )?))
             }
-            params::DiskSource::Image { image_id: _ } => {
-                // Until we implement project images, do not allow disks to be
-                // created from a project image.
-                return Err(ActionError::action_failed(Error::InvalidValue {
-                    label: String::from("image"),
-                    message: String::from(
-                        "project image are not yet supported",
-                    ),
-                }));
+            params::DiskSource::Image { image_id } => {
+                debug!(log, "grabbing image {}", image_id);
+
+                let (.., image) =
+                    LookupPath::new(&opctx, &osagactx.datastore())
+                        .image_id(*image_id)
+                        .fetch()
+                        .await
+                        .map_err(ActionError::action_failed)?;
+
+                debug!(log, "retrieved project image {}", image.id());
+
+                debug!(
+                    log,
+                    "grabbing global image {} volume {}",
+                    image.id(),
+                    image.volume_id
+                );
+
+                let volume = osagactx
+                    .datastore()
+                    .volume_checkout(image.volume_id)
+                    .await
+                    .map_err(ActionError::action_failed)?;
+
+                debug!(
+                    log,
+                    "grabbed volume {}, with data {}",
+                    volume.id(),
+                    volume.data()
+                );
+
+                Some(Box::new(serde_json::from_str(volume.data()).map_err(
+                    |e| {
+                        ActionError::action_failed(Error::internal_error(
+                            &format!(
+                                "failed to deserialize volume data: {}",
+                                e,
+                            ),
+                        ))
+                    },
+                )?))
             }
             params::DiskSource::GlobalImage { image_id } => {
                 debug!(log, "grabbing image {}", image_id);
@@ -407,6 +492,7 @@ async fn sdc_regions_ensure(
                     },
                 )?))
             }
+            params::DiskSource::ImportingBlocks { block_size: _ } => None,
         };
 
     // Each ID should be unique to this disk
@@ -521,7 +607,10 @@ async fn sdc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
     osagactx.nexus().volume_delete(&opctx, volume_id).await?;
     Ok(())
@@ -533,7 +622,10 @@ async fn sdc_finalize_disk_record(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
@@ -553,14 +645,105 @@ async fn sdc_finalize_disk_record(
     // Action::Modify on Disks within the Project.  So this shouldn't break in
     // practice.  However, that's brittle.  It would be better if this were
     // better guaranteed.
-    datastore
-        .disk_update_runtime(
-            &opctx,
-            &authz_disk,
-            &disk_created.runtime().detach(),
-        )
+    match &params.create_params.disk_source {
+        params::DiskSource::ImportingBlocks { block_size: _ } => {
+            datastore
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &disk_created.runtime().import_ready(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+
+        _ => {
+            datastore
+                .disk_update_runtime(
+                    &opctx,
+                    &authz_disk,
+                    &disk_created.runtime().detach(),
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn sdc_get_pantry_address(
+    sagactx: NexusActionContext,
+) -> Result<SocketAddrV6, ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let datastore = osagactx.datastore();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    // Pick a random Pantry and use it for this disk. This will be the
+    // Pantry used for all subsequent import operations until the disk
+    // is "finalized".
+    let pantry_address = get_pantry_address(osagactx.nexus()).await?;
+
+    info!(
+        log,
+        "using pantry at {} for importing to disk {}", pantry_address, disk_id
+    );
+
+    let (.., authz_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+
+    datastore
+        .disk_set_pantry(&opctx, &authz_disk, pantry_address)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(pantry_address)
+}
+
+async fn sdc_call_pantry_attach_for_disk(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    call_pantry_attach_for_disk(
+        &log,
+        &opctx,
+        &osagactx.nexus(),
+        disk_id,
+        pantry_address,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn sdc_call_pantry_attach_for_disk_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
+
+    call_pantry_detach_for_disk(&log, disk_id, pantry_address).await?;
 
     Ok(())
 }
@@ -637,7 +820,7 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, authn::saga::Serialized,
-        context::OpContext, db::datastore::DataStore, external_api::params,
+        db::datastore::DataStore, external_api::params,
     };
     use async_bb8_diesel::{
         AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
@@ -645,8 +828,8 @@ pub(crate) mod test {
     };
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_ip_pool;
-    use nexus_test_utils::resource_helpers::create_organization;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
@@ -661,13 +844,11 @@ pub(crate) mod test {
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const DISK_NAME: &str = "my-disk";
-    const ORG_NAME: &str = "test-org";
     const PROJECT_NAME: &str = "springfield-squidport";
 
     async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
         create_ip_pool(&client, "p0", None).await;
-        create_organization(&client, ORG_NAME).await;
-        let project = create_project(client, ORG_NAME, PROJECT_NAME).await;
+        let project = create_project(client, PROJECT_NAME).await;
         project.identity.id
     }
 
@@ -781,9 +962,11 @@ pub(crate) mod test {
             .await
             .unwrap()
             .transaction_async(|conn| async move {
-                conn.batch_execute_async(crate::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
                 Ok::<_, crate::db::TransactionError<()>>(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::virtual_disk_bytes_provisioned.ne(0))
@@ -971,12 +1154,13 @@ pub(crate) mod test {
     async fn destroy_disk(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.apictx.nexus;
         let opctx = test_opctx(&cptestctx);
-        let disk_selector = params::DiskSelector::new(
-            Some(Name::try_from(ORG_NAME.to_string()).unwrap().into()),
-            Some(Name::try_from(PROJECT_NAME.to_string()).unwrap().into()),
-            Name::try_from(DISK_NAME.to_string()).unwrap().into(),
-        );
-        let disk_lookup = nexus.disk_lookup(&opctx, &disk_selector).unwrap();
+        let disk_selector = params::DiskSelector {
+            project: Some(
+                Name::try_from(PROJECT_NAME.to_string()).unwrap().into(),
+            ),
+            disk: Name::try_from(DISK_NAME.to_string()).unwrap().into(),
+        };
+        let disk_lookup = nexus.disk_lookup(&opctx, disk_selector).unwrap();
 
         nexus
             .project_delete_disk(&opctx, &disk_lookup)

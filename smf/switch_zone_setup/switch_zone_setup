@@ -1,0 +1,24 @@
+#!/bin/bash
+set -ex -o pipefail
+
+. /lib/svc/share/smf_include.sh
+
+# set up the users required for wicket.
+USERS=(wicket support)
+
+for user in ${USERS[@]}; do
+    if ! id -u $user >/dev/null 2>&1; then
+        # Add a new group for the user.
+        groupadd "$user"
+        # Add the user.
+        useradd -m -g "$user" "$user"
+        # Remove the password from the user to enable passwordless login.
+        passwd -d "$user"
+    fi
+done
+
+# enable ipv6 forwarding and routing
+pfexec routeadm -e ipv6-forwarding -u
+pfexec routeadm -e ipv6-routing -u
+
+exit $SMF_EXIT_OK

@@ -6,21 +6,11 @@ use super::instance_create::allocate_sled_ipv6;
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::sagas::declare_saga_actions;
 use crate::authn;
-use crate::context::OpContext;
 use crate::db::identity::Resource;
-use crate::db::model::IpKind;
 use crate::external_api::params;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_client::types::InstanceEnsureBody;
-use sled_agent_client::types::InstanceHardware;
-use sled_agent_client::types::InstanceMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateMigrateParams;
-use sled_agent_client::types::InstanceRuntimeStateRequested;
-use sled_agent_client::types::InstanceStateRequested;
-use sled_agent_client::types::SourceNatConfig;
 use std::net::Ipv6Addr;
 use steno::ActionError;
 use steno::Node;
@@ -48,6 +38,10 @@ declare_saga_actions! {
     INSTANCE_MIGRATE -> "instance_migrate" {
         // TODO robustness: This needs an undo action
         + sim_instance_migrate
+    }
+    V2P_ENSURE -> "v2p_ensure" {
+        // TODO robustness: This needs an undo action
+        + sim_v2p_ensure
     }
     CLEANUP_SOURCE -> "cleanup_source" {
         // TODO robustness: This needs an undo action. Is it even possible
@@ -87,6 +81,7 @@ impl NexusSaga for SagaInstanceMigrate {
         builder.append(allocate_propolis_ip_action());
         builder.append(migrate_prep_action());
         builder.append(instance_migrate_action());
+        builder.append(v2p_ensure_action());
         builder.append(cleanup_source_action());
 
         Ok(builder.build()?)
@@ -98,7 +93,10 @@ async fn sim_migrate_prep(
 ) -> Result<(Uuid, InstanceRuntimeState), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let migrate_uuid = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_propolis_uuid = sagactx.lookup::<Uuid>("dst_propolis_id")?;
@@ -127,16 +125,25 @@ async fn sim_allocate_propolis_ip(
     sagactx: NexusActionContext,
 ) -> Result<Ipv6Addr, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
     allocate_sled_ipv6(&opctx, sagactx, "dst_sled_uuid").await
 }
 
 async fn sim_instance_migrate(
-    sagactx: NexusActionContext,
+    _sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
+    todo!("Migration action not yet implemented");
+
+    /*
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = OpContext::for_saga_action(&sagactx, &params.serialized_authn);
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
 
     let migration_id = sagactx.lookup::<Uuid>("migrate_id")?;
     let dst_sled_id = params.migrate_params.dst_sled_id;
@@ -235,7 +242,7 @@ async fn sim_instance_migrate(
             &InstanceEnsureBody {
                 initial: instance_hardware,
                 target,
-                migrate: Some(InstanceMigrateParams {
+                migrate: Some(InstanceMigrationTargetParams {
                     src_propolis_addr: src_propolis_addr.to_string(),
                     src_propolis_id,
                 }),
@@ -250,6 +257,44 @@ async fn sim_instance_migrate(
     osagactx
         .datastore()
         .instance_update_runtime(&instance_id, &new_runtime_state.into())
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+        */
+}
+
+/// Add V2P mappings for the destination instance
+// Note this must run after sled_id of the instance is set to the destination
+// sled!
+async fn sim_v2p_ensure(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+    let (instance_id, _) =
+        sagactx.lookup::<(Uuid, InstanceRuntimeState)>("migrate_instance")?;
+
+    // TODO-performance the instance_put in sim_instance_migrate will *start* a
+    // migration, but the source and destination propolis servers will perform
+    // it asynchronously. If this step occurs before the source instance vCPUs
+    // are paused, updating the mappings here will briefly "disconnect" the
+    // source instance in the sense that it will be able to send packets out (as
+    // other instance's V2P mappings will be untouched) but will not be able to
+    // receive any packets (other instances will send packets to the destination
+    // propolis' sled but the destination instance vCPUs may not have started
+    // yet). Until the destination propolis takes over, there will be a inbound
+    // network outage for the instance.
+    //
+    // TODO-correctness if the migration fails, there's nothing that will unwind
+    // this and restore the original V2P mappings
+    osagactx
+        .nexus()
+        .create_instance_v2p_mappings(&opctx, instance_id)
         .await
         .map_err(ActionError::action_failed)?;
 

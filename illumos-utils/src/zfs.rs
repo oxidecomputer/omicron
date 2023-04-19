@@ -244,3 +244,30 @@ impl Zfs {
         Ok(value.to_string())
     }
 }
+
+/// Returns all datasets managed by Omicron
+pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
+    let mut datasets = vec![];
+
+    // Collect all datasets within Oxide zpools.
+    //
+    // This includes cockroachdb, clickhouse, and crucible datasets.
+    let zpools = crate::zpool::Zpool::list()?;
+    for pool in &zpools {
+        // For now, avoid erasing any datasets which exist on internal zpools.
+        if pool.kind() == crate::zpool::ZpoolKind::Internal {
+            continue;
+        }
+        let pool = pool.to_string();
+        for dataset in &Zfs::list_datasets(&pool)? {
+            datasets.push(format!("{pool}/{dataset}"));
+        }
+    }
+
+    // Collect all datasets for Oxide zones.
+    for dataset in &Zfs::list_datasets(&ZONE_ZFS_DATASET)? {
+        datasets.push(format!("{}/{dataset}", ZONE_ZFS_DATASET));
+    }
+
+    Ok(datasets)
+}

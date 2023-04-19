@@ -12,17 +12,21 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
     // Enum values
-    InternalDNS => b"internal_dns"
+    CruciblePantry => b"crucible_pantry"
+    Dendrite => b"dendrite"
+    ExternalDns => b"external_dns"
+    ExternalDnsConfig => b"external_dns_config"
+    InternalDns => b"internal_dns"
+    InternalDnsConfig => b"internal_dns_config"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
-    Dendrite => b"dendrite"
     Tfport => b"tfport"
-    CruciblePantry => b"crucible_pantry"
+    Ntp => b"ntp"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -46,8 +50,17 @@ impl From<ServiceUsingCertificate> for ServiceKind {
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
-            internal_api::params::ServiceKind::InternalDNS => {
-                ServiceKind::InternalDNS
+            internal_api::params::ServiceKind::ExternalDns => {
+                ServiceKind::ExternalDns
+            }
+            internal_api::params::ServiceKind::ExternalDnsConfig => {
+                ServiceKind::ExternalDnsConfig
+            }
+            internal_api::params::ServiceKind::InternalDns => {
+                ServiceKind::InternalDns
+            }
+            internal_api::params::ServiceKind::InternalDnsConfig => {
+                ServiceKind::InternalDnsConfig
             }
             internal_api::params::ServiceKind::Nexus { .. } => {
                 ServiceKind::Nexus
@@ -62,6 +75,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::CruciblePantry => {
                 ServiceKind::CruciblePantry
             }
+            internal_api::params::ServiceKind::Ntp => ServiceKind::Ntp,
         }
     }
 }

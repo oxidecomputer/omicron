@@ -5,9 +5,12 @@
 //! Bootstrap-related APIs.
 
 use super::client::Client as BootstrapAgentClient;
-use super::config::{Config, BOOTSTRAP_AGENT_PORT};
+use super::config::{
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+};
 use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
+use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::server::TrustQuorumMembership;
@@ -20,13 +23,17 @@ use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use crate::updates::UpdateManager;
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::dladm::{self, Dladm, GetMacError, PhysicalLink};
+use illumos_utils::dladm::{
+    self, Dladm, Etherstub, EtherstubVnic, GetMacError, PhysicalLink,
+};
 use illumos_utils::zfs::{
-    Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+    self, Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::{Error as ExternalError, MacAddr};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -67,7 +74,7 @@ pub enum BootstrapError {
     #[error("Error monitoring hardware: {0}")]
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
-    #[error("Error starting sled agent: {0}")]
+    #[error("Error managing sled agent: {0}")]
     SledError(String),
 
     #[error("Error deserializing toml from {path}: {err}")]
@@ -82,6 +89,12 @@ pub enum BootstrapError {
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
 
+    #[error("RSS is already executing, and should not run concurrently")]
+    ConcurrentRSSAccess,
+
+    #[error("Failed to initialize rack: {0}")]
+    RackSetup(#[from] crate::rack_setup::service::SetupServiceError),
+
     #[error(transparent)]
     GetMacError(#[from] GetMacError),
 
@@ -91,6 +104,12 @@ pub enum BootstrapError {
     #[error("Failed to delete VNIC on boot: {0}")]
     DeleteVnic(#[from] illumos_utils::dladm::DeleteVnicError),
 
+    #[error("Failed to get all datasets: {0}")]
+    ZfsDatasetsList(anyhow::Error),
+
+    #[error("Failed to destroy dataset: {0}")]
+    ZfsDestroy(#[from] zfs::DestroyDatasetError),
+
     #[error("Failed to ensure ZFS filesystem: {0}")]
     ZfsEnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
@@ -99,6 +118,9 @@ pub enum BootstrapError {
 
     #[error("Error managing guest networking: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
+
+    #[error("Error accessing version information: {0}")]
+    Version(#[from] crate::updates::Error),
 }
 
 impl From<BootstrapError> for ExternalError {
@@ -119,23 +141,62 @@ enum SledAgentState {
     After(SledServer),
 }
 
+fn underlay_etherstub() -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME)
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })
+}
+
+fn underlay_etherstub_vnic(
+    underlay_etherstub: &Etherstub,
+) -> Result<EtherstubVnic, BootstrapError> {
+    Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
+        BootstrapError::SledError(format!(
+            "Can't access etherstub VNIC device: {}",
+            e
+        ))
+    })
+}
+
+fn bootstrap_etherstub() -> Result<Etherstub, BootstrapError> {
+    Dladm::ensure_etherstub(illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME)
+        .map_err(|e| {
+            BootstrapError::SledError(format!(
+                "Can't access etherstub device: {}",
+                e
+            ))
+        })
+}
+
 /// The entity responsible for bootstrapping an Oxide rack.
-pub(crate) struct Agent {
+pub struct Agent {
     /// Debug log
     log: Logger,
     /// Store the parent log - without "component = BootstrapAgent" - so
     /// other launched components can set their own value.
     parent_log: Logger,
-    address: SocketAddrV6,
+
+    /// Bootstrap network address.
+    ip: Ipv6Addr,
+
+    /// Ensures that RSS (initialization or teardown) is not executed
+    /// concurrently.
+    rss_access: Mutex<()>,
 
     /// Our share of the rack secret, if we have one.
     share: Mutex<Option<ShareDistribution>>,
 
-    rss: Mutex<Option<RssHandle>>,
     sled_state: Mutex<SledAgentState>,
+    config: Config,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
+
+    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -159,23 +220,14 @@ fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
     )
 }
 
+// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+// could be randomly generated when it no longer needs to be durable.
 fn bootstrap_ip(
     link: PhysicalLink,
     interface_id: u64,
 ) -> Result<Ipv6Addr, dladm::GetMacError> {
     let mac = Dladm::get_mac(link)?;
     Ok(mac_to_bootstrap_ip(mac, interface_id))
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-fn bootstrap_address(
-    link: PhysicalLink,
-    interface_id: u64,
-    port: u16,
-) -> Result<SocketAddrV6, dladm::GetMacError> {
-    let ip = bootstrap_ip(link, interface_id)?;
-    Ok(SocketAddrV6::new(ip, port, 0, 0))
 }
 
 // Deletes all state which may be left-over from a previous execution of the
@@ -236,24 +288,15 @@ async fn cleanup_all_old_global_state(
 impl Agent {
     pub async fn new(
         log: Logger,
+        config: Config,
         sled_config: SledConfig,
-        link: PhysicalLink,
         sp: Option<SpHandle>,
     ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
         ));
-
-        let address = bootstrap_address(link.clone(), 1, BOOTSTRAP_AGENT_PORT)?;
-
-        // The only zone with a bootstrap ip address besides the global zone,
-        // is the switch zone. We allocate this address here since we have
-        // access to the physical link. This also allows us to keep bootstrap
-        // address allocation in one place.
-        //
-        // If other zones end up needing bootstrap addresses, we'll have to
-        // rethink this strategy, and plumb bootstrap adresses similar to
-        // underlay addresses.
+        let link = config.link.clone();
+        let ip = bootstrap_ip(link.clone(), 1)?;
         let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
@@ -272,15 +315,7 @@ impl Agent {
                 err,
             })?;
 
-        let bootstrap_etherstub = Dladm::ensure_etherstub(
-            illumos_utils::dladm::BOOTSTRAP_ETHERSTUB_NAME,
-        )
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })?;
+        let bootstrap_etherstub = bootstrap_etherstub()?;
 
         let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
             &bootstrap_etherstub,
@@ -294,15 +329,15 @@ impl Agent {
 
         Zones::ensure_has_global_zone_v6_address(
             bootstrap_etherstub_vnic.clone(),
-            *address.ip(),
+            ip,
             "bootstrap6",
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        let ddmd_client = DdmAdminClient::new(log.clone())?;
-        ddmd_client.advertise_prefix(Ipv6Subnet::new(*address.ip()));
+        let ddmd_client = DdmAdminClient::localhost(log.clone())?;
+        ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
         // necessary ZFS and Zone resources are ready.
@@ -319,25 +354,6 @@ impl Agent {
             true,
         )?;
 
-        // HardwareMonitor must be on the underlay network like all services
-        let underlay_etherstub = Dladm::ensure_etherstub(
-            illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
-        )
-        .map_err(|e| {
-            BootstrapError::SledError(format!(
-                "Can't access etherstub device: {}",
-                e
-            ))
-        })?;
-
-        let underlay_etherstub_vnic =
-            Dladm::ensure_etherstub_vnic(&underlay_etherstub).map_err(|e| {
-                BootstrapError::SledError(format!(
-                    "Can't access etherstub VNIC device: {}",
-                    e
-                ))
-            })?;
-
         // Before we start monitoring for hardware, ensure we're running from a
         // predictable state.
         //
@@ -347,29 +363,24 @@ impl Agent {
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
-        let hardware_monitor = HardwareMonitor::new(
-            &ba_log,
-            &sled_config,
-            underlay_etherstub,
-            underlay_etherstub_vnic,
-            bootstrap_etherstub,
-            switch_zone_bootstrap_address,
-        )
-        .await?;
 
         let agent = Agent {
             log: ba_log,
             parent_log: log,
-            address,
+            ip,
+            rss_access: Mutex::new(()),
             share: Mutex::new(None),
-            rss: Mutex::new(None),
-            sled_state: Mutex::new(SledAgentState::Before(Some(
-                hardware_monitor,
-            ))),
+            sled_state: Mutex::new(SledAgentState::Before(None)),
+            config: config.clone(),
             sled_config,
             sp,
             ddmd_client,
+            switch_zone_bootstrap_address,
         };
+
+        let hardware_monitor = agent.start_hardware_monitor().await?;
+        *agent.sled_state.lock().await =
+            SledAgentState::Before(Some(hardware_monitor));
 
         let request_path = get_sled_agent_request_path();
         let trust_quorum = if request_path.exists() {
@@ -399,6 +410,27 @@ impl Agent {
         Ok((agent, trust_quorum))
     }
 
+    async fn start_hardware_monitor(
+        &self,
+    ) -> Result<HardwareMonitor, BootstrapError> {
+        let underlay_etherstub = underlay_etherstub()?;
+        let underlay_etherstub_vnic =
+            underlay_etherstub_vnic(&underlay_etherstub)?;
+        let bootstrap_etherstub = bootstrap_etherstub()?;
+        let link = self.config.link.clone();
+        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
+        let hardware_monitor = HardwareMonitor::new(
+            &self.log,
+            &self.sled_config,
+            underlay_etherstub,
+            underlay_etherstub_vnic,
+            bootstrap_etherstub,
+            switch_zone_bootstrap_address,
+        )
+        .await?;
+        Ok(hardware_monitor)
+    }
+
     /// Initializes the Sled Agent on behalf of the RSS.
     ///
     /// If the Sled Agent has already been initialized:
@@ -419,7 +451,8 @@ impl Agent {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
                 if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone()).await?;
+                    self.establish_sled_quorum(share.clone(), request.subnet)
+                        .await?;
                     *self.share.lock().await = Some(share);
                 }
 
@@ -430,12 +463,17 @@ impl Agent {
                 // we should restart the hardware monitor, so we can react to
                 // changes in the switch regardless of the success or failure of
                 // this sled agent.
-                let (hardware, services) = hardware_monitor
-                    .take()
-                    .expect("Hardware Monitor does not exist")
-                    .stop()
-                    .await
-                    .expect("Failed to stop hardware monitor");
+                let (hardware, services) = match hardware_monitor.take() {
+                    // This is the normal case; transfer hardware monitoring responsibilities from
+                    // the bootstrap agent to the sled agent.
+                    Some(hardware_monitor) => hardware_monitor,
+                    // This is a less likely case, but if we previously failed to start (or
+                    // restart) the hardware monitor, for any reason, recreate it.
+                    None => self.start_hardware_monitor().await?,
+                }
+                .stop()
+                .await
+                .expect("Failed to stop hardware monitor");
 
                 // This acts like a "run-on-drop" closure, to restart the
                 // hardware monitor in the bootstrap agent if we fail to
@@ -577,8 +615,11 @@ impl Agent {
     async fn establish_sled_quorum(
         &self,
         share: ShareDistribution,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) -> Result<RackSecret, BootstrapError> {
-        let ddm_admin_client = DdmAdminClient::new(self.log.clone())?;
+        // Ask the switch zone's maghemite for peers
+        let ddm_admin_client =
+            DdmAdminClient::switch_zone(self.log.clone(), sled_subnet)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -633,7 +674,7 @@ impl Agent {
                     .map(|addr| {
                         let addr = SocketAddrV6::new(
                             addr,
-                            BOOTSTRAP_AGENT_PORT,
+                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
                             0,
                             0,
                         );
@@ -704,34 +745,218 @@ impl Agent {
         Ok(rack_secret)
     }
 
-    /// Initializes the Rack Setup Service, if requested by `config`.
-    pub async fn start_rss(
+    /// Runs the rack setup service to completion
+    pub async fn rack_initialize(
         &self,
-        config: &Config,
+        request: RackInitializeRequest,
     ) -> Result<(), BootstrapError> {
-        if let Some(rss_config) = &config.rss_config {
-            info!(&self.log, "bootstrap service initializing RSS");
-            let rss = RssHandle::start_rss(
-                &self.parent_log,
-                rss_config.clone(),
-                *self.address.ip(),
-                self.sp.clone(),
-                // TODO-cleanup: Remove this arg once RSS can discover the trust
-                // quorum members over the management network.
-                config
-                    .sp_config
-                    .as_ref()
-                    .map(|sp_config| sp_config.trust_quorum_members.clone())
-                    .unwrap_or_default(),
-            );
-            self.rss.lock().await.replace(rss);
-        }
+        // Avoid concurrent initialization and teardown.
+        let _rss_access = self
+            .rss_access
+            .try_lock()
+            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
+
+        RssHandle::run_rss(
+            &self.parent_log,
+            request,
+            self.ip,
+            self.switch_zone_bootstrap_address,
+            self.sp.clone(),
+            // TODO-cleanup: Remove this arg once RSS can discover the trust
+            // quorum members over the management network.
+            self.config
+                .sp_config
+                .as_ref()
+                .map(|sp_config| sp_config.trust_quorum_members.clone())
+                .unwrap_or_default(),
+        )
+        .await?;
         Ok(())
     }
 
-    /// Return the global zone address that the bootstrap agent binds to.
-    pub fn address(&self) -> SocketAddrV6 {
-        self.address
+    /// Runs the rack setup service to completion
+    pub async fn rack_reset(&self) -> Result<(), BootstrapError> {
+        // Avoid concurrent initialization and teardown.
+        let _rss_access = self
+            .rss_access
+            .try_lock()
+            .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
+
+        RssHandle::run_rss_reset(
+            &self.parent_log,
+            self.ip,
+            self.switch_zone_bootstrap_address,
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    // The following "_locked" functions act on global state,
+    // and take a MutexGuard as an argument, which may be unused.
+    //
+    // The input of the MutexGuard is intended to signify: this
+    // method should only be called when the sled agent has been
+    // dismantled, and is not concurrently executing!
+
+    // Uninstall all oxide zones (except the switch zone)
+    async fn uninstall_zones_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        const CONCURRENCY_CAP: usize = 32;
+        futures::stream::iter(Zones::get().await?)
+            .map(Ok::<_, anyhow::Error>)
+            .try_for_each_concurrent(CONCURRENCY_CAP, |zone| async move {
+                if zone.name() != "oxz_switch" {
+                    Zones::halt_and_remove(zone.name()).await?;
+                }
+                Ok(())
+            })
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        Ok(())
+    }
+
+    async fn uninstall_sled_local_config_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        tokio::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .or_else(|err| match err.kind() {
+                std::io::ErrorKind::NotFound => Ok(()),
+                _ => Err(err),
+            })
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Deleting {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+            .await
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Creating config directory {}",
+                    omicron_common::OMICRON_CONFIG_PATH
+                ),
+                err,
+            })?;
+        Ok(())
+    }
+
+    async fn uninstall_networking_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        // NOTE: This is very similar to the invocations
+        // in "sled_hardware::cleanup::cleanup_networking_resources",
+        // with a few notable differences:
+        //
+        // - We can't remove bootstrap-related networking -- this operation
+        // is performed via a request on the bootstrap network.
+        // - We avoid deleting addresses using the chelsio link. Removing
+        // these addresses would delete "cxgbe0/ll", and could render
+        // the sled inaccessible via a local interface.
+
+        sled_hardware::cleanup::delete_underlay_addresses(&self.log)
+            .map_err(BootstrapError::Cleanup)?;
+        sled_hardware::cleanup::delete_omicron_vnics(&self.log)
+            .await
+            .map_err(BootstrapError::Cleanup)?;
+        illumos_utils::opte::delete_all_xde_devices(&self.log)?;
+        Ok(())
+    }
+
+    async fn uninstall_storage_locked(
+        &self,
+        _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
+    ) -> Result<(), BootstrapError> {
+        let datasets = zfs::get_all_omicron_datasets_for_delete()
+            .map_err(BootstrapError::ZfsDatasetsList)?;
+        for dataset in &datasets {
+            info!(self.log, "Removing dataset: {dataset}");
+            zfs::Zfs::destroy_dataset(dataset)?;
+        }
+
+        Ok(())
+    }
+
+    /// Resets this sled, removing:
+    ///
+    /// - All control plane zones (except the switch zone)
+    /// - All sled-local configuration
+    /// - All underlay networking
+    /// - All storage managed by the control plane
+    ///
+    /// This API is intended to put the sled into a state where it can
+    /// subsequently be initialized via RSS.
+    pub async fn sled_reset(&self) -> Result<(), BootstrapError> {
+        let mut state = self.sled_state.lock().await;
+
+        if let SledAgentState::After(_) = &mut *state {
+            // We'd like to stop the old sled agent before starting a new
+            // hardware monitor -- however, if we cannot start a new hardware
+            // monitor, the bootstrap agent may be in a degraded state.
+            let server = match std::mem::replace(
+                &mut *state,
+                SledAgentState::Before(None),
+            ) {
+                SledAgentState::After(server) => server,
+                _ => panic!(
+                    "Unexpected state (we should have just matched on it)"
+                ),
+            };
+            server.close().await.map_err(BootstrapError::SledError)?;
+        };
+
+        // Try to reset the sled, but do not exit early on error.
+        let result = async {
+            self.uninstall_zones_locked(&state).await?;
+            self.uninstall_sled_local_config_locked(&state).await?;
+            self.uninstall_networking_locked(&state).await?;
+            self.uninstall_storage_locked(&state).await?;
+            Ok::<(), BootstrapError>(())
+        }
+        .await;
+
+        // Try to restart the bootstrap agent hardware monitor before
+        // returning any errors from reset.
+        match &mut *state {
+            SledAgentState::Before(None) => {
+                let hardware_monitor = self.start_hardware_monitor()
+                    .await
+                    .map_err(|err| {
+                        warn!(self.log, "Failed to restart bootstrap agent hardware monitor");
+                        err
+                    })?;
+                *state = SledAgentState::Before(Some(hardware_monitor));
+            }
+            _ => {}
+        };
+
+        // Return any errors encountered resetting the sled.
+        result
+    }
+
+    pub async fn components_get(
+        &self,
+    ) -> Result<Vec<crate::updates::Component>, BootstrapError> {
+        let updates = UpdateManager::new(self.sled_config.updates.clone());
+        let components = updates.components_get().await?;
+        Ok(components)
+    }
+
+    /// The GZ address used by the bootstrap agent for Sprockets.
+    pub fn sprockets_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    }
+
+    /// The address used by the bootstrap agent to serve a dropshot interface.
+    pub fn http_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_HTTP_PORT, 0, 0)
     }
 }
 
@@ -789,8 +1014,10 @@ mod tests {
                 rack_id: Uuid::new_v4(),
                 gateway: crate::bootstrap::params::Gateway {
                     address: None,
-                    mac: MacAddr6::nil(),
+                    mac: MacAddr6::nil().into(),
                 },
+                ntp_servers: vec![String::from("test.pool.example.com")],
+                dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
             trust_quorum_share: Some(

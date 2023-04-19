@@ -10,11 +10,6 @@
 /*
  * Important CockroachDB notes:
  *
- *    The syntax STRING(63) means a Unicode string with at most 63 code points,
- *    not 63 bytes.  In many cases, Nexus itself will validate a string's
- *    byte count or code points, so it's still reasonable to limit ourselves to
- *    powers of two (or powers-of-two-minus-one) to improve storage utilization.
- *
  *    For timestamps, CockroachDB's docs recommend TIMESTAMPTZ rather than
  *    TIMESTAMP.  This does not change what is stored with each datum, but
  *    rather how it's interpreted when clients use it.  It should make no
@@ -86,6 +81,10 @@ CREATE TABLE omicron.public.sled (
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
 
+    /* CPU & RAM summary for the sled */
+    usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
+
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
@@ -104,17 +103,61 @@ CREATE INDEX ON omicron.public.sled (
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE omicron.public.sled_resource_kind AS ENUM (
+    -- omicron.public.Dataset
+    'dataset',
+    -- omicron.public.service
+    'service',
+    -- omicron.public.instance
+    'instance',
+    -- omicron.public.sled
+    --
+    -- reserved as an approximation of sled internal usage, such as "by the OS
+    -- and all unaccounted services".
+    'reserved'
+);
+
+-- Accounting for programs using resources on a sled
+CREATE TABLE omicron.public.sled_resource (
+    -- Should match the UUID of the corresponding service
+    id UUID PRIMARY KEY,
+
+    -- The sled where resources are being consumed
+    sled_id UUID NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL,
+
+    -- The maximum number of hardware threads usable by this resource
+    hardware_threads INT8 NOT NULL,
+
+    -- The maximum amount of RSS RAM provisioned to this resource
+    rss_ram INT8 NOT NULL,
+
+    -- The maximum amount of Reservoir RAM provisioned to this resource
+    reservoir_ram INT8 NOT NULL
+);
+
+-- Allow looking up all resources which reside on a sled
+CREATE INDEX ON omicron.public.sled_resource (
+    sled_id
+);
+
 /*
  * Services
  */
 
 CREATE TYPE omicron.public.service_kind AS ENUM (
+  'crucible_pantry',
+  'dendrite',
+  'external_dns_config',
+  'external_dns',
+  'internal_dns_config',
   'internal_dns',
   'nexus',
+  'ntp',
   'oximeter',
-  'dendrite',
-  'tfport',
-  'crucible_pantry'
+  'tfport'
 );
 
 CREATE TABLE omicron.public.service (
@@ -127,13 +170,21 @@ CREATE TABLE omicron.public.service (
     sled_id UUID NOT NULL,
     /* The IP address of the service. */
     ip INET NOT NULL,
+    /* The UDP or TCP port on which the service listens. */
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
     /* Indicates the type of service. */
     kind omicron.public.service_kind NOT NULL
 );
 
 /* Add an index which lets us look up the services on a sled */
 CREATE INDEX ON omicron.public.service (
-    sled_id
+    sled_id,
+    id
+);
+
+CREATE INDEX ON omicron.public.service (
+    kind,
+    id
 );
 
 -- Extended information for services where "service.kind = nexus"
@@ -223,7 +274,6 @@ CREATE UNIQUE INDEX ON omicron.public.certificate (
 -- A table describing virtual resource provisioning which may be associated
 -- with a collection of objects, including:
 -- - Projects
--- - Organizations
 -- - Silos
 -- - Fleet
 CREATE TABLE omicron.public.virtual_provisioning_collection (
@@ -280,7 +330,7 @@ CREATE TABLE omicron.public.virtual_provisioning_resource (
 
 /*
  * ZPools of Storage, attached to Sleds.
- * Typically these are backed by a single physical disk.
+ * These are backed by a single physical disk.
  */
 CREATE TABLE omicron.public.Zpool (
     /* Identity metadata (asset) */
@@ -293,7 +343,8 @@ CREATE TABLE omicron.public.Zpool (
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
 
-    /* TODO: Could also store physical disk FK here */
+    /* FK into the Physical Disk table */
+    physical_disk_id UUID NOT NULL,
 
     total_size INT NOT NULL
 );
@@ -646,34 +697,6 @@ CREATE UNIQUE INDEX ON omicron.public.ssh_key (
     time_deleted IS NULL;
 
 /*
- * Organizations
- */
-
-CREATE TABLE omicron.public.organization (
-    /* Identity metadata */
-    id UUID PRIMARY KEY,
-
-    /* FK into Silo table */
-    silo_id UUID NOT NULL,
-
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-
-    /* child resource generation number, per RFD 192 */
-    rcgen INT NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.organization (
-    silo_id,
-    name
-) WHERE
-    time_deleted IS NULL;
-
-/*
  * Projects
  */
 
@@ -690,12 +713,12 @@ CREATE TABLE omicron.public.project (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    /* Which organization this project belongs to */
-    organization_id UUID NOT NULL /* foreign key into "Organization" table */
+    /* Which silo this project belongs to */
+    silo_id UUID NOT NULL /* foreign key into "silo" table */
 );
 
 CREATE UNIQUE INDEX ON omicron.public.project (
-    organization_id,
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;
@@ -767,18 +790,34 @@ CREATE TABLE omicron.public.instance (
      */
     migration_id UUID,
 
+    /*
+     * A generation number protecting information about the "location" of a
+     * running instance: its active server ID, Propolis ID and IP, and migration
+     * information. This is used for mutual exclusion (to allow only one
+     * migration to proceed at a time) and to coordinate state changes when a
+     * migration finishes.
+     */
+    propolis_generation INT NOT NULL,
+
     /* Instance configuration */
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL
 );
 
+-- Names for instances within a project should be unique
 CREATE UNIQUE INDEX ON omicron.public.instance (
     project_id,
     name
 ) WHERE
     time_deleted IS NULL;
 
+-- Allow looking up instances by server. This is particularly
+-- useful for resource accounting within a sled.
+CREATE INDEX ON omicron.public.instance (
+    active_server_id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * Guest-Visible, Virtual Disks
@@ -837,7 +876,7 @@ CREATE TABLE omicron.public.disk (
      */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
-    disk_state STRING(15) NOT NULL,
+    disk_state STRING(32) NOT NULL,
     /*
      * Every Disk may be attaching to, attached to, or detaching from at most
      * one Instance at a time.
@@ -850,7 +889,9 @@ CREATE TABLE omicron.public.disk (
     size_bytes INT NOT NULL,
     block_size omicron.public.block_size NOT NULL,
     origin_snapshot UUID,
-    origin_image UUID
+    origin_image UUID,
+
+    pantry_address TEXT
 );
 
 CREATE UNIQUE INDEX ON omicron.public.disk (
@@ -874,22 +915,70 @@ CREATE TABLE omicron.public.image (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    project_id UUID NOT NULL,
+    silo_id UUID NOT NULL,
+    project_id UUID,
+
     volume_id UUID NOT NULL,
 
     url STRING(8192),
-    version STRING(64),
+    os STRING(64) NOT NULL,
+    version STRING(64) NOT NULL,
     digest TEXT,
     block_size omicron.public.block_size NOT NULL,
     size_bytes INT NOT NULL
 );
 
+CREATE VIEW omicron.public.project_image AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    silo_id,
+    project_id,
+    volume_id,
+    url,
+    os,
+    version,
+    digest,
+    block_size,
+    size_bytes
+FROM 
+    omicron.public.image
+WHERE 
+    project_id IS NOT NULL;
+
+CREATE VIEW omicron.public.silo_image AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    silo_id,
+    volume_id,
+    url,
+    os,
+    version,
+    digest,
+    block_size,
+    size_bytes
+FROM 
+    omicron.public.image
+WHERE 
+    project_id IS NULL;
+
 CREATE UNIQUE INDEX on omicron.public.image (
+    silo_id,
     project_id,
     name
 ) WHERE
     time_deleted is NULL;
 
+/* TODO-v1: Delete this after migration */
 CREATE TABLE omicron.public.global_image (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1060,6 +1149,15 @@ CREATE UNIQUE INDEX ON omicron.public.vpc_subnet (
 ) WHERE
     time_deleted IS NULL;
 
+/* The kind of network interface. */
+CREATE TYPE omicron.public.network_interface_kind AS ENUM (
+    /* An interface attached to a guest instance. */
+    'instance',
+
+    /* An interface attached to a service. */
+    'service'
+);
+
 CREATE TABLE omicron.public.network_interface (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1070,11 +1168,14 @@ CREATE TABLE omicron.public.network_interface (
     /* Indicates that the object has been deleted */
     time_deleted TIMESTAMPTZ,
 
-    /* FK into Instance table.
-     * Note that interfaces are always attached to a particular instance.
-     * IP addresses may be reserved, but this is a different resource.
+    /* The kind of network interface, e.g., instance */
+    kind omicron.public.network_interface_kind NOT NULL,
+
+    /*
+     * FK into the parent resource of this interface (e.g. Instance, Service)
+     * as determined by the `kind`.
      */
-    instance_id UUID NOT NULL,
+    parent_id UUID NOT NULL,
 
     /* FK into VPC table */
     vpc_id UUID NOT NULL,
@@ -1089,20 +1190,64 @@ CREATE TABLE omicron.public.network_interface (
      */
     mac INT8 NOT NULL,
 
+    /* The private VPC IP address of the interface. */
     ip INET NOT NULL,
+
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
      * `crate::nexus::MAX_NICS_PER_INSTANCE`.
      */
     slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
 
-    /* True if this interface is the primary interface for the instance.
+    /* True if this interface is the primary interface.
      *
      * The primary interface appears in DNS and its address is used for external
-     * connectivity for the instance.
+     * connectivity.
      */
     is_primary BOOL NOT NULL
 );
+
+/* A view of the network_interface table for just instance-kind records. */
+CREATE VIEW omicron.public.instance_network_interface AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    parent_id AS instance_id,
+    vpc_id,
+    subnet_id,
+    mac,
+    ip,
+    slot,
+    is_primary
+FROM
+    omicron.public.network_interface
+WHERE
+    kind = 'instance';
+
+/* A view of the network_interface table for just service-kind records. */
+CREATE VIEW omicron.public.service_network_interface AS
+SELECT
+    id,
+    name,
+    description,
+    time_created,
+    time_modified,
+    time_deleted,
+    parent_id AS service_id,
+    vpc_id,
+    subnet_id,
+    mac,
+    ip,
+    slot,
+    is_primary
+FROM
+    omicron.public.network_interface
+WHERE
+    kind = 'service';
 
 /* TODO-completeness
 
@@ -1129,17 +1274,18 @@ CREATE UNIQUE INDEX ON omicron.public.network_interface (
     time_deleted IS NULL;
 
 /*
- * Index used to verify that an Instance's networking is contained
- * within a single VPC, and that all interfaces are in unique VPC
- * Subnets.
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) are contained within a single VPC, and that all interfaces are
+ * in unique VPC Subnets.
  *
- * This is also used to quickly find the primary interface for an
- * instance, since we store the `is_primary` column. Such queries are
- * mostly used when setting a new primary interface for an instance.
+ * This is also used to quickly find the primary interface since
+ * we store the `is_primary` column. Such queries are mostly used
+ * when setting a new primary interface.
  */
 CREATE UNIQUE INDEX ON omicron.public.network_interface (
-    instance_id,
-    name
+    parent_id,
+    name,
+    kind
 )
 STORING (vpc_id, subnet_id, is_primary)
 WHERE
@@ -1558,7 +1704,7 @@ CREATE TYPE omicron.public.update_artifact_kind AS ENUM (
     'switch_rot'
 );
 
-CREATE TABLE omicron.public.update_available_artifact (
+CREATE TABLE omicron.public.update_artifact (
     name STRING(63) NOT NULL,
     version STRING(63) NOT NULL,
     kind omicron.public.update_artifact_kind NOT NULL,
@@ -1578,7 +1724,7 @@ CREATE TABLE omicron.public.update_available_artifact (
 );
 
 /* This index is used to quickly find outdated artifacts. */
-CREATE INDEX ON omicron.public.update_available_artifact (
+CREATE INDEX ON omicron.public.update_artifact (
     targets_role_version
 );
 
@@ -1719,6 +1865,102 @@ CREATE TABLE omicron.public.update_deployment (
 
 CREATE INDEX on omicron.public.update_deployment (
     time_created
+);
+
+/*******************************************************************/
+
+/*
+ * DNS Propagation
+ *
+ * The tables here are the source of truth of DNS data for both internal and
+ * external DNS.
+ */
+
+/*
+ * A DNS group is a collection of DNS zones covered by a single version number.
+ * We have two DNS Groups in our system: "internal" (for internal service
+ * discovery) and "external" (which we expose on customer networks to provide
+ * DNS for our own customer-facing services, like the API and console).
+ *
+ * Each DNS server is associated with exactly one DNS group.  Nexus propagates
+ * the entire contents of a DNS group (i.e., all of its zones and all of those
+ * zones' DNS names and associated records) to every server in that group.
+ */
+CREATE TYPE omicron.public.dns_group AS ENUM (
+    'internal',
+    'external'
+);
+
+/*
+ * A DNS Zone is basically just a DNS name at the root of a subtree served by
+ * one of our DNS servers.  In a typical system, there would be two DNS zones:
+ *
+ * (1) in the "internal" DNS group, a zone called "control-plane.oxide.internal"
+ *     used by the control plane for internal service discovery
+ *
+ * (2) in the "external" DNS group, a zone whose name is owned by the customer
+ *     and specified when the rack is set up for the first time.  We will use
+ *     this zone to advertise addresses for the services we provide on the
+ *     customer network (i.e., the API and console).
+ */
+CREATE TABLE omicron.public.dns_zone (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    dns_group omicron.public.dns_group NOT NULL,
+    zone_name TEXT NOT NULL
+);
+
+/*
+ * It's allowed (although probably not correct) for the same DNS zone to appear
+ * in both the internal and external groups.  It is not allowed to specify the
+ * same DNS zone twice within the same group.
+ */
+CREATE UNIQUE INDEX ON omicron.public.dns_zone (
+    dns_group, zone_name
+);
+
+/*
+ * All the data associated with a DNS group is gathered together and assigned a
+ * single version number, sometimes called a generation number.  When changing
+ * the DNS data for a group (e.g., to add a new DNS name), clients first insert
+ * a new row into this table with the next available generation number.  (This
+ * table is not strictly necessary.  Instead, we could put the current version
+ * number for the group into a `dns_group` table, and clients could update that
+ * instead of inserting into this table.  But by using a table here, we have a
+ * debugging record of all past generation updates, including metadata about who
+ * created them and why.)
+ */
+CREATE TABLE omicron.public.dns_version (
+    dns_group omicron.public.dns_group NOT NULL,
+    version INT8 NOT NULL,
+
+    /* These fields are for debugging only. */
+    time_created TIMESTAMPTZ NOT NULL,
+    creator TEXT NOT NULL,
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY(dns_group, version)
+);
+
+/*
+ * The meat of the DNS data: a list of DNS names.  Each name has one or more
+ * records stored in JSON.
+ *
+ * To facilitate clients getting a consistent snapshot of the DNS data at a
+ * given version, each name is stored with the version in which it was added and
+ * (optionally) the version in which it was removed.  The name and record data
+ * are immutable, so changing the records for a given name should be expressed
+ * as removing the old name (setting "version_removed") and creating a new
+ * record for the same name at a new version.
+ */
+CREATE TABLE omicron.public.dns_name (
+    dns_zone_id UUID NOT NULL,
+    version_added INT8 NOT NULL,
+    version_removed INT8,
+    name TEXT NOT NULL,
+    dns_record_data JSONB NOT NULL,
+
+    PRIMARY KEY (dns_zone_id, version_added, name)
 );
 
 /*******************************************************************/

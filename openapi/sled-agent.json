@@ -82,7 +82,7 @@
     },
     "/instances/{instance_id}": {
       "put": {
-        "operationId": "instance_put",
+        "operationId": "instance_register",
         "parameters": [
           {
             "in": "path",
@@ -111,6 +111,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstanceRuntimeState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "instance_unregister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceUnregisterResponse"
                 }
               }
             }
@@ -178,9 +210,9 @@
         }
       }
     },
-    "/instances/{instance_id}/serial": {
-      "get": {
-        "operationId": "instance_serial_get",
+    "/instances/{instance_id}/state": {
+      "put": {
+        "operationId": "instance_put_state",
         "parameters": [
           {
             "in": "path",
@@ -190,48 +222,25 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "in": "query",
-            "name": "from_start",
-            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "most_recent",
-            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstancePutStateBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InstanceSerialConsoleData"
+                  "$ref": "#/components/schemas/InstancePutStateResponse"
                 }
               }
             }
@@ -271,6 +280,52 @@
         }
       }
     },
+    "/sled-role": {
+      "get": {
+        "operationId": "sled_role_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledRole"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/timesync": {
+      "get": {
+        "operationId": "timesync_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimeSync"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update": {
       "post": {
         "operationId": "update_artifact",
@@ -279,6 +334,80 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateArtifactId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v2p/{interface_id}": {
+      "put": {
+        "summary": "Create a mapping from a virtual NIC to a physical host",
+        "operationId": "set_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a mapping from a virtual NIC to a physical host",
+        "operationId": "del_v2p",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "interface_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
               }
             }
           },
@@ -521,7 +650,7 @@
         "enum": [
           "tofino_asic",
           "tofino_stub",
-          "softnpu"
+          "soft_npu"
         ]
       },
       "DiskEnsureBody": {
@@ -635,6 +764,66 @@
                 "type": "string",
                 "enum": [
                   "detached"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is ready to receive blocks from an external source",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "import_ready"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from a URL",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_url"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is importing blocks from bulk writes",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "importing_from_bulk_writes"
+                ]
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          {
+            "description": "Disk is being finalized to state Detached",
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "finalizing"
                 ]
               }
             },
@@ -815,6 +1004,13 @@
           }
         ]
       },
+      "DiskType": {
+        "type": "string",
+        "enum": [
+          "U2",
+          "M2"
+        ]
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -888,38 +1084,20 @@
         "minimum": 0
       },
       "InstanceEnsureBody": {
-        "description": "Sent to a sled agent to establish the runtime state of an Instance",
+        "description": "The body of a request to ensure that an instance is known to a sled agent.",
         "type": "object",
         "properties": {
           "initial": {
-            "description": "Last runtime state of the Instance known to Nexus (used if the agent has never seen this Instance before).",
+            "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceHardware"
               }
             ]
-          },
-          "migrate": {
-            "nullable": true,
-            "description": "If we're migrating this instance, the details needed to drive the migration",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceMigrateParams"
-              }
-            ]
-          },
-          "target": {
-            "description": "requested runtime state of the Instance",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeStateRequested"
-              }
-            ]
           }
         },
         "required": [
-          "initial",
-          "target"
+          "initial"
         ]
       },
       "InstanceHardware": {
@@ -996,13 +1174,16 @@
           "snapshot_id"
         ]
       },
-      "InstanceMigrateParams": {
+      "InstanceMigrationTargetParams": {
+        "description": "Parameters used when directing Propolis to initialize itself via live migration.",
         "type": "object",
         "properties": {
           "src_propolis_addr": {
+            "description": "The address of the Propolis server that will serve as the migration source.",
             "type": "string"
           },
           "src_propolis_id": {
+            "description": "The Propolis ID of the migration source.",
             "type": "string",
             "format": "uuid"
           }
@@ -1011,6 +1192,38 @@
           "src_propolis_addr",
           "src_propolis_id"
         ]
+      },
+      "InstancePutStateBody": {
+        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The state into which the instance should be driven.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceStateRequested"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "InstancePutStateResponse": {
+        "description": "The response sent from a request to move an instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          }
+        }
       },
       "InstanceRuntimeState": {
         "description": "Runtime state of the Instance, including the actual running state and minimal metadata\n\nThis state is owned by the sled agent running that Instance.",
@@ -1061,6 +1274,14 @@
             "description": "address of propolis-server running this Instance",
             "type": "string"
           },
+          "propolis_gen": {
+            "description": "The generation number for the Propolis and sled identifiers for this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "propolis_id": {
             "description": "which propolis-server is running this Instance",
             "type": "string",
@@ -1090,73 +1311,11 @@
           "hostname",
           "memory",
           "ncpus",
+          "propolis_gen",
           "propolis_id",
           "run_state",
           "sled_id",
           "time_updated"
-        ]
-      },
-      "InstanceRuntimeStateMigrateParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "migration_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_propolis_id",
-          "migration_id"
-        ]
-      },
-      "InstanceRuntimeStateRequested": {
-        "description": "Used to request an Instance state change from a sled agent\n\nRight now, it's only the run state and migration id that can be changed, though we might want to support changing properties like \"ncpus\" here.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeStateMigrateParams"
-              }
-            ]
-          },
-          "run_state": {
-            "$ref": "#/components/schemas/InstanceStateRequested"
-          }
-        },
-        "required": [
-          "run_state"
-        ]
-      },
-      "InstanceSerialConsoleData": {
-        "description": "Contents of an Instance's serial console buffer.",
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The bytes starting from the requested offset up to either the end of the buffer or the request's `max_bytes`. Provided as a u8 array rather than a string, as it may not be UTF-8.",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "last_byte_offset": {
-            "description": "The absolute offset since boot (suitable for use as `byte_offset` in a subsequent request) of the last byte returned in `data`.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "data",
-          "last_byte_offset"
         ]
       },
       "InstanceState": {
@@ -1238,41 +1397,85 @@
         "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
         "oneOf": [
           {
+            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_target"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
             "description": "Start the instance if it is not already running.",
-            "type": "string",
-            "enum": [
-              "running"
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           },
           {
             "description": "Stop the instance.",
-            "type": "string",
-            "enum": [
-              "stopped"
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           },
           {
-            "description": "Issue a reset command to the instance, such that it should stop and then immediately become running.",
-            "type": "string",
-            "enum": [
-              "reboot"
-            ]
-          },
-          {
-            "description": "Migrate the instance to another node.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
-            "description": "Stop the instance and delete it.",
-            "type": "string",
-            "enum": [
-              "destroyed"
+            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reboot"
+                ]
+              }
+            },
+            "required": [
+              "type"
             ]
           }
         ]
+      },
+      "InstanceUnregisterResponse": {
+        "description": "The response sent from a request to unregister an instance.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          }
+        }
       },
       "IpNet": {
         "oneOf": [
@@ -1337,8 +1540,8 @@
         "title": "A MAC address",
         "description": "A Media Access Control address, in EUI-48 format",
         "type": "string",
-        "pattern": "^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$",
-        "minLength": 17,
+        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
+        "minLength": 5,
         "maxLength": 17
       },
       "Name": {
@@ -1353,6 +1556,10 @@
         "description": "Information required to construct a virtual network interface for a guest",
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "ip": {
             "type": "string",
             "format": "ip"
@@ -1379,6 +1586,7 @@
           }
         },
         "required": [
+          "id",
           "ip",
           "mac",
           "name",
@@ -1387,6 +1595,10 @@
           "subnet",
           "vni"
         ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
         "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
@@ -1436,7 +1648,29 @@
               "dns_address": {
                 "type": "string"
               },
-              "server_address": {
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "type": "string"
+              },
+              "http_address": {
                 "type": "string"
               },
               "type": {
@@ -1448,7 +1682,7 @@
             },
             "required": [
               "dns_address",
-              "server_address",
+              "http_address",
               "type"
             ]
           },
@@ -1543,6 +1777,60 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "boundary": {
+                "type": "boolean"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ntp"
+                ]
+              }
+            },
+            "required": [
+              "boundary",
+              "dns_servers",
+              "ntp_servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "maghemite"
+                ]
+              }
+            },
+            "required": [
+              "mode",
+              "type"
+            ]
           }
         ]
       },
@@ -1586,6 +1874,50 @@
           "zone_type"
         ]
       },
+      "SetVirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
+        ]
+      },
+      "SledRole": {
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
+        ]
+      },
       "Slot": {
         "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
         "type": "integer",
@@ -1620,6 +1952,30 @@
           "last_port"
         ]
       },
+      "TimeSync": {
+        "type": "object",
+        "properties": {
+          "correction": {
+            "description": "The current offset between the NTP clock and system clock.",
+            "type": "number",
+            "format": "double"
+          },
+          "skew": {
+            "description": "The estimated error bound on the frequency.",
+            "type": "number",
+            "format": "double"
+          },
+          "sync": {
+            "description": "The synchronization state of the sled, true when the system clock and the NTP clock are in sync (to within a small window).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "correction",
+          "skew",
+          "sync"
+        ]
+      },
       "UpdateArtifactId": {
         "description": "An identifier for a single update artifact.",
         "type": "object",
@@ -1638,7 +1994,11 @@
           },
           "version": {
             "description": "The artifact's version.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SemverVersion"
+              }
+            ]
           }
         },
         "required": [
@@ -1900,22 +2260,28 @@
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "external_dns",
           "internal_dns",
           "nexus",
           "oximeter",
           "switch",
-          "crucible_pantry"
+          "crucible_pantry",
+          "ntp"
         ]
       },
       "Zpool": {
         "type": "object",
         "properties": {
+          "disk_type": {
+            "$ref": "#/components/schemas/DiskType"
+          },
           "id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
+          "disk_type",
           "id"
         ]
       }

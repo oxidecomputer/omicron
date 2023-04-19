@@ -8,17 +8,19 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
+use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
+use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
-use internal_dns_names::{ServiceName, AAAA, SRV};
+use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
-use std::collections::HashMap;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddr;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
@@ -32,10 +34,10 @@ pub struct Server {
     /// real internal dns server storage dir
     pub dns_server_storage_dir: tempfile::TempDir,
     /// real internal dns server
-    pub dns_server: dns_server::dns_server::Server,
+    pub dns_server: dns_server::dns_server::ServerHandle,
     /// real internal dns dropshot server
     pub dns_dropshot_server:
-        dropshot::HttpServer<Arc<dns_server::dropshot_server::Context>>,
+        dropshot::HttpServer<dns_server::http_server::Context>,
 }
 
 impl Server {
@@ -86,14 +88,21 @@ impl Server {
             (nexus_client
                 .sled_agent_put(
                     &config.id,
-                    &nexus_client::types::SledAgentStartupInfo {
+                    &NexusTypes::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
-                        role: nexus_client::types::SledRole::Gimlet,
-                        baseboard: nexus_client::types::Baseboard {
+                        role: NexusTypes::SledRole::Gimlet,
+                        baseboard: NexusTypes::Baseboard {
                             identifier: String::from("Unknown"),
                             model: String::from("Unknown"),
                             revision: 0,
                         },
+                        usable_hardware_threads: config
+                            .hardware
+                            .hardware_threads,
+                        usable_physical_ram: NexusTypes::ByteCount::try_from(
+                            config.hardware.physical_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)
@@ -117,7 +126,20 @@ impl Server {
         // on the physical rack.
         for zpool in &config.storage.zpools {
             let zpool_id = uuid::Uuid::new_v4();
-            sled_agent.create_zpool(zpool_id, zpool.size).await;
+            let vendor = "synthetic-vendor".to_string();
+            let serial = format!("synthetic-serial-{zpool_id}");
+            let model = "synthetic-model".to_string();
+            sled_agent
+                .create_external_physical_disk(
+                    vendor.clone(),
+                    serial.clone(),
+                    model.clone(),
+                )
+                .await;
+
+            sled_agent
+                .create_zpool(zpool_id, vendor, serial, model, zpool.size)
+                .await;
             let dataset_id = uuid::Uuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
@@ -153,69 +175,97 @@ impl Server {
         let dns_server_storage_dir =
             tempfile::tempdir().map_err(|e| e.to_string())?;
 
-        let dns_server_config = dns_server::Config {
-            log: dropshot::ConfigLogging::StderrTerminal {
-                level: dropshot::ConfigLoggingLevel::Trace,
-            },
-            dropshot: dropshot::ConfigDropshot {
-                bind_address: "[::1]:0".parse().unwrap(),
-                ..Default::default()
-            },
-            data: dns_server::dns_data::Config {
-                nmax_messages: 16,
+        let dns_log = log.new(o!("kind" => "dns"));
+
+        let store = dns_server::storage::Store::new(
+            log.new(o!("component" => "store")),
+            &dns_server::storage::Config {
+                keep_old_generations: 3,
                 storage_path: dns_server_storage_dir
                     .path()
                     .to_string_lossy()
-                    .to_string(),
+                    .to_string()
+                    .into(),
             },
-        };
-        let dns_log = log.new(o!("kind" => "dns"));
-        let zone = "control-plane.oxide.internal".to_string();
-        let dns_address: SocketAddrV6 = "[::1]:0".parse().unwrap();
+        )
+        .context("initializing DNS storage")
+        .map_err(|e| e.to_string())?;
 
-        let (dns_server, dns_dropshot_server) = dns_server::start(
+        let (dns_server, dns_dropshot_server) = dns_server::start_servers(
             dns_log,
-            dns_server_config,
-            zone,
-            dns_address.into(),
+            store,
+            &dns_server::dns_server::Config {
+                bind_address: "[::1]:0".parse().unwrap(),
+            },
+            &dropshot::ConfigDropshot {
+                bind_address: "[::1]:0".parse().unwrap(),
+                ..Default::default()
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
 
         // Insert SRV and AAAA record for Crucible Pantry
-        let mut records: HashMap<_, Vec<(_, SocketAddrV6)>> = HashMap::new();
-        records
-            .entry(SRV::Service(ServiceName::CruciblePantry))
-            .or_insert_with(Vec::new)
-            .push((
-                AAAA::Zone(pantry_server.server.app_private().id),
-                match pantry_server.addr() {
-                    SocketAddr::V6(v6) => v6,
+        let mut dns = internal_dns::DnsConfigBuilder::new();
+        let pantry_zone_id = pantry_server.server.app_private().id;
+        let pantry_addr = match pantry_server.addr() {
+            SocketAddr::V6(v6) => v6,
+            SocketAddr::V4(_) => {
+                panic!("pantry address must be IPv6");
+            }
+        };
+        let pantry_zone = dns
+            .host_zone(pantry_zone_id, *pantry_addr.ip())
+            .expect("failed to set up DNS");
+        dns.service_backend_zone(
+            ServiceName::CruciblePantry,
+            &pantry_zone,
+            pantry_addr.port(),
+        )
+        .expect("failed to set up DNS");
 
-                    SocketAddr::V4(_) => {
-                        panic!("pantry address must be IPv6");
-                    }
-                },
-            ));
-
-        let dns_client = dns_service_client::multiclient::Updater::new(
-            &dns_service_client::multiclient::ServerAddresses {
-                dropshot_server_addrs: vec![dns_dropshot_server.local_addr()],
-                dns_server_addrs: vec![],
-            },
-            log.new(o!("kind" => "dns-client")),
+        let dns_config = dns.build();
+        let dns_config_client = dns_service_client::Client::new(
+            &format!("http://{}", dns_dropshot_server.local_addr()),
+            log.clone(),
         );
-
-        dns_client
-            .insert_dns_records(&records)
+        dns_config_client
+            .dns_config_put(&dns_config)
             .await
+            .context("initializing DNS")
             .map_err(|e| e.to_string())?;
 
+        // Record the internal DNS server as though RSS had provisioned it so
+        // that Nexus knows about it.
+        let dns_bound = match dns_server.local_address() {
+            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V6(a) => *a,
+        };
+        let http_bound = match dns_dropshot_server.local_addr() {
+            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V6(a) => a,
+        };
+        let services = vec![
+            NexusTypes::ServicePutRequest {
+                address: dns_bound.to_string(),
+                kind: NexusTypes::ServiceKind::InternalDns,
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+            },
+            NexusTypes::ServicePutRequest {
+                address: http_bound.to_string(),
+                kind: NexusTypes::ServiceKind::InternalDnsConfig,
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+            },
+        ];
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
-            services: vec![],
+            services,
             datasets,
             internal_services_ip_pool_ranges: vec![],
             certs: vec![],
+            internal_dns_zone_config: d2n_params(&dns_config),
         };
 
         Ok((

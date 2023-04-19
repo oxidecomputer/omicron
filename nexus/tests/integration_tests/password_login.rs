@@ -45,7 +45,7 @@ async fn test_local_users(cptestctx: &ControlPlaneTestContext) {
     test_local_user_with_no_initial_password(client, &silo).await;
     NexusRequest::object_delete(
         client,
-        &format!("/system/silos/{}", silo_name),
+        &format!("/v1/system/silos/{}", silo_name),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
@@ -99,14 +99,14 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
-    assert_eq!(created_user, found_user);
+    assert_eq!(created_user, found_user.user);
 
     // While we're still logged in, change the password.
     let test_password2 =
         params::Password::from_str("as was the style at the time").unwrap();
     let user_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
-        silo_name, created_user.id
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
+        created_user.id, silo_name
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
@@ -170,11 +170,11 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
     )
     .await;
     let admin_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
-        silo_name, admin_user_obj.id
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
+        admin_user_obj.id, silo_name
     );
 
-    let silo_url = format!("/system/silos/{}", silo_name);
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
     grant_iam(
         client,
         &silo_url,
@@ -328,8 +328,8 @@ async fn test_local_user_with_no_initial_password(
     // Now, set a password.
     let test_password2 = params::Password::from_str("joshua").unwrap();
     let user_password_url = format!(
-        "/system/silos/{}/identity-providers/local/users/{}/set-password",
-        silo_name, created_user.id
+        "/v1/system/identity-providers/local/users/{}/set-password?silo={}",
+        created_user.id, silo_name,
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &user_password_url)
@@ -352,20 +352,17 @@ async fn test_local_user_with_no_initial_password(
     )
     .await;
     let found_user = expect_session_valid(client, &session_token).await;
-    assert_eq!(created_user, found_user);
+    assert_eq!(created_user, found_user.user);
 }
 
 async fn expect_session_valid(
     client: &ClientTestContext,
     session_token: &str,
-) -> views::User {
-    NexusRequest::object_get(client, "/session/me")
+) -> views::CurrentUser {
+    NexusRequest::object_get(client, "/v1/me")
         .authn_as(AuthnMode::Session(session_token.to_string()))
-        .execute()
+        .execute_and_parse_unwrap::<views::CurrentUser>()
         .await
-        .expect("expected successful request, but it failed")
-        .parsed_body()
-        .expect("failed to parse /session/me response body")
 }
 
 async fn expect_session_invalid(
@@ -376,7 +373,7 @@ async fn expect_session_invalid(
         client,
         StatusCode::UNAUTHORIZED,
         Method::GET,
-        "/session/me",
+        "/v1/me",
     )
     .authn_as(AuthnMode::Session(session_token.to_string()))
     .execute()

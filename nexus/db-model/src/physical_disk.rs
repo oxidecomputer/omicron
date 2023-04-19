@@ -47,6 +47,20 @@ impl PhysicalDisk {
         }
     }
 
+    pub fn uuid(&self) -> Uuid {
+        self.identity.id
+    }
+
+    // This is slightly gross, but:
+    // the `authz_resource` macro really expects that the "primary_key"
+    // for an object can be acquired by "id()".
+    //
+    // The PhysicalDisk object does actually have a separate convenience
+    // UUID, but may be looked by up vendor/serial/model too.
+    pub fn id(&self) -> (String, String, String) {
+        (self.vendor.clone(), self.serial.clone(), self.model.clone())
+    }
+
     pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
         self.time_deleted
     }

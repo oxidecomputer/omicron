@@ -6,7 +6,7 @@
 
 use crate::api::external::{
     ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
-    Vni,
+    SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use parse_display::{Display, FromStr};
@@ -14,7 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::Duration;
-use strum::EnumIter;
+use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 /// Runtime state of the Disk, which includes its attach state and some minimal
@@ -47,6 +47,9 @@ pub struct InstanceRuntimeState {
     pub propolis_addr: Option<SocketAddr>,
     /// migration id (if one in process)
     pub migration_id: Option<Uuid>,
+    /// The generation number for the Propolis and sled identifiers for this
+    /// instance.
+    pub propolis_gen: Generation,
     /// number of CPUs allocated for this Instance
     pub ncpus: InstanceCpuCount,
     /// memory allocated for this Instance
@@ -97,7 +100,7 @@ pub struct UpdateArtifactId {
     pub name: String,
 
     /// The artifact's version.
-    pub version: String,
+    pub version: SemverVersion,
 
     /// The kind of update artifact this is.
     pub kind: KnownArtifactKind,
@@ -174,10 +177,19 @@ pub enum KnownArtifactKind {
     SwitchRot,
 }
 
+impl KnownArtifactKind {
+    /// Returns an iterator over all the variants in this struct.
+    ///
+    /// This is provided as a helper so dependent packages don't have to pull in
+    /// strum explicitly.
+    pub fn iter() -> KnownArtifactKindIter {
+        <Self as IntoEnumIterator>::iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn known_artifact_kind_roundtrip() {

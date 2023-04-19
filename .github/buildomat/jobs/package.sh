@@ -3,17 +3,23 @@
 #: name = "helios / package"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.66.1"
+#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"=/work/package.tar.gz",
 #:	"=/work/global-zone-packages.tar.gz",
+#:	"=/work/trampoline-global-zone-packages.tar.gz",
 #:	"=/work/zones/*.tar.gz",
 #: ]
 #:
 #: [[publish]]
 #: series = "image"
 #: name = "global-zone-packages"
-#: from_output = "/out/global-zone-packages.tar.gz"
+#: from_output = "/work/global-zone-packages.tar.gz"
+#:
+#: [[publish]]
+#: series = "image"
+#: name = "trampoline-global-zone-packages"
+#: from_output = "/work/trampoline-global-zone-packages.tar.gz"
 
 set -o errexit
 set -o pipefail
@@ -22,10 +28,14 @@ set -o xtrace
 cargo --version
 rustc --version
 
-# Build
 ptime -m ./tools/install_builder_prerequisites.sh -yp
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=asic' package
-ptime -m cargo run --locked --release --bin omicron-package -- -t 'image_type=standard switch_variant=stub' package
+ptime -m ./tools/ci_download_softnpu_machinery
+
+# Build the test target
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t test target create -i standard -m non-gimlet -s softnpu
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t test package
 
 tarball_src_dir="$(pwd)/out"
 
@@ -34,46 +44,28 @@ tarball_src_dir="$(pwd)/out"
 
 files=(
 	out/*.tar
+	out/target/test
+	out/softnpu/*
 	package-manifest.toml
-	smf/sled-agent/config.toml
+	smf/sled-agent/non-gimlet/config.toml
 	target/release/omicron-package
 	tools/create_virtual_hardware.sh
+	tools/scrimlet/*
 )
 
+pfexec mkdir -p /work && pfexec chown $USER /work
 ptime -m tar cvzf /work/package.tar.gz "${files[@]}"
 
-# Assemble global zone files in a temporary directory.
-if ! tmp=$(mktemp -d); then
-  exit 1
-fi
-trap 'cd /; rm -rf "$tmp"' EXIT
+# Build necessary for the global zone
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t host target create -i standard -m gimlet -s asic
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t host package
 
-# Header file, identifying this is intended to be layered in the global zone.
-# Within the ramdisk, this means that all files under "root/foo" should appear
-# in the global zone as "/foo".
-echo '{"v":"1","t":"layer"}' > "$tmp/oxide.json"
+# Create global zone package @ /work/global-zone-packages.tar.gz
+ptime -m ./tools/build-global-zone-packages.sh $tarball_src_dir /work
 
-# Extract the sled-agent tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp/root/opt/oxide/sled-agent"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/omicron-sled-agent.tar"
-# Ensure that the manifest for the sled agent exists in a location where it may
-# be automatically initialized.
-mkdir -p "$tmp/root/lib/svc/manifest/site/"
-mv pkg/manifest.xml "$tmp/root/lib/svc/manifest/site/sled-agent.xml"
-cd -
-
-# Extract the mg-ddm tarball for re-packaging into the layered GZ archive.
-pkg_dir="$tmp/root/opt/oxide/mg-ddm"
-mkdir -p "$pkg_dir"
-cd "$pkg_dir"
-tar -xvfz "$tarball_src_dir/maghemite.tar"
-cd -
-
-mkdir -p /work
-cd "$tmp" && tar cvfz /work/global-zone-packages.tar.gz oxide.json root
-cd -
+# Non-Global Zones
 
 # Assemble Zone Images into their respective output locations.
 mkdir -p /work/zones
@@ -88,6 +80,22 @@ zones=(
 	out/oximeter-collector.tar.gz
 	out/propolis-server.tar.gz
 	out/switch-asic.tar.gz
-	out/switch-stub.tar.gz
+	out/switch-softnpu.tar.gz
+	out/ntp.tar.gz
+	out/mg-ddm.tar.gz
 )
 cp "${zones[@]}" /work/zones/
+
+#
+# Global Zone files for Trampoline image
+#
+
+# Build necessary for the trampoline image
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t recovery target create -i trampoline
+ptime -m cargo run --locked --release --bin omicron-package -- \
+  -t recovery package
+
+# Create trampoline global zone package @ /work/trampoline-global-zone-packages.tar.gz
+ptime -m ./tools/build-trampoline-global-zone-packages.sh $tarball_src_dir /work
+

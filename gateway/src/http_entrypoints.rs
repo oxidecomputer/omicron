@@ -12,6 +12,7 @@ mod conversions;
 use self::component_details::SpComponentDetails;
 use self::conversions::component_from_str;
 use crate::error::SpCommsError;
+use crate::http_err_with_message;
 use crate::ServerContext;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -25,19 +26,18 @@ use dropshot::TypedBody;
 use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
-use futures::stream::FuturesUnordered;
-use futures::FutureExt;
 use futures::TryFutureExt;
+use gateway_messages::SpComponent;
+use gateway_messages::SpError;
+use gateway_sp_comms::error::CommunicationError;
 use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt::Display;
+use std::str;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_stream::StreamExt;
-use tokio_util::either::Either;
 use uuid::Uuid;
 
 #[derive(
@@ -51,37 +51,16 @@ use uuid::Uuid;
     Serialize,
     JsonSchema,
 )]
-pub struct SpInfo {
-    pub info: SpIgnitionInfo,
-    pub details: SpState,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SpState {
-    Enabled {
-        serial_number: String,
-        model: String,
-        revision: u32,
-        hubris_archive_id: String,
-        base_mac_address: [u8; 6],
-        version: ImageVersion,
-        power_state: PowerState,
-        rot: RotState,
-    },
-    CommunicationFailed {
-        message: String,
-    },
+#[serde(rename_all = "snake_case")]
+pub struct SpState {
+    pub serial_number: String,
+    pub model: String,
+    pub revision: u32,
+    pub hubris_archive_id: String,
+    pub base_mac_address: [u8; 6],
+    pub version: ImageVersion,
+    pub power_state: PowerState,
+    pub rot: RotState,
 }
 
 #[derive(
@@ -189,8 +168,6 @@ pub enum SpIgnition {
         flt_rot: bool,
         flt_sp: bool,
     },
-    #[serde(rename = "error")]
-    CommunicationFailed { message: String },
 }
 
 /// Ignition command.
@@ -439,6 +416,15 @@ pub struct SpComponentFirmwareSlot {
     pub slot: u16,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct SpComponentCaboose {
+    pub git_commit: String,
+    pub board: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
 /// Identity of a host phase2 recovery image.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HostPhase2RecoveryImageId {
@@ -506,114 +492,6 @@ struct PathSpIgnitionCommand {
     command: IgnitionCommand,
 }
 
-/// List SPs
-///
-/// Since communication with SPs may be unreliable, consumers may specify an
-/// optional timeout to override the default.
-///
-/// This interface makes use of Ignition as well as the management network.
-/// SPs that are powered off (and therefore cannot respond over the
-/// management network) are represented in the output set. SPs that Ignition
-/// reports as powered on, but that do not respond within the allotted timeout
-/// will similarly be represented in the output; these will only be included in
-/// the output when the allotted timeout has expired.
-///
-/// Note that Ignition provides the full set of SPs that are plugged into the
-/// system so the gateway service knows prior to waiting for responses the
-/// expected cardinality.
-#[endpoint {
-    method = GET,
-    path = "/sp",
-}]
-async fn sp_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Vec<SpInfo>>, HttpError> {
-    let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
-
-    // Build a `FuturesUnordered` to query every SP for its state.
-    let all_sps_stream = mgmt_switch
-        .all_sps()?
-        .map(|(id, sp)| async move {
-            let result = sp.state().await.map_err(SpCommsError::from);
-            Either::Left((id, result))
-        })
-        .collect::<FuturesUnordered<_>>();
-
-    // Build a future to query our local ignition controller for the ignition
-    // state of all SPs.
-    let bulk_ignition_stream =
-        mgmt_switch.bulk_ignition_state().into_stream().map(Either::Right);
-
-    let combo_stream = all_sps_stream.merge(bulk_ignition_stream);
-    tokio::pin!(combo_stream);
-
-    // Wait for all our results to come back. As SP states return, we stash them
-    // in `sp_state`. When the one and only ignition result comes back, we put
-    // it into `bulk_ignition_state`.
-    let mut sp_state = HashMap::new();
-    let mut bulk_ignition_state = None;
-
-    while let Some(item) = combo_stream.next().await {
-        match item {
-            // Result from a single SP.
-            Either::Left((id, state)) => {
-                sp_state.insert(id, state);
-            }
-            // Result from our ignition controller.
-            Either::Right(ignition_state_result) => {
-                // If `bulk_ignition_state` succeeded, it returns an iterator
-                // of `(id, state)` pairs; convert that into a HashMap for quick
-                // lookups below.
-                bulk_ignition_state = Some(
-                    ignition_state_result
-                        .map(|iter| iter.collect::<HashMap<_, _>>()),
-                );
-            }
-        }
-    }
-
-    // We inserted exactly one future for the bulk ignition state into
-    // combo_stream; if combo_stream is exhausted, all our futures have
-    // completed, and we know we've populated `bulk_ignition_state`.
-    let bulk_ignition_state = bulk_ignition_state.unwrap();
-
-    // Build up a list of responses. For any given SP, we might or might not
-    // have its state, and we might or might not have what our ignition
-    // controller thinks its ignition state is.
-    let mut responses = Vec::with_capacity(sp_state.len());
-    for (id, state) in sp_state {
-        let ignition_details =
-            match bulk_ignition_state.as_ref().map(|m| m.get(&id)) {
-                // Happy path
-                Ok(Some(state)) => SpIgnition::from(*state),
-                // Confusing path - we got a response from our ignition
-                // controller, but it didn't include the state for SP `id`. If
-                // we're on a rev-b sidecar, this could be the 36th ignition
-                // target (i.e., the ignition controller does not return
-                // information about itself as a target). For now we'll just
-                // mark this as a failure; hopefully future sidecar revisions
-                // add the 36th target
-                // (https://github.com/oxidecomputer/hardware-sidecar/issues/735).
-                Ok(None) => SpIgnition::CommunicationFailed {
-                    message: format!(
-                        "ignition response missing info for SP {:?}",
-                        id
-                    ),
-                },
-                Err(err) => {
-                    SpIgnition::CommunicationFailed { message: err.to_string() }
-                }
-            };
-        responses.push(SpInfo {
-            info: SpIgnitionInfo { id: id.into(), details: ignition_details },
-            details: state.into(),
-        });
-    }
-
-    Ok(HttpResponseOk(responses))
-}
-
 /// Get info on an SP
 #[endpoint {
     method = GET,
@@ -622,26 +500,14 @@ async fn sp_list(
 async fn sp_get(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSp>,
-) -> Result<HttpResponseOk<SpInfo>, HttpError> {
+) -> Result<HttpResponseOk<SpState>, HttpError> {
     let apictx = rqctx.context();
-    let mgmt_switch = &apictx.mgmt_switch;
     let sp_id = path.into_inner().sp;
-    let ignition_target = mgmt_switch.ignition_target(sp_id.into())?;
-    let sp = mgmt_switch.sp(sp_id.into())?;
+    let sp = apictx.mgmt_switch.sp(sp_id.into())?;
 
-    // Send concurrent requests to our ignition controller and the target SP.
-    let ignition_fut =
-        mgmt_switch.ignition_controller().ignition_state(ignition_target);
-    let sp_fut = sp.state();
+    let state = sp.state().await.map_err(SpCommsError::from)?;
 
-    let (ignition_state, sp_state) = tokio::join!(ignition_fut, sp_fut);
-
-    let info = SpInfo {
-        info: SpIgnitionInfo { id: sp_id, details: ignition_state.into() },
-        details: sp_state.into(),
-    };
-
-    Ok(HttpResponseOk(info))
+    Ok(HttpResponseOk(state.into()))
 }
 
 /// Get host startup options for a sled
@@ -713,10 +579,6 @@ async fn sp_component_list(
 /// This can be useful, for example, to poll the state of a component if
 /// another interface has changed the power state of a component or updated a
 /// component.
-///
-/// As communication with SPs maybe unreliable, consumers may specify a timeout
-/// to override the default. This interface will return an error when the
-/// timeout is reached.
 #[endpoint {
     method = GET,
     path = "/sp/{type}/{slot}/component/{component}",
@@ -734,6 +596,87 @@ async fn sp_component_get(
         sp.component_details(component).await.map_err(SpCommsError::from)?;
 
     Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
+}
+
+// Implementation notes:
+//
+// 1. As of the time of this comment, the cannonical keys written to the hubris
+//    caboose are defined in https://github.com/oxidecomputer/hubtools; see
+//    `write_default_caboose()`.
+// 2. We currently assume that the caboose always includes the same set of
+//    fields regardless of the component (e.g., the SP and RoT caboose have the
+//    same fields). If that becomes untrue, we may need to split this endpoint
+//    up to allow differently-typed responses.
+/// Get the caboose of an SP component
+///
+/// Not all components have a caboose.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/caboose",
+}]
+async fn sp_component_caboose_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<SpComponentCaboose>, HttpError> {
+    const CABOOSE_KEY_GIT_COMMIT: [u8; 4] = *b"GITC";
+    const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
+    const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
+    const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+
+    let apictx = rqctx.context();
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+
+    // At the moment this endpoint only works if the requested component
+    // is the SP itself; we have no way (yet!) of asking the SP for (e.g.) RoT
+    // caboose values.
+    let component = component_from_str(&component)?;
+    if component != SpComponent::SP_ITSELF {
+        return Err(HttpError::from(SpCommsError::from(
+            CommunicationError::SpError(
+                SpError::RequestUnsupportedForComponent,
+            ),
+        )));
+    }
+
+    let from_utf8 = |key: &[u8], bytes| {
+        // This helper closure is only called with the ascii-printable [u8; 4]
+        // key constants we define above, so we can unwrap this conversion.
+        let key = str::from_utf8(key).unwrap();
+        String::from_utf8(bytes).map_err(|_| {
+            http_err_with_message(
+                http::StatusCode::SERVICE_UNAVAILABLE,
+                "InvalidCaboose",
+                format!("non-utf8 data returned for caboose key {key}"),
+            )
+        })
+    };
+
+    let git_commit = sp
+        .get_caboose_value(CABOOSE_KEY_GIT_COMMIT)
+        .await
+        .map_err(SpCommsError::from)?;
+    let board = sp
+        .get_caboose_value(CABOOSE_KEY_BOARD)
+        .await
+        .map_err(SpCommsError::from)?;
+    let name = sp
+        .get_caboose_value(CABOOSE_KEY_NAME)
+        .await
+        .map_err(SpCommsError::from)?;
+    let version = match sp.get_caboose_value(CABOOSE_KEY_VERSION).await {
+        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
+        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
+        Err(err) => return Err(SpCommsError::from(err).into()),
+    };
+
+    let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
+    let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
+    let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+
+    let caboose = SpComponentCaboose { git_commit, board, name, version };
+
+    Ok(HttpResponseOk(caboose))
 }
 
 /// Clear status of a component
@@ -1287,6 +1230,47 @@ async fn recovery_host_phase2_upload(
     Ok(HttpResponseOk(HostPhase2RecoveryImageId { sha256_hash }))
 }
 
+/// Get the identifier for the switch this MGS instance is connected to.
+///
+/// Note that most MGS endpoints behave identically regardless of which scrimlet
+/// the MGS instance is running on; this one, however, is intentionally
+/// different. This endpoint is _probably_ only useful for clients communicating
+/// with MGS over localhost (i.e., other services in the switch zone) who need
+/// to know which sidecar they are connected to.
+#[endpoint {
+    method = GET,
+    path = "/local/switch-id",
+}]
+async fn sp_local_switch_id(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<SpIdentifier>, HttpError> {
+    let apictx = rqctx.context();
+
+    let id = apictx.mgmt_switch.local_switch()?;
+
+    Ok(HttpResponseOk(id.into()))
+}
+
+/// Get the complete list of SP identifiers this MGS instance is configured to
+/// find and communicate with.
+///
+/// Note that unlike most MGS endpoints, this endpoint does not send any
+/// communication on the management network.
+#[endpoint {
+    method = GET,
+    path = "/local/all-sp-ids",
+}]
+async fn sp_all_ids(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<SpIdentifier>>, HttpError> {
+    let apictx = rqctx.context();
+
+    let all_ids =
+        apictx.mgmt_switch.all_sps()?.map(|(id, _)| id.into()).collect();
+
+    Ok(HttpResponseOk(all_ids))
+}
+
 // TODO
 // The gateway service will get asynchronous notifications both from directly
 // SPs over the management network and indirectly from Ignition via the Sidecar
@@ -1305,7 +1289,6 @@ pub fn api() -> GatewayApiDescription {
     fn register_endpoints(
         api: &mut GatewayApiDescription,
     ) -> Result<(), String> {
-        api.register(sp_list)?;
         api.register(sp_get)?;
         api.register(sp_startup_options_get)?;
         api.register(sp_startup_options_set)?;
@@ -1316,6 +1299,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_installinator_image_id_delete)?;
         api.register(sp_component_list)?;
         api.register(sp_component_get)?;
+        api.register(sp_component_caboose_get)?;
         api.register(sp_component_clear_status)?;
         api.register(sp_component_active_slot_get)?;
         api.register(sp_component_active_slot_set)?;
@@ -1330,6 +1314,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(ignition_get)?;
         api.register(ignition_command)?;
         api.register(recovery_host_phase2_upload)?;
+        api.register(sp_local_switch_id)?;
+        api.register(sp_all_ids)?;
         Ok(())
     }
 

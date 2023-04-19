@@ -49,11 +49,11 @@ rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 # available port) because the test suite will be running many servers
 # concurrently.
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 1048576
+request_body_max_bytes = 8388608
 
 [deployment.dropshot_internal]
 bind_address = "127.0.0.1:0"
-request_body_max_bytes = 1048576
+request_body_max_bytes = 8388608
 
 [deployment.subnet]
 net = "fd00:1122:3344:0100::/56"
@@ -65,3 +65,17 @@ net = "fd00:1122:3344:0100::/56"
 [deployment.database]
 type = "from_url"
 url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
+
+# Dendrite (dataplane daemon) API configuration
+[dendrite]
+address = "[::1]:12224"
+
+[background_tasks]
+dns_internal.period_secs_config = 60
+dns_internal.period_secs_servers = 60
+dns_internal.period_secs_propagation = 60
+dns_internal.max_concurrent_server_updates = 5
+dns_external.period_secs_config = 60
+dns_external.period_secs_servers = 60
+dns_external.period_secs_propagation = 60
+dns_external.max_concurrent_server_updates = 5

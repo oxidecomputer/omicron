@@ -10,9 +10,10 @@ async-trait.workspace = true
 base64.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
-oxide-client = { path = "../oxide-client" }
+oxide-client.workspace = true
 rand.workspace = true
 reqwest.workspace = true
-russh = "0.36.1"
-russh-keys = "0.24.1"
+russh = "0.37.1"
+russh-keys = "0.37.1"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+trust-dns-resolver.workspace = true

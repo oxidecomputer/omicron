@@ -27,11 +27,11 @@ pub struct Input {
     /// this macro.  The snake case version of the name is taken as the name of
     /// the Diesel table interface in `db::schema`.
     ///
-    /// This value is typically PascalCase (e.g., "Organization").
+    /// This value is typically PascalCase (e.g., "Project").
     name: String,
     /// ordered list of resources that are ancestors of this resource, starting
     /// with the top of the hierarchy
-    /// (e.g., for an Instance, this would be `[ "Organization", "Project" ]`
+    /// (e.g., for an Instance, this would be `[ "Silo", "Project" ]`
     ancestors: Vec<String>,
     /// unordered list of resources that are direct children of this resource
     /// (e.g., for a Project, these would include "Instance" and "Disk")
@@ -81,12 +81,12 @@ pub struct Config {
 
     // The path to the resource
     /// list of type names for this resource and its parents
-    /// (e.g., [`Organization`, `Project`])
+    /// (e.g., [`Silo`, `Project`])
     path_types: Vec<syn::Ident>,
 
     /// list of identifiers used for the authz objects for this resource and its
     /// parents, in the same order as `authz_path_types` (e.g.,
-    /// [`authz_organization`, `authz_project`])
+    /// [`authz_silo`, `authz_project`])
     path_authz_names: Vec<syn::Ident>,
 
     // Child resources
@@ -219,6 +219,8 @@ fn generate_struct(config: &Config) -> TokenStream {
             /// We're looking for a resource with the given name in the given
             /// parent collection
             Name(#parent_resource_name<'a>, &'a Name),
+            /// Same as [`Self::Name`], but the name is owned rather than borrowed
+            OwnedName(#parent_resource_name<'a>, Name),
         }
     } else {
         quote! {}
@@ -255,6 +257,13 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
         .iter()
         .map(|c| format_ident!("{}_name", heck::AsSnakeCase(c).to_string()))
         .collect();
+    let child_selector_fn_names_owned: Vec<_> = config
+        .child_resources
+        .iter()
+        .map(|c| {
+            format_ident!("{}_name_owned", heck::AsSnakeCase(c).to_string())
+        })
+        .collect();
     let child_selector_fn_docs: Vec<_> = config
         .child_resources
         .iter()
@@ -280,6 +289,17 @@ fn generate_child_selectors(config: &Config) -> TokenStream {
             {
                 #child_resource_types::Name(self, name)
             }
+
+            #[doc = #child_selector_fn_docs]
+            pub fn #child_selector_fn_names_owned<'c>(
+                self,
+                name: Name,
+            ) -> #child_resource_types<'c>
+            where
+                'a: 'c,
+            {
+                #child_resource_types::OwnedName(self, name)
+            }
         )*
     }
 }
@@ -293,7 +313,10 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
         config.parent.as_ref().map(|p| &p.name).unwrap_or(&fleet_name);
 
     let name_variant = if config.lookup_by_name {
-        quote! { #resource_name::Name(parent, _) => parent.lookup_root(), }
+        quote! {
+            #resource_name::Name(parent, _)
+            | #resource_name::OwnedName(parent, _) => parent.lookup_root(),
+        }
     } else {
         quote! {}
     };
@@ -440,13 +463,14 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "fetch_for()"
     let fetch_for_name_variant = if config.lookup_by_name {
         quote! {
-            #resource_name::Name(parent, name) => {
+            #resource_name::Name(parent, &ref name)
+            | #resource_name::OwnedName(parent, ref name) => {
                 #ancestors_authz_names_assign
                 let (#resource_authz_name, db_row) = Self::fetch_by_name_for(
                     opctx,
                     datastore,
                     #parent_lookup_arg_actual
-                    *name,
+                    name,
                     action,
                 ).await?;
                 Ok((#(#path_authz_names,)* db_row))
@@ -459,13 +483,13 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
     // Generate the by-name branch of the match arm in "lookup()"
     let lookup_name_variant = if config.lookup_by_name {
         quote! {
-            #resource_name::Name(parent, name) => {
+            #resource_name::Name(parent, &ref name)
+            | #resource_name::OwnedName(parent, ref name) => {
                 // When doing a by-name lookup, we have to look up the
                 // parent first.  Since this is recursive, we wind up
                 // hitting the database once for each item in the path,
                 // in order descending from the root of the tree.  (So
-                // we'll look up Organization, then Project, then
-                // Instance, etc.)
+                // we'll look up Project, then Instance, etc.)
                 // TODO-performance Instead of doing database queries at
                 // each level of recursion, we could be building up one
                 // big "join" query and hit the database just once.
@@ -475,7 +499,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                         opctx,
                         datastore,
                         #parent_lookup_arg_actual
-                        *name
+                        name
                     ).await?;
                 Ok((#(#path_authz_names,)*))
             }
@@ -654,8 +678,7 @@ fn generate_lookup_methods(config: &Config) -> TokenStream {
                     // the parent by id, then its parent, etc.  Like the
                     // by-name case, we wind up hitting the database once
                     // for each item in the path, but in the reverse order.
-                    // So we'll look up the Instance, then the Project, then
-                    // the Organization.
+                    // So we'll look up the Instance, then the Project.
                     // TODO-performance Instead of doing database queries at
                     // each level of recursion, we could be building up one
                     // big "join" query and hit the database just once.
@@ -907,19 +930,8 @@ mod test {
     #[ignore]
     fn test_lookup_dump() {
         let output = lookup_resource(quote! {
-            name = "Organization",
-            ancestors = ["Silo"],
-            children = [ "Project" ],
-            lookup_by_name = true,
-            soft_deletes = true,
-            primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-        })
-        .unwrap();
-        println!("{}", rustfmt(output).unwrap());
-
-        let output = lookup_resource(quote! {
             name = "Project",
-            ancestors = ["Organization"],
+            ancestors = ["Silo"],
             children = [ "Disk", "Instance" ],
             lookup_by_name = true,
             soft_deletes = true,
@@ -940,7 +952,7 @@ mod test {
         println!("{}", rustfmt(output).unwrap());
 
         let output = lookup_resource(quote! {
-            name = "UpdateAvailableArtifact",
+            name = "UpdateArtifact",
             ancestors = [],
             children = [],
             lookup_by_name = false,

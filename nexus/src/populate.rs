@@ -42,11 +42,11 @@
 //! you define a single data-insertion step.  We have tests that ensure that
 //! each populator behaves as expected in the above ways.
 
-use crate::context::OpContext;
 use crate::db::DataStore;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use lazy_static::lazy_static;
+use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::backoff;
 use std::sync::Arc;
@@ -321,9 +321,9 @@ mod test {
     use super::ALL_POPULATORS;
     use crate::authn;
     use crate::authz;
-    use crate::context::OpContext;
     use crate::db;
     use anyhow::Context;
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
@@ -387,7 +387,7 @@ mod test {
         //
         // Anyway, if we try again with a broken database, we should get a
         // ServiceUnavailable error, which indicates a transient failure.
-        let pool = Arc::new(db::Pool::new_failfast(&cfg));
+        let pool = Arc::new(db::Pool::new_failfast_for_tests(&cfg));
         let datastore = Arc::new(db::DataStore::new(pool));
         let opctx = OpContext::for_background(
             logctx.log.clone(),

@@ -3,13 +3,12 @@
 #: name = "build-and-test (ubuntu-20.04)"
 #: variety = "basic"
 #: target = "ubuntu-20.04"
-#: rust_toolchain = "1.66.1"
+#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",
 #: ]
-#:
 
 set -o errexit
 set -o pipefail
@@ -30,7 +29,7 @@ mkdir "$TEST_TMPDIR"
 # Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
 # suite.
 #
-export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse"
+export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin"
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
@@ -62,6 +61,7 @@ ptime -m cargo build --locked --all-targets --verbose
 # We also don't use `--workspace` here because we're not prepared to run tests
 # from end-to-end-tests.
 #
+
 banner test
 ptime -m cargo test --locked --verbose --no-fail-fast
 

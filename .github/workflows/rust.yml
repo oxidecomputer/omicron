@@ -7,10 +7,9 @@ on: [ push, pull_request ]
 
 jobs:
   check-style:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
+    - uses: actions/checkout@v3.5.0
     - name: Report cargo version
       run: cargo --version
     - name: Report rustfmt version
@@ -23,40 +22,40 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-20.04, macos-11 ]
+        os: [ ubuntu-22.04, macos-12 ]
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: Swatinem/rust-cache@v1
+    - uses: actions/checkout@v3.5.0
+    - uses: Swatinem/rust-cache@v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
+    - name: Set default target
+      run: cargo run --bin omicron-package -- -t default target create
     - name: Check build of deployed Omicron packages
-      run: cargo run --bin omicron-package -- check
+      run: cargo run --bin omicron-package -- -t default check
 
   clippy-lint:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: Swatinem/rust-cache@v1
+    - uses: actions/checkout@v3.5.0
+    - uses: Swatinem/rust-cache@v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Report Clippy version
       run: cargo clippy -- --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
@@ -70,19 +69,18 @@ jobs:
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    # actions/checkout@v2
-    - uses: actions/checkout@28c7f3d2b5162b5ddd3dfd9a45aa55eaf396478b
-    - uses: Swatinem/rust-cache@v1
+    - uses: actions/checkout@v3.5.0
+    - uses: Swatinem/rust-cache@v2.2.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse" >> "$GITHUB_PATH"
+      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation

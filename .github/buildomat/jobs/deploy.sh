@@ -15,7 +15,6 @@
 #:
 #: [dependencies.build-end-to-end-tests]
 #: job = "helios / build-end-to-end-tests"
-#:
 
 set -o errexit
 set -o pipefail
@@ -39,6 +38,12 @@ _exit_trap() {
 	pfexec netstat -rncva
 	pfexec netstat -anu
 	pfexec arp -an
+	pfexec ./out/softnpu/scadm \
+		--server /opt/oxide/softnpu/stuff/server \
+		--client /opt/oxide/softnpu/stuff/client \
+		standalone \
+		dump-state
+
 	pfexec zfs list
 	pfexec zpool list
 	pfexec fmdump -eVp
@@ -139,7 +144,7 @@ pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 # on a canned subnet.  We need to create an address in the global zone such
 # that we can, in the test below, reach Nexus.
 #
-# This must be kept in sync with the IP in "smf/sled-agent/config-rss.toml" and
+# This must be kept in sync with the IP in "smf/sled-agent/non-gimlet/config-rss.toml" and
 # the prefix length which apparently defaults (in the Rust code) to /24.
 #
 pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
@@ -164,9 +169,28 @@ rm -rf pkg
 # uninstallation.
 #
 OMICRON_NO_UNINSTALL=1 \
-    ptime -m pfexec ./target/release/omicron-package install
+    ptime -m pfexec ./target/release/omicron-package -t test install
 
 ./tests/bootstrap
+
+# NOTE: this script configures softnpu's "rack network" settings using swadm
+GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
+
+# NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
+# able to reach instances from the same L2 network segment.
+# /out/softnpu/scadm standalone add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	dump-state
+
 rm ./tests/bootstrap
 for test_bin in tests/*; do
 	./"$test_bin"

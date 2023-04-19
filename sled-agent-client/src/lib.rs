@@ -30,6 +30,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             dst_propolis_id: s.dst_propolis_id,
             propolis_addr: s.propolis_addr.map(|addr| addr.to_string()),
             migration_id: s.migration_id,
+            propolis_gen: s.propolis_gen.into(),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -90,6 +91,7 @@ impl From<types::InstanceRuntimeState>
             dst_propolis_id: s.dst_propolis_id,
             propolis_addr: s.propolis_addr.map(|addr| addr.parse().unwrap()),
             migration_id: s.migration_id,
+            propolis_gen: s.propolis_gen.into(),
             ncpus: s.ncpus.into(),
             memory: s.memory.into(),
             hostname: s.hostname,
@@ -157,6 +159,10 @@ impl From<omicron_common::api::external::DiskState> for types::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            ImportReady => Self::ImportReady,
+            ImportingFromUrl => Self::ImportingFromUrl,
+            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
+            Finalizing => Self::Finalizing,
             Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
@@ -185,6 +191,10 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
         match s {
             Creating => Self::Creating,
             Detached => Self::Detached,
+            ImportReady => Self::ImportReady,
+            ImportingFromUrl => Self::ImportingFromUrl,
+            ImportingFromBulkWrites => Self::ImportingFromBulkWrites,
+            Finalizing => Self::Finalizing,
             Maintenance => Self::Maintenance,
             Attaching(u) => Self::Attaching(u),
             Attached(u) => Self::Attached(u),
@@ -301,9 +311,19 @@ impl From<omicron_common::api::internal::nexus::UpdateArtifactId>
     fn from(s: omicron_common::api::internal::nexus::UpdateArtifactId) -> Self {
         types::UpdateArtifactId {
             name: s.name,
-            version: s.version,
+            version: s.version.into(),
             kind: s.kind.into(),
         }
+    }
+}
+
+impl From<omicron_common::api::external::SemverVersion>
+    for types::SemverVersion
+{
+    fn from(s: omicron_common::api::external::SemverVersion) -> Self {
+        s.to_string().parse().expect(
+            "semver should generate output that matches validation regex",
+        )
     }
 }
 
