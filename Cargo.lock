@@ -8824,6 +8824,7 @@ dependencies = [
  "tough",
  "tufaceous",
  "tufaceous-lib",
+ "update-engine",
  "uuid",
  "wicketd-client",
 ]
@@ -8840,6 +8841,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "update-engine",
  "uuid",
 ]
 
