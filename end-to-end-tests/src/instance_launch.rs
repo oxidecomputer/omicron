@@ -5,13 +5,12 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, Distribution, ExternalIpCreate,
-    ImageCreate, ImageSource, InstanceCpuCount, InstanceCreate,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, ImageCreate,
+    ImageSource, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{
     ClientDisksExt, ClientImagesExt, ClientInstancesExt, ClientSessionExt,
-    ClientSystemExt,
 };
 use russh::{ChannelMsg, Disconnect};
 use russh_keys::key::{KeyPair, PublicKey};
