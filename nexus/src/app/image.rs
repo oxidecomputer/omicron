@@ -48,7 +48,7 @@ impl super::Nexus {
                         .project_image_id(id)),
                     None => {
                         ImageLookup::SiloImage(LookupPath::new(opctx, &self.db_datastore)
-                            .silo_image_id(db_image.silo_id))
+                            .silo_image_id(id))
                     },
                 };
                 Ok(lookup)
