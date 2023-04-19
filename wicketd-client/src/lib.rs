@@ -37,6 +37,8 @@ progenitor::generate_api!(
     },
     replace = {
         Duration = std::time::Duration,
+        ProgressEventKindForGenericSpec = update_engine::events::ProgressEventKind<update_engine::GenericSpec<update_engine::NestedError>>,
+        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::GenericSpec<update_engine::NestedError>>,
     }
 );
 

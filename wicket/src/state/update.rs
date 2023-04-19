@@ -146,6 +146,7 @@ impl RackUpdateState {
                 | StepEventKind::ProgressReset { .. }
                 | StepEventKind::AttemptRetry { .. }
                 | StepEventKind::ExecutionCompleted { .. }
+                | StepEventKind::Nested { .. }
                 | StepEventKind::Unknown => (),
 
                 StepEventKind::StepCompleted { step, .. } => {
@@ -180,7 +181,8 @@ impl RackUpdateState {
         };
         let component = match state {
             CurrentProgress::ProgressEvent { data, .. } => match data {
-                ProgressEventKind::Progress { step, .. } => {
+                ProgressEventKind::Progress { step, .. }
+                | ProgressEventKind::Nested { step, .. } => {
                     Some(step.info.component)
                 }
                 ProgressEventKind::Unknown => None,
