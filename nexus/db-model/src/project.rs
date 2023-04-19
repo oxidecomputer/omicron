@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Disk, Generation, Image, Instance, Name, Snapshot, Vpc};
+use super::{Disk, Generation, Instance, Name, Snapshot, Vpc};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{disk, image, instance, project, snapshot, vpc};
+use crate::Image;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;

@@ -22,8 +22,8 @@ use crate::{
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, StepContext, StepHandle,
-    StepSpec,
+    AsError, CompletionContext, MetadataContext, StepContext,
+    StepContextPayload, StepHandle, StepSpec,
 };
 
 #[derive_where(Debug)]
@@ -475,15 +475,15 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
             "step component" => ?step_info.info.component,
             "step id" => ?step_info.info.id,
         );
-        let (progress_sender, mut progress_receiver) = mpsc::channel(16);
-        let cx = StepContext::new(progress_sender);
+        let (payload_sender, mut payload_receiver) = mpsc::channel(16);
+        let cx = StepContext::new(log, payload_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
         let mut reporter =
             StepProgressReporter::new(total_start, step_info, sender);
 
         let mut step_res = None;
-        let mut progress_done = false;
+        let mut payload_done = false;
 
         loop {
             tokio::select! {
@@ -491,14 +491,14 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                     step_res = Some(res);
                 }
 
-                progress = progress_receiver.recv(), if !progress_done => {
-                    match progress {
-                        Some(progress) => {
-                            reporter.handle_progress(progress).await?;
+                payload = payload_receiver.recv(), if !payload_done => {
+                    match payload {
+                        Some(payload) => {
+                            reporter.handle_payload(payload).await?;
                         }
                         None => {
-                            // The progress receiver is complete.
-                            progress_done = true;
+                            // The payload receiver is complete.
+                            payload_done = true;
                         }
                     }
                 }
@@ -563,6 +563,45 @@ impl<S: StepSpec> StepProgressReporter<S> {
             // It's slightly nicer for step_start and attempt_start to be exactly the same.
             attempt_start: step_start,
             sender,
+        }
+    }
+
+    async fn handle_payload(
+        &mut self,
+        payload: StepContextPayload<S>,
+    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+        match payload {
+            StepContextPayload::Progress(progress) => {
+                self.handle_progress(progress).await
+            }
+            StepContextPayload::Nested(Event::Step(event)) => {
+                self.sender
+                    .send(Event::Step(StepEvent {
+                        total_elapsed: self.total_start.elapsed(),
+                        kind: StepEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: self.step_start.elapsed(),
+                            attempt_elapsed: self.attempt_start.elapsed(),
+                        },
+                    }))
+                    .await
+            }
+            StepContextPayload::Nested(Event::Progress(event)) => {
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        total_elapsed: self.total_start.elapsed(),
+                        kind: ProgressEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: self.step_start.elapsed(),
+                            attempt_elapsed: self.attempt_start.elapsed(),
+                        },
+                    }))
+                    .await
+            }
         }
     }
 
@@ -703,7 +742,6 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 causes.push(source.to_string());
                 current = source;
             }
-
             (message, causes)
         };
 

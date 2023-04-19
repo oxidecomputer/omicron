@@ -248,13 +248,13 @@ impl Server {
         let services = vec![
             NexusTypes::ServicePutRequest {
                 address: dns_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDNS,
+                kind: NexusTypes::ServiceKind::InternalDns,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
             },
             NexusTypes::ServicePutRequest {
                 address: http_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDNSConfig,
+                kind: NexusTypes::ServiceKind::InternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
             },

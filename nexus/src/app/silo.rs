@@ -17,13 +17,13 @@ use anyhow::Context;
 use nexus_db_model::UserProvisionType;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::{CreateResult, LookupType};
 use omicron_common::api::external::{DataPageParams, ResourceType};
 use omicron_common::api::external::{DeleteResult, NameOrId};
+use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::bail_unless;
 use ref_cast::RefCast;
 use std::str::FromStr;
@@ -31,6 +31,17 @@ use uuid::Uuid;
 
 impl super::Nexus {
     // Silos
+    pub fn current_silo_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+    ) -> LookupResult<lookup::Silo<'a>> {
+        let silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up current silo")?;
+        let silo = self.silo_lookup(opctx, NameOrId::Id(silo.id()))?;
+        Ok(silo)
+    }
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
