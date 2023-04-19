@@ -23,6 +23,7 @@ reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 tempfile.workspace = true
@@ -39,6 +40,7 @@ installinator-artifactd.workspace = true
 installinator-common.workspace = true
 omicron-common.workspace = true
 tufaceous-lib.workspace = true
+update-engine.workspace = true
 
 [[bin]]
 name = "wicketd"

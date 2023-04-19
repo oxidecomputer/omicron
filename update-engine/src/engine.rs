@@ -348,6 +348,7 @@ impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
 /// The result of a step.
 ///
 /// Returned by the callback passed to `register_step`.
+#[must_use = "StepResult must be used"]
 pub struct StepResult<T, S: StepSpec> {
     /// The output of the step.
     pub output: T,
