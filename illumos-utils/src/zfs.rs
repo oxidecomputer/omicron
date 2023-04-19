@@ -246,7 +246,7 @@ impl Zfs {
 }
 
 /// Returns all datasets managed by Omicron
-pub fn get_all_omicron_datasets() -> anyhow::Result<Vec<String>> {
+pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     let mut datasets = vec![];
 
     // Collect all datasets within Oxide zpools.
@@ -254,6 +254,10 @@ pub fn get_all_omicron_datasets() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
+        // For now, avoid erasing any datasets which exist on internal zpools.
+        if pool.kind() == crate::zpool::ZpoolKind::Internal {
+            continue;
+        }
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
             datasets.push(format!("{pool}/{dataset}"));
