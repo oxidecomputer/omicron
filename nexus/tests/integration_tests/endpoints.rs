@@ -346,6 +346,8 @@ lazy_static! {
         format!("/v1/images?project={}", *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_IMAGE_URL: String =
         format!("/v1/images/{}?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_PROJECT_PROMOTE_IMAGE_URL: String =
+        format!("/v1/images/{}/promote?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -1216,6 +1218,15 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_PROJECT_PROMOTE_IMAGE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::value::Value::Null),
             ],
         },
 

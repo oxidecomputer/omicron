@@ -116,7 +116,7 @@ resolver = "2"
 anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
-assert_cmd = "2.0.10"
+assert_cmd = "2.0.11"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
 async-trait = "0.1.68"
 authz-macros = { path = "nexus/authz-macros" }
@@ -263,7 +263,7 @@ semver = { version = "1.0.17", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes" }
-serde_json = "1.0.95"
+serde_json = "1.0.96"
 serde_path_to_error = "0.1.11"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"

@@ -194,6 +194,34 @@ resource: SiloGroup "silo1-group"
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: SiloImage "silo1-silo-image"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Image "silo1-image"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-collaborator               ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Project "silo1-proj1"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -292,7 +320,7 @@ resource: Snapshot "silo1-proj1-disk1-snapshot1"
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Image "silo1-proj1-image1"
+resource: ProjectImage "silo1-proj1-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -404,7 +432,7 @@ resource: Snapshot "silo1-proj2-disk1-snapshot1"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Image "silo1-proj2-image1"
+resource: ProjectImage "silo1-proj2-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -530,6 +558,34 @@ resource: SiloGroup "silo2-group"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: SiloImage "silo2-silo-image"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: Image "silo2-image"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 resource: Project "silo2-proj1"
 
   USER                             Q  R LC RP  M MP CC  D
@@ -628,7 +684,7 @@ resource: Snapshot "silo2-proj1-disk1-snapshot1"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Image "silo2-proj1-image1"
+resource: ProjectImage "silo2-proj1-image1"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

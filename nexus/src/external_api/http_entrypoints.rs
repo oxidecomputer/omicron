@@ -39,6 +39,8 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use ipnetwork::IpNetwork;
+use nexus_db_queries::db::lookup::ImageLookup;
+use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
@@ -140,6 +142,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_create)?;
         api.register(image_view)?;
         api.register(image_delete)?;
+        api.register(image_promote)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -2387,7 +2390,7 @@ async fn system_image_delete(
 }]
 async fn image_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    query_params: Query<PaginatedByNameOrId<params::ImageListSelector>>,
 ) -> Result<HttpResponseOk<ResultsPage<Image>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -2397,10 +2400,26 @@ async fn image_list(
         let pag_params = data_page_params_for(&rqctx, &query)?;
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+        let parent_lookup = match scan_params.selector.project.clone() {
+            Some(project) => {
+                let project_lookup = nexus.project_lookup(
+                    &opctx,
+                    params::ProjectSelector { project },
+                )?;
+                ImageParentLookup::Project(project_lookup)
+            }
+            None => {
+                let silo_lookup = nexus.current_silo_lookup(&opctx)?;
+                ImageParentLookup::Silo(silo_lookup)
+            }
+        };
         let images = nexus
-            .image_list(&opctx, &project_lookup, &paginated_by)
+            .image_list(
+                &opctx,
+                &parent_lookup,
+                scan_params.selector.include_silo_images.unwrap_or(false),
+                &paginated_by,
+            )
             .await?
             .into_iter()
             .map(|d| d.into())
@@ -2424,7 +2443,7 @@ async fn image_list(
 }]
 async fn image_create(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<params::ProjectSelector>,
+    query_params: Query<params::OptionalProjectSelector>,
     new_image: TypedBody<params::ImageCreate>,
 ) -> Result<HttpResponseCreated<Image>, HttpError> {
     let apictx = rqctx.context();
@@ -2433,9 +2452,20 @@ async fn image_create(
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let params = &new_image.into_inner();
-        let project_lookup = nexus.project_lookup(&opctx, query)?;
-        let image =
-            nexus.image_create(&opctx, &project_lookup, &params).await?;
+        let parent_lookup = match query.project.clone() {
+            Some(project) => {
+                let project_lookup = nexus.project_lookup(
+                    &opctx,
+                    params::ProjectSelector { project },
+                )?;
+                ImageParentLookup::Project(project_lookup)
+            }
+            None => {
+                let silo_lookup = nexus.current_silo_lookup(&opctx)?;
+                ImageParentLookup::Silo(silo_lookup)
+            }
+        };
+        let image = nexus.image_create(&opctx, &parent_lookup, &params).await?;
         Ok(HttpResponseCreated(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2460,10 +2490,25 @@ async fn image_view(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let image_selector =
-            params::ImageSelector { image: path.image, project: query.project };
-        let (.., image) =
-            nexus.image_lookup(&opctx, image_selector)?.fetch().await?;
+        let image: nexus_db_model::Image = match nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?
+        {
+            ImageLookup::ProjectImage(image) => {
+                let (.., db_image) = image.fetch().await?;
+                db_image.into()
+            }
+            ImageLookup::SiloImage(image) => {
+                let (.., db_image) = image.fetch().await?;
+                db_image.into()
+            }
+        };
         Ok(HttpResponseOk(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -2490,11 +2535,49 @@ async fn image_delete(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let query = query_params.into_inner();
-        let image_selector =
-            params::ImageSelector { image: path.image, project: query.project };
-        let image_lookup = nexus.image_lookup(&opctx, image_selector)?;
+        let image_lookup = nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?;
         nexus.image_delete(&opctx, &image_lookup).await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Promote a project image to be visible to all projects in the silo
+#[endpoint {
+    method = POST,
+    path = "/v1/images/{image}/promote",
+    tags = ["images"]
+}]
+async fn image_promote(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseAccepted<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let image_lookup = nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector {
+                    image: path.image,
+                    project: query.project,
+                },
+            )
+            .await?;
+        let image = nexus.image_promote(&opctx, &image_lookup).await?;
+        Ok(HttpResponseAccepted(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 use artifacts::{WicketdArtifactServer, WicketdArtifactStore};
 pub use config::Config;
 pub(crate) use context::ServerContext;
-use installinator_progress::IprUpdateTracker;
+pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
