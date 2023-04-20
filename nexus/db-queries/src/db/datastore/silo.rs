@@ -230,6 +230,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
+        dns_opctx: &OpContext,
         dns_update: DnsVersionUpdate,
     ) -> DeleteResult {
         assert_eq!(authz_silo.id(), db_silo.id());
@@ -294,7 +295,7 @@ impl DataStore {
                     id,
                 ).await?;
 
-                self.dns_update(opctx, &conn, dns_update).await?;
+                self.dns_update(dns_opctx, &conn, dns_update).await?;
 
                 info!(opctx.log, "deleted silo {}", id);
 

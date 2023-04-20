@@ -132,6 +132,7 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> DeleteResult {
+        let dns_opctx = self.opctx_external_authn();
         let datastore = self.datastore();
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
@@ -141,7 +142,9 @@ impl super::Nexus {
             self.id.to_string(),
         );
         dns_update.remove_name(Self::silo_dns_name(&db_silo.name()))?;
-        datastore.silo_delete(opctx, &authz_silo, &db_silo, dns_update).await?;
+        datastore
+            .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
+            .await?;
         self.background_tasks.activate(&self.task_external_dns_config);
         Ok(())
     }

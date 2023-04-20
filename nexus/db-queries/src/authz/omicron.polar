@@ -332,9 +332,13 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 resource DnsConfig {
 	permissions = [ "read", "modify" ];
 	relations = { parent_fleet: Fleet };
-	# XXX-dap
+	# "external-authenticator" requires these permissions because that's the
+	# context that Nexus uses when creating and deleting Silos.  These
+	# operations necessarily need to read and modify DNS configuration.
 	"read" if "external-authenticator" on "parent_fleet";
 	"modify" if "external-authenticator" on "parent_fleet";
+	# "admin" on the parent fleet also gets these permissions, primarily for
+	# the test suite.
 	"read" if "admin" on "parent_fleet";
 	"modify" if "admin" on "parent_fleet";
 }
