@@ -3,7 +3,7 @@
 
 <service_bundle type='manifest' name='clickhouse'>
 
-  <service name='system/illumos/clickhouse' type='service' version='1'>
+  <service name='oxide/clickhouse' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'

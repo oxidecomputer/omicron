@@ -3,7 +3,7 @@
 
 <service_bundle type='manifest' name='switch_zone_setup'>
 
-<service name='system/illumos/switch_zone_setup' type='service' version='1'>
+<service name='oxide/switch_zone_setup' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'

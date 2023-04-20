@@ -324,7 +324,16 @@ impl crate::smf_helper::Service for ServiceType {
         self.to_string()
     }
     fn smf_name(&self) -> String {
-        format!("svc:/system/illumos/{}", self.service_name())
+        match self {
+            // NOTE: This style of service-naming is deprecated
+            ServiceType::Dendrite { .. }
+            | ServiceType::Tfport { .. }
+            | ServiceType::CruciblePantry
+            | ServiceType::Maghemite { .. } => {
+                format!("svc:/system/illumos/{}", self.service_name())
+            }
+            _ => format!("svc:/oxide/{}", self.service_name()),
+        }
     }
     fn should_import(&self) -> bool {
         true

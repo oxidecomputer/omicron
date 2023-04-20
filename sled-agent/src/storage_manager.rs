@@ -301,7 +301,7 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("system/illumos/cockroachdb")
+                        ServiceBuilder::new("oxide/cockroachdb")
                             .add_property_group(config),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
@@ -372,7 +372,7 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("system/illumos/clickhouse")
+                        ServiceBuilder::new("oxide/clickhouse")
                             .add_property_group(config),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(

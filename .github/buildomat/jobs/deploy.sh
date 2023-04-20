@@ -4,7 +4,8 @@
 #: variety = "basic"
 #: target = "lab-opte-0.21"
 #: output_rules = [
-#:	"%/var/svc/log/system-illumos-sled-agent:default.log",
+#:	"%/var/svc/log/oxide-sled-agent:default.log",
+#:	"%/zone/oxz_*/root/var/svc/log/oxide-*.log",
 #:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
 #:	"!/zone/oxz_propolis-server_*/root/var/svc/log/*.log",
 #: ]
