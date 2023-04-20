@@ -10,7 +10,7 @@ use std::fmt::{Display, Formatter};
 
 pub struct ProfileBuilder {
     name: String,
-    services: Vec<ServiceInstanceBuilder>,
+    services: Vec<ServiceBuilder>,
 }
 
 impl ProfileBuilder {
@@ -18,7 +18,7 @@ impl ProfileBuilder {
         Self { name: name.to_string(), services: vec![] }
     }
 
-    pub fn add_service(mut self, service: ServiceInstanceBuilder) -> Self {
+    pub fn add_service(mut self, service: ServiceBuilder) -> Self {
         self.services.push(service);
         self
     }
@@ -59,6 +59,46 @@ impl Display for ProfileBuilder {
     }
 }
 
+pub struct ServiceBuilder {
+    name: String,
+    instances: Vec<ServiceInstanceBuilder>,
+}
+
+impl ServiceBuilder {
+    pub fn new(name: &str) -> Self {
+        Self { name: name.to_string(), instances: vec![] }
+    }
+
+    pub fn add_instance(
+        mut self,
+        instance: ServiceInstanceBuilder,
+    ) -> Self {
+        self.instances.push(instance);
+        self
+    }
+}
+
+impl Display for ServiceBuilder {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            r#"  <service version="1" type="service" name="{name}">
+"#,
+            name = self.name
+        )?;
+
+        for instance in &self.instances {
+            write!(f, "{}", instance)?;
+        }
+
+        write!(f, r#"  </service>
+"#)?;
+
+        Ok(())
+    }
+}
+
+
 pub struct ServiceInstanceBuilder {
     name: String,
     property_groups: Vec<PropertyGroupBuilder>,
@@ -82,8 +122,7 @@ impl Display for ServiceInstanceBuilder {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            r#"  <service version="1" type="service" name="{name}">
-    <instance enabled="true" name="default">
+            r#"    <instance enabled="true" name="{name}">
 "#,
             name = self.name
         )?;
@@ -92,12 +131,8 @@ impl Display for ServiceInstanceBuilder {
             write!(f, "{}", property_group)?;
         }
 
-        write!(
-            f,
-            r#"    </instance>
-  </service>
-"#
-        )?;
+        write!(f, r#"    </instance>
+"#)?;
 
         Ok(())
     }
@@ -182,7 +217,25 @@ mod tests {
     #[test]
     fn test_service() {
         let builder = ProfileBuilder::new("myprofile")
-            .add_service(ServiceInstanceBuilder::new("myservice"));
+            .add_service(ServiceBuilder::new("myservice"));
+        assert_eq!(
+            format!("{}", builder),
+            r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<service_bundle type="profile" name="myprofile">
+  <service version="1" type="service" name="myservice">
+  </service>
+</service_bundle>"#,
+        );
+    }
+
+    #[test]
+    fn test_instance() {
+        let builder = ProfileBuilder::new("myprofile").add_service(
+            ServiceBuilder::new("myservice")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                )
+        );
         assert_eq!(
             format!("{}", builder),
             r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
@@ -195,11 +248,15 @@ mod tests {
         );
     }
 
+
     #[test]
     fn test_property_group() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceInstanceBuilder::new("myservice")
-                .add_property_group(PropertyGroupBuilder::new("mypg")),
+            ServiceBuilder::new("myservice")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(PropertyGroupBuilder::new("mypg")),
+                )
         );
         assert_eq!(
             format!("{}", builder),
@@ -218,10 +275,14 @@ mod tests {
     #[test]
     fn test_property() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceInstanceBuilder::new("myservice").add_property_group(
-                PropertyGroupBuilder::new("mypg")
-                    .add_property("prop", "type", "value"),
-            ),
+            ServiceBuilder::new("myservice")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(
+                            PropertyGroupBuilder::new("mypg")
+                                .add_property("prop", "type", "value"),
+                        )
+                ),
         );
         assert_eq!(
             format!("{}", builder),
@@ -241,16 +302,19 @@ mod tests {
     #[test]
     fn test_multiple() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceInstanceBuilder::new("myservice")
-                .add_property_group(
-                    PropertyGroupBuilder::new("mypg")
-                        .add_property("prop", "type", "value")
-                        .add_property("prop2", "type", "value2"),
+            ServiceBuilder::new("myservice")
+                .add_instance(
+                    ServiceInstanceBuilder::new("default")
+                        .add_property_group(
+                            PropertyGroupBuilder::new("mypg")
+                                .add_property("prop", "type", "value")
+                                .add_property("prop2", "type", "value2"),
+                        )
+                        .add_property_group(
+                            PropertyGroupBuilder::new("mypg2")
+                                .add_property("prop3", "type", "value3"),
+                        ),
                 )
-                .add_property_group(
-                    PropertyGroupBuilder::new("mypg2")
-                        .add_property("prop3", "type", "value3"),
-                ),
         );
         assert_eq!(
             format!("{}", builder),
