@@ -12,6 +12,7 @@ use crate::svc::wait_for_service;
 use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
+use omicron_common::backoff;
 use slog::info;
 use slog::o;
 use slog::warn;
@@ -56,13 +57,24 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     EnsureAddressError(#[from] crate::zone::EnsureAddressError),
 
+    #[error(transparent)]
+    GetAddressesError(#[from] crate::zone::GetAddressesError),
+
+    #[error("Failed ensuring link-local address in {zone}: {err}")]
+    LinkLocal { zone: String, err: crate::ExecutionError },
+
+    #[error("Failed to find non-link-local address in {zone}")]
+    NoDhcpV6Addr { zone: String },
+
     #[error(
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
     )]
     MissingBootstrapVnic { address: String, zone: String },
 
-    #[error("Failed ensuring address {request:?} in {zone}: missing opte port ({port_idx})")]
-    MissingOptePort { request: AddressRequest, zone: String, port_idx: usize },
+    #[error(
+        "Failed ensuring address in {zone}: missing opte port ({port_idx})"
+    )]
+    MissingOptePort { zone: String, port_idx: usize },
 
     // TODO-remove: See comment in `ensure_address_for_port`
     #[error(transparent)]
@@ -241,14 +253,12 @@ impl RunningZone {
 
     pub async fn ensure_address_for_port(
         &self,
-        addrtype: AddressRequest,
         name: &str,
         port_idx: usize,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        info!(self.inner.log, "Adding address: {:?}", addrtype);
+        info!(self.inner.log, "Ensuring address for OPTE port");
         let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
             EnsureAddressError::MissingOptePort {
-                request: addrtype,
                 zone: self.inner.name.clone(),
                 port_idx,
             }
@@ -257,42 +267,95 @@ impl RunningZone {
         let addrobj =
             AddrObject::new(port.vnic_name(), name).map_err(|err| {
                 EnsureAddressError::AddrObject {
-                    request: addrtype,
+                    request: AddressRequest::Dhcp,
                     zone: self.inner.name.clone(),
                     err,
                 }
             })?;
-        let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
-        if let AddressRequest::Dhcp = addrtype {
+        let zone = Some(self.inner.name.as_ref());
+        if let IpAddr::V4(gateway) = port.gateway().ip() {
+            let addr =
+                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
             // TODO-remove: OPTE's DHCP "server" returns the list of routes to add
             // via option 121 (Classless Static Route). The illumos DHCP client
             // currently does not support this option, so we add the routes
             // manually here.
             // https://www.illumos.org/issues/11990
-            if let IpAddr::V4(gateway) = port.gateway().ip() {
-                let gateway_ip = gateway.to_string();
-                let private_ip = network.ip();
-                self.run_cmd(&[
-                    "/usr/sbin/route",
-                    "add",
-                    "-host",
-                    &gateway_ip,
-                    &private_ip.to_string(),
-                    "-interface",
-                    "-ifp",
-                    port.vnic_name(),
-                ])?;
-                self.run_cmd(&[
-                    "/usr/sbin/route",
-                    "add",
-                    "-inet",
-                    "default",
-                    &gateway_ip,
-                ])?;
-            };
+            let gateway_ip = gateway.to_string();
+            let private_ip = addr.ip();
+            self.run_cmd(&[
+                "/usr/sbin/route",
+                "add",
+                "-host",
+                &gateway_ip,
+                &private_ip.to_string(),
+                "-interface",
+                "-ifp",
+                port.vnic_name(),
+            ])?;
+            self.run_cmd(&[
+                "/usr/sbin/route",
+                "add",
+                "-inet",
+                "default",
+                &gateway_ip,
+            ])?;
+            Ok(addr)
+        } else {
+            // If the port is using IPv6 addressing we still want it to use
+            // DHCP(v6) which requires first creating a link-local address.
+            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
+                |err| EnsureAddressError::LinkLocal {
+                    zone: self.inner.name.clone(),
+                    err,
+                },
+            )?;
+
+            // Unlike DHCPv4, there's no blocking `ipadm` call we can
+            // make as it just happens in the background. So we just poll
+            // until we find a non link-local address.
+            backoff::retry_notify(
+                backoff::retry_policy_local(),
+                || async {
+                    // Grab all the address on the addrobj. There should
+                    // always be at least one (the link-local we added)
+                    let addrs = Zones::get_all_addresses(zone, &addrobj)
+                        .map_err(|e| {
+                            backoff::BackoffError::permanent(
+                                EnsureAddressError::from(e),
+                            )
+                        })?;
+
+                    // Ipv6Addr::is_unicast_link_local is sadly not stable
+                    let is_ll =
+                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
+
+                    // Look for a non link-local addr
+                    addrs
+                        .into_iter()
+                        .find(|addr| match addr {
+                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            _ => false,
+                        })
+                        .ok_or_else(|| {
+                            backoff::BackoffError::transient(
+                                EnsureAddressError::NoDhcpV6Addr {
+                                    zone: self.inner.name.clone(),
+                                },
+                            )
+                        })
+                },
+                |error, delay| {
+                    slog::debug!(
+                        self.inner.log,
+                        "No non link-local address yet (retrying in {:?})",
+                        delay;
+                        "error" => ?error
+                    );
+                },
+            )
+            .await
         }
-        Ok(network)
     }
 
     pub async fn add_default_route(

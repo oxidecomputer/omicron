@@ -1032,11 +1032,7 @@ impl ServiceManager {
                     // atop an OPTE port which operates on a VPC private IP. OPTE will
                     // map the private IP to the external IP automatically.
                     let port_ip = running_zone
-                        .ensure_address_for_port(
-                            AddressRequest::Dhcp,
-                            "public",
-                            0,
-                        )
+                        .ensure_address_for_port("public", 0)
                         .await?
                         .ip();
 
@@ -1107,11 +1103,7 @@ impl ServiceManager {
                     // directly but instead on a VPC private IP. OPTE will
                     // en/decapsulate as appropriate.
                     let port_ip = running_zone
-                        .ensure_address_for_port(
-                            AddressRequest::Dhcp,
-                            "public",
-                            0,
-                        )
+                        .ensure_address_for_port("public", 0)
                         .await?
                         .ip();
                     let dns_address =
@@ -1357,11 +1349,7 @@ impl ServiceManager {
                     if boundary {
                         // Configure OPTE port for boundary NTP
                         running_zone
-                            .ensure_address_for_port(
-                                AddressRequest::Dhcp,
-                                "public",
-                                0,
-                            )
+                            .ensure_address_for_port("public", 0)
                             .await?;
                     }
 
