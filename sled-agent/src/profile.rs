@@ -10,7 +10,7 @@ use std::fmt::{Display, Formatter};
 
 pub struct ProfileBuilder {
     name: String,
-    services: Vec<ServiceBuilder>,
+    services: Vec<ServiceInstanceBuilder>,
 }
 
 impl ProfileBuilder {
@@ -18,7 +18,7 @@ impl ProfileBuilder {
         Self { name: name.to_string(), services: vec![] }
     }
 
-    pub fn add_service(mut self, service: ServiceBuilder) -> Self {
+    pub fn add_service(mut self, service: ServiceInstanceBuilder) -> Self {
         self.services.push(service);
         self
     }
@@ -59,12 +59,12 @@ impl Display for ProfileBuilder {
     }
 }
 
-pub struct ServiceBuilder {
+pub struct ServiceInstanceBuilder {
     name: String,
     property_groups: Vec<PropertyGroupBuilder>,
 }
 
-impl ServiceBuilder {
+impl ServiceInstanceBuilder {
     pub fn new(name: &str) -> Self {
         Self { name: name.to_string(), property_groups: vec![] }
     }
@@ -78,7 +78,7 @@ impl ServiceBuilder {
     }
 }
 
-impl Display for ServiceBuilder {
+impl Display for ServiceInstanceBuilder {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -182,7 +182,7 @@ mod tests {
     #[test]
     fn test_service() {
         let builder = ProfileBuilder::new("myprofile")
-            .add_service(ServiceBuilder::new("myservice"));
+            .add_service(ServiceInstanceBuilder::new("myservice"));
         assert_eq!(
             format!("{}", builder),
             r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn test_property_group() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice")
+            ServiceInstanceBuilder::new("myservice")
                 .add_property_group(PropertyGroupBuilder::new("mypg")),
         );
         assert_eq!(
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn test_property() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice").add_property_group(
+            ServiceInstanceBuilder::new("myservice").add_property_group(
                 PropertyGroupBuilder::new("mypg")
                     .add_property("prop", "type", "value"),
             ),
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn test_multiple() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice")
+            ServiceInstanceBuilder::new("myservice")
                 .add_property_group(
                     PropertyGroupBuilder::new("mypg")
                         .add_property("prop", "type", "value")

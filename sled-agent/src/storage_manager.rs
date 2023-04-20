@@ -301,7 +301,7 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("oxide/cockroachdb")
+                        ServiceInstanceBuilder::new("oxide/cockroachdb")
                             .add_property_group(config),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
@@ -372,7 +372,7 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("oxide/clickhouse")
+                        ServiceInstanceBuilder::new("oxide/clickhouse")
                             .add_property_group(config),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
@@ -395,7 +395,7 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("oxide/crucible/agent")
+                        ServiceInstanceBuilder::new("oxide/crucible/agent")
                             .add_property_group(config),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
