@@ -193,7 +193,7 @@ async fn sim_reserve_sled_resources(
     //      immutable despite being in the instance's "runtime" state.
     let resources = db::model::Resources::new(
         params.instance.runtime_state.ncpus.0 .0.into(),
-        params.instance.runtime_state.memory.into(),
+        params.instance.runtime_state.memory,
         // TODO(#2804): Properly specify reservoir size.
         omicron_common::api::external::ByteCount::from(0).into(),
     );
