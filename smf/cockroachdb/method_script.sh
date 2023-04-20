@@ -27,4 +27,4 @@ args=(
   '--store' "$DATASTORE"
 )
 
-exec /opt/oxide/cockroachdb/bin/cockroach start-single-node "${args[@]}"
+exec /opt/oxide/cockroachdb/bin/cockroach start-single-node "${args[@]}" &
