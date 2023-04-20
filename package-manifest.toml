@@ -107,7 +107,8 @@ source.type = "local"
 source.paths = [
   { from = "out/cockroachdb", to = "/opt/oxide/cockroachdb" },
   { from = "common/src/sql", to = "/opt/oxide/cockroachdb/sql" },
-  { from = "smf/cockroachdb", to = "/var/svc/manifest/site/cockroachdb" },
+  { from = "smf/cockroachdb/manifest.xml", to = "/var/svc/manifest/site/cockroachdb/manifest.xml" },
+  { from = "smf/cockroachdb/method_script.sh", to = "/opt/oxide/lib/svc/manifest/cockroachdb.sh" },
 ]
 output.type = "zone"
 setup_hint = "Run `./tools/ci_download_cockroachdb` to download the necessary binaries"
@@ -221,10 +222,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "7c5c87a06b62f3f90e26766a8abdd80a8e050f15"
+source.commit = "bfafac89e520d6aba41706bc276563c0fd6d58a8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "bcc555a5b8d075643c304126dd7e4d9605da6ffc7c8bd8d123e5469be99f0c18"
+source.sha256 = "ab2060ff321964204911d9566e85255ed701ad2e99301f46cd3a9d604713b4a9"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -232,10 +233,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "7c5c87a06b62f3f90e26766a8abdd80a8e050f15"
+source.commit = "bfafac89e520d6aba41706bc276563c0fd6d58a8"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "055d45104067559032105a13ae8f4895eea7ebcb708b56d195a0006e731e670e"
+source.sha256 = "57c3eaab6899fdb8d1ee1e30ed45698fbbf6b0ef501e39a1f17d083b7be5cec2"
 output.type = "zone"
 
 # Refer to

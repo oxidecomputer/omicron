@@ -762,7 +762,7 @@ impl ServiceManager {
                     .add_property("listen_port", "astring", listen_port);
 
                 let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("system/illumos/crucible_pantry")
+                    ServiceBuilder::new("oxide/crucible/pantry")
                         .add_property_group(config),
                 );
                 profile
