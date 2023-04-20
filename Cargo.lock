@@ -3938,6 +3938,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crucible-agent-client",
+ "dns-server",
  "dropshot",
  "headers",
  "http",
@@ -3960,6 +3961,8 @@ dependencies = [
  "slog",
  "tempfile",
  "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
  "uuid",
 ]
 

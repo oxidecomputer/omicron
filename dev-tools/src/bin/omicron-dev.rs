@@ -357,6 +357,14 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         "omicron-dev: cockroachdb directory: {}",
         cptestctx.database.temp_dir().display()
     );
+    println!(
+        "omicron-dev: external DNS:          {}",
+        cptestctx.external_dns_server.local_address()
+    );
+    println!(
+        "omicron-dev: external DNS HTTP      {}",
+        cptestctx.external_dns_config_server.local_addr()
+    );
 
     // Wait for a signal.
     let caught_signal = signal_stream.next().await;

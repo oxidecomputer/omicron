@@ -4,6 +4,7 @@
 
 //! Integration testing facilities for Nexus
 
+use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
@@ -25,6 +26,11 @@ use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::Path;
 use std::time::Duration;
+use trust_dns_resolver::config::NameServerConfig;
+use trust_dns_resolver::config::Protocol;
+use trust_dns_resolver::config::ResolverConfig;
+use trust_dns_resolver::config::ResolverOpts;
+use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 pub mod db;
@@ -53,6 +59,10 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub dendrite: dev::dendrite::DendriteInstance,
+    pub external_dns_server: dns_server::dns_server::ServerHandle,
+    pub external_dns_config_server:
+        dropshot::HttpServer<dns_server::http_server::Context>,
+    pub external_dns_resolver: trust_dns_resolver::TokioAsyncResolver,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -185,18 +195,47 @@ pub async fn test_setup_with_config<N: NexusServer>(
     .await
     .unwrap();
 
+    // Set up an external DNS server.
+    let (
+        external_dns_server,
+        external_dns_config_server,
+        external_dns_resolver,
+    ) = start_dns_server(
+        logctx.log.new(o!(
+            "component" => "external_dns_server",
+        )),
+        tempdir.path(),
+    )
+    .await
+    .unwrap();
+
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address = match sled_agent.dns_dropshot_server.local_addr() {
+    let dns_server_address_internal = match sled_agent
+        .dns_dropshot_server
+        .local_addr()
+    {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_service = ServicePutRequest {
+    let dns_service_internal = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
-        address: dns_server_address,
+        address: dns_server_address_internal,
         kind: ServiceKind::InternalDNSConfig,
+    };
+    let dns_server_address_external = match external_dns_config_server
+        .local_addr()
+    {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => addr,
+    };
+    let dns_service_external = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        address: dns_server_address_external,
+        kind: ServiceKind::ExternalDNSConfig,
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),
@@ -218,9 +257,12 @@ pub async fn test_setup_with_config<N: NexusServer>(
                 .ip(),
         },
     };
-    let server =
-        N::start(nexus_internal, &config, vec![dns_service, nexus_service])
-            .await;
+    let server = N::start(
+        nexus_internal,
+        &config,
+        vec![dns_service_internal, dns_service_external, nexus_service],
+    )
+    .await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();
@@ -276,6 +318,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
         producer,
         logctx,
         dendrite,
+        external_dns_server,
+        external_dns_config_server,
+        external_dns_resolver,
     }
 }
 
@@ -444,4 +489,55 @@ pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
     for item in v1.iter() {
         assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
     }
+}
+
+pub async fn start_dns_server(
+    log: slog::Logger,
+    storage_path: &Path,
+) -> Result<
+    (
+        dns_server::dns_server::ServerHandle,
+        dropshot::HttpServer<dns_server::http_server::Context>,
+        TokioAsyncResolver,
+    ),
+    anyhow::Error,
+> {
+    let config_store = dns_server::storage::Config {
+        keep_old_generations: 3,
+        storage_path: storage_path.to_string_lossy().into_owned().into(),
+    };
+    let store = dns_server::storage::Store::new(
+        log.new(o!("component" => "DnsStore")),
+        &config_store,
+    )
+    .unwrap();
+
+    let (dns_server, http_server) = dns_server::start_servers(
+        log,
+        store,
+        &dns_server::dns_server::Config {
+            bind_address: "[::1]:0".parse().unwrap(),
+        },
+        &dropshot::ConfigDropshot {
+            bind_address: "[::1]:0".parse().unwrap(),
+            request_body_max_bytes: 8 * 1024,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut resolver_config = ResolverConfig::new();
+    resolver_config.add_name_server(NameServerConfig {
+        socket_addr: *dns_server.local_address(),
+        protocol: Protocol::Udp,
+        tls_dns_name: None,
+        trust_nx_responses: false,
+        bind_addr: None,
+    });
+    let resolver =
+        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
+            .context("creating DNS resolver")?;
+
+    Ok((dns_server, http_server, resolver))
 }
