@@ -181,7 +181,8 @@ impl RackUpdateState {
         };
         let component = match state {
             CurrentProgress::ProgressEvent { data, .. } => match data {
-                ProgressEventKind::Progress { step, .. }
+                ProgressEventKind::WaitingForProgress { step, .. }
+                | ProgressEventKind::Progress { step, .. }
                 | ProgressEventKind::Nested { step, .. } => {
                     Some(step.info.component)
                 }

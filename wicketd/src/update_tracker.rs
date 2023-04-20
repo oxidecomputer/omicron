@@ -1183,6 +1183,11 @@ impl UpdateContext {
                     step_elapsed: elapsed, // TODO
                     attempt_elapsed: elapsed,
                     message: message.into(),
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::DownloadCompleted {
                     attempt,
@@ -1199,6 +1204,11 @@ impl UpdateContext {
                     next_step: make_step_meta("TODO FIXME"), // WRONG
                     step_elapsed: elapsed,                   // TODO
                     attempt_elapsed: elapsed,                // TODO
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::FormatFailed {
                     attempt,
@@ -1211,6 +1221,11 @@ impl UpdateContext {
                     step_elapsed: elapsed, // TODO
                     attempt_elapsed: elapsed,
                     message: message.into(),
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::FormatCompleted {
                     attempt,
@@ -1223,6 +1238,11 @@ impl UpdateContext {
                     next_step: make_step_meta("TODO FIXME"), // WRONG
                     step_elapsed: elapsed,                   // TODO
                     attempt_elapsed: elapsed,                // TODO
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::WriteFailed {
                     attempt,
@@ -1240,6 +1260,11 @@ impl UpdateContext {
                     step_elapsed: elapsed, // TODO
                     attempt_elapsed: elapsed,
                     message: message.into(),
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::WriteCompleted {
                     attempt,
@@ -1256,6 +1281,11 @@ impl UpdateContext {
                     next_step: make_step_meta("TODO FIXME"), // WRONG
                     step_elapsed: elapsed,                   // TODO
                     attempt_elapsed: elapsed,                // TODO
+                    progress: Box::new(ProgressEvent {
+                        execution_id,
+                        total_elapsed: Duration::default(), // TODO
+                        kind: ProgressEventKind::Unknown,   // TODO
+                    }),
                 },
                 CompletionEventKind::MiscError {
                     operation,
@@ -1285,6 +1315,11 @@ impl UpdateContext {
                             step_elapsed: elapsed, // TODO
                             attempt_elapsed: elapsed,
                             message: message.into(),
+                            progress: Box::new(ProgressEvent {
+                                execution_id,
+                                total_elapsed: Duration::default(), // TODO
+                                kind: ProgressEventKind::Unknown,   // TODO
+                            }),
                         }
                     }
                 }
@@ -1296,6 +1331,11 @@ impl UpdateContext {
                         next_step: make_step_meta("TODO FIXME"), // WRONG
                         step_elapsed: Duration::default(),       // TODO
                         attempt_elapsed: Duration::default(),    // TODO
+                        progress: Box::new(ProgressEvent {
+                            execution_id,
+                            total_elapsed: Duration::default(), // TODO
+                            kind: ProgressEventKind::Unknown,   // TODO
+                        }),
                     }
                 }
             };

@@ -15,7 +15,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use update_engine::events::ProgressCounter;
 
 use crate::spec::{
-    Event, ExampleComponent, ExampleStepId, ExampleStepMetadata,
+    Event, ExampleComponent, ExampleStepId, ExampleStepMetadata, ProgressEvent,
     ProgressEventKind, StepEventKind, StepInfoWithMetadata, StepOutcome,
 };
 
@@ -78,7 +78,12 @@ impl MessageDisplayState {
         let Event::Step(step_event) = first_event else {
             bail!("received invalid event: {first_event:?}");
         };
-        let StepEventKind::ExecutionStarted { steps, components, first_step } = step_event.kind else {
+        let StepEventKind::ExecutionStarted {
+            steps,
+            components,
+            first_step: _,
+            progress,
+        } = step_event.kind else {
             bail!("received invalid step event kind: {step_event:?}");
         };
 
@@ -102,7 +107,7 @@ impl MessageDisplayState {
 
         let mut ret =
             MessageDisplayState { log, mp, pb_main, sty_aux, component_tree };
-        ret.handle_and_get_node(first_step)?;
+        ret.handle_progress_event(*progress)?;
 
         Ok(ret)
     }
@@ -116,33 +121,36 @@ impl MessageDisplayState {
                 StepEventKind::ExecutionStarted { .. } => {
                     bail!("already past the first step")
                 }
-                StepEventKind::ProgressReset { step, .. } => {
+                StepEventKind::ProgressReset { step, progress, .. } => {
                     let node = self.handle_and_get_node(step)?;
                     node.reset();
+                    self.handle_progress_event(*progress)?;
                 }
                 StepEventKind::AttemptRetry {
                     step,
                     next_attempt,
                     attempt_elapsed,
                     message,
+                    progress,
                     ..
                 } => {
                     let node = self.handle_and_get_node(step)?;
                     node.retry(next_attempt, attempt_elapsed, message);
+                    self.handle_progress_event(*progress)?;
                 }
                 StepEventKind::StepCompleted {
                     step,
                     attempt,
                     outcome,
-                    next_step,
                     attempt_elapsed,
+                    progress,
                     ..
                 } => {
                     let node = self.handle_and_get_node(step)?;
                     node.finish(attempt, outcome, attempt_elapsed);
                     self.pb_main.inc(1);
 
-                    self.handle_and_get_node(next_step)?;
+                    self.handle_progress_event(*progress)?;
                 }
                 StepEventKind::ExecutionCompleted {
                     last_step,
@@ -173,20 +181,28 @@ impl MessageDisplayState {
                 }
                 StepEventKind::Unknown => {}
             },
-            Event::Progress(event) => match event.kind {
-                ProgressEventKind::WaitingForProgress { step, .. } => {
-                    // Create this node.
-                    _ = self.handle_and_get_node(step)?;
-                }
-                ProgressEventKind::Progress { step, progress, .. } => {
-                    let node = self.handle_and_get_node(step)?;
-                    node.progress(progress);
-                }
-                ProgressEventKind::Nested { .. } => {
-                    // TODO: display nested events
-                }
-                ProgressEventKind::Unknown => {}
-            },
+            Event::Progress(event) => self.handle_progress_event(event)?,
+        }
+
+        self.pb_main.tick();
+
+        Ok(())
+    }
+
+    fn handle_progress_event(&mut self, event: ProgressEvent) -> Result<()> {
+        match event.kind {
+            ProgressEventKind::WaitingForProgress { step, .. } => {
+                // Create this node.
+                self.handle_and_get_node(step)?;
+            }
+            ProgressEventKind::Progress { step, progress, .. } => {
+                let node = self.handle_and_get_node(step)?;
+                node.progress(progress);
+            }
+            ProgressEventKind::Nested { .. } => {
+                // TODO: display nested events
+            }
+            ProgressEventKind::Unknown => {}
         }
 
         self.pb_main.tick();

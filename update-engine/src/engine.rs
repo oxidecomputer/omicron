@@ -211,18 +211,16 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                     steps: step_infos,
                     components,
                     first_step: first_step_info.clone(),
-                },
-            }))
-            .await?;
-        self.sender
-            .send(Event::Progress(ProgressEvent {
-                execution_id: self.execution_id,
-                total_elapsed: start_elapsed,
-                kind: ProgressEventKind::WaitingForProgress {
-                    step: first_step_info.clone(),
-                    attempt: 1,
-                    step_elapsed: Duration::ZERO,
-                    attempt_elapsed: Duration::ZERO,
+                    progress: Box::new(ProgressEvent {
+                        execution_id: self.execution_id,
+                        total_elapsed: start_elapsed,
+                        kind: ProgressEventKind::WaitingForProgress {
+                            step: first_step_info.clone(),
+                            attempt: 1,
+                            step_elapsed: Duration::ZERO,
+                            attempt_elapsed: Duration::ZERO,
+                        },
+                    }),
                 },
             }))
             .await?;
@@ -649,16 +647,36 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.handle_progress(progress).await
             }
             StepContextPayload::Nested(Event::Step(event)) => {
+                // If there's a progress event associated with the step event,
+                // then generate a parent progress event.
+                let total_elapsed = self.total_start.elapsed();
+                let step_elapsed = self.step_start.elapsed();
+                let attempt_elapsed = self.attempt_start.elapsed();
+                let progress = event.kind.progress_event().map(|event| {
+                    Box::new(ProgressEvent {
+                        execution_id: self.execution_id,
+                        total_elapsed,
+                        kind: ProgressEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event.clone()),
+                            step_elapsed,
+                            attempt_elapsed,
+                        },
+                    })
+                });
+
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed,
                         kind: StepEventKind::Nested {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             event: Box::new(event),
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed,
+                            attempt_elapsed,
+                            progress,
                         },
                     }))
                     .await
@@ -720,23 +738,19 @@ impl<S: StepSpec> StepProgressReporter<S> {
                             step_elapsed,
                             attempt_elapsed,
                             message,
+                            progress: Box::new(ProgressEvent {
+                                execution_id: self.execution_id,
+                                total_elapsed,
+                                kind: ProgressEventKind::WaitingForProgress {
+                                    step: self.step_info.clone(),
+                                    attempt: self.attempt,
+                                    step_elapsed,
+                                    attempt_elapsed,
+                                },
+                            }),
                         },
                     }))
-                    .await?;
-                // Also send the corresponding "waiting for progress" message.
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        execution_id: self.execution_id,
-                        total_elapsed,
-                        kind: ProgressEventKind::WaitingForProgress {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            step_elapsed,
-                            attempt_elapsed,
-                        },
-                    }))
-                    .await?;
-                Ok(())
+                    .await
             }
             StepProgress::Retry { message } => {
                 // Retry this step.
@@ -757,24 +771,20 @@ impl<S: StepSpec> StepProgressReporter<S> {
                             step_elapsed,
                             attempt_elapsed: last_attempt_elapsed,
                             message,
+                            progress: Box::new(ProgressEvent {
+                                execution_id: self.execution_id,
+                                total_elapsed,
+                                kind: ProgressEventKind::WaitingForProgress {
+                                    step: self.step_info.clone(),
+                                    attempt: self.attempt,
+                                    step_elapsed,
+                                    // For this attempt, zero time has passed so far.
+                                    attempt_elapsed: Duration::ZERO,
+                                },
+                            }),
                         },
                     }))
-                    .await?;
-                // Also send the corresponding "waiting for progress" message.
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        execution_id: self.execution_id,
-                        total_elapsed,
-                        kind: ProgressEventKind::WaitingForProgress {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            step_elapsed,
-                            // For this attempt, zero time has passed so far.
-                            attempt_elapsed: Duration::ZERO,
-                        },
-                    }))
-                    .await?;
-                Ok(())
+                    .await
             }
         }
     }
@@ -798,19 +808,17 @@ impl<S: StepSpec> StepProgressReporter<S> {
                             next_step: next_step_info.clone(),
                             step_elapsed: self.step_start.elapsed(),
                             attempt_elapsed: self.attempt_start.elapsed(),
-                        },
-                    }))
-                    .await?;
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        execution_id: self.execution_id,
-                        total_elapsed,
-                        kind: ProgressEventKind::WaitingForProgress {
-                            step: next_step_info.clone(),
-                            attempt: 1,
-                            // For this next step, zero time has passed so far.
-                            step_elapsed: Duration::ZERO,
-                            attempt_elapsed: Duration::ZERO,
+                            progress: Box::new(ProgressEvent {
+                                execution_id: self.execution_id,
+                                total_elapsed,
+                                kind: ProgressEventKind::WaitingForProgress {
+                                    step: next_step_info.clone(),
+                                    attempt: 1,
+                                    // For this next step, zero time has passed so far.
+                                    step_elapsed: Duration::ZERO,
+                                    attempt_elapsed: Duration::ZERO,
+                                },
+                            }),
                         },
                     }))
                     .await?;
