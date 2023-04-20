@@ -305,6 +305,11 @@
                   }
                 ]
               },
+              "execution_id": {
+                "description": "The execution ID.",
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -322,6 +327,7 @@
             },
             "required": [
               "data",
+              "execution_id",
               "kind",
               "total_elapsed"
             ]
@@ -526,6 +532,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -537,6 +548,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -1374,6 +1386,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1385,6 +1402,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -1399,6 +1417,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1410,6 +1433,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
