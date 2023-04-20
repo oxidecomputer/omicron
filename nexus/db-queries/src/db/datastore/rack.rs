@@ -417,11 +417,10 @@ impl DataStore {
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                // This is the rare case where we want to allow table scans.  There
-                // must not be enough Nexus instances for this to be a problem.
-                // XXX-dap copied from ALLOW_FULL_TABLE_SCAN_SQL
-                let sql = "set local disallow_full_table_scans = off; \
-                    set local large_full_scan_rows = 1000;";
+                // This is the rare case where we want to allow table scans.
+                // There must not be enough Nexus instances for this to be a
+                // problem.  If there were, we couldn't fit them in DNS anyway.
+                let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
                 conn.batch_execute_async(sql).await?;
                 Ok(extip_dsl::external_ip
                     .filter(
