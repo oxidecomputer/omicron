@@ -762,11 +762,10 @@ impl ServiceManager {
                     .add_property("listen_port", "astring", listen_port);
 
                 let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/pantry")
-                        .add_instance(
-                            ServiceInstanceBuilder::new("default")
-                                .add_property_group(config),
-                        )
+                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
                 );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)

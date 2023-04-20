@@ -301,11 +301,10 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("oxide/cockroachdb")
-                            .add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(config)
-                            )
+                        ServiceBuilder::new("oxide/cockroachdb").add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        ),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
                         |err| Error::io("Failed to setup CRDB profile", err),
@@ -375,11 +374,10 @@ async fn ensure_running_zone(
                         .add_property("store", "astring", "/data");
 
                     let profile = ProfileBuilder::new("omicron").add_service(
-                        ServiceBuilder::new("oxide/clickhouse")
-                            .add_instance(
-                                ServiceInstanceBuilder::new("default")
-                                    .add_property_group(config),
-                            )
+                        ServiceBuilder::new("oxide/clickhouse").add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        ),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
                         |err| {
@@ -405,7 +403,7 @@ async fn ensure_running_zone(
                             .add_instance(
                                 ServiceInstanceBuilder::new("default")
                                     .add_property_group(config),
-                            )
+                            ),
                     );
                     profile.add_to_zone(log, &installed_zone).await.map_err(
                         |err| {

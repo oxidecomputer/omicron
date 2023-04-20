@@ -69,10 +69,7 @@ impl ServiceBuilder {
         Self { name: name.to_string(), instances: vec![] }
     }
 
-    pub fn add_instance(
-        mut self,
-        instance: ServiceInstanceBuilder,
-    ) -> Self {
+    pub fn add_instance(mut self, instance: ServiceInstanceBuilder) -> Self {
         self.instances.push(instance);
         self
     }
@@ -91,13 +88,15 @@ impl Display for ServiceBuilder {
             write!(f, "{}", instance)?;
         }
 
-        write!(f, r#"  </service>
-"#)?;
+        write!(
+            f,
+            r#"  </service>
+"#
+        )?;
 
         Ok(())
     }
 }
-
 
 pub struct ServiceInstanceBuilder {
     name: String,
@@ -131,8 +130,11 @@ impl Display for ServiceInstanceBuilder {
             write!(f, "{}", property_group)?;
         }
 
-        write!(f, r#"    </instance>
-"#)?;
+        write!(
+            f,
+            r#"    </instance>
+"#
+        )?;
 
         Ok(())
     }
@@ -232,9 +234,7 @@ mod tests {
     fn test_instance() {
         let builder = ProfileBuilder::new("myprofile").add_service(
             ServiceBuilder::new("myservice")
-                .add_instance(
-                    ServiceInstanceBuilder::new("default")
-                )
+                .add_instance(ServiceInstanceBuilder::new("default")),
         );
         assert_eq!(
             format!("{}", builder),
@@ -248,15 +248,13 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_property_group() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice")
-                .add_instance(
-                    ServiceInstanceBuilder::new("default")
-                        .add_property_group(PropertyGroupBuilder::new("mypg")),
-                )
+            ServiceBuilder::new("myservice").add_instance(
+                ServiceInstanceBuilder::new("default")
+                    .add_property_group(PropertyGroupBuilder::new("mypg")),
+            ),
         );
         assert_eq!(
             format!("{}", builder),
@@ -275,14 +273,12 @@ mod tests {
     #[test]
     fn test_property() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice")
-                .add_instance(
-                    ServiceInstanceBuilder::new("default")
-                        .add_property_group(
-                            PropertyGroupBuilder::new("mypg")
-                                .add_property("prop", "type", "value"),
-                        )
+            ServiceBuilder::new("myservice").add_instance(
+                ServiceInstanceBuilder::new("default").add_property_group(
+                    PropertyGroupBuilder::new("mypg")
+                        .add_property("prop", "type", "value"),
                 ),
+            ),
         );
         assert_eq!(
             format!("{}", builder),
@@ -302,19 +298,18 @@ mod tests {
     #[test]
     fn test_multiple() {
         let builder = ProfileBuilder::new("myprofile").add_service(
-            ServiceBuilder::new("myservice")
-                .add_instance(
-                    ServiceInstanceBuilder::new("default")
-                        .add_property_group(
-                            PropertyGroupBuilder::new("mypg")
-                                .add_property("prop", "type", "value")
-                                .add_property("prop2", "type", "value2"),
-                        )
-                        .add_property_group(
-                            PropertyGroupBuilder::new("mypg2")
-                                .add_property("prop3", "type", "value3"),
-                        ),
-                )
+            ServiceBuilder::new("myservice").add_instance(
+                ServiceInstanceBuilder::new("default")
+                    .add_property_group(
+                        PropertyGroupBuilder::new("mypg")
+                            .add_property("prop", "type", "value")
+                            .add_property("prop2", "type", "value2"),
+                    )
+                    .add_property_group(
+                        PropertyGroupBuilder::new("mypg2")
+                            .add_property("prop3", "type", "value3"),
+                    ),
+            ),
         );
         assert_eq!(
             format!("{}", builder),
