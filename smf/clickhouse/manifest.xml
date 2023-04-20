@@ -11,12 +11,6 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-  <method_context>
-    <method_environment>
-      <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
-    </method_environment>
-  </method_context>
-
   <exec_method type='method' name='start'
     exec='/var/svc/manifest/site/clickhouse/method_script.sh'
     timeout_seconds='0' />
