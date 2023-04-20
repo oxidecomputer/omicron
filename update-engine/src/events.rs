@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::rust::deserialize_ignore_any;
 
 use crate::{
-    errors::ConvertGenericError, AsError, GenericSpec, NestedSpec, StepSpec,
+    errors::ConvertGenericError, AsError, ExecutionId, GenericSpec, NestedSpec,
+    StepSpec,
 };
 
 #[derive_where(Debug)]
@@ -62,6 +63,9 @@ impl<S: StepSpec> Event<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "StepEventFor{S}")]
 pub struct StepEvent<S: StepSpec> {
+    /// The execution ID.
+    pub execution_id: ExecutionId,
+
     /// Total time elapsed since the start of execution.
     pub total_elapsed: Duration,
 
@@ -79,6 +83,7 @@ impl<S: StepSpec> StepEvent<S> {
         value: StepEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(StepEvent {
+            execution_id: value.execution_id,
             total_elapsed: value.total_elapsed,
             kind: StepEventKind::from_generic(value.kind)
                 .map_err(|error| error.parent("kind"))?,
@@ -92,6 +97,7 @@ impl<S: StepSpec> StepEvent<S> {
         self,
     ) -> Result<StepEvent<GenericSpec<E>>, ConvertGenericError> {
         Ok(StepEvent {
+            execution_id: self.execution_id,
             total_elapsed: self.total_elapsed,
             kind: self
                 .kind
@@ -263,6 +269,30 @@ pub enum StepEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEventKind<S> {
+    /// Returns whether this is a terminal step event.
+    ///
+    /// Terminal events guarantee that there are no further events coming from
+    /// this update engine.
+    ///
+    /// This does not recurse into nested events; those are always non-terminal.
+    pub fn is_terminal(&self) -> StepEventIsTerminal {
+        match self {
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionCompleted { .. } => {
+                StepEventIsTerminal::Terminal { success: true }
+            }
+            StepEventKind::ExecutionFailed { .. } => {
+                StepEventIsTerminal::Terminal { success: false }
+            }
+            StepEventKind::ExecutionStarted { .. }
+            | StepEventKind::ProgressReset { .. }
+            | StepEventKind::AttemptRetry { .. }
+            | StepEventKind::StepCompleted { .. }
+            | StepEventKind::Nested { .. }
+            | StepEventKind::Unknown => StepEventIsTerminal::NonTerminal,
+        }
+    }
+
     /// Returns the priority of the event.
     ///
     /// For more about this, see [`StepEventPriority`].
@@ -558,6 +588,24 @@ impl<S: StepSpec> StepEventKind<S> {
     }
 }
 
+/// Whether a [`StepEvent`] is a terminal event.
+///
+/// Returned by [`StepEventKind::is_terminal`].
+///
+/// The update engine guarantees that after a terminal event is seen, no further
+/// events are seen.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepEventIsTerminal {
+    /// This is not a terminal event.
+    NonTerminal,
+
+    /// This is a terminal event.
+    Terminal {
+        /// True if execution completed successfully.
+        success: bool,
+    },
+}
+
 /// The priority of a [`StepEvent`].
 ///
 /// Returned by [`StepEventKind::priority`].
@@ -681,6 +729,9 @@ impl<S: StepSpec> StepOutcome<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "ProgressEventFor{S}")]
 pub struct ProgressEvent<S: StepSpec> {
+    /// The execution ID.
+    pub execution_id: ExecutionId,
+
     /// Total time elapsed since the start of execution.
     pub total_elapsed: Duration,
 
@@ -698,6 +749,7 @@ impl<S: StepSpec> ProgressEvent<S> {
         value: ProgressEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(Self {
+            execution_id: value.execution_id,
             total_elapsed: value.total_elapsed,
             kind: ProgressEventKind::from_generic(value.kind)
                 .map_err(|error| error.parent("kind"))?,
@@ -711,6 +763,7 @@ impl<S: StepSpec> ProgressEvent<S> {
         self,
     ) -> Result<ProgressEvent<GenericSpec<E>>, ConvertGenericError> {
         Ok(ProgressEvent {
+            execution_id: self.execution_id,
             total_elapsed: self.total_elapsed,
             kind: self
                 .kind
@@ -725,6 +778,22 @@ impl<S: StepSpec> ProgressEvent<S> {
 #[serde(bound = "", rename_all = "snake_case", tag = "kind")]
 #[schemars(rename = "ProgressEventKindFor{S}")]
 pub enum ProgressEventKind<S: StepSpec> {
+    /// The update engine is waiting for a progress message.
+    Waiting {
+        /// Information about the step.
+        step: StepInfoWithMetadata<S>,
+
+        /// The attempt number currently being executed.
+        attempt: usize,
+
+        /// Total time elapsed since the start of the step. Includes prior
+        /// attempts.
+        step_elapsed: Duration,
+
+        /// Total time elapsed since the start of the attempt.
+        attempt_elapsed: Duration,
+    },
+
     Progress {
         /// Information about the step.
         step: StepInfoWithMetadata<S>,
@@ -778,6 +847,18 @@ impl<S: StepSpec> ProgressEventKind<S> {
         value: ProgressEventKind<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         let ret = match value {
+            ProgressEventKind::Waiting {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+            } => ProgressEventKind::Waiting {
+                step: StepInfoWithMetadata::from_generic(step)
+                    .map_err(|error| error.parent("step"))?,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+            },
             ProgressEventKind::Progress {
                 step,
                 attempt,
@@ -822,6 +903,19 @@ impl<S: StepSpec> ProgressEventKind<S> {
         self,
     ) -> Result<ProgressEventKind<GenericSpec<E>>, ConvertGenericError> {
         let ret = match self {
+            ProgressEventKind::Waiting {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+            } => ProgressEventKind::Waiting {
+                step: step
+                    .into_generic()
+                    .map_err(|error| error.parent("step"))?,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+            },
             ProgressEventKind::Progress {
                 step,
                 attempt,
@@ -1130,21 +1224,121 @@ impl<S: StepSpec> StepProgress<S> {
     }
 }
 
+/// A report produced from an engine running on another machine or in another
+/// process.
+///
+/// Remote reports can be passed into a [`StepContext`](crate::StepContext),
+/// in which case they show up as nested events.
+#[derive_where(Clone, Debug, Eq, PartialEq)]
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "RemoteReportFor{S}")]
+pub struct RemoteReport<S: StepSpec> {
+    /// The execution ID corresponding to the report.
+    ///
+    /// This is the same as the execution ID of all the step events inside.
+    pub execution_id: ExecutionId,
+
+    /// How long it's been since the engine started running.
+    pub total_elapsed: Duration,
+
+    /// A list of step events.
+    ///
+    /// Step events include success and failure events.
+    pub step_events: Vec<StepEvent<S>>,
+
+    /// A list of progress events, or whether we're currently waiting for a
+    /// progress event.
+    ///
+    /// Currently, this produces one progress event for each top-level and
+    /// nested event in progress.
+    pub progress_events: Vec<ProgressEvent<S>>,
+}
+
+impl<S: StepSpec> RemoteReport<S> {
+    /// Converts a generic version into self.
+    ///
+    /// This version can be used to convert a generic type into a more concrete
+    /// form.
+    pub fn from_generic<E: AsError>(
+        value: RemoteReport<GenericSpec<E>>,
+    ) -> Result<Self, ConvertGenericError> {
+        Ok(Self {
+            execution_id: value.execution_id,
+            total_elapsed: value.total_elapsed,
+            step_events: value
+                .step_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    StepEvent::from_generic(event).map_err(|error| {
+                        error.parent_array("step_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            progress_events: value
+                .progress_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    ProgressEvent::from_generic(event).map_err(|error| {
+                        error.parent_array("progress_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+
+    /// Converts self into its generic version.
+    ///
+    /// This version can be used to share data across different kinds of engines.
+    pub fn into_generic<E: AsError>(
+        self,
+    ) -> Result<RemoteReport<GenericSpec<E>>, ConvertGenericError> {
+        Ok(RemoteReport {
+            execution_id: self.execution_id,
+            total_elapsed: self.total_elapsed,
+            step_events: self
+                .step_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    event.into_generic().map_err(|error| {
+                        error.parent_array("step_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            progress_events: self
+                .progress_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    event.into_generic().map_err(|error| {
+                        error.parent_array("progress_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use omicron_test_utils::dev::test_setup_log;
 
-    use crate::test_utils::TestSpec;
+    use crate::test_utils::*;
 
     use super::*;
 
     #[test]
     fn step_event_parse_unknown() {
         let logctx = test_setup_log("step_event_parse_unknown");
+        let execution_id = test_execution_id();
         let tests = [
             (
                 r#"
                   {
+                    "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1179,6 +1373,7 @@ mod tests {
                   }
                 "#,
                 StepEvent {
+                    execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: StepEventKind::Unknown,
                 },
@@ -1186,6 +1381,7 @@ mod tests {
             (
                 r#"
                   {
+                    "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1221,6 +1417,7 @@ mod tests {
                   }
                 "#,
                 StepEvent::<TestSpec> {
+                    execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: StepEventKind::ExecutionCompleted {
                         last_step: StepInfoWithMetadata {
@@ -1265,10 +1462,13 @@ mod tests {
     #[test]
     fn progress_event_parse_unknown() {
         let logctx = test_setup_log("progress_event_parse_unknown");
+        let execution_id = test_execution_id();
+
         let tests = [
             (
                 r#"
                   {
+                    "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1304,6 +1504,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent {
+                    execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Unknown,
                 },
@@ -1311,6 +1512,7 @@ mod tests {
             (
                 r#"
                   {
+                    "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1347,6 +1549,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent::<TestSpec> {
+                    execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Progress {
                         step: StepInfoWithMetadata {

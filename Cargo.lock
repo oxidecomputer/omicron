@@ -8381,6 +8381,7 @@ dependencies = [
  "linear-map",
  "omicron-test-utils",
  "owo-colors",
+ "petgraph",
  "schemars",
  "serde",
  "serde_json",
@@ -8389,6 +8390,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "uuid",
 ]
 
 [[package]]

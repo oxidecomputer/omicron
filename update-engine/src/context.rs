@@ -102,8 +102,9 @@ impl<S: StepSpec> StepContext<S> {
                                     .expect("we always keep the receiver open");
                                 }
                                 Err(error) => {
-                                    // All we can really do is log this as a warning.
-                                    // This
+                                    // All we can really do is log this as a
+                                    // warning. This shouldn't happen unless a
+                                    // serializer errors out.
                                     slog::warn!(self.log, "error serializing nested event: {error}");
                                 }
                             }
