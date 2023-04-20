@@ -5,8 +5,8 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{
-    DiskEnsureBody, InstanceEnsureBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse,
+    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
     VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
@@ -33,6 +33,7 @@ type SledApiDescription = ApiDescription<Arc<SledAgent>>;
 /// Returns a description of the sled agent API
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
+        api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
@@ -105,6 +106,28 @@ async fn instance_put_state(
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
         sa.instance_ensure_state(instance_id, body_args.state).await?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/migration-ids",
+}]
+async fn instance_put_migration_ids(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutMigrationIdsBody>,
+) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_put_migration_ids(
+            instance_id,
+            &body_args.old_runtime,
+            &body_args.migration_params,
+        )
+        .await?,
     ))
 }
 

@@ -7,11 +7,10 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::params::NetworkInterface;
-use crate::params::SourceNatConfig;
-use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
+    InstanceHardware, InstanceMigrationSourceParams,
+    InstanceMigrationTargetParams, InstanceStateRequested, NetworkInterface,
+    SourceNatConfig, VpcFirewallRule,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
@@ -513,6 +512,11 @@ mockall::mock! {
             &self,
             state: InstanceStateRequested
         ) -> Result<InstanceRuntimeState, Error>;
+        pub async fn put_migration_ids(
+            &self,
+            old_runtime: &InstanceRuntimeState,
+            migration_ids: &Option<InstanceMigrationSourceParams>
+        ) -> Result<InstanceRuntimeState, Error>;
         pub async fn issue_snapshot_request(
             &self,
             disk_id: Uuid,
@@ -712,6 +716,40 @@ impl Instance {
         if let Some(s) = next_published {
             inner.state.transition(s);
         }
+        Ok(inner.state.current().clone())
+    }
+
+    pub async fn put_migration_ids(
+        &self,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let mut inner = self.inner.lock().await;
+
+        // Check that the instance's current generation matches the one the
+        // caller expects to transition from. This helps Nexus ensure that if
+        // multiple migration sagas launch at Propolis generation N, then only
+        // one of them will successfully set the instance's migration IDs.
+        if inner.state.current().propolis_gen != old_runtime.propolis_gen {
+            // Allow this transition for idempotency if the instance is
+            // already in the requested goal state.
+            if inner.state.migration_ids_already_set(old_runtime, migration_ids)
+            {
+                return Ok(inner.state.current().clone());
+            }
+
+            return Err(Error::Transition(
+                omicron_common::api::external::Error::InvalidRequest {
+                    message: format!(
+                        "wrong Propolis ID generation: expected {}, got {}",
+                        inner.state.current().propolis_gen,
+                        old_runtime.propolis_gen
+                    ),
+                },
+            ));
+        }
+
+        inner.state.set_migration_ids(migration_ids);
         Ok(inner.state.current().clone())
     }
 
