@@ -75,6 +75,94 @@ pub struct StepEvent<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEvent<S> {
+    /// Returns a progress event associated with this step event, if any.
+    ///
+    /// Some step events have an implicit progress event of kind
+    /// [`ProgressEventKind::WaitingForProgress`] associated with them. This
+    /// causes those step events to generate progress events.
+    pub fn progress_event(&self) -> Option<ProgressEvent<S>> {
+        match &self.kind {
+            StepEventKind::ExecutionStarted { first_step, .. } => {
+                Some(ProgressEvent {
+                    execution_id: self.execution_id,
+                    total_elapsed: self.total_elapsed,
+                    kind: ProgressEventKind::WaitingForProgress {
+                        step: first_step.clone(),
+                        attempt: 1,
+                        step_elapsed: Duration::ZERO,
+                        attempt_elapsed: Duration::ZERO,
+                    },
+                })
+            }
+            StepEventKind::ProgressReset {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                ..
+            } => Some(ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::WaitingForProgress {
+                    step: step.clone(),
+                    attempt: *attempt,
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                },
+            }),
+            StepEventKind::AttemptRetry {
+                step,
+                next_attempt,
+                step_elapsed,
+                ..
+            } => Some(ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::WaitingForProgress {
+                    step: step.clone(),
+                    attempt: *next_attempt,
+                    step_elapsed: *step_elapsed,
+                    // For this attempt, zero time has passed so far.
+                    attempt_elapsed: Duration::ZERO,
+                },
+            }),
+            StepEventKind::StepCompleted { next_step, .. } => {
+                Some(ProgressEvent {
+                    execution_id: self.execution_id,
+                    total_elapsed: self.total_elapsed,
+                    kind: ProgressEventKind::WaitingForProgress {
+                        step: next_step.clone(),
+                        attempt: 1,
+                        // For this next step, zero time has passed so far.
+                        step_elapsed: Duration::ZERO,
+                        attempt_elapsed: Duration::ZERO,
+                    },
+                })
+            }
+            StepEventKind::Nested {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                event,
+                ..
+            } => event.progress_event().map(|progress_event| ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::Nested {
+                    step: step.clone(),
+                    attempt: *attempt,
+                    event: Box::new(progress_event),
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                },
+            }),
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionCompleted { .. }
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::Unknown => None,
+        }
+    }
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -131,13 +219,6 @@ pub enum StepEventKind<S: StepSpec> {
 
         /// Information about the first step.
         first_step: StepInfoWithMetadata<S>,
-
-        /// A [`ProgressEvent`] associated with this step event.
-        ///
-        /// This is always of the kind
-        /// [`ProgressEventKind::WaitingForProgress`]. The event should be
-        /// processed along with the corresponding step event.
-        progress: Box<ProgressEvent<S>>,
     },
 
     /// Progress was reset along an attempt, and this attempt is going down a
@@ -161,13 +242,6 @@ pub enum StepEventKind<S: StepSpec> {
 
         /// A message assocaited with the reset.
         message: Cow<'static, str>,
-
-        /// A [`ProgressEvent`] associated with this step event.
-        ///
-        /// This is always of the kind
-        /// [`ProgressEventKind::WaitingForProgress`]. The event should be
-        /// processed along with the corresponding step event.
-        progress: Box<ProgressEvent<S>>,
     },
 
     /// An attempt failed and this step is being retried.
@@ -187,13 +261,6 @@ pub enum StepEventKind<S: StepSpec> {
 
         /// A message associated with the retry.
         message: Cow<'static, str>,
-
-        /// A [`ProgressEvent`] associated with this step event.
-        ///
-        /// This is always of the kind
-        /// [`ProgressEventKind::WaitingForProgress`]. The event should be
-        /// processed along with the corresponding step event.
-        progress: Box<ProgressEvent<S>>,
     },
 
     /// A step is complete and the next step has been started.
@@ -216,13 +283,6 @@ pub enum StepEventKind<S: StepSpec> {
 
         /// The time it took for this attempt to complete.
         attempt_elapsed: Duration,
-
-        /// A [`ProgressEvent`] associated with this step event.
-        ///
-        /// This is always of the kind
-        /// [`ProgressEventKind::WaitingForProgress`]. The event should be
-        /// processed along with the corresponding step event.
-        progress: Box<ProgressEvent<S>>,
     },
 
     /// Execution is complete.
@@ -289,12 +349,6 @@ pub enum StepEventKind<S: StepSpec> {
 
         /// The time it took for this attempt to complete.
         attempt_elapsed: Duration,
-
-        /// An optional top-level progress event.
-        ///
-        /// If the nested step event has a progress event associated with it,
-        /// this contains the corresponding top-level progress event.
-        progress: Option<Box<ProgressEvent<S>>>,
     },
 
     /// Future variants that might be unknown.
@@ -320,25 +374,6 @@ impl<S: StepSpec> StepEventKind<S> {
         }
     }
 
-    /// Returns the progress event associated with this step event, if any.
-    ///
-    /// Some step events have associated progress events.
-    pub fn progress_event(&self) -> Option<&ProgressEvent<S>> {
-        match self {
-            StepEventKind::ExecutionStarted { progress, .. }
-            | StepEventKind::ProgressReset { progress, .. }
-            | StepEventKind::AttemptRetry { progress, .. }
-            | StepEventKind::StepCompleted { progress, .. } => {
-                Some(&**progress)
-            }
-            StepEventKind::Nested { progress, .. } => progress.as_deref(),
-            StepEventKind::NoStepsDefined
-            | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. }
-            | StepEventKind::Unknown => None,
-        }
-    }
-
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -352,7 +387,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 steps,
                 components,
                 first_step,
-                progress,
             } => StepEventKind::ExecutionStarted {
                 steps: steps
                     .into_iter()
@@ -373,10 +407,6 @@ impl<S: StepSpec> StepEventKind<S> {
                     .collect::<Result<Vec<_>, _>>()?,
                 first_step: StepInfoWithMetadata::from_generic(first_step)
                     .map_err(|error| error.parent("first_step"))?,
-                progress: Box::new(
-                    ProgressEvent::from_generic(*progress)
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::ProgressReset {
                 step,
@@ -385,7 +415,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress,
             } => StepEventKind::ProgressReset {
                 step: StepInfoWithMetadata::from_generic(step)
                     .map_err(|error| error.parent("step"))?,
@@ -396,10 +425,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress: Box::new(
-                    ProgressEvent::from_generic(*progress)
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::AttemptRetry {
                 step,
@@ -407,7 +432,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress,
             } => StepEventKind::AttemptRetry {
                 step: StepInfoWithMetadata::from_generic(step)
                     .map_err(|error| error.parent("step"))?,
@@ -415,10 +439,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress: Box::new(
-                    ProgressEvent::from_generic(*progress)
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::StepCompleted {
                 step,
@@ -427,7 +447,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 next_step,
                 step_elapsed,
                 attempt_elapsed,
-                progress,
             } => StepEventKind::StepCompleted {
                 step: StepInfoWithMetadata::from_generic(step)
                     .map_err(|error| error.parent("step"))?,
@@ -438,10 +457,6 @@ impl<S: StepSpec> StepEventKind<S> {
                     .map_err(|error| error.parent("next_step"))?,
                 step_elapsed,
                 attempt_elapsed,
-                progress: Box::new(
-                    ProgressEvent::from_generic(*progress)
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::ExecutionCompleted {
                 last_step,
@@ -480,7 +495,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 event,
                 step_elapsed,
                 attempt_elapsed,
-                progress,
             } => StepEventKind::Nested {
                 step: StepInfoWithMetadata::from_generic(step)
                     .map_err(|error| error.parent("step"))?,
@@ -488,13 +502,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 event,
                 step_elapsed,
                 attempt_elapsed,
-                progress: progress
-                    .map(|progress| {
-                        ProgressEvent::from_generic(*progress)
-                            .map(Box::new)
-                            .map_err(|error| error.parent("progress"))
-                    })
-                    .transpose()?,
             },
             StepEventKind::Unknown => StepEventKind::Unknown,
         };
@@ -513,7 +520,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 steps,
                 components,
                 first_step,
-                progress,
             } => StepEventKind::ExecutionStarted {
                 steps: steps
                     .into_iter()
@@ -535,11 +541,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 first_step: first_step
                     .into_generic()
                     .map_err(|error| error.parent("first_step"))?,
-                progress: Box::new(
-                    progress
-                        .into_generic()
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::ProgressReset {
                 step,
@@ -548,7 +549,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress,
             } => StepEventKind::ProgressReset {
                 step: step
                     .into_generic()
@@ -560,11 +560,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress: Box::new(
-                    progress
-                        .into_generic()
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::AttemptRetry {
                 step,
@@ -572,7 +567,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress,
             } => StepEventKind::AttemptRetry {
                 step: step
                     .into_generic()
@@ -581,11 +575,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
                 message,
-                progress: Box::new(
-                    progress
-                        .into_generic()
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::StepCompleted {
                 step,
@@ -594,7 +583,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 next_step,
                 step_elapsed,
                 attempt_elapsed,
-                progress,
             } => StepEventKind::StepCompleted {
                 step: step
                     .into_generic()
@@ -608,11 +596,6 @@ impl<S: StepSpec> StepEventKind<S> {
                     .map_err(|error| error.parent("next_step"))?,
                 step_elapsed,
                 attempt_elapsed,
-                progress: Box::new(
-                    progress
-                        .into_generic()
-                        .map_err(|error| error.parent("progress"))?,
-                ),
             },
             StepEventKind::ExecutionCompleted {
                 last_step,
@@ -654,7 +637,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 event,
                 step_elapsed,
                 attempt_elapsed,
-                progress,
             } => StepEventKind::Nested {
                 step: step
                     .into_generic()
@@ -663,14 +645,6 @@ impl<S: StepSpec> StepEventKind<S> {
                 event,
                 step_elapsed,
                 attempt_elapsed,
-                progress: progress
-                    .map(|progress| {
-                        progress
-                            .into_generic()
-                            .map(Box::new)
-                            .map_err(|error| error.parent("progress"))
-                    })
-                    .transpose()?,
             },
             StepEventKind::Unknown => StepEventKind::Unknown,
         };

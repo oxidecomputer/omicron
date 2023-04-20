@@ -552,37 +552,6 @@
           "total_elapsed"
         ]
       },
-      "ProgressEventForWicketdEngineSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
-              }
-            ]
-          },
-          "execution_id": {
-            "description": "The execution ID.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "execution_id",
-          "total_elapsed"
-        ]
-      },
       "ProgressEventKindForGenericSpec": {
         "oneOf": [
           {
@@ -1608,14 +1577,6 @@
                   "execution_started"
                 ]
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
-                  }
-                ]
-              },
               "steps": {
                 "description": "The list of steps that will be executed.",
                 "type": "array",
@@ -1628,7 +1589,6 @@
               "components",
               "first_step",
               "kind",
-              "progress",
               "steps"
             ]
           },
@@ -1663,14 +1623,6 @@
               "metadata": {
                 "description": "Progress-related metadata associated with this attempt."
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step.",
                 "allOf": [
@@ -1694,7 +1646,6 @@
               "kind",
               "message",
               "metadata",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -1727,14 +1678,6 @@
                 "format": "uint",
                 "minimum": 0
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step.",
                 "allOf": [
@@ -1757,7 +1700,6 @@
               "kind",
               "message",
               "next_attempt",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -1802,14 +1744,6 @@
                   }
                 ]
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step that just completed.",
                 "allOf": [
@@ -1833,7 +1767,6 @@
               "kind",
               "next_step",
               "outcome",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -1988,15 +1921,6 @@
                 "type": "string",
                 "enum": [
                   "nested"
-                ]
-              },
-              "progress": {
-                "nullable": true,
-                "description": "An optional top-level progress event.\n\nIf the nested step event has a progress event associated with it, this contains the corresponding top-level progress event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
-                  }
                 ]
               },
               "step": {
@@ -2084,14 +2008,6 @@
                   "execution_started"
                 ]
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
-                  }
-                ]
-              },
               "steps": {
                 "description": "The list of steps that will be executed.",
                 "type": "array",
@@ -2104,7 +2020,6 @@
               "components",
               "first_step",
               "kind",
-              "progress",
               "steps"
             ]
           },
@@ -2139,14 +2054,6 @@
               "metadata": {
                 "description": "Progress-related metadata associated with this attempt."
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step.",
                 "allOf": [
@@ -2170,7 +2077,6 @@
               "kind",
               "message",
               "metadata",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -2203,14 +2109,6 @@
                 "format": "uint",
                 "minimum": 0
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step.",
                 "allOf": [
@@ -2233,7 +2131,6 @@
               "kind",
               "message",
               "next_attempt",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -2278,14 +2175,6 @@
                   }
                 ]
               },
-              "progress": {
-                "description": "A [`ProgressEvent`] associated with this step event.\n\nThis is always of the kind [`ProgressEventKind::WaitingForProgress`]. The event should be processed along with the corresponding step event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
-                  }
-                ]
-              },
               "step": {
                 "description": "Information about the step that just completed.",
                 "allOf": [
@@ -2309,7 +2198,6 @@
               "kind",
               "next_step",
               "outcome",
-              "progress",
               "step",
               "step_elapsed"
             ]
@@ -2464,15 +2352,6 @@
                 "type": "string",
                 "enum": [
                   "nested"
-                ]
-              },
-              "progress": {
-                "nullable": true,
-                "description": "An optional top-level progress event.\n\nIf the nested step event has a progress event associated with it, this contains the corresponding top-level progress event.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
-                  }
                 ]
               },
               "step": {

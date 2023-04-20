@@ -82,7 +82,6 @@ impl MessageDisplayState {
             steps,
             components,
             first_step: _,
-            progress,
         } = step_event.kind else {
             bail!("received invalid step event kind: {step_event:?}");
         };
@@ -107,80 +106,88 @@ impl MessageDisplayState {
 
         let mut ret =
             MessageDisplayState { log, mp, pb_main, sty_aux, component_tree };
-        ret.handle_progress_event(*progress)?;
+        let progress = step_event.progress_event().expect(
+            "first event should always have a progress associated with it",
+        );
+        ret.handle_progress_event(progress)?;
 
         Ok(ret)
     }
 
     fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
-            Event::Step(event) => match event.kind {
-                StepEventKind::NoStepsDefined => {
-                    bail!("at least one step expected")
-                }
-                StepEventKind::ExecutionStarted { .. } => {
-                    bail!("already past the first step")
-                }
-                StepEventKind::ProgressReset { step, progress, .. } => {
-                    let node = self.handle_and_get_node(step)?;
-                    node.reset();
-                    self.handle_progress_event(*progress)?;
-                }
-                StepEventKind::AttemptRetry {
-                    step,
-                    next_attempt,
-                    attempt_elapsed,
-                    message,
-                    progress,
-                    ..
-                } => {
-                    let node = self.handle_and_get_node(step)?;
-                    node.retry(next_attempt, attempt_elapsed, message);
-                    self.handle_progress_event(*progress)?;
-                }
-                StepEventKind::StepCompleted {
-                    step,
-                    attempt,
-                    outcome,
-                    attempt_elapsed,
-                    progress,
-                    ..
-                } => {
-                    let node = self.handle_and_get_node(step)?;
-                    node.finish(attempt, outcome, attempt_elapsed);
-                    self.pb_main.inc(1);
-
-                    self.handle_progress_event(*progress)?;
-                }
-                StepEventKind::ExecutionCompleted {
-                    last_step,
-                    last_attempt,
-                    last_outcome,
-                    step_elapsed,
-                    attempt_elapsed: _,
-                } => {
-                    let last_node = self.handle_and_get_node(last_step)?;
-                    last_node.finish(last_attempt, last_outcome, step_elapsed);
-                }
-                StepEventKind::ExecutionFailed {
-                    failed_step,
-                    total_attempts,
-                    attempt_elapsed,
-                    message,
-                    ..
-                } => {
-                    let failed_node = self.handle_and_get_node(failed_step)?;
-                    failed_node.abandon(
-                        &message,
+            Event::Step(event) => {
+                match event.kind {
+                    StepEventKind::NoStepsDefined => {
+                        bail!("at least one step expected")
+                    }
+                    StepEventKind::ExecutionStarted { .. } => {
+                        bail!("already past the first step")
+                    }
+                    StepEventKind::ProgressReset { step, .. } => {
+                        let node = self.handle_and_get_node(step)?;
+                        node.reset();
+                    }
+                    StepEventKind::AttemptRetry {
+                        step,
+                        next_attempt,
+                        attempt_elapsed,
+                        message,
+                        ..
+                    } => {
+                        let node = self.handle_and_get_node(step)?;
+                        node.retry(next_attempt, attempt_elapsed, message);
+                    }
+                    StepEventKind::StepCompleted {
+                        step,
+                        attempt,
+                        outcome,
+                        attempt_elapsed,
+                        ..
+                    } => {
+                        let node = self.handle_and_get_node(step)?;
+                        node.finish(attempt, outcome, attempt_elapsed);
+                        self.pb_main.inc(1);
+                    }
+                    StepEventKind::ExecutionCompleted {
+                        last_step,
+                        last_attempt,
+                        last_outcome,
+                        step_elapsed,
+                        attempt_elapsed: _,
+                    } => {
+                        let last_node = self.handle_and_get_node(last_step)?;
+                        last_node.finish(
+                            last_attempt,
+                            last_outcome,
+                            step_elapsed,
+                        );
+                    }
+                    StepEventKind::ExecutionFailed {
+                        failed_step,
                         total_attempts,
                         attempt_elapsed,
-                    );
+                        message,
+                        ..
+                    } => {
+                        let failed_node =
+                            self.handle_and_get_node(failed_step)?;
+                        failed_node.abandon(
+                            &message,
+                            total_attempts,
+                            attempt_elapsed,
+                        );
+                    }
+                    StepEventKind::Nested { .. } => {
+                        // TODO: display nested events
+                    }
+                    StepEventKind::Unknown => {}
                 }
-                StepEventKind::Nested { .. } => {
-                    // TODO: display nested events
+
+                if let Some(progress) = event.progress_event() {
+                    self.handle_progress_event(progress)?;
                 }
-                StepEventKind::Unknown => {}
-            },
+            }
             Event::Progress(event) => self.handle_progress_event(event)?,
         }
 
