@@ -305,6 +305,11 @@
                   }
                 ]
               },
+              "execution_id": {
+                "description": "The execution ID.",
+                "type": "string",
+                "format": "uuid"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -322,6 +327,7 @@
             },
             "required": [
               "data",
+              "execution_id",
               "kind",
               "total_elapsed"
             ]
@@ -526,6 +532,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -537,11 +548,61 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
       "ProgressEventKindForGenericSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -679,6 +740,55 @@
       },
       "ProgressEventKindForWicketdEngineSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -1374,6 +1484,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1385,6 +1500,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -1399,6 +1515,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1410,6 +1531,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },

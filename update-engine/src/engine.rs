@@ -4,16 +4,19 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{borrow::Cow, sync::Mutex};
+use std::{borrow::Cow, fmt, sync::Mutex, time::Duration};
 
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
 use futures::{future::BoxFuture, prelude::*};
 use linear_map::LinearMap;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tokio::{
     sync::{mpsc, oneshot},
     time::Instant,
 };
+use uuid::Uuid;
 
 use crate::{
     errors::ExecutionError,
@@ -26,11 +29,38 @@ use crate::{
     StepContextPayload, StepHandle, StepSpec,
 };
 
+/// An identifier for a particular engine execution.
+///
+/// All events coming from an execution have the same engine ID. Nested engines
+/// have their own ID.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(transparent)]
+pub struct ExecutionId(pub Uuid);
+
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive_where(Debug)]
 pub struct UpdateEngine<'a, S: StepSpec> {
     // TODO: for now, this is a sequential series of steps. This can potentially
     // be a graph in the future.
     log: slog::Logger,
+    execution_id: ExecutionId,
     sender: mpsc::Sender<Event<S>>,
     // This is a mutex to allow borrows to steps to be held by both
     // ComponentRegistrar and NewStep at the same time. (This could also be a
@@ -44,11 +74,24 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
+        let execution_id = ExecutionId(Uuid::new_v4());
         Self {
-            log: log.new(slog::o!("component" => "UpdateEngine")),
+            log: log.new(slog::o!(
+                "component" => "UpdateEngine",
+                "execution_id" => format!("{execution_id}"),
+            )),
+            execution_id: ExecutionId(Uuid::new_v4()),
             sender,
             steps: Default::default(),
         }
+    }
+
+    /// Returns the ID for this execution.
+    ///
+    /// All events coming from this engine will have this ID associated with
+    /// them.
+    pub fn execution_id(&self) -> ExecutionId {
+        self.execution_id
     }
 
     /// Adds a new step corresponding to the given component.
@@ -140,6 +183,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
             self.sender.send(Event::Step(StepEvent {
+                execution_id: self.execution_id,
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
@@ -157,13 +201,28 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 .await
         };
 
+        let start_elapsed = total_start.elapsed();
+
         self.sender
             .send(Event::Step(StepEvent {
-                total_elapsed: total_start.elapsed(),
+                execution_id: self.execution_id,
+                total_elapsed: start_elapsed,
                 kind: StepEventKind::ExecutionStarted {
                     steps: step_infos,
                     components,
                     first_step: first_step_info.clone(),
+                },
+            }))
+            .await?;
+        self.sender
+            .send(Event::Progress(ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: start_elapsed,
+                kind: ProgressEventKind::WaitingForProgress {
+                    step: first_step_info.clone(),
+                    attempt: 1,
+                    step_elapsed: Duration::ZERO,
+                    attempt_elapsed: Duration::ZERO,
                 },
             }))
             .await?;
@@ -172,6 +231,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
             .exec
             .execute(
                 &self.log,
+                self.execution_id,
                 total_start,
                 first_step_info,
                 self.sender.clone(),
@@ -194,7 +254,13 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
 
             (step_res, reporter) = step
                 .exec
-                .execute(&self.log, total_start, step_info, self.sender.clone())
+                .execute(
+                    &self.log,
+                    self.execution_id,
+                    total_start,
+                    step_info,
+                    self.sender.clone(),
+                )
                 .await?;
         }
 
@@ -462,6 +528,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
     async fn execute(
         self,
         log: &slog::Logger,
+        execution_id: ExecutionId,
         total_start: Instant,
         step_info: StepInfoWithMetadata<S>,
         sender: mpsc::Sender<Event<S>>,
@@ -479,8 +546,12 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         let cx = StepContext::new(log, payload_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
-        let mut reporter =
-            StepProgressReporter::new(total_start, step_info, sender);
+        let mut reporter = StepProgressReporter::new(
+            execution_id,
+            total_start,
+            step_info,
+            sender,
+        );
 
         let mut step_res = None;
         let mut payload_done = false;
@@ -540,6 +611,7 @@ type StepExecFn<'a, S> = Box<
 >;
 
 struct StepProgressReporter<S: StepSpec> {
+    execution_id: ExecutionId,
     total_start: Instant,
     step_info: StepInfoWithMetadata<S>,
     step_start: Instant,
@@ -550,12 +622,14 @@ struct StepProgressReporter<S: StepSpec> {
 
 impl<S: StepSpec> StepProgressReporter<S> {
     fn new(
+        execution_id: ExecutionId,
         total_start: Instant,
         step_info: StepInfoWithMetadata<S>,
         sender: mpsc::Sender<Event<S>>,
     ) -> Self {
         let step_start = Instant::now();
         Self {
+            execution_id,
             total_start,
             step_info,
             step_start,
@@ -577,6 +651,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
             StepContextPayload::Nested(Event::Step(event)) => {
                 self.sender
                     .send(Event::Step(StepEvent {
+                        execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::Nested {
                             step: self.step_info.clone(),
@@ -591,6 +666,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
             StepContextPayload::Nested(Event::Progress(event)) => {
                 self.sender
                     .send(Event::Progress(ProgressEvent {
+                        execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: ProgressEventKind::Nested {
                             step: self.step_info.clone(),
@@ -614,6 +690,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 // Send the progress to the sender.
                 self.sender
                     .send(Event::Progress(ProgressEvent {
+                        execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: ProgressEventKind::Progress {
                             step: self.step_info.clone(),
@@ -627,40 +704,77 @@ impl<S: StepSpec> StepProgressReporter<S> {
                     .await
             }
             StepProgress::Reset { metadata, message } => {
+                let total_elapsed = self.total_start.elapsed();
+                let step_elapsed = self.step_start.elapsed();
+                let attempt_elapsed = self.attempt_start.elapsed();
+
                 // Send a progress reset message, but do not reset the attempt.
                 self.sender
                     .send(Event::Step(StepEvent {
-                        total_elapsed: self.total_start.elapsed(),
+                        execution_id: self.execution_id,
+                        total_elapsed,
                         kind: StepEventKind::ProgressReset {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             metadata,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed,
+                            attempt_elapsed,
                             message,
                         },
                     }))
-                    .await
+                    .await?;
+                // Also send the corresponding "waiting for progress" message.
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        execution_id: self.execution_id,
+                        total_elapsed,
+                        kind: ProgressEventKind::WaitingForProgress {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            step_elapsed,
+                            attempt_elapsed,
+                        },
+                    }))
+                    .await?;
+                Ok(())
             }
             StepProgress::Retry { message } => {
                 // Retry this step.
                 self.attempt += 1;
-                let attempt_elapsed = self.attempt_start.elapsed();
+                let total_elapsed = self.total_start.elapsed();
+                let step_elapsed = self.step_start.elapsed();
+                let last_attempt_elapsed = self.attempt_start.elapsed();
                 self.attempt_start = Instant::now();
 
                 // Send the retry message.
                 self.sender
                     .send(Event::Step(StepEvent {
-                        total_elapsed: self.total_start.elapsed(),
+                        execution_id: self.execution_id,
+                        total_elapsed,
                         kind: StepEventKind::AttemptRetry {
                             step: self.step_info.clone(),
                             next_attempt: self.attempt,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed,
+                            step_elapsed,
+                            attempt_elapsed: last_attempt_elapsed,
                             message,
                         },
                     }))
-                    .await
+                    .await?;
+                // Also send the corresponding "waiting for progress" message.
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        execution_id: self.execution_id,
+                        total_elapsed,
+                        kind: ProgressEventKind::WaitingForProgress {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            step_elapsed,
+                            // For this attempt, zero time has passed so far.
+                            attempt_elapsed: Duration::ZERO,
+                        },
+                    }))
+                    .await?;
+                Ok(())
             }
         }
     }
@@ -672,9 +786,11 @@ impl<S: StepSpec> StepProgressReporter<S> {
     ) -> Result<(), ExecutionError<S>> {
         match step_res {
             Ok(outcome) => {
+                let total_elapsed = self.total_start.elapsed();
                 self.sender
                     .send(Event::Step(StepEvent {
-                        total_elapsed: self.total_start.elapsed(),
+                        execution_id: self.execution_id,
+                        total_elapsed,
                         kind: StepEventKind::StepCompleted {
                             step: self.step_info,
                             attempt: self.attempt,
@@ -682,6 +798,19 @@ impl<S: StepSpec> StepProgressReporter<S> {
                             next_step: next_step_info.clone(),
                             step_elapsed: self.step_start.elapsed(),
                             attempt_elapsed: self.attempt_start.elapsed(),
+                        },
+                    }))
+                    .await?;
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        execution_id: self.execution_id,
+                        total_elapsed,
+                        kind: ProgressEventKind::WaitingForProgress {
+                            step: next_step_info.clone(),
+                            attempt: 1,
+                            // For this next step, zero time has passed so far.
+                            step_elapsed: Duration::ZERO,
+                            attempt_elapsed: Duration::ZERO,
                         },
                     }))
                     .await?;
@@ -704,6 +833,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
             Ok(outcome) => {
                 self.sender
                     .send(Event::Step(StepEvent {
+                        execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::ExecutionCompleted {
                             last_step: self.step_info,
@@ -747,6 +877,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
 
         self.sender
             .send(Event::Step(StepEvent {
+                execution_id: self.execution_id,
                 total_elapsed: self.total_start.elapsed(),
                 kind: StepEventKind::ExecutionFailed {
                     failed_step: self.step_info,

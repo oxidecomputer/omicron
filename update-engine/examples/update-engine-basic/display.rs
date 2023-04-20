@@ -174,6 +174,10 @@ impl MessageDisplayState {
                 StepEventKind::Unknown => {}
             },
             Event::Progress(event) => match event.kind {
+                ProgressEventKind::WaitingForProgress { step, .. } => {
+                    // Create this node.
+                    _ = self.handle_and_get_node(step)?;
+                }
                 ProgressEventKind::Progress { step, progress, .. } => {
                     let node = self.handle_and_get_node(step)?;
                     node.progress(progress);
