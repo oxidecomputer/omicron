@@ -8,7 +8,7 @@ use super::simulatable::Simulatable;
 
 use crate::common::instance::InstanceState;
 use crate::nexus::NexusClient;
-use crate::params::InstanceStateRequested;
+use crate::params::{InstanceMigrationSourceParams, InstanceStateRequested};
 use async_trait::async_trait;
 use nexus_client;
 use omicron_common::api::external::Error;
@@ -220,6 +220,28 @@ impl SimInstanceInner {
         self.propolis_queue.clear();
         self.state.current().clone()
     }
+    fn put_migration_ids(
+        &mut self,
+        old_runtime: &InstanceRuntimeState,
+        ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        if self.state.migration_ids_already_set(old_runtime, ids) {
+            return Ok(self.state.current().clone());
+        }
+
+        if self.state.current().propolis_gen != old_runtime.propolis_gen {
+            return Err(Error::InvalidRequest {
+                message: format!(
+                    "wrong Propolis ID generation: expected {}, got {}",
+                    self.state.current().propolis_gen,
+                    old_runtime.propolis_gen
+                ),
+            });
+        }
+
+        self.state.set_migration_ids(ids);
+        Ok(self.state.current().clone())
+    }
 }
 
 /// A simulation of an Instance created by the external Oxide API.
@@ -245,6 +267,15 @@ pub struct SimInstance {
 impl SimInstance {
     pub fn terminate(&self) -> InstanceRuntimeState {
         self.inner.lock().unwrap().terminate()
+    }
+
+    pub async fn put_migration_ids(
+        &self,
+        old_runtime: &InstanceRuntimeState,
+        ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.put_migration_ids(old_runtime, ids)
     }
 }
 
