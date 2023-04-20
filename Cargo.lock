@@ -8387,6 +8387,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "uuid",
 ]
 
 [[package]]
