@@ -107,6 +107,7 @@ regex.workspace = true
 rustls = { workspace = true, features = ["dangerous_configuration"] }
 subprocess.workspace = true
 term.workspace = true
+trust-dns-resolver.workspace = true
 httptest.workspace = true
 strum.workspace = true
 

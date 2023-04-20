@@ -4432,6 +4432,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.3",
  "tough",
+ "trust-dns-resolver",
  "usdt",
  "uuid",
 ]

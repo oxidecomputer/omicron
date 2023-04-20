@@ -156,9 +156,12 @@ impl super::Nexus {
             .await?;
 
         // We've potentially updated both the list of DNS servers and the DNS
-        // configuration.  Activate both background tasks.
+        // configuration.  Activate both background tasks, for both internal and
+        // external DNS.
         self.background_tasks.activate(&self.task_internal_dns_config);
         self.background_tasks.activate(&self.task_internal_dns_servers);
+        self.background_tasks.activate(&self.task_external_dns_config);
+        self.background_tasks.activate(&self.task_external_dns_servers);
 
         Ok(())
     }
