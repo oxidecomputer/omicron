@@ -16,6 +16,7 @@ serde_with.workspace = true
 schemars.workspace = true
 slog.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
+uuid.workspace = true
 
 [dev-dependencies]
 buf-list.workspace = true
