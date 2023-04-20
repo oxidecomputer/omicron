@@ -356,7 +356,7 @@ pub async fn start_sled_agent(
     };
 
     let (server, _rack_init_request) =
-        sim::Server::start(&config, &log).await?;
+        sim::Server::start(&config, &log, &sim::RssArgs::default()).await?;
     Ok(server)
 }
 

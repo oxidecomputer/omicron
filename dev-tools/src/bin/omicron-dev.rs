@@ -362,7 +362,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.external_dns_server.local_address()
     );
     println!(
-        "omicron-dev: external DNS HTTP      {}",
+        "omicron-dev: external DNS HTTP:     {}",
         cptestctx.external_dns_config_server.local_addr()
     );
 

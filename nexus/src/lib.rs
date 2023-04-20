@@ -31,14 +31,15 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use internal_dns::DnsConfigBuilder;
 use slog::Logger;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
 // These modules used to be within nexus, but have been moved to
 // nexus-db-queries. Keeping these around temporarily for migration reasons.
 pub use nexus_db_queries::{authn, authz, db};
-use omicron_common::address::{IpRange, Ipv4Range};
+use nexus_types::internal_api::params::ServiceKind;
+use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
 
 #[macro_use]
 extern crate slog;
@@ -211,6 +212,33 @@ impl nexus_test_interface::NexusServer for Server {
         //
         // However, RSS isn't running, so we'll do the handoff ourselves.
         let opctx = internal_server.apictx.nexus.opctx_for_service_balancer();
+
+        // Allocation of the initial Nexus's external IP is a little funny.  In
+        // a real system, it'd be allocated by RSS and provided with the rack
+        // initialization request (which we're about to simulate).  RSS also
+        // provides information about the external IP pool ranges available for
+        // system services.  The Nexus external IP that it picks comes from this
+        // range.  During rack initialization, Nexus "allocates" the IP (which
+        // was really already allocated) -- recording that allocation like any
+        // other one.
+        //
+        // In this context, the IP was "allocated" by the user.  Most likely,
+        // it's 127.0.0.1, having come straight from the stock testing config
+        // file.  Whatever it is, we fake up an IP pool range for use by system
+        // services that includes solely this IP.
+        let internal_services_ip_pool_ranges = services
+            .iter()
+            .filter_map(|s| match s.kind {
+                ServiceKind::Nexus { external_address: IpAddr::V4(addr) } => {
+                    Some(IpRange::V4(Ipv4Range::new(addr, addr).unwrap()))
+                }
+                ServiceKind::Nexus { external_address: IpAddr::V6(addr) } => {
+                    Some(IpRange::V6(Ipv6Range::new(addr, addr).unwrap()))
+                }
+                _ => None,
+            })
+            .collect();
+
         internal_server
             .apictx
             .nexus
@@ -220,13 +248,7 @@ impl nexus_test_interface::NexusServer for Server {
                 internal_api::params::RackInitializationRequest {
                     services,
                     datasets: vec![],
-                    internal_services_ip_pool_ranges: vec![IpRange::V4(
-                        Ipv4Range::new(
-                            Ipv4Addr::LOCALHOST,
-                            Ipv4Addr::LOCALHOST,
-                        )
-                        .unwrap(),
-                    )],
+                    internal_services_ip_pool_ranges,
                     certs: vec![],
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
                 },
