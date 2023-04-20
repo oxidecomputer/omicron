@@ -1,0 +1,5 @@
+# This should match the commit on package-manifest.toml
+# and Cargo.toml
+#
+# Use the `./tools/update_propolis.sh` script to update this.
+COMMIT="40e8d8e280c312e44047ff9d6b3b261e4537977a"

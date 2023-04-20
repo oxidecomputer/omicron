@@ -1,0 +1,5 @@
+# This should match the commit on package-manifest.toml
+# and Cargo.toml
+#
+# Use the `./tools/update_crucible.sh` script to update this.
+COMMIT="fb671895e8adb3cab5e801bbbe8728997178aba4"
