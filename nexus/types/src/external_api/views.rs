@@ -128,14 +128,14 @@ pub struct GlobalImage {
     pub size: ByteCount,
 }
 
-/// Client view of project Images
+/// Client view of images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The project the image belongs to
-    pub project_id: Uuid,
+    /// ID of the parent project if the image is a project image
+    pub project_id: Option<Uuid>,
 
     /// URL source of this image, if any
     pub url: Option<String>,

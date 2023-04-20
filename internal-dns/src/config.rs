@@ -426,7 +426,7 @@ mod test {
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
         assert_eq!(ServiceName::Cockroach.dns_name(), "_cockroach._tcp",);
-        assert_eq!(ServiceName::InternalDNS.dns_name(), "_nameservice._tcp",);
+        assert_eq!(ServiceName::InternalDns.dns_name(), "_nameservice._tcp",);
         assert_eq!(ServiceName::Nexus.dns_name(), "_nexus._tcp",);
         assert_eq!(ServiceName::Oximeter.dns_name(), "_oximeter._tcp",);
         assert_eq!(ServiceName::Dendrite.dns_name(), "_dendrite._tcp",);

@@ -122,7 +122,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Project::init(),
         Disk::init(),
         Snapshot::init(),
-        Image::init(),
+        ProjectImage::init(),
         Instance::init(),
         IpPool::init(),
         InstanceNetworkInterface::init(),
@@ -130,6 +130,9 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         VpcRouter::init(),
         RouterRoute::init(),
         VpcSubnet::init(),
+        // Silo-level resources
+        Image::init(),
+        SiloImage::init(),
         // Fleet-level resources
         Certificate::init(),
         ConsoleSession::init(),

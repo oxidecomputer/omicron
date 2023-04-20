@@ -18,7 +18,8 @@ use omicron_common::{
 };
 use tempfile::TempDir;
 use uuid::Uuid;
-use wicketd_client::types::{UpdateEventKind, UpdateTerminalEventKind};
+use wicketd::RunningUpdateState;
+use wicketd_client::{types::UpdateComponent, StepEventKind};
 
 #[tokio::test]
 async fn test_updates() {
@@ -89,7 +90,7 @@ async fn test_updates() {
         slog::debug!(log, "received update log"; "update_log" => ?update_log);
 
         for event in update_log.events {
-            if let UpdateEventKind::Terminal(event) = event.kind {
+            if let StepEventKind::ExecutionFailed { .. } = event.data {
                 break 'outer event;
             }
         }
@@ -97,11 +98,11 @@ async fn test_updates() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    match terminal_event {
-        UpdateTerminalEventKind::ArtifactUpdateFailed { artifact, .. } => {
+    match terminal_event.data {
+        StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(artifact.kind, "gimlet_sp");
+            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
@@ -208,6 +209,13 @@ async fn test_installinator_fetch() {
     args.exec(&log.new(slog::o!("crate" => "installinator")))
         .await
         .expect("installinator succeeded");
+
+    // Check that the update status is marked as closed.
+    assert_eq!(
+        wicketd_testctx.server.ipr_update_tracker.update_state(update_id).await,
+        Some(RunningUpdateState::Closed),
+        "update should be marked as closed at the end of the run"
+    );
 
     // Check that the host and control plane artifacts were downloaded
     // correctly.

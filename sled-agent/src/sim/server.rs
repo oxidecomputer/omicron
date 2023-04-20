@@ -252,13 +252,13 @@ impl Server {
         let mut services = vec![
             NexusTypes::ServicePutRequest {
                 address: dns_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDNS,
+                kind: NexusTypes::ServiceKind::InternalDns,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
             },
             NexusTypes::ServicePutRequest {
                 address: http_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDNSConfig,
+                kind: NexusTypes::ServiceKind::InternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
             },
@@ -290,7 +290,7 @@ impl Server {
         {
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDNSConfig,
+                kind: NexusTypes::ServiceKind::ExternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
             });

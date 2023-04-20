@@ -566,7 +566,7 @@ async fn uninstall_all_omicron_zones() -> Result<()> {
 }
 
 fn uninstall_all_omicron_datasets(config: &Config) -> Result<()> {
-    let datasets = match zfs::get_all_omicron_datasets() {
+    let datasets = match zfs::get_all_omicron_datasets_for_delete() {
         Err(e) => {
             warn!(config.log, "Failed to get omicron datasets: {}", e);
             return Ok(());

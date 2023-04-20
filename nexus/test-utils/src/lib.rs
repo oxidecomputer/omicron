@@ -223,7 +223,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         address: dns_server_address_internal,
-        kind: ServiceKind::InternalDNSConfig,
+        kind: ServiceKind::InternalDnsConfig,
     };
     let dns_server_address_external = match external_dns_config_server
         .local_addr()
@@ -235,7 +235,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         address: dns_server_address_external,
-        kind: ServiceKind::ExternalDNSConfig,
+        kind: ServiceKind::ExternalDnsConfig,
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),

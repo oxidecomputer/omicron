@@ -13,8 +13,9 @@ use super::storage::Storage;
 
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -323,31 +324,12 @@ impl SledAgent {
         self: &Arc<Self>,
         instance_id: Uuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
-        if !self.instances.contains_key(&instance_id).await {
-            return Ok(InstanceUnregisterResponse { updated_runtime: None });
-        }
+        let instance =
+            self.instances.sim_get_cloned_object(&instance_id).await?;
 
         self.detach_disks_from_instance(instance_id).await?;
-
-        // TODO: Simulated instances can currently only be accessed via their
-        // collections, which only support operations that are generic across
-        // all simulated object types. Instantly destroying an object is not
-        // such an operation. Work around this for now by stopping the instance
-        // and immediately draining its state queue so that the instance is
-        // destroyed before this call returns.
-        self.instances
-            .sim_ensure(
-                &instance_id,
-                self.instances.sim_get_current_state(&instance_id).await?,
-                Some(InstanceStateRequested::Stopped),
-            )
-            .await?;
-        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
-
         Ok(InstanceUnregisterResponse {
-            updated_runtime: Some(
-                self.instances.sim_get_current_state(&instance_id).await?,
-            ),
+            updated_runtime: Some(instance.terminate()),
         })
     }
 
@@ -357,21 +339,23 @@ impl SledAgent {
         instance_id: Uuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
-        if !self.instances.contains_key(&instance_id).await {
-            match state {
-                InstanceStateRequested::Stopped => {
-                    return Ok(InstancePutStateResponse {
-                        updated_runtime: None,
-                    });
-                }
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "instance {} not registered on sled",
-                        instance_id,
-                    )));
-                }
-            }
-        }
+        let current =
+            match self.instances.sim_get_cloned_object(&instance_id).await {
+                Ok(i) => i.current().clone(),
+                Err(_) => match state {
+                    InstanceStateRequested::Stopped => {
+                        return Ok(InstancePutStateResponse {
+                            updated_runtime: None,
+                        });
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "instance {} not registered on sled",
+                            instance_id,
+                        )));
+                    }
+                },
+            };
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -398,11 +382,7 @@ impl SledAgent {
 
         let new_state = self
             .instances
-            .sim_ensure(
-                &instance_id,
-                self.instances.sim_get_current_state(&instance_id).await?,
-                Some(state),
-            )
+            .sim_ensure(&instance_id, current, Some(state))
             .await?;
 
         // If this request will shut down the simulated instance, look for any
@@ -431,6 +411,18 @@ impl SledAgent {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn instance_put_migration_ids(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let instance =
+            self.instances.sim_get_cloned_object(&instance_id).await?;
+
+        instance.put_migration_ids(old_runtime, migration_ids).await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)

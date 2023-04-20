@@ -164,6 +164,23 @@ pub struct InstanceMigrationSourceParams {
     pub dst_propolis_id: Uuid,
 }
 
+/// The body of a request to set or clear the migration identifiers from a
+/// sled agent's instance state records.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct InstancePutMigrationIdsBody {
+    /// The last runtime state known to this requestor. This request will
+    /// succeed if either (a) the Propolis generation in the sled agent's
+    /// runtime state matches the generation in this record, or (b) the sled
+    /// agent's runtime state matches what would result from applying this
+    /// request to the caller's runtime state. This latter condition provides
+    /// idempotency.
+    pub old_runtime: InstanceRuntimeState,
+
+    /// The migration identifiers to set. If `None`, this operation clears the
+    /// migration IDs.
+    pub migration_params: Option<InstanceMigrationSourceParams>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum DiskType {
     U2,
@@ -378,33 +395,27 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum ZoneType {
-    #[serde(rename = "external_dns")]
-    ExternalDNS,
-    #[serde(rename = "internal_dns")]
-    InternalDNS,
-    #[serde(rename = "nexus")]
+    ExternalDns,
+    InternalDns,
     Nexus,
-    #[serde(rename = "oximeter")]
     Oximeter,
-    #[serde(rename = "switch")]
     Switch,
-    #[serde(rename = "crucible_pantry")]
     CruciblePantry,
-    #[serde(rename = "ntp")]
-    NTP,
+    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
-            ZoneType::InternalDNS => Self::InternalDns,
-            ZoneType::ExternalDNS => Self::ExternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
             ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::NTP => Self::Ntp,
+            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -413,13 +424,13 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
-            ExternalDNS => "external_dns",
-            InternalDNS => "internal_dns",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
             Nexus => "nexus",
             Oximeter => "oximeter",
             Switch => "switch",
             CruciblePantry => "crucible_pantry",
-            NTP => "ntp",
+            Ntp => "ntp",
         };
         write!(f, "{name}")
     }

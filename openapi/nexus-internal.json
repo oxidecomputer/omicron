@@ -2283,7 +2283,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "external_d_n_s"
+                  "external_dns"
                 ]
               }
             },
@@ -2297,7 +2297,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "external_d_n_s_config"
+                  "external_dns_config"
                 ]
               }
             },
@@ -2311,7 +2311,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "internal_d_n_s"
+                  "internal_dns"
                 ]
               }
             },
@@ -2325,7 +2325,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "internal_d_n_s_config"
+                  "internal_dns_config"
                 ]
               }
             },
@@ -2422,7 +2422,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "n_t_p"
+                  "ntp"
                 ]
               }
             },

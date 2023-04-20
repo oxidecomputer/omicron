@@ -221,10 +221,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fb671895e8adb3cab5e801bbbe8728997178aba4"
+source.commit = "3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "227761dcba9372619c71fcf7137a7a98c4d618192cbaa6f41031c4429ab99c04"
+source.sha256 = "52a08b6637b7701549f1b0b0979f8fbb64f2dd6942b954ffa27c15b265cad143"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -232,10 +232,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fb671895e8adb3cab5e801bbbe8728997178aba4"
+source.commit = "3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "bf648339cfd010bad65186584fe34108cc1f27162c62e11f1d18b1fe89a43ddc"
+source.sha256 = "31027320798cf77f5175415839d722bcf5d7a52fd6bbc327625028b81b709c2b"
 output.type = "zone"
 
 # Refer to
@@ -246,10 +246,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "880a031fbdd7417cd3a4643f8bf419d8d5ea8224"
+source.commit = "e7ce7a1dbe2d410b787df2e52478229b008b4750"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "93265033a62a998ebc2d64ed3c0f0d4a97c16d34132d3d59660f5430a24990e9"
+source.sha256 = "d4782227629464288a6d1cfdd7bdef135c179ddd2b0d573e785e758b7d063285"
 output.type = "zone"
 
 [package.maghemite]
@@ -298,8 +298,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
-source.sha256 = "e7021cfa8432a24b21a514433bb08f0ad6754f3b8d0115ae152356566283c72e"
+source.commit = "7d4ab83dcfe1c95cd01e091f92eb9664c96930bb"
+source.sha256 = "fe88ec54f426a8726deccbf9fd9aa50b733520284757110d36a1ad3879e25170"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -324,8 +324,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
-source.sha256 = "f14914d96bea9d6b4914849ba54d12aa3818637ce070c6db8f830e793e2c596b"
+source.commit = "7d4ab83dcfe1c95cd01e091f92eb9664c96930bb"
+source.sha256 = "165c6dbf679db22e6f1c7cbff82c4f0a2c5df93469012283d6ecc944306eb790"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -343,8 +343,8 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "56f211202538ab370cec2fc6da5af532b10b0c7c"
-source.sha256 = "d69fd155072a33f3395cb60d25eb6f9951d52efe393835b6f7b169cebe6df9b2"
+source.commit = "7d4ab83dcfe1c95cd01e091f92eb9664c96930bb"
+source.sha256 = "294f22046a46f27fc1027090e980d8c7a9cb9ff48f63f92ac0a0554a9f46ef5b"
 output.type = "zone"
 output.intermediate_only = true
 
