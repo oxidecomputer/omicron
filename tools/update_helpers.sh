@@ -131,7 +131,7 @@ function do_update_crates {
     # Update Cargo.toml with the new commit
     for IDX in "${!CRATES[@]}"; do
         echo "UPDATING: [${CRATES[$IDX]}]"
-        sed $IN_PLACE -e "s/$COMMIT/${CARGO_COMMITS[$IDX]}/g" "$CARGO_TOML"
+        sed $IN_PLACE -e "s/${CARGO_COMMITS[$IDX]}/$TARGET_COMMIT/g" "$CARGO_TOML"
     done
 
     set +o xtrace
