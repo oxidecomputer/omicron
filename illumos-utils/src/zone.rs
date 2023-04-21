@@ -238,7 +238,7 @@ impl Zones {
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
-        vnics: Vec<String>,
+        links: Vec<String>,
         limit_priv: Vec<String>,
     ) -> Result<(), AdmError> {
         if let Some(zone) = Self::find(zone_name).await? {
@@ -289,9 +289,9 @@ impl Zones {
         for device in devices {
             cfg.add_device(device);
         }
-        for vnic in &vnics {
+        for link in &links {
             cfg.add_net(&zone::Net {
-                physical: vnic.to_string(),
+                physical: link.to_string(),
                 ..Default::default()
             });
         }

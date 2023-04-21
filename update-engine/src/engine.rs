@@ -4,7 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{borrow::Cow, sync::Mutex};
+use std::{borrow::Cow, fmt, sync::Mutex};
 
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
@@ -49,6 +49,12 @@ use crate::{
 #[serde(transparent)]
 pub struct ExecutionId(pub Uuid);
 
+impl fmt::Display for ExecutionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive_where(Debug)]
 pub struct UpdateEngine<'a, S: StepSpec> {
     // TODO: for now, this is a sequential series of steps. This can potentially
@@ -68,8 +74,12 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 impl<'a, S: StepSpec> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
+        let execution_id = ExecutionId(Uuid::new_v4());
         Self {
-            log: log.new(slog::o!("component" => "UpdateEngine")),
+            log: log.new(slog::o!(
+                "component" => "UpdateEngine",
+                "execution_id" => format!("{execution_id}"),
+            )),
             execution_id: ExecutionId(Uuid::new_v4()),
             sender,
             steps: Default::default(),
