@@ -25,6 +25,28 @@ typeset -r contract=$2	# For the refresh and stop methods
 for var in file boundary server allow; do
 	nameref _var=$var
 
+LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
+ALL_LINKS=$(svcprop -c -p config/all_links "${SMF_FMRI}")
+DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
+GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
+
+if [[ "$ALL_LINKS" == unknown ]] || \
+  [[ "$LISTEN_ADDR" == unknown ]] || \
+  [[ "$DATALINK" == unknown ]] || \
+  [[ "$GATEWAY" == unknown ]]; then
+    printf 'ERROR: missing all_links, listen_addr, datalink or gateway\n' >&2
+    exit "$SMF_EXIT_ERR_CONFIG"
+fi
+
+ALL_LINKS=( $ALL_LINKS )
+
+for LINK in "${ALL_LINKS[@]}"; do
+    ipadm show-addr "$LINK/ll" || ipadm create-addr -t -T addrconf "$LINK/ll"
+done
+ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
+ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
+route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
+
 	typeset _var=`svcprop -p config/$var $SMF_FMRI`
 	(($? == 0)) || config "Could not retrieve config/$var property"
 	[[ $_var == '""' ]] && _var=

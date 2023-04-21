@@ -14,7 +14,7 @@
              type="service"
              version="1">
 
-        <create_default_instance enabled="false" />
+        <create_default_instance enabled='true' />
 
         <dependency name="network"
                     grouping="require_any"
@@ -44,19 +44,19 @@
             <service_fmri value="svc:/network/routing-setup" />
         </dependency>
 
-	<!--
+<!--
         The service is started as root, but with only the privileges it
-	    requires. The chrony daemon forks a privileged helper and then the
-	    main daemon drops everything it does not need, leaving it with
-	    completely minimal privileges (it even divests the privilege to
+        requires. The chrony daemon forks a privileged helper and then the
+        main daemon drops everything it does not need, leaving it with
+        completely minimal privileges (it even divests the privilege to
         fork/exec).
 
         The service also always starts the binary with ASLR enabled,
-	    regardless of whether it was linked with -zaslr
-	-->
+        regardless of whether it was linked with -zaslr
+-->
         <exec_method type="method"
                      name="start"
-		     exec="/var/svc/method/svc-site-ntp %m"
+                     exec="/var/svc/method/svc-site-ntp %m"
                      timeout_seconds="60">
             <method_context security_flags="aslr">
                 <method_credential user="root"
@@ -67,29 +67,24 @@
 
         <exec_method type="method"
                      name="refresh"
-		     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
+                     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
                      timeout_seconds="60">
         </exec_method>
 
         <exec_method type="method"
                      name="stop"
-		     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
+                     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
                      timeout_seconds="60" />
 
-        <property_group name="config"
-                        type="application">
-            <propval name="file"
-                     type="astring"
-                     value="/etc/inet/chrony.conf" />
-	    <propval name="boundary"
-                     type="boolean"
-		    value="false" />
-            <propval name="server"
-                     type="astring"
-                     value="" />
-            <propval name="allow"
-                     type="astring"
-                     value="" />
+        <property_group name="config" type="application">
+            <propval name='all_links' type='astring' value='unknown' />
+            <propval name='datalink' type='astring' value='unknown' />
+            <propval name='gateway' type='astring' value='unknown' />
+            <propval name='listen_addr' type='astring' value='unknown' />
+            <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
+            <propval name="boundary" type="boolean" value="false" />
+            <propval name="server" type="astring" value="" />
+            <propval name="allow" type="astring" value="" />
         </property_group>
 
         <stability value="Unstable" />

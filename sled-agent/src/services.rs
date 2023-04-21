@@ -31,7 +31,6 @@ use crate::params::{
     ZoneType,
 };
 use crate::profile::*;
-use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
@@ -647,37 +646,22 @@ impl ServiceManager {
 
     async fn configure_dns_client(
         &self,
-        running_zone: &RunningZone,
+        zone: &InstalledZone,
         dns_servers: &Vec<String>,
         domain: &Option<String>,
-    ) -> Result<(), Error> {
-        struct DnsClient {}
-
-        impl crate::smf_helper::Service for DnsClient {
-            fn service_name(&self) -> String {
-                "dns_client".to_string()
-            }
-            fn smf_name(&self) -> String {
-                "svc:/network/dns/client".to_string()
-            }
-            fn should_import(&self) -> bool {
-                false
-            }
-        }
-
-        let service = DnsClient {};
-        let smfh = SmfHelper::new(&running_zone, &service);
-
-        let etc = PathBuf::from(running_zone.root()).join("etc");
-        let resolv_conf = etc.join("resolv.conf");
-        let nsswitch_conf = etc.join("nsswitch.conf");
-        let nsswitch_dns = etc.join("nsswitch.dns");
-
+    ) -> Result<Option<ServiceBuilder>, Error> {
         if dns_servers.is_empty() {
             // Disable the dns/client service
-            smfh.disable()?;
+            Ok(None)
         } else {
-            debug!(self.inner.log, "enabling {:?}", service.service_name());
+            let name = "network/dns/client";
+            let service = ServiceBuilder::new(name);
+            let etc = PathBuf::from(zone.root()).join("etc");
+            let resolv_conf = etc.join("resolv.conf");
+            let nsswitch_conf = etc.join("nsswitch.conf");
+            let nsswitch_dns = etc.join("nsswitch.dns");
+
+            debug!(self.inner.log, "enabling {:?}", name);
             let mut config = String::new();
             if let Some(d) = domain {
                 config.push_str(&format!("domain {d}\n"));
@@ -694,11 +678,8 @@ impl ServiceManager {
             tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
                 .await
                 .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
-
-            smfh.refresh()?;
-            smfh.enable()?;
+            Ok(Some(service))
         }
-        Ok(())
     }
 
     async fn initialize_zone(
@@ -771,8 +752,68 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| Error::io("crucible pantry profile", err))?;
-                let running_zone = RunningZone::boot(installed_zone).await?;
-                return Ok(running_zone);
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneType::Ntp => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let rack_net =
+                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address).net();
+
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.addresses.len(), 1);
+                let listen_addr = &request.addresses[0].to_string();
+
+                assert_eq!(request.services.len(), 1);
+                let ServiceType::Ntp { ntp_servers, boundary, dns_servers, domain } = &request.services[0] else {
+                    return Err(Error::BadServiceRequest {
+                        service: request.services[0].to_string(),
+                        message: "Cannot set up this service in the NTP zone".to_string(),
+                    });
+                };
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("gateway", "astring", gateway)
+                    .add_property(
+                        "all_links",
+                        "astring",
+                        &installed_zone
+                            .links()
+                            .iter()
+                            .map(|l| l.name())
+                            .join(" "),
+                    )
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("allow", "astring", &format!("{}", rack_net))
+                    .add_property(
+                        "boundary",
+                        "astring",
+                        if *boundary { "true" } else { "false" },
+                    )
+                    .add_property("server", "astring", &ntp_servers.join(" "));
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("system/illumos/ntp").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                let maybe_dns_client = self
+                    .configure_dns_client(&installed_zone, dns_servers, domain)
+                    .await?;
+                let profile = if let Some(dns_client) = maybe_dns_client {
+                    profile.add_service(dns_client)
+                } else {
+                    profile
+                };
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| Error::io("NTP profile", err))?;
+                return Ok(RunningZone::boot(installed_zone).await?);
             }
             _ => {}
         }
@@ -1192,50 +1233,7 @@ impl ServiceManager {
                 ServiceType::CruciblePantry => {
                     panic!("CruciblePantry is self-assembling now")
                 }
-                ServiceType::Ntp {
-                    ntp_servers,
-                    boundary,
-                    dns_servers,
-                    domain,
-                } => {
-                    info!(
-                        self.inner.log,
-                        "Set up NTP service boundary={}, Servers={:?}",
-                        boundary,
-                        ntp_servers
-                    );
-
-                    let sled_info =
-                        if let Some(info) = self.inner.sled_info.get() {
-                            info
-                        } else {
-                            return Err(Error::SledAgentNotReady);
-                        };
-
-                    let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
-                        sled_info.underlay_address,
-                    )
-                    .net();
-
-                    smfh.setprop("config/allow", &format!("{}", rack_net))?;
-                    smfh.setprop(
-                        "config/boundary",
-                        if *boundary { "true" } else { "false" },
-                    )?;
-
-                    smfh.delpropvalue("config/server", "*")?;
-                    for server in ntp_servers {
-                        smfh.addpropvalue("config/server", server)?;
-                    }
-                    self.configure_dns_client(
-                        &running_zone,
-                        &dns_servers,
-                        &domain,
-                    )
-                    .await?;
-
-                    smfh.refresh()?;
-                }
+                ServiceType::Ntp { .. } => panic!("NTP is self-assembling"),
                 ServiceType::Maghemite { mode } => {
                     info!(self.inner.log, "Setting up Maghemite service");
 

@@ -126,7 +126,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root
     pub fn root(&self) -> String {
-        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
+        self.inner.root()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -395,7 +395,7 @@ impl RunningZone {
     }
 
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        self.inner.links()
     }
 }
 
@@ -475,12 +475,21 @@ impl InstalledZone {
         zone_name
     }
 
+    /// Returns the filesystem path to the zone's root
+    pub fn root(&self) -> String {
+        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name)
+    }
+
     pub fn get_control_vnic_name(&self) -> &str {
         self.control_vnic.name()
     }
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
     }
 
     #[allow(clippy::too_many_arguments)]
