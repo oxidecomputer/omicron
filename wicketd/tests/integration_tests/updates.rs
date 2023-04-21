@@ -80,16 +80,16 @@ async fn test_updates() {
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
-        let update_log = wicketd_testctx
+        let event_report = wicketd_testctx
             .wicketd_client
             .get_update_sp(wicketd_client::types::SpType::Sled, 0)
             .await
             .expect("get_update_sp successful")
             .into_inner();
 
-        slog::debug!(log, "received update log"; "update_log" => ?update_log);
+        slog::debug!(log, "received event report"; "event_report" => ?event_report);
 
-        for event in update_log.events {
+        for event in event_report.step_events {
             if let StepEventKind::ExecutionFailed { .. } = event.data {
                 break 'outer event;
             }

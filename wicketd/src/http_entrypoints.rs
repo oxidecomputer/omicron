@@ -6,7 +6,7 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
-use crate::update_events::UpdateLog;
+use crate::update_events::EventReport;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -181,8 +181,8 @@ async fn post_start_update(
 /// or completed) known by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct UpdateLogAll {
-    pub sps: BTreeMap<SpType, BTreeMap<u32, UpdateLog>>,
+pub struct EventReportAll {
+    pub sps: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
 /// An endpoint to get the status of all updates being performed or recently
@@ -193,9 +193,9 @@ pub struct UpdateLogAll {
 }]
 async fn get_update_all(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<UpdateLogAll>, HttpError> {
-    let sps = rqctx.context().update_tracker.update_log_all().await;
-    Ok(HttpResponseOk(UpdateLogAll { sps }))
+) -> Result<HttpResponseOk<EventReportAll>, HttpError> {
+    let sps = rqctx.context().update_tracker.event_report_all().await;
+    Ok(HttpResponseOk(EventReportAll { sps }))
 }
 
 /// An endpoint to get the status of any update being performed or recently
@@ -207,10 +207,10 @@ async fn get_update_all(
 async fn get_update_sp(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
-) -> Result<HttpResponseOk<UpdateLog>, HttpError> {
-    let update_log =
-        rqctx.context().update_tracker.update_log(target.into_inner()).await;
-    Ok(HttpResponseOk(update_log))
+) -> Result<HttpResponseOk<EventReport>, HttpError> {
+    let event_report =
+        rqctx.context().update_tracker.event_report(target.into_inner()).await;
+    Ok(HttpResponseOk(event_report))
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

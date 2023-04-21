@@ -640,13 +640,13 @@ impl Pantry {
     pub async fn get_job_result(
         &self,
         job_id: String,
-    ) -> Result<Result<()>, HttpError> {
+    ) -> Result<Result<bool>, HttpError> {
         let mut jobs = self.jobs.lock().await;
         if !jobs.contains(&job_id) {
             return Err(HttpError::for_not_found(None, job_id));
         }
         jobs.remove(&job_id);
-        Ok(Ok(()))
+        Ok(Ok(true))
     }
 
     pub async fn import_from_url(

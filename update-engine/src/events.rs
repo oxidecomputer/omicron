@@ -21,7 +21,7 @@ use crate::{
     StepSpec,
 };
 
-#[derive_where(Debug)]
+#[derive_where(Clone, Debug, PartialEq, Eq)]
 pub enum Event<S: StepSpec> {
     Step(StepEvent<S>),
     Progress(ProgressEvent<S>),
@@ -75,6 +75,94 @@ pub struct StepEvent<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEvent<S> {
+    /// Returns a progress event associated with this step event, if any.
+    ///
+    /// Some step events have an implicit progress event of kind
+    /// [`ProgressEventKind::WaitingForProgress`] associated with them. This
+    /// causes those step events to generate progress events.
+    pub fn progress_event(&self) -> Option<ProgressEvent<S>> {
+        match &self.kind {
+            StepEventKind::ExecutionStarted { first_step, .. } => {
+                Some(ProgressEvent {
+                    execution_id: self.execution_id,
+                    total_elapsed: self.total_elapsed,
+                    kind: ProgressEventKind::WaitingForProgress {
+                        step: first_step.clone(),
+                        attempt: 1,
+                        step_elapsed: Duration::ZERO,
+                        attempt_elapsed: Duration::ZERO,
+                    },
+                })
+            }
+            StepEventKind::ProgressReset {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                ..
+            } => Some(ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::WaitingForProgress {
+                    step: step.clone(),
+                    attempt: *attempt,
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                },
+            }),
+            StepEventKind::AttemptRetry {
+                step,
+                next_attempt,
+                step_elapsed,
+                ..
+            } => Some(ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::WaitingForProgress {
+                    step: step.clone(),
+                    attempt: *next_attempt,
+                    step_elapsed: *step_elapsed,
+                    // For this attempt, zero time has passed so far.
+                    attempt_elapsed: Duration::ZERO,
+                },
+            }),
+            StepEventKind::StepCompleted { next_step, .. } => {
+                Some(ProgressEvent {
+                    execution_id: self.execution_id,
+                    total_elapsed: self.total_elapsed,
+                    kind: ProgressEventKind::WaitingForProgress {
+                        step: next_step.clone(),
+                        attempt: 1,
+                        // For this next step, zero time has passed so far.
+                        step_elapsed: Duration::ZERO,
+                        attempt_elapsed: Duration::ZERO,
+                    },
+                })
+            }
+            StepEventKind::Nested {
+                step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                event,
+                ..
+            } => event.progress_event().map(|progress_event| ProgressEvent {
+                execution_id: self.execution_id,
+                total_elapsed: self.total_elapsed,
+                kind: ProgressEventKind::Nested {
+                    step: step.clone(),
+                    attempt: *attempt,
+                    event: Box::new(progress_event),
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                },
+            }),
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionCompleted { .. }
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::Unknown => None,
+        }
+    }
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -614,6 +702,10 @@ pub enum StepEventIsTerminal {
 /// related to step successes and failures must be delivered, while events
 /// related to retries can be trimmed down since they are overall less
 /// important.
+///
+/// More precisely, a high-priority event is an event which cannot be dropped if
+/// an [`EventBuffer`](crate::EventBuffer) is to work correctly. Low-priority
+/// events can be dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum StepEventPriority {
     /// A low-priority event.
@@ -779,7 +871,10 @@ impl<S: StepSpec> ProgressEvent<S> {
 #[schemars(rename = "ProgressEventKindFor{S}")]
 pub enum ProgressEventKind<S: StepSpec> {
     /// The update engine is waiting for a progress message.
-    Waiting {
+    ///
+    /// The update engine sends this message immediately after a [`StepEvent`]
+    /// corresponding to a new step.
+    WaitingForProgress {
         /// Information about the step.
         step: StepInfoWithMetadata<S>,
 
@@ -847,12 +942,12 @@ impl<S: StepSpec> ProgressEventKind<S> {
         value: ProgressEventKind<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         let ret = match value {
-            ProgressEventKind::Waiting {
+            ProgressEventKind::WaitingForProgress {
                 step,
                 attempt,
                 step_elapsed,
                 attempt_elapsed,
-            } => ProgressEventKind::Waiting {
+            } => ProgressEventKind::WaitingForProgress {
                 step: StepInfoWithMetadata::from_generic(step)
                     .map_err(|error| error.parent("step"))?,
                 attempt,
@@ -903,12 +998,12 @@ impl<S: StepSpec> ProgressEventKind<S> {
         self,
     ) -> Result<ProgressEventKind<GenericSpec<E>>, ConvertGenericError> {
         let ret = match self {
-            ProgressEventKind::Waiting {
+            ProgressEventKind::WaitingForProgress {
                 step,
                 attempt,
                 step_elapsed,
                 attempt_elapsed,
-            } => ProgressEventKind::Waiting {
+            } => ProgressEventKind::WaitingForProgress {
                 step: step
                     .into_generic()
                     .map_err(|error| error.parent("step"))?,
@@ -1224,24 +1319,15 @@ impl<S: StepSpec> StepProgress<S> {
     }
 }
 
-/// A report produced from an engine running on another machine or in another
-/// process.
+/// A report produced from an [`EventBuffer`](crate::EventBuffer).
 ///
 /// Remote reports can be passed into a [`StepContext`](crate::StepContext),
 /// in which case they show up as nested events.
-#[derive_where(Clone, Debug, Eq, PartialEq)]
+#[derive_where(Clone, Debug, Default, Eq, PartialEq)]
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[serde(bound = "", rename_all = "snake_case")]
-#[schemars(rename = "RemoteReportFor{S}")]
-pub struct RemoteReport<S: StepSpec> {
-    /// The execution ID corresponding to the report.
-    ///
-    /// This is the same as the execution ID of all the step events inside.
-    pub execution_id: ExecutionId,
-
-    /// How long it's been since the engine started running.
-    pub total_elapsed: Duration,
-
+#[schemars(rename = "EventReportFor{S}")]
+pub struct EventReport<S: StepSpec> {
     /// A list of step events.
     ///
     /// Step events include success and failure events.
@@ -1255,17 +1341,15 @@ pub struct RemoteReport<S: StepSpec> {
     pub progress_events: Vec<ProgressEvent<S>>,
 }
 
-impl<S: StepSpec> RemoteReport<S> {
+impl<S: StepSpec> EventReport<S> {
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
     /// form.
     pub fn from_generic<E: AsError>(
-        value: RemoteReport<GenericSpec<E>>,
+        value: EventReport<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(Self {
-            execution_id: value.execution_id,
-            total_elapsed: value.total_elapsed,
             step_events: value
                 .step_events
                 .into_iter()
@@ -1294,10 +1378,8 @@ impl<S: StepSpec> RemoteReport<S> {
     /// This version can be used to share data across different kinds of engines.
     pub fn into_generic<E: AsError>(
         self,
-    ) -> Result<RemoteReport<GenericSpec<E>>, ConvertGenericError> {
-        Ok(RemoteReport {
-            execution_id: self.execution_id,
-            total_elapsed: self.total_elapsed,
+    ) -> Result<EventReport<GenericSpec<E>>, ConvertGenericError> {
+        Ok(EventReport {
             step_events: self
                 .step_events
                 .into_iter()

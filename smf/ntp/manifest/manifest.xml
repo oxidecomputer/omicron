@@ -10,7 +10,7 @@
 <service_bundle type="manifest"
                 name="ntp:default">
 
-<service name="system/illumos/ntp"
+<service name="oxide/ntp"
              type="service"
              version="1">
 

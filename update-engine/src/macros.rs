@@ -54,8 +54,10 @@ macro_rules! define_update_engine {
             ::update_engine::StepResult<T, S>;
         $v type StepOutcome<S = $spec_type> =
             ::update_engine::events::StepOutcome<S>;
-        $v type RemoteReport<S = $spec_type> =
-            ::update_engine::events::RemoteReport<S>;
+        $v type EventBuffer<S = $spec_type> =
+            ::update_engine::EventBuffer<S>;
+        $v type EventReport<S = $spec_type> =
+            ::update_engine::events::EventReport<S>;
         $v type StepHandle<T, S = $spec_type> =
             ::update_engine::StepHandle<T, S>;
     };
