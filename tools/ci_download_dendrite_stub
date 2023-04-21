@@ -22,7 +22,7 @@ TARGET_DIR="out"
 DOWNLOAD_DIR="$TARGET_DIR/downloads"
 # Location where the final dendrite-stub directory should end up.
 DEST_DIR="./$TARGET_DIR/dendrite-stub"
-BIN_DIR="$TEST_DIR/root/opt/oxide/dendrite/bin"
+BIN_DIR="$DEST_DIR/root/opt/oxide/dendrite/bin"
 
 ARTIFACT_URL="https://buildomat.eng.oxide.computer/public/file"
 
