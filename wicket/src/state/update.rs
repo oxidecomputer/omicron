@@ -103,7 +103,7 @@ impl RackUpdateState {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(logger, "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
+                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
                     continue;
                 };
                 self.update_items(&id, &log);
