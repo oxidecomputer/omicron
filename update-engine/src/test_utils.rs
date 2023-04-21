@@ -6,7 +6,7 @@
 
 use schemars::JsonSchema;
 
-use crate::StepSpec;
+use crate::{ExecutionId, StepSpec};
 
 #[derive(JsonSchema)]
 pub(crate) enum TestSpec {}
@@ -19,4 +19,11 @@ impl StepSpec for TestSpec {
     type CompletionMetadata = serde_json::Value;
     type SkippedMetadata = serde_json::Value;
     type Error = anyhow::Error;
+}
+
+pub(crate) static TEST_EXECUTION_UUID: &str =
+    "2cc08a14-5e96-4917-bc70-e98293a3b703";
+
+pub fn test_execution_id() -> ExecutionId {
+    ExecutionId(TEST_EXECUTION_UUID.parse().expect("valid UUID"))
 }

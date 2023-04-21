@@ -10,9 +10,9 @@ use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
-    VpcFirewallRule, Zpool,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::StorageManager;
@@ -566,6 +566,23 @@ impl SledAgent {
         self.inner
             .instances
             .ensure_state(instance_id, target)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that the instance's runtime state contains the
+    /// supplied migration IDs, provided that the caller continues to meet the
+    /// conditions needed to change those IDs. See the doc comments for
+    /// [`crate::params::InstancePutMigrationIdsBody`].
+    pub async fn instance_put_migration_ids(
+        &self,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        self.inner
+            .instances
+            .put_migration_ids(instance_id, old_runtime, migration_ids)
             .await
             .map_err(|e| Error::Instance(e))
     }

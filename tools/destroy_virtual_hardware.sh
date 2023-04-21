@@ -43,7 +43,7 @@ function fail {
 }
 
 function verify_omicron_uninstalled {
-    svcs "svc:/system/illumos/sled-agent:default" 2>&1 > /dev/null && \
+    svcs "svc:/oxide/sled-agent:default" 2>&1 > /dev/null && \
         fail "Omicron is still installed, please run \`omicron-package uninstall\`, and then re-run this script"
 }
 

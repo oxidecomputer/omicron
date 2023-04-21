@@ -168,7 +168,7 @@ If you've done this already, and you wish to recover, run from the root of this 
 ====
 
 This command installs a bootstrap service called
-`svc:/system/illumos/sled-agent:default`, which itself loads other requested
+`svc:/oxide/sled-agent:default`, which itself loads other requested
 services. The bootstrap service is currently the only service which is
 "persistent" across reboots - although it will initialize other services as part
 of its setup sequence anyway.

@@ -12,7 +12,15 @@ cfg_if::cfg_if! {
     }
 }
 
+mod firewall_rules;
 pub mod params;
+mod port;
+mod port_manager;
+
+pub use firewall_rules::opte_firewall_rules;
+pub use port::Port;
+pub use port_manager::PortManager;
+pub use port_manager::PortTicket;
 
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
@@ -66,7 +74,7 @@ impl Gateway {
             ip: subnet
                 .iter()
                 .nth(1)
-                .expect("IP subnet must have at least 1 address"),
+                .expect("IP subnet must have at least 2 addresses"),
         }
     }
 }
