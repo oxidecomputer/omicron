@@ -4,11 +4,10 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::dladm::Dladm;
-use crate::dladm::PhysicalLink;
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::NetworkInterface;
+use crate::opte::params::NetworkInterfaceKind;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
@@ -18,23 +17,19 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
-use opte_ioctl::OpteHdl;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
-use oxide_vpc::api::Ipv4Cidr;
-use oxide_vpc::api::Ipv4PrefixLen;
+use oxide_vpc::api::Ipv6Cfg;
 use oxide_vpc::api::MacAddr;
-use oxide_vpc::api::PhysNet;
 use oxide_vpc::api::RouterTarget;
 use oxide_vpc::api::SNat4Cfg;
-use oxide_vpc::api::SetFwRulesReq;
-use oxide_vpc::api::SetVirt2PhysReq;
+use oxide_vpc::api::SNat6Cfg;
 use oxide_vpc::api::VpcCfg;
 use slog::debug;
+use slog::error;
 use slog::info;
-use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -66,8 +61,9 @@ struct PortManagerInner {
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
-    // Map of all ports, keyed on the instance Uuid and the port name.
-    ports: Mutex<BTreeMap<(Uuid, String), Port>>,
+    // Map of all ports, keyed on the interface Uuid and its kind
+    // (which includes the Uuid of the parent instance or service)
+    ports: Mutex<BTreeMap<(Uuid, NetworkInterfaceKind), Port>>,
 }
 
 impl PortManagerInner {
@@ -87,8 +83,7 @@ pub struct PortManager {
 }
 
 impl PortManager {
-    /// Create a new manager, for creating OPTE ports for guest network
-    /// interfaces
+    /// Create a new manager, for creating OPTE ports
     pub fn new(
         log: Logger,
         underlay_ip: Ipv6Addr,
@@ -109,113 +104,115 @@ impl PortManager {
         &self.inner.underlay_ip
     }
 
-    /// Create an OPTE port for the given guest instance.
+    /// Create an OPTE port
+    #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn create_port(
         &self,
-        instance_id: Uuid,
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
-        external_ips: Option<Vec<IpAddr>>,
+        external_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
     ) -> Result<(Port, PortTicket), Error> {
-        // TODO-completeness: Remove IPv4 restrictions once OPTE supports
-        // virtual IPv6 networks.
-        let private_ip = match nic.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
-        }?;
-
-        // Argument checking and conversions into OPTE data types.
-        let subnet = IpNetwork::from(nic.subnet);
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
-        let (opte_subnet, gateway) = match subnet {
-            IpNetwork::V4(net) => (
-                Ipv4Cidr::new(
-                    net.ip().into(),
-                    Ipv4PrefixLen::new(net.prefix()).unwrap(),
-                ),
-                Gateway::from_subnet(&subnet),
-            ),
-            IpNetwork::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 is not yet supported for guest interfaces",
-                ))
-                .into());
-            }
-        };
-        let gateway_ip = match gateway.ip {
-            IpAddr::V4(ip) => Ok(oxide_vpc::api::Ipv4Addr::from(ip)),
-            IpAddr::V6(_) => Err(opte_ioctl::Error::InvalidArgument(
-                String::from("IPv6 is not yet supported for guest interfaces"),
-            )),
-        }?;
+        let subnet = IpNetwork::from(nic.subnet);
+        let vpc_subnet = IpCidr::from(subnet);
+        let gateway = Gateway::from_subnet(&subnet);
         let boundary_services = default_boundary_services();
 
-        // Describe the source NAT for this instance.
-        let snat = match source_nat {
-            Some(snat) => {
-                let external_ip = match snat.ip {
-                    IpAddr::V4(ip) => ip.into(),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
-                    }
-                };
-                let ports = snat.first_port..=snat.last_port;
-                Some(SNat4Cfg { external_ip, ports })
-            }
-            None => None,
-        };
-
-        // Describe the external IP addresses for this instance.
+        // Describe the external IP addresses for this port.
         //
         // Note that we're currently only taking the first address, which is all
         // that OPTE supports. The array is guaranteed to be limited by Nexus.
         // See https://github.com/oxidecomputer/omicron/issues/1467
         // See https://github.com/oxidecomputer/opte/issues/196
-        let external_ip = match external_ips {
-            Some(ref ips) if !ips.is_empty() => {
-                match ips[0] {
-                    IpAddr::V4(ipv4) => Some(ipv4.into()),
-                    IpAddr::V6(_) => {
-                        return Err(opte_ioctl::Error::InvalidArgument(
-                            String::from("IPv6 is not yet supported for external addresses")
-                        ).into());
+        let external_ip = external_ips.get(0);
+
+        macro_rules! ip_cfg {
+            ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
+             $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
+                let $cidr_t(vpc_subnet) = vpc_subnet else {
+                    error!(
+                        self.inner.log,
+                        concat!($log_prefix, " subnet");
+                        "subnet" => ?vpc_subnet,
+                    );
+                    return Err(Error::InvalidPortIpConfig);
+                };
+                let $ip_t(gateway_ip) = gateway.ip else {
+                    error!(
+                        self.inner.log,
+                        concat!($log_prefix, " gateway");
+                        "gateway_ip" => ?gateway.ip,
+                    );
+                    return Err(Error::InvalidPortIpConfig);
+                };
+                let snat = match source_nat {
+                    Some(snat) => {
+                        let $ip_t(snat_ip) = snat.ip else {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " SNAT config");
+                                "snat_ip" => ?snat.ip,
+                            );
+                            return Err(Error::InvalidPortIpConfig);
+                        };
+                        let ports = snat.first_port..=snat.last_port;
+                        Some($snat_t { external_ip: snat_ip.into(), ports })
                     }
-                }
-            }
-            _ => None,
+                    None => None,
+                };
+                let external_ip = match external_ip {
+                    Some($ip_t(ip)) => Some((*ip).into()),
+                    Some(_) => {
+                        error!(
+                            self.inner.log,
+                            concat!($log_prefix, " external IP");
+                            "external_ip" => ?external_ip,
+                        );
+                        return Err(Error::InvalidPortIpConfig);
+                    }
+                    None => None,
+                };
+
+                $ipcfg_e($ipcfg_t {
+                    vpc_subnet,
+                    private_ip: $ip.into(),
+                    gateway_ip: gateway_ip.into(),
+                    snat,
+                    external_ips: external_ip,
+                })
+            }}
+        }
+
+        // Build the port's IP configuration as either IPv4 or IPv6
+        // depending on the IP that was assigned to the NetworkInterface.
+        // We use a macro here to be DRY
+        // TODO-completeness: Support both dual stack
+        let ip_cfg = match nic.ip {
+            IpAddr::V4(ip) => ip_cfg!(
+                ip,
+                "Expected IPv4",
+                IpAddr::V4,
+                IpCidr::Ip4,
+                IpCfg::Ipv4,
+                Ipv4Cfg,
+                SNat4Cfg
+            ),
+            IpAddr::V6(ip) => ip_cfg!(
+                ip,
+                "Expected IPv6",
+                IpAddr::V6,
+                IpCidr::Ip6,
+                IpCfg::Ipv6,
+                Ipv6Cfg,
+                SNat6Cfg
+            ),
         };
 
-        // Create the xde device.
-        //
-        // The sequencing here is important. We'd like to make sure things are
-        // cleaned up properly, while having a sequence of fallible operations.
-        // So we:
-        //
-        // - create the xde device
-        // - create the vnic, cleaning up the xde device if that fails
-        // - add both to the Port
-        //
-        // The Port object's drop implementation will clean up both of those, if
-        // any of the remaining fallible operations fail.
-        let port_name = self.inner.next_port_name();
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-
-        // TODO-completeness: Add support for IPv6.
         let vpc_cfg = VpcCfg {
-            ip_cfg: IpCfg::Ipv4(Ipv4Cfg {
-                vpc_subnet: opte_subnet,
-                private_ip,
-                gateway_ip,
-                snat,
-                external_ips: external_ip,
-            }),
-            guest_mac: MacAddr::from(mac.into_array()),
+            ip_cfg,
+            guest_mac: MacAddr::from(nic.mac.into_array()),
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
             phys_ip: self.inner.underlay_ip.into(),
@@ -233,12 +230,32 @@ impl PortManager {
             // TODO-completeness (#2153): Plumb domain search list
             domain_list: vec![],
         };
-        hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+
+        // Create the xde device.
+        //
+        // The sequencing here is important. We'd like to make sure things are
+        // cleaned up properly, while having a sequence of fallible operations.
+        // So we:
+        //
+        // - create the xde device
+        // - create the vnic, cleaning up the xde device if that fails
+        // - add both to the Port
+        //
+        // The Port object's drop implementation will clean up both of those, if
+        // any of the remaining fallible operations fail.
+        let port_name = self.inner.next_port_name();
         debug!(
             self.inner.log,
-            "Created xde device for guest port";
+            "Creating xde device";
             "port_name" => &port_name,
+            "vpc_cfg" => ?&vpc_cfg,
         );
+        #[cfg(target_os = "illumos")]
+        let hdl = {
+            let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
+            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl
+        };
 
         // Initialize firewall rules for the new port.
         let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
@@ -257,7 +274,8 @@ impl PortManager {
             "port_name" => &port_name,
             "rules" => ?&rules,
         );
-        hdl.set_fw_rules(&SetFwRulesReq {
+        #[cfg(target_os = "illumos")]
+        hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
             port_name: port_name.clone(),
             rules,
         })?;
@@ -277,19 +295,22 @@ impl PortManager {
         // create a superfluous VNIC on the OPTE device, solely so Viona can use
         // it.
         let vnic = {
-            let phys = PhysicalLink(port_name.clone());
             let vnic_name = format!("v{}", port_name);
-            if let Err(e) =
-                Dladm::create_vnic(&phys, &vnic_name, Some(nic.mac), None)
-            {
-                warn!(
+            #[cfg(target_os = "illumos")]
+            if let Err(e) = crate::dladm::Dladm::create_vnic(
+                &crate::dladm::PhysicalLink(port_name.clone()),
+                &vnic_name,
+                Some(nic.mac),
+                None,
+            ) {
+                slog::warn!(
                     self.inner.log,
                     "Failed to create overlay VNIC for xde device";
-                    "port_name" => port_name.as_str(),
+                    "port_name" => &port_name,
                     "err" => ?e
                 );
                 if let Err(e) = hdl.delete_xde(&port_name) {
-                    warn!(
+                    slog::warn!(
                         self.inner.log,
                         "Failed to clean up xde device after failure to create overlay VNIC";
                         "err" => ?e
@@ -311,69 +332,41 @@ impl PortManager {
 
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
-            let ticket = PortTicket::new(
-                instance_id,
-                port_name.clone(),
-                self.inner.clone(),
-            );
+            let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
             let port = Port::new(
                 port_name.clone(),
                 nic.ip,
-                subnet,
                 mac,
                 nic.slot,
                 vni,
-                self.inner.underlay_ip,
-                source_nat,
-                external_ips,
                 gateway,
-                boundary_services,
                 vnic,
             );
-            let old =
-                ports.insert((instance_id, port_name.clone()), port.clone());
+            let old = ports.insert((nic.id, nic.kind), port.clone());
             assert!(
                 old.is_none(),
-                "Duplicate OPTE port detected: instance_id = {}, port_name = {}",
-                instance_id,
-                &port_name,
+                "Duplicate OPTE port detected: interface_id = {}, kind = {:?}",
+                nic.id,
+                nic.kind,
             );
             (port, ticket)
         };
 
         // Add a router entry for this interface's subnet, directing traffic to the
         // VPC subnet.
-        match subnet.network() {
-            IpAddr::V4(ip) => {
-                let prefix =
-                    Ipv4PrefixLen::new(subnet.prefix()).map_err(|e| {
-                        opte_ioctl::Error::InvalidArgument(format!(
-                            "Invalid IPv4 subnet prefix: {}",
-                            e
-                        ))
-                    })?;
-                let cidr =
-                    Ipv4Cidr::new(oxide_vpc::api::Ipv4Addr::from(ip), prefix);
-                let route = AddRouterEntryReq {
-                    port_name: port_name.clone(),
-                    dest: cidr.into(),
-                    target: RouterTarget::VpcSubnet(IpCidr::Ip4(cidr)),
-                };
-                hdl.add_router_entry(&route)?;
-                debug!(
-                    self.inner.log,
-                    "Added IPv4 VPC Subnet router entry for OPTE port";
-                    "port_name" => &port_name,
-                    "entry" => ?route,
-                );
-            }
-            IpAddr::V6(_) => {
-                return Err(opte_ioctl::Error::InvalidArgument(String::from(
-                    "IPv6 not yet supported",
-                ))
-                .into());
-            }
-        }
+        let route = AddRouterEntryReq {
+            port_name: port_name.clone(),
+            dest: vpc_subnet,
+            target: RouterTarget::VpcSubnet(vpc_subnet),
+        };
+        #[cfg(target_os = "illumos")]
+        hdl.add_router_entry(&route)?;
+        debug!(
+            self.inner.log,
+            "Added VPC Subnet router entry";
+            "port_name" => &port_name,
+            "route" => ?route,
+        );
 
         // TODO-remove
         //
@@ -391,52 +384,78 @@ impl PortManager {
         // routing rules the control plane provides.
         //
         // This rule sends all traffic that has no better match to the gateway.
-        let prefix = Ipv4PrefixLen::new(0).unwrap();
-        let dest =
-            Ipv4Cidr::new(std::net::Ipv4Addr::UNSPECIFIED.into(), prefix);
-        let target = RouterTarget::InternetGateway;
-        hdl.add_router_entry(&AddRouterEntryReq {
-            port_name,
-            dest: dest.into(),
-            target,
-        })?;
+        let dest = match vpc_subnet {
+            IpCidr::Ip4(_) => "0.0.0.0/0",
+            IpCidr::Ip6(_) => "::/0",
+        }
+        .parse()
+        .unwrap();
+        let route = AddRouterEntryReq {
+            port_name: port_name.clone(),
+            dest,
+            target: RouterTarget::InternetGateway,
+        };
+        #[cfg(target_os = "illumos")]
+        hdl.add_router_entry(&route)?;
+        debug!(
+            self.inner.log,
+            "Added default internet gateway route entry";
+            "port_name" => &port_name,
+            "route" => ?route,
+        );
 
         info!(
             self.inner.log,
-            "Created OPTE port for guest";
+            "Created OPTE port";
             "port" => ?&port,
         );
         Ok((port, ticket))
     }
 
+    #[cfg(target_os = "illumos")]
     pub fn firewall_rules_ensure(
         &self,
         rules: &[VpcFirewallRule],
     ) -> Result<(), Error> {
+        use opte_ioctl::OpteHdl;
         let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
-        for ((_, port_name), port) in self.inner.ports.lock().unwrap().iter() {
+        for ((_, _), port) in self.inner.ports.lock().unwrap().iter() {
             let rules = opte_firewall_rules(rules, port.vni(), port.mac());
-            let port_name = port_name.clone();
+            let port_name = port.name().to_string();
             info!(
                 self.inner.log,
                 "Setting OPTE firewall rules";
                 "port" => ?&port_name,
                 "rules" => ?&rules,
             );
-            hdl.set_fw_rules(&SetFwRulesReq { port_name, rules })?;
+            hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
+                port_name,
+                rules,
+            })?;
         }
         Ok(())
     }
 
+    #[cfg(not(target_os = "illumos"))]
+    pub fn firewall_rules_ensure(
+        &self,
+        rules: &[VpcFirewallRule],
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring {} firewall rules", rules.len());
+        Ok(())
+    }
+
+    #[cfg(target_os = "illumos")]
     pub fn set_virtual_nic_host(
         &self,
         mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
-        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        use opte_ioctl::OpteHdl;
 
-        hdl.set_v2p(&SetVirt2PhysReq {
+        let hdl = OpteHdl::open(OpteHdl::XDE_CTL)?;
+        hdl.set_v2p(&oxide_vpc::api::SetVirt2PhysReq {
             vip: mapping.virtual_ip.into(),
-            phys: PhysNet {
+            phys: oxide_vpc::api::PhysNet {
                 ether: oxide_vpc::api::MacAddr::from(
                     (*mapping.virtual_mac).into_array(),
                 ),
@@ -448,56 +467,91 @@ impl PortManager {
         Ok(())
     }
 
+    #[cfg(not(target_os = "illumos"))]
+    pub fn set_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring virtual NIC mapping");
+        Ok(())
+    }
+
+    #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
         _mapping: &SetVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
+        slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub fn unset_virtual_nic_host(
+        &self,
+        _mapping: &SetVirtualNetworkInterfaceHost,
+    ) -> Result<(), Error> {
+        info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())
     }
 }
 
 pub struct PortTicket {
     id: Uuid,
-    port_name: String,
-    manager: Option<Arc<PortManagerInner>>,
+    kind: NetworkInterfaceKind,
+    manager: Arc<PortManagerInner>,
 }
 
 impl std::fmt::Debug for PortTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        if self.manager.is_some() {
-            f.debug_struct("PortTicket")
-                .field("id", &self.id)
-                .field("manager", &"{ .. }")
-                .finish()
-        } else {
-            f.debug_struct("PortTicket").field("id", &self.id).finish()
-        }
+        f.debug_struct("PortTicket")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("manager", &"{ .. }")
+            .finish()
     }
 }
 
 impl PortTicket {
     fn new(
         id: Uuid,
-        port_name: String,
+        kind: NetworkInterfaceKind,
         manager: Arc<PortManagerInner>,
     ) -> Self {
-        Self { id, port_name, manager: Some(manager) }
+        Self { id, kind, manager }
     }
 
-    pub fn release(&mut self) -> Result<(), Error> {
-        if let Some(manager) = self.manager.take() {
-            let mut ports = manager.ports.lock().unwrap();
-            ports.remove(&(self.id, self.port_name.clone()));
-            debug!(
-                manager.log,
-                "Removing OPTE port from manager";
-                "instance_id" => ?self.id,
-                "port_name" => &self.port_name,
+    fn release_inner(&mut self) -> Result<(), Error> {
+        let mut ports = self.manager.ports.lock().unwrap();
+        let Some(port) = ports.remove(&(self.id, self.kind)) else {
+            error!(
+                self.manager.log,
+                "Tried to release non-existent port";
+                "id" => ?&self.id,
+                "kind" => ?&self.kind,
             );
-            return Ok(());
-        }
+            return Err(Error::ReleaseMissingPort(self.id, self.kind));
+        };
+        debug!(
+            self.manager.log,
+            "Removed OPTE port from manager";
+            "id" => ?&self.id,
+            "kind" => ?&self.kind,
+            "port" => ?&port,
+        );
         Ok(())
+    }
+
+    pub fn release(mut self) {
+        // There can only be a single `PortTicket` per-port
+        // and we've taken it here by value, so the port must
+        // still exist in the manager.
+        self.release_inner()
+            .expect("failed to release Port with valid PortTicket");
+
+        // NOTE: We've already called `release_inner` so let's
+        // skip the Drop impl which also calls `release_inner`.
+        std::mem::forget(self);
     }
 }
 
@@ -505,6 +559,6 @@ impl Drop for PortTicket {
     fn drop(&mut self) {
         // We're ignoring the value since (1) it's already logged and (2) we
         // can't do anything with it anyway.
-        let _ = self.release();
+        let _ = self.release_inner();
     }
 }
