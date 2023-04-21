@@ -556,8 +556,7 @@ impl ServiceManager {
         &self,
         req: &ServiceZoneRequest,
     ) -> Result<Vec<(Link, bool)>, Error> {
-        let mut links: Vec<(Link, bool)> =
-            Vec::with_capacity(req.services.len());
+        let mut links: Vec<(Link, bool)> = Vec::new();
 
         for svc in &req.services {
             match svc {
