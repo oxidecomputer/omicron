@@ -622,6 +622,8 @@ mod tests {
                 MarkReportProcessed::Both,
             )
             .unwrap();
+
+        logctx.cleanup_successful();
     }
 
     /// This number is small enough that it will cause low-priority events to be
