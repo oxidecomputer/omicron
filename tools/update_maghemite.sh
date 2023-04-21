@@ -7,9 +7,10 @@ SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 function usage {
-    echo "usage: $0 -c COMMIT [-n]"
+    echo "usage: $0 [-c COMMIT] [-n]"
     echo
     echo "  -c COMMIT   Ask to update Maghemite to a specific commit."
+    echo "              If this is unset, Github is queried."
     echo "  -n          Dry-run"
     exit 1
 }
@@ -40,9 +41,7 @@ function main {
       esac
     done
 
-    if [[ -z "$TARGET_COMMIT" ]]; then
-        usage
-    fi
+    TARGET_COMMIT=$(get_latest_commit_from_gh "$REPO" "$TARGET_COMMIT")
     install_toml2json
     do_update_packages "$TARGET_COMMIT" "$DRY_RUN" "$REPO" "${PACKAGES[@]}"
 }

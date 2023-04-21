@@ -28,7 +28,7 @@ function get_latest_commit_from_gh {
     REPO="$1"
     TARGET_COMMIT="$2"
     if [[ -z "$TARGET_COMMIT" ]]; then
-        curl -fsS "https://api.github.com/repos/$REPO/commits" | jq -r '.[0].sha'
+        curl -fsS "https://buildomat.eng.oxide.computer/public/branch/$REPO/main"
     else
         echo "$TARGET_COMMIT"
     fi
