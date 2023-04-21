@@ -1963,6 +1963,16 @@ CREATE TABLE omicron.public.dns_name (
     PRIMARY KEY (dns_zone_id, name, version_added)
 );
 
+/*
+ * Any given live name should only exist once.  (Put differently: the primary
+ * key already prevents us from having the same name added twice in the same
+ * version.  But you should also not be able to add a name in any version if the
+ * name is currently still live (i.e., version_removed IS NULL).
+ */
+CREATE UNIQUE INDEX ON omicron.public.dns_name (
+    dns_zone_id, name
+) WHERE version_removed IS NULL;
+
 /*******************************************************************/
 
 /*

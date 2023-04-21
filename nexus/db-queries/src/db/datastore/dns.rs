@@ -350,8 +350,23 @@ impl DataStore {
         Ok(())
     }
 
-    // XXX-dap TODO-coverage
-    /// Load initial data for a DNS group into the database
+    /// Update the configuration of a DNS zone as specified in `update`
+    ///
+    /// **This function must be used inside a transaction.**
+    /// XXX-dap can we have it make another internal transaction?  If so, update
+    /// the tests to NOT use a transaction.
+    ///
+    /// This can be used inside an existing transaction so that the DNS changes
+    /// happen only if the rest of the transaction also happens.  It's
+    /// recommended to put this step last because the more time elapses between
+    /// running this function and attempting to commit the transaction, the
+    /// greater the change of transaction failure due to a conflict error (if
+    /// some other caller attempts to update the same DNS group).
+    ///
+    /// **Callers almost certainly want to wake up the corresponding Nexus
+    /// background task to cause these changes to be propagated to the
+    /// corresponding DNS servers.**
+    #[must_use]
     pub async fn dns_update<ConnErr>(
         &self,
         opctx: &OpContext,
@@ -419,26 +434,13 @@ impl DataStore {
 
         {
             use db::schema::dns_name::dsl;
-            let nadded = diesel::insert_into(dsl::dns_name)
-                .values(new_names)
-                .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
-                })?;
 
-            // XXX-dap TODO-coverage add a test for this
-            bail_unless!(
-                nadded == ntoadd,
-                "inserted wrong number of dns_name records: expected {}, \
-                actually inserted {}",
-                ntoadd,
-                nadded
-            );
-
+            // Remove any names that we're removing first.  This is important,
+            // as the database will enforce a constraint that the same name not
+            // appear live (i.e., with version_removed IS NULL) in two different
+            // versions.  If someone is adding *and* removing a name in this
+            // update, we would (temporarily) violate that constraint if we did
+            // this in the other order.
             let to_remove = update.names_removed;
             let ntoremove = to_remove.len();
             let nremoved = diesel::update(
@@ -454,7 +456,6 @@ impl DataStore {
                 public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
             })?;
 
-            // XXX-dap TODO-coverage add a test for this
             bail_unless!(
                 nremoved == ntoremove,
                 "updated wrong number of dns_name records: expected {}, \
@@ -462,13 +463,32 @@ impl DataStore {
                 ntoremove,
                 nremoved
             );
+
+            // Now add any names being added.
+            let nadded = diesel::insert_into(dsl::dns_name)
+                .values(new_names)
+                .execute_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel_pool(
+                        e.into(),
+                        ErrorHandler::Server,
+                    )
+                })?;
+
+            bail_unless!(
+                nadded == ntoadd,
+                "inserted wrong number of dns_name records: expected {}, \
+                actually inserted {}",
+                ntoadd,
+                nadded
+            );
         }
 
         Ok(())
     }
 }
 
-// XXX-dap TODO-coverage
 /// Helper for changing the configuration of a DNS zone
 ///
 /// A DNS zone's configuration consists of the DNS names in the zone and their
@@ -524,7 +544,6 @@ impl DnsVersionUpdateBuilder {
     /// which names need to be added when making a change.  For example, when
     /// creating a Silo, we expect that the Silo's DNS name does not already
     /// exist.
-    /// XXX-dap TODO-coverage test all of this
     ///
     /// `name` should not contain the suffix of the DNS zone itself.  For
     /// example, if the DNS zone is `control-plane.oxide.internal` and we want
@@ -578,9 +597,12 @@ mod test {
     use crate::db::datastore::datastore_test;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
+    use crate::db::TransactionError;
     use assert_matches::assert_matches;
+    use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use chrono::Utc;
+    use futures::FutureExt;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::DnsName;
     use nexus_db_model::DnsVersion;
@@ -592,6 +614,7 @@ mod test {
     use nexus_types::internal_api::params::Srv;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::num::NonZeroU32;
@@ -1324,5 +1347,441 @@ mod test {
         assert_eq!(dns_update.names_added.len(), 2);
         assert_eq!(dns_update.names_added.get("test1").unwrap(), &records1);
         assert_eq!(dns_update.names_added.get("test2").unwrap(), &records2);
+    }
+
+    #[tokio::test]
+    async fn test_dns_update() {
+        let logctx = dev::test_setup_log("test_dns_uniqueness");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let now = Utc::now();
+
+        // Create three DNS zones for testing:
+        //
+        // dns_zone1: the zone we're going to do most of our testing with
+        // dns_zone2: another zone in the same DNS group
+        // dns_zone3: a zone in a different DNS group
+        let dns_zone1 = DnsZone {
+            id: Uuid::new_v4(),
+            time_created: now,
+            dns_group: DnsGroup::External,
+            zone_name: String::from("oxide1.test"),
+        };
+        let dns_zone2 = DnsZone {
+            id: Uuid::new_v4(),
+            time_created: now,
+            dns_group: DnsGroup::External,
+            zone_name: String::from("oxide2.test"),
+        };
+        let dns_zone3 = DnsZone {
+            id: Uuid::new_v4(),
+            time_created: now,
+            dns_group: DnsGroup::Internal,
+            zone_name: String::from("oxide3.test"),
+        };
+
+        {
+            // Create those initial zones.
+            use crate::db::schema::dns_zone::dsl;
+            diesel::insert_into(dsl::dns_zone)
+                .values(vec![
+                    dns_zone1.clone(),
+                    dns_zone2.clone(),
+                    dns_zone3.clone(),
+                ])
+                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .await
+                .unwrap();
+        }
+        {
+            // Create initial versions of each DNS group.
+            use crate::db::schema::dns_version::dsl;
+            diesel::insert_into(dsl::dns_version)
+                .values(vec![
+                    DnsVersion {
+                        dns_group: DnsGroup::Internal,
+                        version: Generation::new(),
+                        time_created: now,
+                        creator: "test suite 5".to_string(),
+                        comment: "test suite 6".to_string(),
+                    },
+                    DnsVersion {
+                        dns_group: DnsGroup::External,
+                        version: Generation::new(),
+                        time_created: now,
+                        creator: "test suite 7".to_string(),
+                        comment: "test suite 8".to_string(),
+                    },
+                ])
+                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .await
+                .unwrap();
+        }
+
+        // The configuration starts off empty.
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 1);
+        assert_eq!(dns_config.zones.len(), 0);
+
+        // Add a few DNS names.
+        let aaaa_record1 = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let aaaa_record2 = DnsRecord::Aaaa("fe80::1".parse().unwrap());
+        let records1 = vec![aaaa_record1.clone()];
+        let records2 = vec![aaaa_record2.clone()];
+        let records12 = vec![aaaa_record1, aaaa_record2];
+
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("update 1: set up zone1"),
+                String::from("the test suite"),
+            );
+            update.add_name(String::from("n1"), records1.clone()).unwrap();
+            update.add_name(String::from("n2"), records2.clone()).unwrap();
+
+            let conn = datastore.pool_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, conn, update).await.unwrap();
+        }
+
+        // Verify the new config.
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 2);
+        assert_eq!(dns_config.zones.len(), 1);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records1.clone()),
+                ("n2".to_string(), records2.clone()),
+            ])
+        );
+
+        // We should be able to add the same names to a different zone with
+        // different values.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone2.clone(),
+                String::from("update 2: set up zone2"),
+                String::from("the test suite"),
+            );
+            update.add_name(String::from("n1"), records2.clone()).unwrap();
+            update.add_name(String::from("n2"), records1.clone()).unwrap();
+
+            let conn = datastore.pool_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, conn, update).await.unwrap();
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 3);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records1.clone()),
+                ("n2".to_string(), records2.clone()),
+            ])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+
+        // Now change "n1" in zone1 by removing it and adding it again.
+        // This should work.  "n1" in zone2 should be unaffected.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("update 3: change n1 in zone1 only"),
+                String::from("the test suite"),
+            );
+            update.remove_name(String::from("n1")).unwrap();
+            update.add_name(String::from("n1"), records12.clone()).unwrap();
+
+            let conn = datastore.pool_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, conn, update).await.unwrap();
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 4);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records12.clone()),
+                ("n2".to_string(), records2.clone()),
+            ])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+
+        // Now just remove "n1" in zone1 altogether.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("update 4: remove n1 in zone1"),
+                String::from("the test suite"),
+            );
+            update.remove_name(String::from("n1")).unwrap();
+
+            let conn = datastore.pool_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, conn, update).await.unwrap();
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 5);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([("n2".to_string(), records2.clone()),])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+
+        // Now add "n1" back -- again.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("update 5: add n1 in zone1"),
+                String::from("the test suite"),
+            );
+            update.add_name(String::from("n1"), records2.clone()).unwrap();
+
+            let conn = datastore.pool_for_tests().await.unwrap();
+            datastore.dns_update(&opctx, conn, update).await.unwrap();
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 6);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records2.clone()),
+            ])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+
+        // Now, try concurrent updates to different DNS groups.  Both should
+        // succeed.
+        {
+            let mut update1 = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("update: concurrent part 1"),
+                String::from("the test suite"),
+            );
+            update1.remove_name(String::from("n1")).unwrap();
+
+            let conn1 = datastore.pool_for_tests().await.unwrap();
+            let conn2 = datastore.pool_for_tests().await.unwrap();
+            let (wait1_tx, wait1_rx) = tokio::sync::oneshot::channel();
+            let (wait2_tx, wait2_rx) = tokio::sync::oneshot::channel();
+
+            let cds = datastore.clone();
+            let copctx = opctx.child(std::collections::BTreeMap::new());
+            let mut fut = conn1
+                .transaction_async(|c1| async move {
+                    cds.dns_update(&copctx, &c1, update1).await.unwrap();
+                    // Let the outside scope know we've done the update, but we
+                    // haven't committed the transaction yet.  Wait for them to
+                    // tell us to proceed.
+                    wait1_tx.send(()).unwrap();
+                    let _ = wait2_rx.await.unwrap();
+                    Ok::<(), TransactionError<()>>(())
+                })
+                .fuse();
+
+            // Wait for that transaction to get far enough to have done the
+            // update.  We also have to wait for the transaction itself or it
+            // won't run.
+            let mut wait1_rx = wait1_rx.fuse();
+            futures::select! {
+                _ = fut => (),
+                r = wait1_rx => r.unwrap(),
+            };
+
+            // Now start another transaction that updates the same DNS group and
+            // have it complete before the first one does.
+            let mut update2 = DnsVersionUpdateBuilder::new(
+                dns_zone3.clone(),
+                String::from("update: concurrent part 2"),
+                String::from("the test suite"),
+            );
+            update2.add_name(String::from("n1"), records1.clone()).unwrap();
+            datastore.dns_update(&opctx, conn2, update2).await.unwrap();
+
+            // Now let the first one finish.
+            wait2_tx.send(()).unwrap();
+            // Make sure it completed successfully.
+            fut.await.unwrap();
+        }
+
+        // Verify the result of the concurrent update.
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 7);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([("n2".to_string(), records2.clone()),])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 2);
+        assert_eq!(dns_config.zones.len(), 1);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide3.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([("n1".to_string(), records1.clone()),])
+        );
+
+        // Failure case: cannot remove a name that didn't exist.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("bad update: remove non-existent name"),
+                String::from("the test suite"),
+            );
+            update.remove_name(String::from("n4")).unwrap();
+
+            let cds = datastore.clone();
+            let copctx = opctx.child(BTreeMap::new());
+            let conn = datastore.pool_for_tests().await.unwrap();
+            let error = conn
+                .transaction_async(|c1| async move {
+                    cds.dns_update(&copctx, &c1, update)
+                        .await
+                        .map_err(TransactionError::CustomError)
+                })
+                .await
+                .unwrap_err();
+            match error {
+                TransactionError::CustomError(e) => {
+                    assert_eq!(
+                        e.to_string(),
+                        "Internal Error: updated wrong number of dns_name \
+                        records: expected 1, actually marked 0 for removal"
+                    );
+                }
+                e => panic!("unexpected error: {:#}", e),
+            }
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 7);
+
+        // Failure case: cannot add a name that already exists.
+        {
+            let mut update = DnsVersionUpdateBuilder::new(
+                dns_zone1.clone(),
+                String::from("bad update: remove non-existent name"),
+                String::from("the test suite"),
+            );
+            update.add_name(String::from("n2"), records1.clone()).unwrap();
+
+            let cds = datastore.clone();
+            let copctx = opctx.child(BTreeMap::new());
+            let conn = datastore.pool_for_tests().await.unwrap();
+            let error = conn
+                .transaction_async(|c1| async move {
+                    cds.dns_update(&copctx, &c1, update)
+                        .await
+                        .map_err(TransactionError::CustomError)
+                })
+                .await
+                .unwrap_err();
+            match error {
+                TransactionError::CustomError(e) => {
+                    let msg = e.to_string();
+                    assert!(msg.starts_with("Internal Error: "));
+                    assert!(msg.contains("violates unique constraint"));
+                }
+                e => panic!("unexpected error: {:#}", e),
+            }
+        }
+
+        let dns_config = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .unwrap();
+        assert_eq!(dns_config.generation, 7);
+        assert_eq!(dns_config.zones.len(), 2);
+        assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
+        assert_eq!(
+            dns_config.zones[0].records,
+            HashMap::from([("n2".to_string(), records2.clone()),])
+        );
+        assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
+        assert_eq!(
+            dns_config.zones[1].records,
+            HashMap::from([
+                ("n1".to_string(), records2.clone()),
+                ("n2".to_string(), records1.clone()),
+            ])
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
