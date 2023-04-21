@@ -32,6 +32,9 @@ jobs:
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
+    - name: Install coreutils
+      run: brew install coreutils
+      if: matrix.os == 'macos-12'
     - name: Update PATH
       run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
     - name: Install Pre-Requisites
