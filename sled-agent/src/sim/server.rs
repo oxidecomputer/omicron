@@ -302,6 +302,8 @@ impl Server {
             internal_services_ip_pool_ranges,
             certs: vec![],
             internal_dns_zone_config: d2n_params(&dns_config),
+            external_dns_zone_name:
+                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         };
 
         Ok((

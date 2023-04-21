@@ -59,6 +59,7 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub dendrite: dev::dendrite::DendriteInstance,
+    pub external_dns_zone_name: String,
     pub external_dns_server: dns_server::dns_server::ServerHandle,
     pub external_dns_config_server:
         dropshot::HttpServer<dns_server::http_server::Context>,
@@ -257,10 +258,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
                 .ip(),
         },
     };
+    let external_dns_zone_name =
+        internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
     let server = N::start(
         nexus_internal,
         &config,
         vec![dns_service_internal, dns_service_external, nexus_service],
+        &external_dns_zone_name,
     )
     .await;
 
@@ -318,6 +322,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         producer,
         logctx,
         dendrite,
+        external_dns_zone_name,
         external_dns_server,
         external_dns_config_server,
         external_dns_resolver,

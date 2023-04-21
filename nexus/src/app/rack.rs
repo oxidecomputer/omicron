@@ -130,11 +130,9 @@ impl super::Nexus {
             dns_zone.records,
         );
 
-        // TODO the initial external DNS zone name and potentially record
-        // name(s) need to come in with the rack initialization request.
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
-            "oxide-dev.test",
+            request.external_dns_zone_name.as_str(),
             &self.id.to_string(),
             "rack setup",
             HashMap::new(),

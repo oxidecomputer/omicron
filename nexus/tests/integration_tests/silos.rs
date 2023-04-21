@@ -35,6 +35,7 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -2103,13 +2104,14 @@ async fn verify_silo_dns_name(
     silo_name: &str,
     should_exist: bool,
 ) {
-    // We assume for the purpose of the test suite that:
-    // - Nexus is running on IPv4 localhost (127.0.0.1)
-    // - the delegated external DNS zone name is "oxide-dev.test."
-    //   (this is currently hardcoded inside Nexus; in the future it will come
-    //   in via RSS) XXX-dap
-    // - the naming scheme is "$silo_name.sys.$delegated_name", per RFD 357.
-    let dns_name = format!("{}.sys.oxide-dev.test.", silo_name);
+    // The DNS naming scheme for Silo DNS names is just:
+    //     $silo_name.sys.$delegated_name
+    // This is determined by RFD 357 and also implemented in Nexus.
+    let dns_name = format!("{}.sys.{}", silo_name, DNS_ZONE_EXTERNAL_TESTING);
+
+    // We assume that in the test suite, Nexus's "external" address is
+    // localhost.
+    let nexus_ip = Ipv4Addr::LOCALHOST;
 
     wait_for_condition(
         || async {
@@ -2123,7 +2125,7 @@ async fn verify_silo_dns_name(
                     if addrs.is_empty() {
                         false
                     } else {
-                        assert_eq!(addrs, [&Ipv4Addr::LOCALHOST]);
+                        assert_eq!(addrs, [&nexus_ip]);
                         true
                     }
                 }

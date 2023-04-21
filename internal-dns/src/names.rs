@@ -9,6 +9,10 @@ use uuid::Uuid;
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
+/// Name for the delegated external DNS zone that's used in testing and
+/// development
+pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
+
 /// Names of services within the control plane
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {

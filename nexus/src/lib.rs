@@ -30,6 +30,8 @@ pub use crucible_agent_client;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use internal_dns::DnsConfigBuilder;
+use nexus_types::internal_api::params::ServiceKind;
+use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
 use slog::Logger;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
@@ -38,8 +40,6 @@ use uuid::Uuid;
 // These modules used to be within nexus, but have been moved to
 // nexus-db-queries. Keeping these around temporarily for migration reasons.
 pub use nexus_db_queries::{authn, authz, db};
-use nexus_types::internal_api::params::ServiceKind;
-use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
 
 #[macro_use]
 extern crate slog;
@@ -207,6 +207,7 @@ impl nexus_test_interface::NexusServer for Server {
         internal_server: InternalServer,
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        external_dns_zone_name: &str,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -251,6 +252,7 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_services_ip_pool_ranges,
                     certs: vec![],
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
+                    external_dns_zone_name: external_dns_zone_name.to_owned(),
                 },
             )
             .await
