@@ -32,7 +32,7 @@ where
     }
 }
 
-/// A helper function which modifies what information is tracked wtihin the
+/// A helper function which modifies what information is tracked within the
 /// callback of the notify function.
 ///
 /// The default "Notify" function returns an error and the duration since the
