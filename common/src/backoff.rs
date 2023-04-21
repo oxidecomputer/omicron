@@ -11,11 +11,68 @@
 //! - An inaccessible network
 //! - An overloaded server
 
+use std::future::Future;
 use std::time::Duration;
+use std::time::Instant;
 
 pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::Error as BackoffError;
 pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
+
+pub trait NotifyTracking<E> {
+    fn notify_ext(&mut self, err: E, count: usize, duration: Duration);
+}
+
+impl<E, F> NotifyTracking<E> for F
+where
+    F: FnMut(E, usize, Duration),
+{
+    fn notify_ext(&mut self, err: E, count: usize, duration: Duration) {
+        self(err, count, duration)
+    }
+}
+
+/// A helper function which modifies what information is tracked wtihin the
+/// callback of the notify function.
+///
+/// The default "Notify" function returns an error and the duration since the
+/// *last* call of notify, but often the decision about "where should an error
+/// be logged" depends on the *total* duration of time since we started
+/// retrying.
+///
+/// By returning:
+/// - A count of total calls
+/// - The duration since we started retrying
+///
+/// The caller can more easily log:
+/// - (info) Something non-erroneous on the first failure (indicating, to a log, that
+/// retry is occuring).
+/// - (warning) Something more concerned after a total time threshold has passed.
+///
+/// Identical to [::backoff::future::retry_notify], but with invokes
+/// the [NotifyTracking::notify_ext] method instead of
+/// [::backoff::Notify::notify].
+pub async fn retry_notify_ext<I, E, Fn, Fut, B, N>(
+    backoff: B,
+    operation: Fn,
+    mut notify: N,
+) -> Result<I, E>
+where
+    B: Backoff,
+    Fn: FnMut() -> Fut,
+    Fut: Future<Output = Result<I, BackoffError<E>>>,
+    N: NotifyTracking<E>,
+{
+    let mut count = 0;
+    let start = Instant::now();
+
+    let backoff_notify = |error, _duration| {
+        notify.notify_ext(error, count, Instant::now().duration_since(start));
+        count += 1;
+    };
+
+    retry_notify(backoff, operation, backoff_notify).await
+}
 
 /// Return a backoff policy for querying internal services.
 ///
