@@ -91,9 +91,9 @@ function configure_os
 			SET_BINARIES=""
 			;;
 		*)
-			echo "WARNING: OS: $1 is not supported by dendrite"
+			echo "WARNING: binaries for $1 are not published by dendrite"
 			echo "Network apis will be unavailable"
-			unsupported_os
+			SET_BINARIES="unsupported_os"
 			;;
 	esac
 }
@@ -176,7 +176,6 @@ function unsupported_os
 	mkdir -p "$BIN_DIR"
 	echo "echo 'unsupported os' && exit 1" >> "$BIN_DIR/dpd"
 	chmod +x "$BIN_DIR/dpd"
-	exit 0
 }
 
 main "$@"
