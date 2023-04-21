@@ -1345,7 +1345,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6#3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8#0b34a53b57038a7804ac69ab90400539bd1961e8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1355,6 +1355,18 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crucible-client-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8#0b34a53b57038a7804ac69ab90400539bd1961e8"
+dependencies = [
+ "base64 0.21.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -1372,7 +1384,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6#3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8#0b34a53b57038a7804ac69ab90400539bd1961e8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1388,7 +1400,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6#3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6"
+source = "git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8#0b34a53b57038a7804ac69ab90400539bd1961e8"
 dependencies = [
  "libc",
  "num-derive",
@@ -4494,7 +4506,7 @@ dependencies = [
  "chrono",
  "clap 4.2.2",
  "crucible-agent-client",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8)",
  "ddm-admin-client",
  "dns-server",
  "dns-service-client",
@@ -5659,7 +5671,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=e7ce7a1dbe2d410b787df2e52478229b008b4750#e7ce7a1dbe2d410b787df2e52478229b008b4750"
 dependencies = [
  "base64 0.21.0",
- "crucible-client-types",
+ "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=3a3e806bfc2eea3519cfc0ec14ec4e745f275cd6)",
  "progenitor",
  "propolis_types",
  "rand 0.8.5",
