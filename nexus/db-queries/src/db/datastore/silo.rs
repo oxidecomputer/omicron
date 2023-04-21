@@ -4,7 +4,7 @@
 
 //! [`DataStore`] methods related to [`Silo`]s.
 
-use super::dns::DnsVersionUpdate;
+use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -89,7 +89,7 @@ impl DataStore {
         opctx: &OpContext,
         group_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
-        dns_update: DnsVersionUpdate,
+        dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
@@ -231,7 +231,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
         dns_opctx: &OpContext,
-        dns_update: DnsVersionUpdate,
+        dns_update: DnsVersionUpdateBuilder,
     ) -> DeleteResult {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;

@@ -16,7 +16,7 @@ use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::UserProvisionType;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::DnsVersionUpdate;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ListResultVec;
@@ -100,7 +100,7 @@ impl super::Nexus {
             .collect();
 
         let silo_name = &new_silo_params.identity.name;
-        let mut dns_update = DnsVersionUpdate::new(
+        let mut dns_update = DnsVersionUpdateBuilder::new(
             datastore.dns_zone_external(external_authn_opctx).await?,
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
@@ -136,7 +136,7 @@ impl super::Nexus {
         let datastore = self.datastore();
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
-        let mut dns_update = DnsVersionUpdate::new(
+        let mut dns_update = DnsVersionUpdateBuilder::new(
             datastore.dns_zone_external(opctx).await?,
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),

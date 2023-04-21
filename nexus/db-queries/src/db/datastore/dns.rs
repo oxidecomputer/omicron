@@ -359,7 +359,7 @@ impl DataStore {
             crate::db::pool::DbConnection,
             ConnErr,
         > + Sync),
-        update: DnsVersionUpdate,
+        update: DnsVersionUpdateBuilder,
     ) -> Result<(), Error>
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
@@ -468,10 +468,22 @@ impl DataStore {
     }
 }
 
-// XXX-dap TODO-doc
 // XXX-dap TODO-coverage
-// XXX-dap should this go into the db-model crate?
-pub struct DnsVersionUpdate {
+/// Helper for changing the configuration of a DNS zone
+///
+/// A DNS zone's configuration consists of the DNS names in the zone and their
+/// associated DNS records.  Any change to the zone configuration consists of a
+/// set of names added (with associated records) and a set of names removed
+/// (which removes all records for the corresponding names).  If you want to
+/// _change_ the records associated with a name, you first remove what's there
+/// and add the name back with different records.
+///
+/// You use this object to build up a _description_ of the changes to the DNS
+/// zone's configuration.  Then you call [`DataStore::dns_update()`] to apply
+/// these changes transactionally to the database.  The changes are then
+/// propagated asynchronously to the DNS servers.  No changes are made (to
+/// either the database or the DNS servers) while you modify this object.
+pub struct DnsVersionUpdateBuilder {
     dns_zone: DnsZone,
     comment: String,
     creator: String,
@@ -479,13 +491,22 @@ pub struct DnsVersionUpdate {
     names_removed: HashSet<String>,
 }
 
-impl DnsVersionUpdate {
+impl DnsVersionUpdateBuilder {
+    /// Begin describing a new change to the given DNS zone
+    ///
+    /// `comment` is a short text summary of why this change is being made,
+    /// aimed at people looking through the change history while debugging.
+    /// Example: `"silo create: 'my-silo'"` tells us that the DNS change is
+    /// being made because a new Silo called `my-silo` is being created.
+    ///
+    /// "creator" describes the component making the change. This is generally
+    /// the current Nexus instance's uuid.
     pub fn new(
         dns_zone: DnsZone,
         comment: String,
         creator: String,
-    ) -> DnsVersionUpdate {
-        DnsVersionUpdate {
+    ) -> DnsVersionUpdateBuilder {
+        DnsVersionUpdateBuilder {
             dns_zone,
             comment,
             creator,
@@ -494,30 +515,60 @@ impl DnsVersionUpdate {
         }
     }
 
+    /// Record that the DNS name `name` is being added to the zone with the
+    /// corresponding set of records
+    ///
+    /// `name` must not already exist in the zone unless you're also calling
+    /// `remove_name()` with the same name (meaning that you're replacing the
+    /// records for that `name`).  It's expected that callers know precisely
+    /// which names need to be added when making a change.  For example, when
+    /// creating a Silo, we expect that the Silo's DNS name does not already
+    /// exist.
+    /// XXX-dap TODO-coverage test all of this
+    ///
+    /// `name` should not contain the suffix of the DNS zone itself.  For
+    /// example, if the DNS zone is `control-plane.oxide.internal` and we want
+    /// to have `nexus.control-plane.oxide.internal` show up in DNS, the name
+    /// here would just be `nexus`.
+    ///
+    /// `name` can contain multiple labels (e.g., `foo.bar`).
     pub fn add_name(
         &mut self,
         name: String,
         records: Vec<DnsRecord>,
     ) -> Result<(), Error> {
-        // XXX-dap TODO-coverage add a test for this
-        match self.names_added.insert(name.clone(), records) {
-            None => Ok(()),
-            Some(_) => Err(Error::internal_error(&format!(
+        if self.names_added.contains_key(&name) {
+            Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to add name {:?} multiple times",
                 self.comment, &name
-            ))),
+            )))
+        } else {
+            assert!(self.names_added.insert(name, records).is_none());
+            Ok(())
         }
     }
 
+    /// Record that the DNS name `name` and all of its associated records are
+    /// being removed from the zone
+    ///
+    /// `name` must already be in the zone.  It's expected that callers know
+    /// precisely which names need to be removed when making a change.  For
+    /// example, when deleting a Silo, we expect that the Silo's DNS name is
+    /// present.
+    ///
+    /// See `add_name(name)` for more about other expectations about `name`,
+    /// like that it may contain multiple labels and that it should not include
+    /// the DNS zone suffix.
     pub fn remove_name(&mut self, name: String) -> Result<(), Error> {
-        // XXX-dap TODO-coverage add a test for this
-        match self.names_removed.insert(name.clone()) {
-            true => Ok(()),
-            false => Err(Error::internal_error(&format!(
+        if self.names_removed.contains(&name) {
+            Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to remove name {:?} \
                 multiple times",
                 self.comment, &name,
-            ))),
+            )))
+        } else {
+            assert!(self.names_removed.insert(name.clone()));
+            Ok(())
         }
     }
 }
@@ -525,6 +576,7 @@ impl DnsVersionUpdate {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::datastore_test;
+    use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -541,6 +593,7 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
+    use std::net::Ipv6Addr;
     use std::num::NonZeroU32;
     use uuid::Uuid;
 
@@ -1195,5 +1248,81 @@ mod test {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_dns_builder_basic() {
+        let dns_zone = DnsZone {
+            id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            dns_group: DnsGroup::External,
+            zone_name: String::from("oxide.test"),
+        };
+
+        let mut dns_update = DnsVersionUpdateBuilder::new(
+            dns_zone.clone(),
+            String::from("basic test"),
+            String::from("the basic test"),
+        );
+        assert_eq!(dns_update.dns_zone.id, dns_zone.id);
+        assert_eq!(dns_update.comment, "basic test");
+        assert_eq!(dns_update.creator, "the basic test");
+        assert!(dns_update.names_added.is_empty());
+        assert!(dns_update.names_removed.is_empty());
+
+        let aaaa_record1 = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let aaaa_record2 = DnsRecord::Aaaa("fe80::1".parse().unwrap());
+        let records1 = vec![aaaa_record1];
+        let records2 = vec![aaaa_record2];
+
+        // Basic case: add a name
+        dns_update.add_name(String::from("test1"), records1.clone()).unwrap();
+        assert_eq!(dns_update.names_added.get("test1").unwrap(), &records1);
+
+        // Cannot add a name that's already been added.  After the error, the
+        // state is unchanged.
+        let error = dns_update
+            .add_name(String::from("test1"), records2.clone())
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Internal Error: DNS update (\"basic test\") attempted to add \
+            name \"test1\" multiple times"
+        );
+        assert_eq!(dns_update.names_added.get("test1").unwrap(), &records1);
+        assert_eq!(dns_update.names_added.len(), 1);
+
+        // Neither of these operations changed `names_removed`.
+        assert!(dns_update.names_removed.is_empty());
+
+        // Basic case: remove a name.
+        dns_update.remove_name(String::from("test2")).unwrap();
+        assert!(dns_update.names_removed.contains("test2"));
+
+        // Cannot remove a name that's already been removed.  After the error,
+        // the state is unchanged.
+        let error = dns_update.remove_name(String::from("test2")).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Internal Error: DNS update (\"basic test\") attempted to remove \
+            name \"test2\" multiple times"
+        );
+        assert!(dns_update.names_removed.contains("test2"));
+        assert_eq!(dns_update.names_removed.len(), 1);
+
+        // Neither of these operations changed `names_added`.
+        assert_eq!(dns_update.names_added.get("test1").unwrap(), &records1);
+        assert_eq!(dns_update.names_added.len(), 1);
+
+        // It's fine to remove and add the same name.  The order of add and
+        // remove does not matter.
+        dns_update.remove_name(String::from("test1")).unwrap();
+        dns_update.add_name(String::from("test2"), records2.clone()).unwrap();
+        assert_eq!(dns_update.names_removed.len(), 2);
+        assert!(dns_update.names_removed.contains("test1"));
+        assert!(dns_update.names_removed.contains("test2"));
+        assert_eq!(dns_update.names_added.len(), 2);
+        assert_eq!(dns_update.names_added.get("test1").unwrap(), &records1);
+        assert_eq!(dns_update.names_added.get("test2").unwrap(), &records2);
     }
 }
