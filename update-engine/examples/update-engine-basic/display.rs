@@ -78,6 +78,9 @@ impl MessageDisplayState {
         let Event::Step(step_event) = first_event else {
             bail!("received invalid event: {first_event:?}");
         };
+        let progress_event = step_event.progress_event().expect(
+            "first event should always have a progress associated with it",
+        );
         let StepEventKind::ExecutionStarted {
             steps,
             components,
@@ -106,10 +109,7 @@ impl MessageDisplayState {
 
         let mut ret =
             MessageDisplayState { log, mp, pb_main, sty_aux, component_tree };
-        let progress = step_event.progress_event().expect(
-            "first event should always have a progress associated with it",
-        );
-        ret.handle_progress_event(progress)?;
+        ret.handle_progress_event(progress_event)?;
 
         Ok(ret)
     }
@@ -117,6 +117,7 @@ impl MessageDisplayState {
     fn handle_event(&mut self, event: Event) -> Result<()> {
         match event {
             Event::Step(event) => {
+                let progress_event = event.progress_event();
                 match event.kind {
                     StepEventKind::NoStepsDefined => {
                         bail!("at least one step expected")
@@ -184,8 +185,8 @@ impl MessageDisplayState {
                     StepEventKind::Unknown => {}
                 }
 
-                if let Some(progress) = event.progress_event() {
-                    self.handle_progress_event(progress)?;
+                if let Some(progress_event) = progress_event {
+                    self.handle_progress_event(progress_event)?;
                 }
             }
             Event::Progress(event) => self.handle_progress_event(event)?,
