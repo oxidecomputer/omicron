@@ -16,6 +16,7 @@ use sled_agent_client::types::{
     InstanceMigrationSourceParams, InstanceMigrationTargetParams,
     InstanceStateRequested,
 };
+use slog::warn;
 use std::net::Ipv6Addr;
 use steno::ActionError;
 use steno::Node;
@@ -135,8 +136,6 @@ declare_saga_actions! {
         + sim_instance_migrate
     }
 }
-
-// instance migrate saga: definition
 
 #[derive(Debug)]
 pub struct SagaInstanceMigrate;
@@ -258,10 +257,7 @@ async fn sim_set_migration_ids(
             &opctx,
             db_instance.id(),
             db_instance,
-            Some(InstanceMigrationSourceParams {
-                dst_propolis_id,
-                migration_id,
-            }),
+            InstanceMigrationSourceParams { dst_propolis_id, migration_id },
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -273,33 +269,36 @@ async fn sim_clear_migration_ids(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
-    // The instance may have moved to another Propolis generation by this point
-    // (if e.g. it was stopped and restarted), so this is not guaranteed to
-    // succeed.
+    // If this call to clear migration IDs failed, one of the following things
+    // must have happened:
     //
-    // REVIEW(gjc): This callee has enough information to distinguish "outdated
-    // generation" failures from other errors. What is the right way to handle
-    // that class of other errors? For example, suppose CRDB is totally
-    // unavailable right now, but becomes available again later. The migration
-    // IDs in this step need to be cleared so that the instance can try to
-    // migrate again. How should this step achieve that?
-    let _ = osagactx
+    // 1. Sled agent's view of the instance changed in a way that invalidated
+    //    this request. Sled agent is expected to push its own state updates on
+    //    these transitions and properly manage migration IDs when they occur.
+    // 2. Nexus failed to contact sled agent entirely.
+    // 3. Nexus talked to sled agent but then failed to reach CRDB when trying
+    //    to write back the instance state with the cleared IDs. (Note that
+    //    when clearing migration IDs, failing to update CRDB because the
+    //    current generation number is too far advanced is not actually treated
+    //    as a failure.)
+    //
+    // In case 1, the instance should already be updated properly (or will be
+    // updated properly soon), and in cases 2 and 3 there's nothing that can
+    // reliably be done (the error may not be transient), so just swallow all
+    // errors here (but warn that they occurred).
+    if let Err(e) = osagactx
         .nexus()
-        .instance_set_migration_ids(
-            &opctx,
-            db_instance.id(),
-            &db_instance,
-            None,
-        )
-        .await;
+        .instance_clear_migration_ids(db_instance.id(), &db_instance)
+        .await
+    {
+        warn!(osagactx.log(),
+              "Error clearing migration IDs during rollback";
+              "instance_id" => %db_instance.id(),
+              "error" => ?e);
+    }
 
     Ok(())
 }

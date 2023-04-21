@@ -306,12 +306,10 @@ impl super::Nexus {
     }
 
     /// Attempts to set the migration IDs for the supplied instance via the
-    /// instance's current sled.
+    /// sled specified in `db_instance`.
     ///
     /// The caller is assumed to have fetched the current instance record from
-    /// the DB and verified either that the record has no migration IDs (in
-    /// the case where the caller is setting IDs) or that it has the expected
-    /// IDs (if the caller is clearing them).
+    /// the DB and verified that the record has no migration IDs.
     ///
     /// Returns `Ok` and the updated instance record if this call successfully
     /// updated the instance with the sled agent and that update was
@@ -320,27 +318,17 @@ impl super::Nexus {
     ///
     /// # Panics
     ///
-    /// Raises an assertion failure if `migration_params` is `Some` and the
-    /// supplied `db_instance` already has a migration ID or destination
-    /// Propolis ID set.
-    ///
-    /// Raises an assertion failure if `migration_params` is `None` and the
-    /// supplied `db_instance`'s migration ID or destination Propolis ID is not
-    /// set.
+    /// Asserts that `db_instance` has no migration ID or destination Propolis
+    /// ID set.
     pub async fn instance_set_migration_ids(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
         db_instance: &db::model::Instance,
-        migration_params: Option<InstanceMigrationSourceParams>,
+        migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
-        if migration_params.is_some() {
-            assert!(db_instance.runtime().migration_id.is_none());
-            assert!(db_instance.runtime().dst_propolis_id.is_none());
-        } else {
-            assert!(db_instance.runtime().migration_id.is_some());
-            assert!(db_instance.runtime().dst_propolis_id.is_some());
-        }
+        assert!(db_instance.runtime().migration_id.is_none());
+        assert!(db_instance.runtime().dst_propolis_id.is_none());
 
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(instance_id)
@@ -354,7 +342,7 @@ impl super::Nexus {
                 &instance_id,
                 &InstancePutMigrationIdsBody {
                     old_runtime: db_instance.runtime().clone().into(),
-                    migration_params,
+                    migration_params: Some(migration_params),
                 },
             )
             .await
@@ -378,6 +366,46 @@ impl super::Nexus {
                 "instance's Propolis generation is out of date",
             ))
         }
+    }
+
+    /// Attempts to clear the migration IDs for the supplied instance via the
+    /// sled specified in `db_instance`.
+    ///
+    /// The supplied instance record must contain valid migration IDs.
+    ///
+    /// Returns `Ok` if sled agent accepted the request to clear migration IDs
+    /// and the resulting attempt to write instance runtime state back to CRDB
+    /// succeeded. This routine returns `Ok` even if the update was not actually
+    /// applied (due to a separate generation number change).
+    ///
+    /// # Panics
+    ///
+    /// Asserts that `db_instance` has a migration ID and destination Propolis
+    /// ID set.
+    pub async fn instance_clear_migration_ids(
+        &self,
+        instance_id: Uuid,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        assert!(db_instance.runtime().migration_id.is_some());
+        assert!(db_instance.runtime().dst_propolis_id.is_some());
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let instance_put_result = sa
+            .instance_put_migration_ids(
+                &instance_id,
+                &InstancePutMigrationIdsBody {
+                    old_runtime: db_instance.runtime().clone().into(),
+                    migration_params: None,
+                },
+            )
+            .await
+            .map(|res| Some(res.into_inner()));
+
+        self.handle_instance_put_result(&db_instance, instance_put_result)
+            .await?;
+
+        Ok(())
     }
 
     /// Reboot the specified instance.
