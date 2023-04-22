@@ -15,6 +15,7 @@ use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::paginated;
+use crate::db::TransactionError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use diesel::prelude::*;
@@ -352,16 +353,19 @@ impl DataStore {
 
     /// Update the configuration of a DNS zone as specified in `update`
     ///
-    /// **This function must be used inside a transaction.**
-    /// XXX-dap can we have it make another internal transaction?  If so, update
-    /// the tests to NOT use a transaction.
+    /// This function runs the body inside a transaction (if no transaction is
+    /// open) or a nested transaction (savepoint, if a transaction is already
+    /// open).  Generally, the caller should invoke this function while already
+    /// inside a transaction so that the DNS changes happen if and only if the
+    /// rest of the transaction also happens.  The caller's transaction should
+    /// be aborted if this function fails, lest the operation succeed with DNS
+    /// not updated.
     ///
-    /// This can be used inside an existing transaction so that the DNS changes
-    /// happen only if the rest of the transaction also happens.  It's
-    /// recommended to put this step last because the more time elapses between
-    /// running this function and attempting to commit the transaction, the
-    /// greater the change of transaction failure due to a conflict error (if
-    /// some other caller attempts to update the same DNS group).
+    /// It's recommended to put this step last in any transaction because the
+    /// more time elapses between running this function and attempting to commit
+    /// the transaction, the greater the change of either transaction failure
+    /// due to a conflict error (if some other caller attempts to update the
+    /// same DNS group) or another client blocking (for the same reason).
     ///
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
@@ -379,9 +383,42 @@ impl DataStore {
     where
         ConnErr: From<diesel::result::Error> + Send + 'static,
         ConnErr: Into<PoolError>,
+        TransactionError<Error>: From<ConnErr>,
     {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
+        let result = conn
+            .transaction_async(|c| async move {
+                self.dns_update_internal(opctx, &c, update)
+                    .await
+                    .map_err(TransactionError::CustomError)
+            })
+            .await;
+
+        match result {
+            Ok(()) => Ok(()),
+            Err(TransactionError::CustomError(e)) => Err(e),
+            Err(TransactionError::Pool(e)) => {
+                Err(public_error_from_diesel_pool(e, ErrorHandler::Server))
+            }
+        }
+    }
+
+    // This must only be used inside a transaction.  Otherwise, it may make
+    // invalid changes to the database state.  Use `dns_update()` instead.
+    async fn dns_update_internal<ConnErr>(
+        &self,
+        opctx: &OpContext,
+        conn: &(impl async_bb8_diesel::AsyncConnection<
+            crate::db::pool::DbConnection,
+            ConnErr,
+        > + Sync),
+        update: DnsVersionUpdateBuilder,
+    ) -> Result<(), Error>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        ConnErr: Into<PoolError>,
+    {
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -614,7 +651,6 @@ mod test {
     use nexus_types::internal_api::params::Srv;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
-    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::Ipv6Addr;
     use std::num::NonZeroU32;
@@ -1702,27 +1738,14 @@ mod test {
             );
             update.remove_name(String::from("n4")).unwrap();
 
-            let cds = datastore.clone();
-            let copctx = opctx.child(BTreeMap::new());
             let conn = datastore.pool_for_tests().await.unwrap();
-            let error = conn
-                .transaction_async(|c1| async move {
-                    cds.dns_update(&copctx, &c1, update)
-                        .await
-                        .map_err(TransactionError::CustomError)
-                })
-                .await
-                .unwrap_err();
-            match error {
-                TransactionError::CustomError(e) => {
-                    assert_eq!(
-                        e.to_string(),
-                        "Internal Error: updated wrong number of dns_name \
-                        records: expected 1, actually marked 0 for removal"
-                    );
-                }
-                e => panic!("unexpected error: {:#}", e),
-            }
+            let error =
+                datastore.dns_update(&opctx, conn, update).await.unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Internal Error: updated wrong number of dns_name \
+                records: expected 1, actually marked 0 for removal"
+            );
         }
 
         let dns_config = datastore
@@ -1740,25 +1763,12 @@ mod test {
             );
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
-            let cds = datastore.clone();
-            let copctx = opctx.child(BTreeMap::new());
             let conn = datastore.pool_for_tests().await.unwrap();
-            let error = conn
-                .transaction_async(|c1| async move {
-                    cds.dns_update(&copctx, &c1, update)
-                        .await
-                        .map_err(TransactionError::CustomError)
-                })
-                .await
-                .unwrap_err();
-            match error {
-                TransactionError::CustomError(e) => {
-                    let msg = e.to_string();
-                    assert!(msg.starts_with("Internal Error: "));
-                    assert!(msg.contains("violates unique constraint"));
-                }
-                e => panic!("unexpected error: {:#}", e),
-            }
+            let error =
+                datastore.dns_update(&opctx, conn, update).await.unwrap_err();
+            let msg = error.to_string();
+            assert!(msg.starts_with("Internal Error: "));
+            assert!(msg.contains("violates unique constraint"));
         }
 
         let dns_config = datastore
