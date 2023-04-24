@@ -46,12 +46,18 @@ macro_rules! define_update_engine {
             ::update_engine::events::StepComponentSummary<S>;
         $v type StepInfoWithMetadata<S = $spec_type> =
             ::update_engine::events::StepInfoWithMetadata<S>;
+        $v type StepContext<S = $spec_type> =
+            ::update_engine::StepContext<S>;
         $v type StepProgress<S = $spec_type> =
             ::update_engine::events::StepProgress<S>;
         $v type StepResult<T, S = $spec_type> =
             ::update_engine::StepResult<T, S>;
         $v type StepOutcome<S = $spec_type> =
             ::update_engine::events::StepOutcome<S>;
+        $v type EventBuffer<S = $spec_type> =
+            ::update_engine::EventBuffer<S>;
+        $v type EventReport<S = $spec_type> =
+            ::update_engine::events::EventReport<S>;
         $v type StepHandle<T, S = $spec_type> =
             ::update_engine::StepHandle<T, S>;
     };

@@ -30,6 +30,7 @@ use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
 };
+use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use illumos_utils::addrobj::AddrObject;
@@ -93,8 +94,12 @@ pub enum Error {
     #[error("Cannot deserialize TOML from file {path}: {err}")]
     TomlDeserialize { path: PathBuf, err: toml::de::Error },
 
-    #[error("I/O Error accessing {path}: {err}")]
-    Io { path: PathBuf, err: std::io::Error },
+    #[error("Failed to perform I/O: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
@@ -153,6 +158,15 @@ pub enum Error {
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
+}
+
+impl Error {
+    fn io(message: &str, err: std::io::Error) -> Self {
+        Self::Io { message: message.to_string(), err }
+    }
+    fn io_path(path: &Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {}", path.display()), err }
+    }
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -378,9 +392,9 @@ impl ServiceManager {
                 config_path.to_string_lossy()
             );
             let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await.map_err(
-                    |err| Error::Io { path: config_path.clone(), err },
-                )?,
+                &tokio::fs::read_to_string(&config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?,
             )
             .map_err(|err| Error::TomlDeserialize {
                 path: config_path.clone(),
@@ -535,14 +549,15 @@ impl ServiceManager {
     }
 
     // Check the services intended to run in the zone to determine whether any
-    // physical links or vnics need to be mapped into the zone when it is created.
-    //
-    // NOTE: This function is implemented to return the first link found, under
-    // the assumption that "at most one" would be necessary.
+    // physical links or vnics need to be mapped into the zone when it is
+    // created. Returns a list of links, plus whether or not they need link
+    // local addresses in the zone.
     fn links_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Vec<Link>, Error> {
+    ) -> Result<Vec<(Link, bool)>, Error> {
+        let mut links: Vec<(Link, bool)> = Vec::new();
+
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
@@ -558,7 +573,7 @@ impl ServiceManager {
                         .new_control(None)
                     {
                         Ok(n) => {
-                            return Ok(vec![n]);
+                            links.push((n, false));
                         }
                         Err(e) => {
                             return Err(Error::NexusVnicCreation(e));
@@ -571,7 +586,9 @@ impl ServiceManager {
                     // bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
-                            return Ok(vec![link]);
+                            // It's important that tfpkt does **not** receive a
+                            // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
+                            links.push((link, false));
                         }
                         Err(_) => {
                             return Err(Error::MissingDevice {
@@ -583,14 +600,12 @@ impl ServiceManager {
                 ServiceType::Maghemite { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
-                    let mut links = Vec::with_capacity(
-                        self.inner.switch_zone_maghemite_links.len(),
-                    );
-
                     for link in &self.inner.switch_zone_maghemite_links {
                         match Dladm::verify_link(&link.to_string()) {
                             Ok(link) => {
-                                links.push(link);
+                                // Link local addresses should be created in the
+                                // zone so that maghemite can listen on them.
+                                links.push((link, true));
                             }
 
                             Err(_) => {
@@ -600,14 +615,12 @@ impl ServiceManager {
                             }
                         }
                     }
-
-                    return Ok(links);
                 }
                 _ => (),
             }
         }
 
-        Ok(vec![])
+        Ok(links)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -675,11 +688,11 @@ impl ServiceManager {
             debug!(self.inner.log, "creating {}", resolv_conf.display());
             tokio::fs::write(&resolv_conf, config)
                 .await
-                .map_err(|err| Error::Io { path: resolv_conf.clone(), err })?;
+                .map_err(|err| Error::io_path(&resolv_conf, err))?;
 
             tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
                 .await
-                .map_err(|err| Error::Io { path: nsswitch_dns.clone(), err })?;
+                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
 
             smfh.refresh()?;
             smfh.enable()?;
@@ -698,7 +711,15 @@ impl ServiceManager {
                 Some((vnic, address)) => (Some(vnic), Some(address)),
                 None => (None, None),
             };
-        let links = self.links_needed(request)?;
+
+        // Unzip here, then zip later - it's important that the InstalledZone
+        // owns the links, but it doesn't care about the boolean for requesting
+        // link local addresses.
+        let links: Vec<Link>;
+        let links_need_link_local: Vec<bool>;
+        (links, links_need_link_local) =
+            self.links_needed(request)?.into_iter().unzip();
+
         let limit_priv = Self::privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names
@@ -725,19 +746,62 @@ impl ServiceManager {
         )
         .await?;
 
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
+        //
+        // These zones are self-assembling -- after they boot, there should
+        // be no "zlogin" necessary to initialize.
+        match request.zone_type {
+            ZoneType::CruciblePantry => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.addresses.len(), 1);
+                let listen_addr = &request.addresses[0].to_string();
+                let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port);
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| Error::io("crucible pantry profile", err))?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
+                return Ok(running_zone);
+            }
+            _ => {}
+        }
+
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        for link in running_zone.links() {
-            info!(
-                self.inner.log,
-                "Ensuring {}/{} exists in zone",
-                link.name(),
-                IPV6_LINK_LOCAL_NAME
-            );
-            Zones::ensure_has_link_local_v6_address(
-                Some(running_zone.name()),
-                &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME).unwrap(),
-            )?;
+        for (link, needs_link_local) in
+            running_zone.links().iter().zip(links_need_link_local)
+        {
+            if needs_link_local {
+                info!(
+                    self.inner.log,
+                    "Ensuring {}/{} exists in zone",
+                    link.name(),
+                    IPV6_LINK_LOCAL_NAME
+                );
+                Zones::ensure_has_link_local_v6_address(
+                    Some(running_zone.name()),
+                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
+                        .unwrap(),
+                )?;
+            }
         }
 
         if let Some(bootstrap_address) = bootstrap_address {
@@ -906,10 +970,7 @@ impl ServiceManager {
                     let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
 
                     // Serialize the configuration and append it into the file.
                     let serialized_cfg =
@@ -924,13 +985,10 @@ impl ServiceManager {
                         .append(true)
                         .open(&config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
-                    file.write_all(config_str.as_bytes()).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
+                    file.write_all(config_str.as_bytes())
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?;
                 }
                 ServiceType::ExternalDns { http_address, dns_address } => {
                     info!(self.inner.log, "Setting up external-dns service");
@@ -1144,15 +1202,7 @@ impl ServiceManager {
                     smfh.refresh()?;
                 }
                 ServiceType::CruciblePantry => {
-                    info!(self.inner.log, "Setting up Crucible pantry service");
-
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
-                            "config/listen",
-                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
-                        )?;
-                    }
-                    smfh.refresh()?;
+                    panic!("CruciblePantry is self-assembling now")
                 }
                 ServiceType::Ntp {
                     ntp_servers,
@@ -1325,9 +1375,9 @@ impl ServiceManager {
         let services_to_initialize = {
             if config_path.exists() {
                 let cfg: ServiceEnsureBody = toml::from_str(
-                    &tokio::fs::read_to_string(&config_path).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?,
+                    &tokio::fs::read_to_string(&config_path)
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?,
                 )
                 .map_err(|err| Error::TomlDeserialize {
                     path: config_path.clone(),
@@ -1375,7 +1425,7 @@ impl ServiceManager {
             })?;
         tokio::fs::write(&config_path, services_str)
             .await
-            .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+            .map_err(|err| Error::io_path(&config_path, err))?;
 
         Ok(())
     }

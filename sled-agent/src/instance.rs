@@ -7,18 +7,16 @@
 use crate::common::instance::{Action as InstanceAction, InstanceStates};
 use crate::instance_manager::InstanceTicket;
 use crate::nexus::LazyNexusClient;
-use crate::params::NetworkInterface;
-use crate::params::SourceNatConfig;
-use crate::params::VpcFirewallRule;
 use crate::params::{
-    InstanceHardware, InstanceMigrationTargetParams, InstanceStateRequested,
+    InstanceHardware, InstanceMigrationSourceParams,
+    InstanceMigrationTargetParams, InstanceStateRequested, NetworkInterface,
+    SourceNatConfig, VpcFirewallRule,
 };
 use anyhow::anyhow;
 use futures::lock::{Mutex, MutexGuard};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
-use illumos_utils::opte::PortTicket;
 use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
@@ -162,8 +160,6 @@ enum Reaction {
 struct RunningState {
     // Connection to Propolis.
     client: Arc<PropolisClient>,
-    // Objects representing the instance's OPTE ports in the port manager
-    port_tickets: Option<Vec<PortTicket>>,
     // Handle to task monitoring for Propolis state changes.
     monitor_task: Option<JoinHandle<()>>,
     // Handle to the zone.
@@ -196,7 +192,6 @@ impl Drop for RunningState {
 struct PropolisSetup {
     client: Arc<PropolisClient>,
     running_zone: RunningZone,
-    port_tickets: Option<Vec<PortTicket>>,
 }
 
 struct InstanceInner {
@@ -337,7 +332,6 @@ impl InstanceInner {
     ) -> Result<(), Error> {
         let nics = running_zone
             .opte_ports()
-            .iter()
             .map(|port| propolis_client::api::NetworkInterfaceRequest {
                 // TODO-correctness: Remove `.vnic()` call when we use the port
                 // directly.
@@ -396,7 +390,7 @@ impl InstanceInner {
     ) -> Result<(), Error> {
         assert!(self.running_state.is_none());
 
-        let PropolisSetup { client, running_zone, port_tickets } = setup;
+        let PropolisSetup { client, running_zone } = setup;
         self.propolis_ensure(&client, &running_zone, migrate).await?;
 
         // Monitor propolis for state changes in the background.
@@ -410,12 +404,8 @@ impl InstanceInner {
             }
         }));
 
-        self.running_state = Some(RunningState {
-            client,
-            port_tickets,
-            monitor_task,
-            running_zone,
-        });
+        self.running_state =
+            Some(RunningState { client, monitor_task, running_zone });
 
         Ok(())
     }
@@ -455,6 +445,9 @@ impl InstanceInner {
     async fn terminate(&mut self) -> Result<(), Error> {
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
+        // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
+        // `RunningZone::stop` in case we're called between creating the
+        // zone and assigning `running_state`.
         let zname = propolis_zone_name(self.propolis_id());
         warn!(self.log, "Halting and removing zone: {}", zname);
         Zones::halt_and_remove_logged(&self.log, &zname).await.unwrap();
@@ -469,20 +462,13 @@ impl InstanceInner {
             return Ok(());
         };
 
+        // We already removed the zone above but mark it as stopped
+        running_state.running_zone.stop().await.unwrap();
+
         // Remove any OPTE ports from the port manager.
-        let mut result = Ok(());
-        if let Some(tickets) = running_state.port_tickets.as_mut() {
-            for ticket in tickets.iter_mut() {
-                // Release the port from the manager, and store any error. We
-                // don't return immediately so that we can try to clean up all
-                // ports, even if early ones fail. Return the last error, which
-                // is OK for now.
-                if let Err(e) = ticket.release() {
-                    result = Err(e.into());
-                }
-            }
-        }
-        result
+        running_state.running_zone.release_opte_ports();
+
+        Ok(())
     }
 }
 
@@ -512,6 +498,11 @@ mockall::mock! {
         pub async fn put_state(
             &self,
             state: InstanceStateRequested
+        ) -> Result<InstanceRuntimeState, Error>;
+        pub async fn put_migration_ids(
+            &self,
+            old_runtime: &InstanceRuntimeState,
+            migration_ids: &Option<InstanceMigrationSourceParams>
         ) -> Result<InstanceRuntimeState, Error>;
         pub async fn issue_snapshot_request(
             &self,
@@ -715,28 +706,59 @@ impl Instance {
         Ok(inner.state.current().clone())
     }
 
+    pub async fn put_migration_ids(
+        &self,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let mut inner = self.inner.lock().await;
+
+        // Check that the instance's current generation matches the one the
+        // caller expects to transition from. This helps Nexus ensure that if
+        // multiple migration sagas launch at Propolis generation N, then only
+        // one of them will successfully set the instance's migration IDs.
+        if inner.state.current().propolis_gen != old_runtime.propolis_gen {
+            // Allow this transition for idempotency if the instance is
+            // already in the requested goal state.
+            if inner.state.migration_ids_already_set(old_runtime, migration_ids)
+            {
+                return Ok(inner.state.current().clone());
+            }
+
+            return Err(Error::Transition(
+                omicron_common::api::external::Error::InvalidRequest {
+                    message: format!(
+                        "wrong Propolis ID generation: expected {}, got {}",
+                        inner.state.current().propolis_gen,
+                        old_runtime.propolis_gen
+                    ),
+                },
+            ));
+        }
+
+        inner.state.set_migration_ids(migration_ids);
+        Ok(inner.state.current().clone())
+    }
+
     async fn setup_propolis_locked(
         &self,
         inner: &mut MutexGuard<'_, InstanceInner>,
     ) -> Result<PropolisSetup, Error> {
         // Create OPTE ports for the instance
         let mut opte_ports = Vec::with_capacity(inner.requested_nics.len());
-        let mut port_tickets = Vec::with_capacity(inner.requested_nics.len());
         for nic in inner.requested_nics.iter() {
             let (snat, external_ips) = if nic.primary {
-                (Some(inner.source_nat), Some(inner.external_ips.clone()))
+                (Some(inner.source_nat), &inner.external_ips[..])
             } else {
-                (None, None)
+                (None, &[][..])
             };
-            let (port, port_ticket) = inner.port_manager.create_port(
-                *inner.id(),
+            let port = inner.port_manager.create_port(
                 nic,
                 snat,
                 external_ips,
                 &inner.firewall_rules,
             )?;
             opte_ports.push(port);
-            port_tickets.push(port_ticket);
         }
 
         // Create a zone for the propolis instance, using the previously
@@ -892,11 +914,7 @@ impl Instance {
         // don't need to worry about initialization races.
         wait_for_http_server(&inner.log, &client).await?;
 
-        Ok(PropolisSetup {
-            client,
-            running_zone,
-            port_tickets: Some(port_tickets),
-        })
+        Ok(PropolisSetup { client, running_zone })
     }
 
     /// Rudely terminates this instance's Propolis (if it has one) and

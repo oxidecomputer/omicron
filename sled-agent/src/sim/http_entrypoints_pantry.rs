@@ -110,6 +110,11 @@ async fn is_job_finished(
     Ok(HttpResponseOk(JobPollResponse { job_is_finished }))
 }
 
+#[derive(Serialize, JsonSchema)]
+pub struct JobResultOkResponse {
+    pub job_result_ok: bool,
+}
+
 /// Block on returning a Pantry background job result, then return 200 OK if the
 /// job executed OK, 500 otherwise.
 #[endpoint {
@@ -119,15 +124,16 @@ async fn is_job_finished(
 async fn job_result_ok(
     rc: RequestContext<Arc<Pantry>>,
     path: TypedPath<JobPath>,
-) -> Result<HttpResponseOk<()>, HttpError> {
+) -> Result<HttpResponseOk<JobResultOkResponse>, HttpError> {
     let path = path.into_inner();
     let pantry = rc.context();
 
     let job_result = pantry.get_job_result(path.id).await?;
 
     match job_result {
-        Ok(_) => Ok(HttpResponseOk(())),
-
+        Ok(job_result_ok) => {
+            Ok(HttpResponseOk(JobResultOkResponse { job_result_ok }))
+        }
         Err(e) => Err(HttpError::for_internal_error(e.to_string())),
     }
 }
