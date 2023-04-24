@@ -238,7 +238,15 @@ mod test {
         // requested.  We should wind up with an unauthenticated context with
         // both grunts having been consulted.
         let ctx = authn
-            .authn_request_generic(&(), &log, &(&request).into())
+            .authn_request_generic(
+                &(),
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                )
+                .into(),
+            )
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -253,7 +261,14 @@ mod test {
         // not be consulted.
         flag1.store(OK, Ordering::SeqCst);
         let ctx = authn
-            .authn_request_generic(&(), &log, &(&request).into())
+            .authn_request_generic(
+                &(),
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -266,7 +281,14 @@ mod test {
         // back an error.  grunt2 should not be consulted.
         flag1.store(FAIL, Ordering::SeqCst);
         let error = authn
-            .authn_request_generic(&(), &log, &(&request).into())
+            .authn_request_generic(
+                &(),
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
             .await
             .expect_err("expected authn to fail");
         expected_count1 += 1;
@@ -283,7 +305,14 @@ mod test {
         flag1.store(SKIP, Ordering::SeqCst);
         flag2.store(OK, Ordering::SeqCst);
         let ctx = authn
-            .authn_request_generic(&(), &log, &(&request).into())
+            .authn_request_generic(
+                &(),
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
             .await
             .expect("expected authn to succeed");
         expected_count1 += 1;
@@ -298,7 +327,14 @@ mod test {
         expected_count1 += 1;
         expected_count2 += 1;
         let error = authn
-            .authn_request_generic(&(), &log, &(&request).into())
+            .authn_request_generic(
+                &(),
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
             .await
             .expect_err("expected authn to fail");
         assert_eq!(
