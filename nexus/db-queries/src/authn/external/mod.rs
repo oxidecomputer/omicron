@@ -244,8 +244,7 @@ mod test {
                 &dropshot::RequestInfo::new(
                     &request,
                     "0.0.0.0:0".parse().unwrap(),
-                )
-                .into(),
+                ),
             )
             .await
             .expect("expected authn to succeed");
