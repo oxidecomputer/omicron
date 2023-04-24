@@ -9,10 +9,10 @@ use ipnetwork::IpNetwork;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
+use std::path::Path;
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
@@ -233,6 +233,7 @@ impl Zones {
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
+        zone_root_path: &Path,
         zone_name: &str,
         zone_image: &std::path::Path,
         datasets: &[zone::Dataset],
@@ -269,7 +270,7 @@ impl Zones {
             true,
             zone::CreationOptions::Blank,
         );
-        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, zone_name);
+        let path = zone_root_path.join(zone_name);
         cfg.get_global()
             .set_brand("omicron1")
             .set_path(&path)

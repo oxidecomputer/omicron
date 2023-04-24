@@ -33,12 +33,13 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
+use crate::storage_manager::StorageManager;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
-use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
@@ -183,9 +184,6 @@ pub fn default_services_config_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
 }
 
-// Converts a zone and service name into a full configuration directory path.
-type ConfigDirGetter = Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>;
-
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the revision of the sidecar to be used.
@@ -197,10 +195,6 @@ pub struct Config {
     /// The path for the ServiceManager to store information about
     /// all running services.
     pub all_svcs_config_path: PathBuf,
-
-    /// A function which returns the path the directory holding the
-    /// service's configuration file.
-    pub get_svc_config_dir: ConfigDirGetter,
 }
 
 impl Config {
@@ -212,14 +206,29 @@ impl Config {
             sidecar_revision,
             gateway_address,
             all_svcs_config_path: default_services_config_path(),
-            get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
-                PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
-                    .join(PathBuf::from(zone_name))
-                    .join("root")
-                    .join(format!("var/svc/manifest/site/{}", svc_name))
-            }),
         }
     }
+}
+
+// A wrapper around `ZoneRequest`, which allows it to be serialized
+// to a toml file.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct AllZoneRequests {
+    requests: Vec<ZoneRequest>,
+}
+
+impl AllZoneRequests {
+    fn new() -> Self {
+        Self { requests: vec![] }
+    }
+}
+
+// This struct represents the combo of "what zone did you ask for" + "where did
+// we put it".
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct ZoneRequest {
+    zone: ServiceZoneRequest,
+    root: PathBuf,
 }
 
 struct Task {
@@ -281,6 +290,11 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
+    // TODO(https://github.com/oxidecomputer/omicron/issues/2888): We will
+    // need this interface to provision Zone filesystems on explicit U.2s,
+    // rather than simply placing them on the ramdisk.
+    #[allow(dead_code)]
+    storage: StorageManager,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -321,6 +335,7 @@ impl ServiceManager {
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageManager,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
@@ -349,6 +364,7 @@ impl ServiceManager {
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
+                storage,
             }),
         };
         Ok(mgr)
@@ -391,7 +407,7 @@ impl ServiceManager {
                 "Sled services found at {}; loading",
                 config_path.to_string_lossy()
             );
-            let cfg: ServiceEnsureBody = toml::from_str(
+            let cfg: AllZoneRequests = toml::from_str(
                 &tokio::fs::read_to_string(&config_path)
                     .await
                     .map_err(|err| Error::io_path(&config_path, err))?,
@@ -407,12 +423,12 @@ impl ServiceManager {
             // services.
             self.initialize_services_locked(
                 &mut existing_zones,
-                &cfg.services
+                &cfg.requests
                     .clone()
                     .into_iter()
                     .filter(|svc| {
                         matches!(
-                            svc.zone_type,
+                            svc.zone.zone_type,
                             ZoneType::InternalDns | ZoneType::Ntp
                         )
                     })
@@ -457,7 +473,7 @@ impl ServiceManager {
             let mut existing_zones = self.inner.zones.lock().await;
 
             // Initialize all remaining serivces
-            self.initialize_services_locked(&mut existing_zones, &cfg.services)
+            self.initialize_services_locked(&mut existing_zones, &cfg.requests)
                 .await?;
         } else {
             info!(
@@ -702,12 +718,12 @@ impl ServiceManager {
 
     async fn initialize_zone(
         &self,
-        request: &ServiceZoneRequest,
+        request: &ZoneRequest,
         filesystems: &[zone::Fs],
     ) -> Result<RunningZone, Error> {
-        let device_names = Self::devices_needed(request)?;
+        let device_names = Self::devices_needed(&request.zone)?;
         let (bootstrap_vnic, bootstrap_address) =
-            match self.bootstrap_address_needed(request)? {
+            match self.bootstrap_address_needed(&request.zone)? {
                 Some((vnic, address)) => (Some(vnic), Some(address)),
                 None => (None, None),
             };
@@ -718,9 +734,9 @@ impl ServiceManager {
         let links: Vec<Link>;
         let links_need_link_local: Vec<bool>;
         (links, links_need_link_local) =
-            self.links_needed(request)?.into_iter().unzip();
+            self.links_needed(&request.zone)?.into_iter().unzip();
 
-        let limit_priv = Self::privs_needed(request);
+        let limit_priv = Self::privs_needed(&request.zone);
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -730,7 +746,8 @@ impl ServiceManager {
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
-            &request.zone_type.to_string(),
+            &request.root,
+            &request.zone.zone_type.to_string(),
             // unique_name=
             None,
             // dataset=
@@ -750,7 +767,7 @@ impl ServiceManager {
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
-        match request.zone_type {
+        match request.zone.zone_type {
             ZoneType::CruciblePantry => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -758,8 +775,8 @@ impl ServiceManager {
 
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
-                assert_eq!(request.addresses.len(), 1);
-                let listen_addr = &request.addresses[0].to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let config = PropertyGroupBuilder::new("config")
@@ -809,12 +826,12 @@ impl ServiceManager {
                 self.inner.log,
                 "Ensuring bootstrap address {} exists in {} zone",
                 bootstrap_address.to_string(),
-                request.zone_type.to_string()
+                request.zone.zone_type.to_string()
             );
             running_zone.ensure_bootstrap_address(bootstrap_address).await?;
         }
 
-        for addr in &request.addresses {
+        for addr in &request.zone.addresses {
             if *addr == Ipv6Addr::LOCALHOST {
                 continue;
             }
@@ -833,8 +850,8 @@ impl ServiceManager {
             );
         }
 
-        info!(self.inner.log, "GZ addresses: {:#?}", request.gz_addresses);
-        for &addr in &request.gz_addresses {
+        info!(self.inner.log, "GZ addresses: {:#?}", request.zone.gz_addresses);
+        for &addr in &request.zone.gz_addresses {
             info!(
                 self.inner.log,
                 "Ensuring GZ address {} exists",
@@ -842,7 +859,7 @@ impl ServiceManager {
             );
 
             let addr_name =
-                request.zone_type.to_string().replace(&['-', '_'][..], "");
+                request.zone.zone_type.to_string().replace(&['-', '_'][..], "");
             Zones::ensure_has_global_zone_v6_address(
                 self.inner.underlay_vnic.clone(),
                 addr,
@@ -851,7 +868,7 @@ impl ServiceManager {
             .map_err(|err| Error::GzAddress {
                 message: format!(
                     "adding address on behalf of service zone '{}'",
-                    request.zone_type
+                    request.zone.zone_type
                 ),
                 err,
             })?;
@@ -861,7 +878,7 @@ impl ServiceManager {
             self.advertise_prefix_of_address(addr).await;
         }
 
-        let maybe_gateway = if !request.gz_addresses.is_empty() {
+        let maybe_gateway = if !request.zone.gz_addresses.is_empty() {
             // If this service supplies its own GZ address, add a route.
             //
             // This is currently being used for the DNS service.
@@ -870,7 +887,7 @@ impl ServiceManager {
             // can be supplied - now that we're actively using it, we
             // aren't really handling the "many GZ addresses" case, and it
             // doesn't seem necessary now.
-            Some(request.gz_addresses[0])
+            Some(request.zone.gz_addresses[0])
         } else if let Some(info) = self.inner.sled_info.get() {
             // If the service has not supplied a GZ address, simply add
             // a route to the sled's underlay address.
@@ -886,7 +903,7 @@ impl ServiceManager {
             })?;
         }
 
-        for service in &request.services {
+        for service in &request.zone.services {
             // TODO: Related to
             // https://github.com/oxidecomputer/omicron/pull/1124 , should we
             // avoid importing this manifest?
@@ -936,7 +953,7 @@ impl ServiceManager {
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
-                        id: request.id,
+                        id: request.zone.id,
                         rack_id: sled_info.rack_id,
 
                         dropshot_external: dropshot::ConfigDropshot {
@@ -961,10 +978,10 @@ impl ServiceManager {
                     };
 
                     // Copy the partial config file to the expected location.
-                    let config_dir = (sled_info.config.get_svc_config_dir)(
-                        running_zone.name(),
-                        &request.zone_type.to_string(),
-                    );
+                    let config_dir = PathBuf::from(format!(
+                        "{}/var/svc/manifest/site/nexus",
+                        running_zone.root()
+                    ));
                     let partial_config_path =
                         config_dir.join(PARTIAL_CONFIG_FILENAME);
                     let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
@@ -1072,8 +1089,8 @@ impl ServiceManager {
                 ServiceType::Oximeter => {
                     info!(self.inner.log, "Setting up oximeter service");
 
-                    let address = request.addresses[0];
-                    smfh.setprop("config/id", request.id)?;
+                    let address = request.zone.addresses[0];
+                    smfh.setprop("config/id", request.zone.id)?;
                     smfh.setprop(
                         "config/address",
                         &format!("[{}]:{}", address, OXIMETER_PORT),
@@ -1082,7 +1099,7 @@ impl ServiceManager {
                 }
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
-                    smfh.setprop("config/id", request.id)?;
+                    smfh.setprop("config/id", request.zone.id)?;
 
                     // Always tell MGS to listen on localhost so wicketd can
                     // contact it even before we have an underlay network.
@@ -1091,7 +1108,7 @@ impl ServiceManager {
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
 
-                    if let Some(address) = request.addresses.get(0) {
+                    if let Some(address) = request.zone.addresses.get(0) {
                         // Don't use localhost twice
                         if *address != Ipv6Addr::LOCALHOST {
                             smfh.addpropvalue(
@@ -1143,7 +1160,7 @@ impl ServiceManager {
                     info!(self.inner.log, "Setting up dendrite service");
 
                     smfh.delpropvalue("config/address", "*")?;
-                    for address in &request.addresses {
+                    for address in &request.zone.addresses {
                         smfh.addpropvalue(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT),
@@ -1321,7 +1338,7 @@ impl ServiceManager {
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,
-        requests: &Vec<ServiceZoneRequest>,
+        requests: &Vec<ZoneRequest>,
     ) -> Result<(), Error> {
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
         // As long as we ensure the requests don't overlap, we could
@@ -1329,22 +1346,25 @@ impl ServiceManager {
         for req in requests {
             info!(
                 self.inner.log,
-                "Ensuring service zone is initialized: {:?}", req.zone_type
+                "Ensuring service zone is initialized: {:?}",
+                req.zone.zone_type
             );
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            let expected_zone_name =
-                InstalledZone::get_zone_name(&req.zone_type.to_string(), None);
+            let expected_zone_name = InstalledZone::get_zone_name(
+                &req.zone.zone_type.to_string(),
+                None,
+            );
             if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
                 info!(
                     self.inner.log,
-                    "Service zone {} already exists", req.zone_type
+                    "Service zone {} already exists", req.zone.zone_type
                 );
                 continue;
             } else {
                 info!(
                     self.inner.log,
-                    "Service zone {} does not yet exist", req.zone_type
+                    "Service zone {} does not yet exist", req.zone.zone_type
                 );
             }
 
@@ -1372,9 +1392,10 @@ impl ServiceManager {
         let mut existing_zones = self.inner.zones.lock().await;
         let config_path = self.services_config_path()?;
 
-        let services_to_initialize = {
+        let old_zone_requests: AllZoneRequests = {
             if config_path.exists() {
-                let cfg: ServiceEnsureBody = toml::from_str(
+                debug!(self.inner.log, "Reading old service requests");
+                toml::from_str(
                     &tokio::fs::read_to_string(&config_path)
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?,
@@ -1382,42 +1403,52 @@ impl ServiceManager {
                 .map_err(|err| Error::TomlDeserialize {
                     path: config_path.clone(),
                     err,
-                })?;
-                let known_services = cfg.services;
-
-                let known_set: HashSet<&ServiceZoneRequest> =
-                    HashSet::from_iter(known_services.iter());
-                let requested_set = HashSet::from_iter(request.services.iter());
-
-                if !requested_set.is_superset(&known_set) {
-                    // The caller may only request services additively.
-                    //
-                    // We may want to use a different mechanism for zone removal, in
-                    // the case of changing configurations, rather than just doing
-                    // that removal implicitly.
-                    warn!(
-                        self.inner.log,
-                        "Cannot request services on this sled, differing configurations: {:#?}",
-                        known_set.symmetric_difference(&requested_set)
-                    );
-                    return Err(Error::ServicesAlreadyConfigured);
-                }
-                requested_set
-                    .difference(&known_set)
-                    .map(|s| (*s).clone())
-                    .collect::<Vec<ServiceZoneRequest>>()
+                })?
             } else {
-                request.services.clone()
+                debug!(self.inner.log, "No old service requests");
+                AllZoneRequests::new()
             }
         };
 
+        let new_zone_requests: Vec<ServiceZoneRequest> = {
+            let known_set: HashSet<&ServiceZoneRequest> = HashSet::from_iter(
+                old_zone_requests.requests.iter().map(|r| &r.zone),
+            );
+            let requested_set = HashSet::from_iter(request.services.iter());
+
+            if !requested_set.is_superset(&known_set) {
+                // The caller may only request services additively.
+                //
+                // We may want to use a different mechanism for zone removal, in
+                // the case of changing configurations, rather than just doing
+                // that removal implicitly.
+                warn!(
+                    self.inner.log,
+                    "Cannot request services on this sled, differing configurations: {:#?}",
+                    known_set.symmetric_difference(&requested_set)
+                );
+                return Err(Error::ServicesAlreadyConfigured);
+            }
+            requested_set
+                .difference(&known_set)
+                .map(|s| (*s).clone())
+                .collect::<Vec<ServiceZoneRequest>>()
+        };
+
+        let mut zone_requests = AllZoneRequests::new();
+        for zone in new_zone_requests.into_iter() {
+            let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            zone_requests.requests.push(ZoneRequest { zone, root });
+        }
+
         self.initialize_services_locked(
             &mut existing_zones,
-            &services_to_initialize,
+            &zone_requests.requests,
         )
         .await?;
 
-        let serialized_services = toml::Value::try_from(&request)
+        zone_requests.requests.append(&mut old_zone_requests.requests.clone());
+        let serialized_services = toml::Value::try_from(&zone_requests)
             .expect("Cannot serialize service list");
         let services_str =
             toml::to_string(&serialized_services).map_err(|err| {
@@ -1780,6 +1811,21 @@ impl ServiceManager {
         Ok(())
     }
 
+    async fn try_initialize_sled_local_zone(
+        &self,
+        sled_zone: &mut SledLocalZone,
+    ) -> Result<(), Error> {
+        let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
+            return Ok(())
+        };
+        let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let request = ZoneRequest { zone: request.clone(), root };
+        let zone = self.initialize_zone(&request, filesystems).await?;
+        *sled_zone =
+            SledLocalZone::Running { request: request.zone.clone(), zone };
+        Ok(())
+    }
+
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
     async fn initialize_zone_loop(
@@ -1796,31 +1842,13 @@ impl ServiceManager {
                     }
                     _ => panic!("Unhandled zone type"),
                 }
-                match &*sled_zone {
-                    SledLocalZone::Initializing {
-                        request,
-                        filesystems,
-                        ..
-                    } => {
-                        match self.initialize_zone(&request, filesystems).await
-                        {
-                            Ok(zone) => {
-                                *sled_zone = SledLocalZone::Running {
-                                    request: request.clone(),
-                                    zone,
-                                };
-                                return;
-                            }
-                            Err(err) => {
-                                warn!(
-                                    self.inner.log,
-                                    "Failed to initialize {} zone: {err}",
-                                    zone_type.to_string()
-                                );
-                            }
-                        }
-                    }
-                    _ => return,
+                match self.try_initialize_sled_local_zone(&mut sled_zone).await
+                {
+                    Ok(()) => return,
+                    Err(e) => warn!(
+                        self.inner.log,
+                        "Failed to initialize {zone_type}: {e}"
+                    ),
                 }
             }
 
@@ -1869,7 +1897,7 @@ mod test {
         );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, name, _, _, _, _, _, _| {
+        install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
@@ -1978,16 +2006,10 @@ mod test {
         fn make_config(&self) -> Config {
             let all_svcs_config_path =
                 self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
-            let svc_config_dir = self.config_dir.path().to_path_buf();
             Config {
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
                 gateway_address: None,
                 all_svcs_config_path,
-                get_svc_config_dir: Box::new(
-                    move |_zone_name: &str, _svc_name: &str| {
-                        svc_config_dir.clone()
-                    },
-                ),
             }
         }
     }
@@ -2001,7 +2023,7 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log,
+            log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2010,6 +2032,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();
@@ -2040,7 +2067,7 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log,
+            log.clone(),
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2049,6 +2076,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();
@@ -2076,6 +2108,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
+        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
@@ -2090,6 +2123,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();
@@ -2120,6 +2158,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();
@@ -2144,6 +2187,7 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
+        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
@@ -2158,6 +2202,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();
@@ -2190,6 +2239,11 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(
+                &log,
+                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
+            )
+            .await,
         )
         .await
         .unwrap();

@@ -21,6 +21,7 @@ use illumos_utils::running_zone::{
     InstalledZone, RunCommandError, RunningZone,
 };
 use illumos_utils::svc::wait_for_service;
+use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::{AddressRequest, PROPOLIS_ZONE_PREFIX};
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::PROPOLIS_PORT;
@@ -75,6 +76,9 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
+
+    #[error("No U2 Zpool")]
+    NoU2Zpool,
 
     #[error("serde_json failure: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
@@ -497,7 +501,7 @@ mockall::mock! {
         pub async fn current_state(&self) -> InstanceRuntimeState;
         pub async fn put_state(
             &self,
-            state: InstanceStateRequested
+            state: InstanceStateRequested,
         ) -> Result<InstanceRuntimeState, Error>;
         pub async fn put_migration_ids(
             &self,
@@ -764,10 +768,11 @@ impl Instance {
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
-
+        let root = std::path::Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let installed_zone = InstalledZone::install(
             &inner.log,
             &inner.vnic_allocator,
+            &root,
             "propolis-server",
             Some(&inner.propolis_id().to_string()),
             // dataset=

@@ -9,7 +9,6 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
 use ipnetwork::IpNetwork;
 use slog::info;
@@ -17,7 +16,7 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -126,7 +125,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root
     pub fn root(&self) -> String {
-        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
+        format!("{}/root", self.inner.zonepath.display())
     }
 
     /// Runs a command within the Zone, return the output.
@@ -355,6 +354,7 @@ impl RunningZone {
             running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
+                zonepath: zone_info.path().into(),
                 name: zone_name.to_string(),
                 control_vnic,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
@@ -440,6 +440,9 @@ pub enum InstallZoneError {
 pub struct InstalledZone {
     log: Logger,
 
+    // Filesystem path of the zone
+    zonepath: PathBuf,
+
     // Name of the Zone.
     name: String,
 
@@ -483,10 +486,16 @@ impl InstalledZone {
         &self.name
     }
 
+    /// Returns the filesystem path to the zonepath
+    pub fn zonepath(&self) -> &Path {
+        &self.zonepath
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
+        zone_root_path: &Path,
         zone_name: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
@@ -519,6 +528,7 @@ impl InstalledZone {
 
         Zones::install_omicron_zone(
             log,
+            &zone_root_path,
             &full_zone_name,
             &zone_image_path,
             &datasets,
@@ -536,6 +546,7 @@ impl InstalledZone {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
+            zonepath: zone_root_path.join(&full_zone_name),
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

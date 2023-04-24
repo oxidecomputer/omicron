@@ -80,6 +80,16 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
+    #[error("No U.2 Zpools found")]
+    NoU2Zpool,
+
+    #[error("Failed to parse UUID from {path}: {err}")]
+    ParseUuid {
+        path: PathBuf,
+        #[source]
+        err: uuid::Error,
+    },
+
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
         name: String,
@@ -117,6 +127,9 @@ pub enum Error {
         #[source]
         err: std::io::Error,
     },
+
+    #[error("Underlay not yet initialized")]
+    UnderlayNotInitialized,
 }
 
 impl Error {
@@ -185,17 +198,14 @@ impl Pool {
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 struct DatasetName {
     // A unique identifier for the Zpool on which the dataset is stored.
-    pool_name: String,
+    pool_name: ZpoolName,
     // A name for the dataset within the Zpool.
     dataset_name: String,
 }
 
 impl DatasetName {
-    fn new(pool_name: &str, dataset_name: &str) -> Self {
-        Self {
-            pool_name: pool_name.to_string(),
-            dataset_name: dataset_name.to_string(),
-        }
+    fn new(pool_name: ZpoolName, dataset_name: &str) -> Self {
+        Self { pool_name, dataset_name: dataset_name.to_string() }
     }
 
     fn full(&self) -> String {
@@ -214,7 +224,7 @@ struct DatasetInfo {
 
 impl DatasetInfo {
     fn new(
-        pool: &str,
+        pool: ZpoolName,
         kind: DatasetKind,
         address: SocketAddrV6,
     ) -> DatasetInfo {
@@ -271,11 +281,15 @@ async fn ensure_running_zone(
         Err(illumos_utils::running_zone::GetZoneError::NotFound { .. }) => {
             info!(log, "Zone for {} was not found", dataset_name.full());
 
+            let zone_root_path = dataset_name
+                .pool_name
+                .dataset_path(sled_hardware::disk::ZONE_DATASET);
             let installed_zone = InstalledZone::install(
                 log,
                 vnic_allocator,
+                &zone_root_path,
                 &dataset_info.name.dataset_name,
-                Some(&dataset_name.pool_name),
+                Some(&dataset_name.pool_name.to_string()),
                 &[zone::Dataset { name: dataset_name.full() }],
                 &[],
                 &[],
@@ -443,6 +457,11 @@ struct NewFilesystemRequest {
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
+struct UnderlayRequest {
+    underlay: UnderlayAccess,
+    responder: oneshot::Sender<Result<(), Error>>,
+}
+
 #[derive(PartialEq, Eq, Clone)]
 enum DiskWrapper {
     Real { disk: Disk, devfs_path: PathBuf },
@@ -490,7 +509,7 @@ impl DiskWrapper {
 }
 
 #[derive(Clone)]
-struct StorageResources {
+pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
     disks: Arc<Mutex<HashMap<DiskIdentity, DiskWrapper>>>,
 
@@ -498,15 +517,42 @@ struct StorageResources {
     pools: Arc<Mutex<HashMap<Uuid, Pool>>>,
 }
 
+impl StorageResources {
+    /// Returns all M.2 zpools
+    pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
+        self.all_zpools(DiskVariant::M2).await
+    }
+
+    pub async fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
+        let disks = self.disks.lock().await;
+        disks
+            .values()
+            .filter_map(|disk| {
+                if let DiskWrapper::Real { disk, .. } = disk {
+                    if disk.variant() == variant {
+                        return Some(disk.zpool_name().clone());
+                    }
+                };
+                None
+            })
+            .collect()
+    }
+}
+
+/// Describes the access to the underlay used by the StorageManager.
+pub struct UnderlayAccess {
+    pub lazy_nexus_client: LazyNexusClient,
+    pub underlay_address: Ipv6Addr,
+    pub sled_id: Uuid,
+}
+
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
-    sled_id: Uuid,
-    lazy_nexus_client: LazyNexusClient,
     nexus_notifications: FuturesOrdered<NotifyFut>,
     rx: mpsc::Receiver<StorageWorkerRequest>,
     vnic_allocator: VnicAllocator<Etherstub>,
-    underlay_address: Ipv6Addr,
+    underlay: Arc<Mutex<Option<UnderlayAccess>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -524,10 +570,15 @@ impl StorageWorker {
         dataset_name: &DatasetName,
         do_format: bool,
     ) -> Result<Uuid, Error> {
+        let zoned = true;
         let fs_name = &dataset_name.full();
-        Zfs::ensure_zoned_filesystem(
-            &fs_name,
+        Zfs::ensure_filesystem(
+            &format!(
+                "{}/{}",
+                dataset_name.pool_name, dataset_name.dataset_name
+            ),
             Mountpoint::Path(PathBuf::from("/data")),
+            zoned,
             do_format,
         )?;
         // Ensure the dataset has a usable UUID.
@@ -571,13 +622,19 @@ impl StorageWorker {
             "Ensuring zone for {} is running",
             dataset_name.full()
         );
+
+        let underlay = self.underlay.lock().await;
+        let Some(underlay) = underlay.as_ref() else {
+            return Err(Error::UnderlayNotInitialized);
+        };
+
         let zone = ensure_running_zone(
             &self.log,
             &self.vnic_allocator,
             dataset_info,
             &dataset_name,
             do_format,
-            self.underlay_address,
+            underlay.underlay_address,
         )
         .await?;
 
@@ -595,9 +652,8 @@ impl StorageWorker {
     // informing it about the addition of `pool_id` to this sled.
     fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
         let pool_id = pool.name.id();
-        let sled_id = self.sled_id;
         let DiskIdentity { vendor, serial, model } = pool.parent.clone();
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
+        let underlay = self.underlay.clone();
 
         let notify_nexus = move || {
             let zpool_request = ZpoolPutRequest {
@@ -606,15 +662,22 @@ impl StorageWorker {
                 disk_serial: serial.clone(),
                 disk_model: model.clone(),
             };
-            let lazy_nexus_client = lazy_nexus_client.clone();
+            let underlay = underlay.clone();
+
             async move {
+                let underlay = underlay.lock().await;
+                let Some(underlay) = underlay.as_ref() else {
+                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                };
+                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+
                 lazy_nexus_client
                     .get()
                     .await
                     .map_err(|e| {
                         backoff::BackoffError::transient(e.to_string())
                     })?
-                    .zpool_put(&sled_id, &pool_id, &zpool_request)
+                    .zpool_put(&underlay.sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
                         backoff::BackoffError::transient(e.to_string())
@@ -800,7 +863,12 @@ impl StorageWorker {
         disk: UnparsedDisk,
     ) -> Result<(), Error> {
         info!(self.log, "Deleting disk: {disk:?}");
-
+        // TODO: Don't we need to do some accounting, e.g. for all the information
+        // that's no longer accessible? Or is that up to Nexus to figure out at
+        // a later point-in-time?
+        //
+        // If we're storing zone images on the M.2s for internal services, how
+        // do we reconcile them?
         let mut disks = resources.disks.lock().await;
         self.delete_disk_locked(resources, &mut disks, disk.identity()).await
     }
@@ -824,12 +892,16 @@ impl StorageWorker {
     // Adds a "notification to nexus" to `self.nexus_notifications`, informing it
     // about the addition/removal of a physical disk to this sled.
     fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
-        let sled_id = self.sled_id;
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
+        let underlay = self.underlay.clone();
         let notify_nexus = move || {
             let disk = disk.clone();
-            let lazy_nexus_client = lazy_nexus_client.clone();
+            let underlay = underlay.clone();
             async move {
+                let underlay = underlay.lock().await;
+                let Some(underlay) = underlay.as_ref() else {
+                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                };
+                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
                 let nexus = lazy_nexus_client.get().await.map_err(|e| {
                     backoff::BackoffError::transient(e.to_string())
                 })?;
@@ -844,7 +916,7 @@ impl StorageWorker {
                                 DiskVariant::U2 => PhysicalDiskKind::U2,
                                 DiskVariant::M2 => PhysicalDiskKind::M2,
                             },
-                            sled_id,
+                            sled_id: underlay.sled_id,
                         };
                         nexus.physical_disk_put(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
@@ -855,7 +927,7 @@ impl StorageWorker {
                             model: disk_identity.model.clone(),
                             serial: disk_identity.serial.clone(),
                             vendor: disk_identity.vendor.clone(),
-                            sled_id,
+                            sled_id: underlay.sled_id,
                         };
                         nexus.physical_disk_delete(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
@@ -923,8 +995,7 @@ impl StorageWorker {
             // stop the storage manager from processing all storage.
             //
             // Instead, we opt to log the failure.
-            let dataset_name =
-                DatasetName::new(&pool_name.to_string(), &fs_name);
+            let dataset_name = DatasetName::new(pool_name.clone(), &fs_name);
             let result = self.load_dataset(pool, &dataset_name).await;
             match result {
                 Ok(dataset) => datasets.push(dataset),
@@ -953,9 +1024,8 @@ impl StorageWorker {
             ))
         })?;
 
-        let pool_name = pool.info.name();
         let dataset_info = DatasetInfo::new(
-            pool_name,
+            pool.name.clone(),
             request.dataset_kind.clone(),
             request.address,
         );
@@ -977,7 +1047,7 @@ impl StorageWorker {
         let path = pool.dataset_config_path(id).await?;
         let info_str = toml::to_string(&dataset_info)
             .map_err(|err| Error::Serialize { path: path.clone(), err })?;
-        let pool_name = pool.info.name();
+        let pool_name = &pool.name;
         let mut file = File::create(&path).await.map_err(|err| Error::Io {
             message: format!("Failed creating config file at {path:?} for pool {pool_name}, dataset: {id}"),
             err,
@@ -1078,6 +1148,10 @@ impl StorageWorker {
                         DisksChanged(disks) => {
                             self.ensure_using_exactly_these_disks(&resources, disks).await?;
                         },
+                        SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
+                            self.underlay.lock().await.replace(underlay);
+                            let _ = responder.send(Ok(()));
+                        }
                     }
                 },
             }
@@ -1085,17 +1159,16 @@ impl StorageWorker {
     }
 }
 
-#[derive(Debug)]
 enum StorageWorkerRequest {
     AddDisk(UnparsedDisk),
     AddSyntheticDisk(ZpoolName),
     RemoveDisk(UnparsedDisk),
     DisksChanged(Vec<UnparsedDisk>),
     NewFilesystem(NewFilesystemRequest),
+    SetupUnderlayAccess(UnderlayRequest),
 }
 
-/// A sled-local view of all attached storage.
-pub struct StorageManager {
+struct StorageManagerInner {
     log: Logger,
 
     resources: StorageResources,
@@ -1106,15 +1179,15 @@ pub struct StorageManager {
     task: JoinHandle<Result<(), Error>>,
 }
 
+/// A sled-local view of all attached storage.
+#[derive(Clone)]
+pub struct StorageManager {
+    inner: Arc<StorageManagerInner>,
+}
+
 impl StorageManager {
     /// Creates a new [`StorageManager`] which should manage local storage.
-    pub async fn new(
-        log: &Logger,
-        sled_id: Uuid,
-        lazy_nexus_client: LazyNexusClient,
-        etherstub: Etherstub,
-        underlay_address: Ipv6Addr,
-    ) -> Self {
+    pub async fn new(log: &Logger, etherstub: Etherstub) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let resources = StorageResources {
             disks: Arc::new(Mutex::new(HashMap::new())),
@@ -1124,21 +1197,21 @@ impl StorageManager {
         let vnic_allocator = VnicAllocator::new("Storage", etherstub);
 
         StorageManager {
-            log: log.clone(),
-            resources: resources.clone(),
-            tx,
-            task: tokio::task::spawn(async move {
-                let mut worker = StorageWorker {
-                    log,
-                    sled_id,
-                    lazy_nexus_client,
-                    nexus_notifications: FuturesOrdered::new(),
-                    rx,
-                    vnic_allocator,
-                    underlay_address,
-                };
+            inner: Arc::new(StorageManagerInner {
+                log: log.clone(),
+                resources: resources.clone(),
+                tx,
+                task: tokio::task::spawn(async move {
+                    let mut worker = StorageWorker {
+                        log,
+                        nexus_notifications: FuturesOrdered::new(),
+                        rx,
+                        vnic_allocator,
+                        underlay: Arc::new(Mutex::new(None)),
+                    };
 
-                worker.do_work(resources).await
+                    worker.do_work(resources).await
+                }),
             }),
         }
     }
@@ -1155,41 +1228,73 @@ impl StorageManager {
     where
         I: IntoIterator<Item = UnparsedDisk>,
     {
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::DisksChanged(
                 unparsed_disks.into_iter().collect::<Vec<_>>(),
             ))
             .await
-            .unwrap();
+            .map_err(|_| ())
+            .expect("Failed to send DisksChanged request");
     }
 
     /// Adds a disk and associated zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_disk].
     pub async fn upsert_disk(&self, disk: UnparsedDisk) {
-        info!(self.log, "Upserting disk: {disk:?}");
-        self.tx.send(StorageWorkerRequest::AddDisk(disk)).await.unwrap();
+        info!(self.inner.log, "Upserting disk: {disk:?}");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::AddDisk(disk))
+            .await
+            .map_err(|_| ())
+            .expect("Failed to send AddDisk request");
     }
 
     /// Removes a disk, if it's tracked by the storage manager, as well
     /// as any associated zpools.
     // Receiver implemented by [StorageWorker::delete_disk].
     pub async fn delete_disk(&self, disk: UnparsedDisk) {
-        info!(self.log, "Deleting disk: {disk:?}");
-        self.tx.send(StorageWorkerRequest::RemoveDisk(disk)).await.unwrap();
+        info!(self.inner.log, "Deleting disk: {disk:?}");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::RemoveDisk(disk))
+            .await
+            .map_err(|_| ())
+            .expect("Failed to send RemoveDisk request");
     }
 
     /// Adds a synthetic zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_synthetic_disk].
     pub async fn upsert_synthetic_disk(&self, name: ZpoolName) {
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::AddSyntheticDisk(name))
             .await
-            .unwrap();
+            .map_err(|_| ())
+            .expect("Failed to send AddSyntheticDisk request");
+    }
+
+    /// Adds underlay access to the storage manager.
+    pub async fn setup_underlay_access(
+        &self,
+        underlay: UnderlayAccess,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::SetupUnderlayAccess(UnderlayRequest {
+                underlay,
+                responder: tx,
+            }))
+            .await
+            .map_err(|_| ())
+            .expect("Failed to send SetupUnderlayAccess request");
+        rx.await.expect("Failed to await underlay setup")
     }
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
-        let disks = self.resources.disks.lock().await;
-        let pools = self.resources.pools.lock().await;
+        let disks = self.inner.resources.disks.lock().await;
+        let pools = self.inner.resources.pools.lock().await;
 
         let mut zpools = Vec::with_capacity(pools.len());
 
@@ -1224,15 +1329,21 @@ impl StorageManager {
             responder: tx,
         };
 
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::NewFilesystem(request))
             .await
+            .map_err(|_| ())
             .expect("Storage worker bug (not alive)");
         rx.await.expect(
             "Storage worker bug (dropped responder without responding)",
         )?;
 
         Ok(())
+    }
+
+    pub fn resources(&self) -> &StorageResources {
+        &self.inner.resources
     }
 }
 
@@ -1244,7 +1355,7 @@ impl Drop for StorageManager {
         // Without that option, we instead opt to simply cancel the worker
         // task to ensure it does not remain alive beyond the StorageManager
         // itself.
-        self.task.abort();
+        self.inner.task.abort();
     }
 }
 
@@ -1257,7 +1368,10 @@ mod test {
         let dataset_info = DatasetInfo {
             address: "[::1]:8080".parse().unwrap(),
             kind: DatasetKind::Crucible,
-            name: DatasetName::new("pool", "dataset"),
+            name: DatasetName::new(
+                ZpoolName::new_internal(Uuid::new_v4()),
+                "dataset",
+            ),
         };
 
         toml::to_string(&dataset_info).unwrap();
