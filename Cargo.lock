@@ -4895,6 +4895,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap 4.2.2",
+ "crossterm 0.26.1",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -4910,6 +4911,7 @@ dependencies = [
  "slog-term",
  "thiserror",
  "tokio",
+ "tui",
  "uuid",
 ]
 

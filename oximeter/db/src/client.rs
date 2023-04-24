@@ -322,7 +322,6 @@ impl Client {
         Ok(timeseries_by_key.into_values().collect())
     }
 
-    // Initialize ClickHouse with the database and metric table schema.
     // Execute a generic SQL statement.
     //
     // TODO-robustness This currently does no validation of the statement.

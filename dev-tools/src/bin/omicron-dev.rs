@@ -357,6 +357,10 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         "omicron-dev: cockroachdb directory: {}",
         cptestctx.database.temp_dir().display()
     );
+    println!(
+        "omicron-dev: clickhouse URL:        127.0.0.1:{}",
+        cptestctx.clickhouse.port(),
+    );
 
     // Wait for a signal.
     let caught_signal = signal_stream.next().await;
