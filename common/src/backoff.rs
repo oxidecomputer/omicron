@@ -67,7 +67,7 @@ where
     let start = Instant::now();
 
     let backoff_notify = |error, _duration| {
-        notify.notify_ext(error, count, Instant::now().duration_since(start));
+        notify.notify_ext(error, count, start.elapsed());
         count += 1;
     };
 
