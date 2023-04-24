@@ -149,7 +149,7 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 derive-where = "1.2.1"
-diesel = { version = "2.0.3" }
+diesel = { version = "2.0.4" }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", rev = "309bd361d886a237fbdd5d74992bdbd783f98bff" }
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
