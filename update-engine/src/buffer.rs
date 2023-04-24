@@ -7,12 +7,13 @@
 use std::collections::{hash_map, HashMap, VecDeque};
 
 use derive_where::derive_where;
+use either::Either;
 use petgraph::prelude::*;
 
 use crate::{
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
-        StepEventIsTerminal, StepEventKind, StepEventPriority,
+        StepEventKind, StepEventPriority,
     },
     ExecutionId, StepSpec,
 };
@@ -95,43 +96,36 @@ impl<S: StepSpec> EventBuffer<S> {
     ///
     /// This report can be serialized and sent over the wire.
     pub fn generate_report(&self) -> EventReport<S> {
-        // Gather step events across all keys.
-        let mut step_events = self.event_store.high_priority.clone();
-        let mut progress_events = Vec::new();
-        for value in self.event_store.map.values() {
-            step_events.extend(value.low_priority.iter().cloned());
-            progress_events.push(value.progress_event.clone());
-        }
-
-        // Sort events by their total duration. We assume that total_elapsed is
-        // monotonically increasing. We should come up with a better sort
-        // algorithm in the future, based on the actual event kinds.
-        step_events.sort_by(|a, b| a.total_elapsed.cmp(&b.total_elapsed));
-        progress_events.sort_by(|a, b| a.total_elapsed.cmp(&b.total_elapsed));
-
-        EventReport { step_events, progress_events }
+        self.generate_report_since(None)
     }
 
-    /// Clears events returned by the last call to [`Self::generate_report`].
-    ///
-    /// Call this after successfully sending a report over the wire.
-    pub fn on_report_processed(&mut self) {
-        self.event_store.clear_step_events();
-        // Do *not* clear progress events -- we always want to keep returning at
-        // least one of them, and have them be cleared in the end once a step or
-        // execution is complete.
+    pub fn generate_report_since(
+        &self,
+        mut last_seen: Option<usize>,
+    ) -> EventReport<S> {
+        // Gather step events across all keys.
+        let mut step_events = Vec::new();
+        let mut progress_events = Vec::new();
+        for value in self.event_store.map.values() {
+            step_events.extend(value.step_events_since(last_seen).cloned());
+            progress_events.extend(value.step_status.progress_event().cloned());
+        }
+
+        // Sort events.
+        step_events.sort_by(|a, b| a.event_index.cmp(&b.event_index));
+        progress_events.sort_by(|a, b| a.total_elapsed.cmp(&b.total_elapsed));
+        if let Some(last) = step_events.last() {
+            // Only update last_seen if there are new step events (otherwise it
+            // stays the same).
+            last_seen = Some(last.event_index);
+        }
+
+        EventReport { step_events, progress_events, last_seen }
     }
 
     pub fn add_progress_event(&mut self, event: ProgressEvent<S>) {
         self.event_store.handle_progress_event(event);
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum CompletedIndex {
-    LastSeen(usize),
-    // Terminal is greater than any LastSeen.
-    Terminal,
 }
 
 #[derive_where(Clone, Debug, Default)]
@@ -141,10 +135,8 @@ struct EventStore<S: StepSpec> {
     // While petgraph seems like overkill at first, it results in really
     // straightforward algorithms below compared to alternatives like storing
     // trees using Box pointers.
-    event_tree: DiGraphMap<EventKey, ()>,
-    high_priority: Vec<StepEvent<S>>,
-    map: HashMap<EventKey, EventMapValue<S>>,
-    last_completed_index: HashMap<ExecutionId, CompletedIndex>,
+    event_tree: DiGraphMap<StepKey, ()>,
+    map: HashMap<StepKey, EventMapValue<S>>,
 }
 
 impl<S: StepSpec> EventStore<S> {
@@ -165,10 +157,7 @@ impl<S: StepSpec> EventStore<S> {
                     let value = entry.get_mut();
                     let progress_event = event.progress_event();
                     if event.kind.priority() == StepEventPriority::High {
-                        // Handle duplicate events.
-                        if self.high_priority.last() != Some(&event) {
-                            self.high_priority.push(event);
-                        }
+                        value.add_high_priority_step_event(event);
                     } else {
                         value.add_low_priority_step_event(
                             event,
@@ -186,17 +175,15 @@ impl<S: StepSpec> EventStore<S> {
 
                     match (priority, progress_event) {
                         (StepEventPriority::High, Some(progress_event)) => {
-                            entry.insert(EventMapValue::new(progress_event));
-                            // Handle duplicate events.
-                            if self.high_priority.last() != Some(&event) {
-                                self.high_priority.push(event);
-                            }
+                            let value = entry
+                                .insert(EventMapValue::new(progress_event));
+                            value.add_high_priority_step_event(event);
                         }
                         (StepEventPriority::High, None) => {
-                            // Handle duplicate events.
-                            if self.high_priority.last() != Some(&event) {
-                                self.high_priority.push(event);
-                            }
+                            // The only way to reach this branch is with a
+                            // NoStepsDefined event.
+                            entry
+                                .insert(EventMapValue::no_steps_defined(event));
                         }
                         (StepEventPriority::Low, Some(progress_event)) => {
                             let value = entry
@@ -252,8 +239,8 @@ impl<S: StepSpec> EventStore<S> {
     fn recurse_for_step_event<S2: StepSpec>(
         &mut self,
         event: &StepEvent<S2>,
-        parent_node: Option<EventKey>,
-    ) -> Option<EventKey> {
+        parent_node: Option<StepKey>,
+    ) -> Option<StepKey> {
         match &event.kind {
             StepEventKind::ExecutionStarted { first_step, .. } => {
                 // Register the start of progress here.
@@ -265,16 +252,12 @@ impl<S: StepSpec> EventStore<S> {
                 Some(key)
             }
             StepEventKind::StepCompleted { step, next_step, .. } => {
-                let key = EventKey {
+                let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
-                self.last_completed_index.insert(
-                    event.execution_id,
-                    CompletedIndex::LastSeen(step.info.index),
-                );
-                // Clear all events for this ID and any child events.
-                self.clear_event_key(key);
+                // Mark this key and all child keys completed.
+                self.mark_event_key_completed(key);
 
                 // Register the next step in the progress map.
                 let next_key =
@@ -287,7 +270,7 @@ impl<S: StepSpec> EventStore<S> {
             StepEventKind::ProgressReset { step, .. }
             | StepEventKind::AttemptRetry { step, .. } => {
                 // Reset progress for the step in the progress map.
-                let key = EventKey {
+                let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
@@ -297,10 +280,8 @@ impl<S: StepSpec> EventStore<S> {
             | StepEventKind::ExecutionFailed { failed_step: step, .. } => {
                 // This is a terminal event: clear all progress for this
                 // execution ID and any nested events.
-                self.last_completed_index
-                    .insert(event.execution_id, CompletedIndex::Terminal);
                 self.clear_execution_id(event.execution_id);
-                let key = EventKey {
+                let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
@@ -308,7 +289,7 @@ impl<S: StepSpec> EventStore<S> {
             }
             StepEventKind::Nested { step, event: nested_event, .. } => {
                 // Recurse and find any nested events.
-                let parent_node = EventKey {
+                let parent_node = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
@@ -321,8 +302,8 @@ impl<S: StepSpec> EventStore<S> {
     fn recurse_for_progress_event<S2: StepSpec>(
         &mut self,
         event: &ProgressEvent<S2>,
-        parent_node: Option<EventKey>,
-    ) -> Option<EventKey> {
+        parent_node: Option<StepKey>,
+    ) -> Option<StepKey> {
         match &event.kind {
             ProgressEventKind::WaitingForProgress { step, .. }
             | ProgressEventKind::Progress { step, .. } => {
@@ -348,39 +329,17 @@ impl<S: StepSpec> EventStore<S> {
         &mut self,
         execution_id: ExecutionId,
         index: usize,
-    ) -> Option<EventKey> {
-        if Some(&CompletedIndex::LastSeen(index))
-            <= self.last_completed_index.get(&execution_id)
-        {
-            // We've already seen this step be completed. Ignore this
-            // progress event.
-            return None;
-        }
-        Some(self.event_tree.add_node(EventKey { execution_id, index }))
+    ) -> Option<StepKey> {
+        Some(self.event_tree.add_node(StepKey { execution_id, index }))
     }
 
-    fn clear_step_events(&mut self) {
-        // Keep terminal events since it's nice to always return the fact that
-        // an engine has completed.
-        self.high_priority.retain(|event| {
-            matches!(
-                event.kind.is_terminal(),
-                StepEventIsTerminal::Terminal { .. }
-            )
-        });
-        // Also clear low-priority step events across all keys.
-        for value in self.map.values_mut() {
-            value.low_priority.clear();
-        }
-    }
-
-    fn clear_event_key(&mut self, key: EventKey) {
+    fn mark_event_key_completed(&mut self, key: StepKey) {
         // Remove this node and anything reachable from it.
         let mut dfs = DfsPostOrder::new(&self.event_tree, key);
         while let Some(key) = dfs.next(&self.event_tree) {
-            // This will remove the node as well as all the edges into it.
-            self.event_tree.remove_node(key);
-            self.map.remove(&key);
+            if let Some(value) = self.map.get_mut(&key) {
+                value.mark_completed();
+            }
         }
     }
 
@@ -391,9 +350,9 @@ impl<S: StepSpec> EventStore<S> {
             self.map.keys().filter(|k| k.execution_id == execution_id).copied(),
         );
         while let Some(key) = dfs.next(&self.event_tree) {
-            // This will remove the node as well as all the edges into it.
-            self.event_tree.remove_node(key);
-            self.map.remove(&key);
+            if let Some(value) = self.map.get_mut(&key) {
+                value.mark_completed();
+            }
         }
     }
 }
@@ -401,13 +360,67 @@ impl<S: StepSpec> EventStore<S> {
 /// The list of events for a particular key.
 #[derive_where(Clone, Debug)]
 struct EventMapValue<S: StepSpec> {
-    low_priority: VecDeque<StepEvent<S>>,
-    progress_event: ProgressEvent<S>,
+    // Invariant: stored in order sorted by event_index.
+    high_priority: Vec<StepEvent<S>>,
+    step_status: StepStatus<S>,
 }
 
 impl<S: StepSpec> EventMapValue<S> {
     fn new(progress_event: ProgressEvent<S>) -> Self {
-        Self { low_priority: VecDeque::new(), progress_event }
+        Self {
+            high_priority: Vec::new(),
+            step_status: StepStatus::Running {
+                low_priority: VecDeque::new(),
+                progress_event,
+            },
+        }
+    }
+
+    fn no_steps_defined(step_event: StepEvent<S>) -> Self {
+        assert_eq!(
+            step_event.kind,
+            StepEventKind::NoStepsDefined,
+            "this constructor should only be called on NoStepsDefined"
+        );
+        Self {
+            high_priority: vec![step_event],
+            step_status: StepStatus::Completed,
+        }
+    }
+
+    // Returns step events since the provided event index.
+    //
+    // Does not necessarily return results in sorted order.
+    fn step_events_since(
+        &self,
+        last_seen: Option<usize>,
+    ) -> impl Iterator<Item = &StepEvent<S>> {
+        // partition_point is safe since pred is
+        let iter = self
+            .high_priority
+            .iter()
+            .filter(move |event| Some(event.event_index) > last_seen);
+        let iter2 = self
+            .step_status
+            .low_priority()
+            .filter(move |event| Some(event.event_index) > last_seen);
+        iter.chain(iter2)
+    }
+
+    fn add_high_priority_step_event(&mut self, event: StepEvent<S>) {
+        match self
+            .high_priority
+            .binary_search_by(|probe| probe.event_index.cmp(&event.event_index))
+        {
+            Ok(_) => {
+                // This is a duplicate.
+            }
+            Err(index) => {
+                // index is typically the last element, so this should be quite
+                // efficient.
+                self.high_priority.insert(index, event);
+            }
+        }
     }
 
     fn add_low_priority_step_event(
@@ -415,29 +428,79 @@ impl<S: StepSpec> EventMapValue<S> {
         event: StepEvent<S>,
         max_low_priority: usize,
     ) {
-        assert_eq!(
-            event.kind.priority(),
-            StepEventPriority::Low,
-            "EventMapValue only handles low-priority step events"
-        );
-        // Limit the number of events to the maximum low priority, ejecting the
-        // oldest event if necessary.
-        if self.low_priority.back() != Some(&event) {
-            self.low_priority.push_front(event);
-            while self.low_priority.len() > max_low_priority {
-                self.low_priority.pop_front();
+        if let StepStatus::Running { low_priority, .. } = &mut self.step_status
+        {
+            match low_priority.binary_search_by(|probe| {
+                probe.event_index.cmp(&event.event_index)
+            }) {
+                Ok(_) => {
+                    // This is a duplicate.
+                }
+                Err(index) => {
+                    // The index is almost always at the end, so this is
+                    // efficient enough.
+                    low_priority.insert(index, event);
+                }
+            }
+
+            // Limit the number of events to the maximum low priority, ejecting
+            // the oldest event(s) if necessary.
+            while low_priority.len() > max_low_priority {
+                low_priority.pop_front();
             }
         }
     }
 
-    fn set_progress(&mut self, progress_event: ProgressEvent<S>) {
-        self.progress_event = progress_event;
+    fn mark_completed(&mut self) {
+        self.step_status = StepStatus::Completed;
+    }
+
+    fn set_progress(&mut self, current_progress: ProgressEvent<S>) {
+        if let StepStatus::Running { progress_event, .. } =
+            &mut self.step_status
+        {
+            *progress_event = current_progress;
+        }
+    }
+}
+
+/// The step status as last seen by events.
+#[derive_where(Clone, Debug)]
+enum StepStatus<S: StepSpec> {
+    Running {
+        // Invariant: stored in sorted order by index.
+        low_priority: VecDeque<StepEvent<S>>,
+        progress_event: ProgressEvent<S>,
+    },
+    Completed,
+}
+
+impl<S: StepSpec> StepStatus<S> {
+    #[allow(unused)]
+    fn is_running(&self) -> bool {
+        matches!(self, Self::Running { .. })
+    }
+
+    fn low_priority(&self) -> impl Iterator<Item = &StepEvent<S>> {
+        match self {
+            Self::Running { low_priority, .. } => {
+                Either::Left(low_priority.iter())
+            }
+            Self::Completed => Either::Right(std::iter::empty()),
+        }
+    }
+
+    fn progress_event(&self) -> Option<&ProgressEvent<S>> {
+        match self {
+            Self::Running { progress_event, .. } => Some(progress_event),
+            Self::Completed => None,
+        }
     }
 }
 
 /// A unique identifier for a group of step or progress events.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-struct EventKey {
+struct StepKey {
     execution_id: ExecutionId,
     index: usize,
 }
@@ -517,41 +580,6 @@ mod tests {
         engine.execute().await.expect("execution successful");
         let generated_events: Vec<_> =
             ReceiverStream::new(receiver).collect().await;
-        let generated_step_events: Vec<_> = generated_events
-            .iter()
-            .filter_map(|event| match event {
-                Event::Step(event) => Some(event.clone()),
-                Event::Progress(_) => None,
-            })
-            .collect();
-
-        // Feed events in one by one, marking reports as processed after each
-        // event.
-        {
-            let mut buffer: EventBuffer<TestSpec> =
-                EventBuffer::new(MAX_LOW_PRIORITY);
-            let mut reported_step_events = Vec::new();
-
-            for (i, event) in generated_events.iter().enumerate() {
-                buffer.add_event(event.clone());
-                let report = buffer.generate_report();
-                let is_last_event = i == generated_events.len() - 1;
-                assert_general_properties(&buffer, &report, is_last_event)
-                .with_context(|| {
-                    format!(
-                        "WITH reports processed, properties not met at index {i}"
-                    )
-                })
-                .unwrap();
-                reported_step_events.extend(report.step_events);
-                buffer.on_report_processed();
-            }
-
-            assert_eq!(
-                generated_step_events, reported_step_events,
-                "all generated step events were reported"
-            );
-        }
 
         let test_cx = BufferTestContext::new(generated_events);
 
@@ -559,21 +587,36 @@ mod tests {
             .run_all_elements_test(
                 "all events passed in one-by-one",
                 |buffer, event| buffer.add_event(event.clone()),
+                1,
             )
             .unwrap();
 
         test_cx
-            .run_all_elements_test("all events duplicated", |buffer, event| {
-                buffer.add_event(event.clone());
-                buffer.add_event(event.clone());
-            })
+            .run_all_elements_test(
+                "all events duplicated (1)",
+                |buffer, event| {
+                    buffer.add_event(event.clone());
+                    buffer.add_event(event.clone());
+                },
+                1,
+            )
+            .unwrap();
+
+        test_cx
+            .run_all_elements_test(
+                "all events duplicated (2)",
+                |buffer, event| {
+                    buffer.add_event(event.clone());
+                },
+                2,
+            )
             .unwrap();
 
         test_cx
             .run_filtered_test(
                 "all events passed in",
                 |buffer, event| buffer.add_event(event.clone()),
-                MarkReportProcessed::No,
+                WithDeltas::No,
             )
             .unwrap();
 
@@ -585,7 +628,7 @@ mod tests {
                         buffer.add_step_event(event.clone());
                     }
                 },
-                MarkReportProcessed::Both,
+                WithDeltas::Both,
             )
             .unwrap();
 
@@ -602,7 +645,7 @@ mod tests {
                         buffer.add_progress_event(event.clone());
                     }
                 },
-                MarkReportProcessed::Both,
+                WithDeltas::Both,
             )
             .unwrap();
 
@@ -619,7 +662,7 @@ mod tests {
                         // Don't add progress events either.
                     }
                 },
-                MarkReportProcessed::Both,
+                WithDeltas::Both,
             )
             .unwrap();
 
@@ -656,25 +699,45 @@ mod tests {
             &self,
             description: &str,
             mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
+            times: usize,
         ) -> anyhow::Result<()> {
             let mut buffer: EventBuffer<TestSpec> =
                 EventBuffer::new(MAX_LOW_PRIORITY);
             let mut reported_step_events = Vec::new();
+            let mut last_seen = None;
 
             for (i, event) in self.generated_events.iter().enumerate() {
-                (event_fn)(&mut buffer, event);
-                let report = buffer.generate_report();
-                let is_last_event = i == self.generated_events.len() - 1;
-                assert_general_properties(&buffer, &report, is_last_event)
-                    .with_context(|| {
-                        format!(
-                            "with {description}, for index {i}, \
-                             properties not met"
-                        )
-                    })
-                    .unwrap();
-                reported_step_events.extend(report.step_events);
-                buffer.on_report_processed();
+                for time in 0..times {
+                    (event_fn)(&mut buffer, event);
+                    let report = buffer.generate_report_since(last_seen);
+                    let is_last_event = i == self.generated_events.len() - 1;
+                    assert_general_properties(&buffer, &report, is_last_event)
+                        .with_context(|| {
+                            format!(
+                                "{description}, at index {i} (time {time}), \
+                                properties not met"
+                            )
+                        })
+                        .unwrap();
+                    reported_step_events.extend(report.step_events);
+                    last_seen = report.last_seen;
+
+                    // Call last_seen without feeding a new event in to ensure that
+                    // a report with no step events is produced.
+                    let report = buffer.generate_report_since(last_seen);
+                    ensure!(
+                        report.step_events.is_empty(),
+                        "{description}, at index {i} (time {time}),\
+                        no step events are seen"
+                    );
+                    ensure!(
+                        report.last_seen == last_seen,
+                        "{description}, at index {i} (time {time}), \
+                        report.last_seen {:?} matches last_seen {:?}",
+                        report.last_seen,
+                        last_seen,
+                    );
+                }
             }
 
             ensure!(
@@ -690,18 +753,18 @@ mod tests {
             &self,
             event_fn_description: &str,
             mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
-            mark_report_processed: MarkReportProcessed,
+            with_deltas: WithDeltas,
         ) -> anyhow::Result<()> {
-            match mark_report_processed {
-                MarkReportProcessed::Yes => {
+            match with_deltas {
+                WithDeltas::Yes => {
                     self.run_filtered_test_inner(&mut event_fn, true)
                         .context(event_fn_description.to_owned())?;
                 }
-                MarkReportProcessed::No => {
+                WithDeltas::No => {
                     self.run_filtered_test_inner(&mut event_fn, false)
                         .context(event_fn_description.to_owned())?;
                 }
-                MarkReportProcessed::Both => {
+                WithDeltas::Both => {
                     self.run_filtered_test_inner(&mut event_fn, true)
                         .context(event_fn_description.to_owned())?;
                     self.run_filtered_test_inner(&mut event_fn, false)
@@ -715,25 +778,33 @@ mod tests {
         fn run_filtered_test_inner(
             &self,
             mut event_fn: impl FnMut(&mut EventBuffer<TestSpec>, &Event<TestSpec>),
-            mark_report_processed: bool,
+            with_deltas: bool,
         ) -> anyhow::Result<()> {
-            let description =
-                format!("with mark_report_processed = {mark_report_processed}");
+            let description = format!("with deltas = {with_deltas}");
             let mut buffer = EventBuffer::new(MAX_LOW_PRIORITY);
             let mut last_high_priority = Vec::new();
 
-            // If we're marking reports as processed, create a buffer that
-            // doesn't drop events.
-            let mut receive_buffer =
-                mark_report_processed.then(|| EventBuffer::new(1024));
+            // This buffer has a large enough capacity that it never drops
+            // events.
+            let mut receive_buffer = EventBuffer::new(1024);
+            // last_seen_opt is None if with_deltas is false.
+            //
+            // Some(None) if with_deltas is true and no events have been seen so far.
+            //
+            // Some(Some(index)) if with_deltas is true and events have been seen.
+            let mut last_seen_opt = with_deltas.then_some(None);
 
             for (i, event) in self.generated_events.iter().enumerate() {
                 (event_fn)(&mut buffer, event);
                 buffer.add_event(event.clone());
-                let report = buffer.generate_report();
+                let report = match last_seen_opt {
+                    Some(last_seen) => buffer.generate_report_since(last_seen),
+                    None => buffer.generate_report(),
+                };
+
                 let is_last_event = i == self.generated_events.len() - 1;
-                if mark_report_processed {
-                    buffer.on_report_processed();
+                if let Some(last_seen) = &mut last_seen_opt {
+                    *last_seen = report.last_seen;
                 }
 
                 assert_general_properties(&buffer, &report, is_last_event)
@@ -744,14 +815,9 @@ mod tests {
                     })
                     .unwrap();
 
+                receive_buffer.add_event_report(report.clone());
                 let this_step_events =
-                    if let Some(receive_buffer) = receive_buffer.as_mut() {
-                        receive_buffer.add_event_report(report);
-                        receive_buffer.generate_report().step_events
-                    } else {
-                        report.step_events
-                    };
-                // Ensure that all high-priority events reported so far are seen.
+                    receive_buffer.generate_report().step_events;
                 let this_high_priority: Vec<_> = this_step_events
                     .iter()
                     .filter(|event| {
@@ -760,12 +826,29 @@ mod tests {
                     .cloned()
                     .collect();
 
+                if !with_deltas {
+                    let report_high_priority: Vec<_> = report
+                        .step_events
+                        .iter()
+                        .filter(|event| {
+                            event.kind.priority() == StepEventPriority::High
+                        })
+                        .cloned()
+                        .collect();
+                    ensure!(
+                        this_high_priority == report_high_priority,
+                        "{description}, at index {i}, \
+                         all high-priority events reported"
+                    );
+                }
+
                 if this_high_priority.len() == last_high_priority.len() {
                     // event is not a high-priority event. All old high-priority
                     // events must be reported as well.
                     ensure!(
                         this_high_priority == last_high_priority,
-                        "{description}, at index {i}, all high-priority events reported"
+                        "{description}, at index {i}, \
+                         all old high-priority events reported (1)"
                     );
                 } else if this_high_priority.len()
                     == last_high_priority.len() + 1
@@ -774,7 +857,8 @@ mod tests {
                     ensure!(
                         &this_high_priority[0..last_high_priority.len()]
                             == &last_high_priority,
-                        "{description}, at index {i}, all old high-priority events reported"
+                        "{description}, at index {i}, \
+                         all old high-priority events reported (2)"
                     );
                 }
 
@@ -787,7 +871,7 @@ mod tests {
 
     #[derive(Copy, Clone, Debug)]
     #[allow(unused)]
-    enum MarkReportProcessed {
+    enum WithDeltas {
         Yes,
         No,
         Both,
@@ -816,37 +900,51 @@ mod tests {
             }
         }
 
-        // Ensure that the internal event tree has one root.
-        let root_keys: Vec<_> = buffer
+        // Ensure that the internal event tree has one root that's currently
+        // running.
+        let running_root_keys: Vec<_> = buffer
             .event_store
             .event_tree
             .nodes()
             .filter(|node| {
-                buffer
+                let is_root = buffer
                     .event_store
                     .event_tree
                     .neighbors_directed(*node, Direction::Incoming)
                     .count()
-                    == 0
+                    == 0;
+                is_root
+                    && buffer
+                        .event_store
+                        .map
+                        .get(&node)
+                        .expect("event key must exist")
+                        .step_status
+                        .is_running()
             })
             .collect();
         if !is_last_event {
-            if root_keys.len() != 1 {
-                bail!("expected 1 root key, found {root_keys:?}");
+            if running_root_keys.len() != 1 {
+                bail!(
+                    "expected 1 running root key, found {running_root_keys:?}"
+                );
             }
         } else {
-            if !root_keys.is_empty() {
-                bail!("expected no root keys since this is the last event, found {root_keys:?}");
+            if !running_root_keys.is_empty() {
+                bail!(
+                    "expected no root keys since this is \
+                     the last event, found {running_root_keys:?}"
+                );
             }
         }
 
         Ok(())
     }
 
-    fn progress_event_key<S: StepSpec>(event: &ProgressEvent<S>) -> EventKey {
+    fn progress_event_key<S: StepSpec>(event: &ProgressEvent<S>) -> StepKey {
         match &event.kind {
             ProgressEventKind::WaitingForProgress { step, .. }
-            | ProgressEventKind::Progress { step, .. } => EventKey {
+            | ProgressEventKind::Progress { step, .. } => StepKey {
                 execution_id: event.execution_id,
                 index: step.info.index,
             },

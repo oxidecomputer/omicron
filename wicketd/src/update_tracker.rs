@@ -390,9 +390,6 @@ impl UpdateDriver {
         // log directly.
         let event_buffer = Arc::clone(&update_cx.event_buffer);
         let event_receiving_task = tokio::spawn(async move {
-            // TODO Is this event receiving handler right? Can we end up seeing
-            // `current` set to a progress report for a step that is also
-            // present in the completed `.events` list?
             while let Some(event) = receiver.recv().await {
                 event_buffer.lock().unwrap().add_event(event);
             }
@@ -1282,7 +1279,12 @@ impl UpdateContext {
                 }
             };
 
-            StepEvent { execution_id, total_elapsed: event.total_elapsed, kind }
+            StepEvent {
+                execution_id,
+                event_index: 0,
+                total_elapsed: event.total_elapsed,
+                kind,
+            }
         });
 
         // TODO: This races with our task that receives events from the update
