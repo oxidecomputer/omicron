@@ -639,7 +639,8 @@ impl StorageWorker {
             if call_count == 0 {
                 info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
             } else if total_duration > std::time::Duration::from_secs(30) {
-                warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
+                warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "total duration" => ?total_duration);
             }
         };
         self.nexus_notifications.push_back(
@@ -887,7 +888,8 @@ impl StorageWorker {
             if call_count == 0 {
                 info!(log, "failed to notify nexus about {disk:?}");
             } else if total_duration > std::time::Duration::from_secs(30) {
-                warn!(log, "failed to notify nexus about {disk:?}");
+                warn!(log, "failed to notify nexus about {disk:?}";
+                    "total duration" => ?total_duration);
             }
         };
         self.nexus_notifications.push_back(
