@@ -192,6 +192,10 @@ pub async fn test_setup_with_config<N: NexusServer>(
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
+    let dns_server_dns_address = match sled_agent.dns_server.local_address() {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => *addr,
+    };
     let dns_server_zone = Uuid::new_v4();
     let dns_service_config = ServicePutRequest {
         service_id: Uuid::new_v4(),
@@ -204,7 +208,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         zone_id: Some(dns_server_zone),
-        address: dns_server_address,
+        address: dns_server_dns_address,
         kind: ServiceKind::InternalDns,
     };
     let server = N::start(
