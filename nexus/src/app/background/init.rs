@@ -24,8 +24,13 @@ pub fn init(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     config: &BackgroundTaskConfig,
-) -> (common::Driver, common::TaskHandle, common::TaskHandle, common::TaskHandle)
-{
+) -> (
+    common::Driver,
+    common::TaskHandle,
+    common::TaskHandle,
+    common::TaskHandle,
+    common::TaskHandle,
+) {
     let mut driver = common::Driver::new();
 
     let (task_config, task_servers) = init_dns(
@@ -35,7 +40,7 @@ pub fn init(
         DnsGroup::Internal,
         &config.dns_internal,
     );
-    let (_, external_task_servers) = init_dns(
+    let (external_task_config, external_task_servers) = init_dns(
         &mut driver,
         opctx,
         datastore,
@@ -43,7 +48,13 @@ pub fn init(
         &config.dns_external,
     );
 
-    (driver, task_config, task_servers, external_task_servers)
+    (
+        driver,
+        task_config,
+        task_servers,
+        external_task_config,
+        external_task_servers,
+    )
 }
 
 fn init_dns(

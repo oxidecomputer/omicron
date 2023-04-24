@@ -240,6 +240,8 @@ pub struct RackInitializationRequest {
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
+    /// delegated DNS name for external DNS
+    pub external_dns_zone_name: String,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

@@ -130,11 +130,9 @@ impl super::Nexus {
             dns_zone.records,
         );
 
-        // TODO the initial external DNS zone name and potentially record
-        // name(s) need to come in with the rack initialization request.
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
-            "oxide-dev.test",
+            request.external_dns_zone_name.as_str(),
             &self.id.to_string(),
             "rack setup",
             HashMap::new(),
@@ -156,9 +154,12 @@ impl super::Nexus {
             .await?;
 
         // We've potentially updated both the list of DNS servers and the DNS
-        // configuration.  Activate both background tasks.
+        // configuration.  Activate both background tasks, for both internal and
+        // external DNS.
         self.background_tasks.activate(&self.task_internal_dns_config);
         self.background_tasks.activate(&self.task_internal_dns_servers);
+        self.background_tasks.activate(&self.task_external_dns_config);
+        self.background_tasks.activate(&self.task_external_dns_servers);
 
         Ok(())
     }

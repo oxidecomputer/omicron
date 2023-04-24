@@ -177,6 +177,9 @@ pub struct Nexus {
     /// task handle for the internal DNS servers background task
     task_internal_dns_servers: background::TaskHandle,
 
+    /// task handle for the external DNS config background task
+    task_external_dns_config: background::TaskHandle,
+
     /// task handle for the external DNS servers background task
     task_external_dns_servers: background::TaskHandle,
 }
@@ -272,6 +275,7 @@ impl Nexus {
             background_tasks,
             task_internal_dns_config,
             task_internal_dns_servers,
+            task_external_dns_config,
             task_external_dns_servers,
         ) = background::init(
             &background_ctx,
@@ -314,6 +318,7 @@ impl Nexus {
             background_tasks,
             task_internal_dns_config,
             task_internal_dns_servers,
+            task_external_dns_config,
             task_external_dns_servers,
         };
 
