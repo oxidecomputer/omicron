@@ -36,8 +36,8 @@ pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
 /// retry is occuring).
 /// - (warning) Something more concerned after a total time threshold has passed.
 ///
-/// Identical to [::backoff::future::retry_notify], but with invokes the a
-/// method passing the total count of calls and total duration instead of
+/// Identical to [::backoff::future::retry_notify], but invokes a method passing
+/// the total count of calls and total duration instead of
 /// [::backoff::Notify::notify].
 pub async fn retry_notify_ext<I, E, Fut>(
     backoff: impl Backoff,
