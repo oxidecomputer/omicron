@@ -210,6 +210,7 @@ pub mod test {
                 &opctx,
                 Uuid::new_v4(),
                 cptestctx.sled_agent.sled_agent.id,
+                Some(Uuid::new_v4()),
                 new_dns_addr,
                 ServiceKind::InternalDnsConfig.into(),
             )

@@ -251,12 +251,14 @@ impl Server {
                 kind: NexusTypes::ServiceKind::InternalDns,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
             NexusTypes::ServicePutRequest {
                 address: http_bound.to_string(),
                 kind: NexusTypes::ServiceKind::InternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
         ];
 

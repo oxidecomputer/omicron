@@ -192,13 +192,27 @@ pub async fn test_setup_with_config<N: NexusServer>(
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_service = ServicePutRequest {
+    let dns_server_zone = Uuid::new_v4();
+    let dns_service_config = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
         address: dns_server_address,
         kind: ServiceKind::InternalDnsConfig,
     };
-    let server = N::start(nexus_internal, &config, vec![dns_service]).await;
+    let dns_service_dns = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
+        address: dns_server_address,
+        kind: ServiceKind::InternalDns,
+    };
+    let server = N::start(
+        nexus_internal,
+        &config,
+        vec![dns_service_config, dns_service_dns],
+    )
+    .await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();

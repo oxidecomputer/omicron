@@ -92,6 +92,7 @@ use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
+use uuid::Uuid;
 
 // The minimum number of sleds to initialize the rack.
 const MINIMUM_SLED_COUNT: usize = 1;
@@ -648,6 +649,7 @@ impl ServiceInner {
                         ServiceType::Nexus { external_ip, internal_ip: _ } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -664,6 +666,7 @@ impl ServiceInner {
                         ServiceType::Dendrite { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -678,6 +681,7 @@ impl ServiceInner {
                         ServiceType::ExternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
@@ -689,14 +693,16 @@ impl ServiceInner {
                             dns_address,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id: Uuid::new_v4(),
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
                                     NexusTypes::ServiceKind::InternalDnsConfig,
                             });
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id: Uuid::new_v4(),
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: dns_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
@@ -705,6 +711,7 @@ impl ServiceInner {
                         ServiceType::Oximeter => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -719,6 +726,7 @@ impl ServiceInner {
                         ServiceType::CruciblePantry => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -733,6 +741,7 @@ impl ServiceInner {
                         ServiceType::Ntp { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
+                                zone_id: Some(zone.id),
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],

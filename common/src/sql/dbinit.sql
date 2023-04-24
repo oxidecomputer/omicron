@@ -168,6 +168,8 @@ CREATE TABLE omicron.public.service (
 
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
+    /* For services in illumos zones, the zone's unique id (for debugging) */
+    zone_id UUID,
     /* The IP address of the service. */
     ip INET NOT NULL,
     /* The UDP or TCP port on which the service listens. */

@@ -488,6 +488,7 @@ table! {
         time_modified -> Timestamptz,
 
         sled_id -> Uuid,
+        zone_id -> Nullable<Uuid>,
         ip -> Inet,
         port -> Int4,
         kind -> crate::ServiceKindEnum,

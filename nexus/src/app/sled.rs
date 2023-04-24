@@ -260,6 +260,7 @@ impl super::Nexus {
         opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
+        zone_id: Option<Uuid>,
         address: SocketAddrV6,
         kind: ServiceKind,
     ) -> Result<(), Error> {
@@ -270,7 +271,8 @@ impl super::Nexus {
             "service_id" => id.to_string(),
             "address" => address.to_string(),
         );
-        let service = db::model::Service::new(id, sled_id, address, kind);
+        let service =
+            db::model::Service::new(id, sled_id, zone_id, address, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
 
         if kind == ServiceKind::ExternalDnsConfig {
