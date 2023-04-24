@@ -8,11 +8,34 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use uuid::Uuid;
 
-/// Information required to construct a virtual network interface for a guest
+/// The type of network interface
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NetworkInterfaceKind {
+    /// A vNIC attached to a guest instance
+    Instance { id: Uuid },
+    /// A vNIC associated with an internal service
+    Service { id: Uuid },
+}
+
+/// Information required to construct a virtual network interface
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkInterface {
-    pub id: uuid::Uuid,
+    pub id: Uuid,
+    pub kind: NetworkInterfaceKind,
     pub name: external::Name,
     pub ip: IpAddr,
     pub mac: external::MacAddr,
@@ -23,7 +46,7 @@ pub struct NetworkInterface {
 }
 
 /// An IP address and port range used for instance source NAT, i.e., making
-/// outbound network connections from guests.
+/// outbound network connections from guests or services.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
 pub struct SourceNatConfig {
     /// The external address provided to the instance

@@ -70,6 +70,7 @@ use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use update_engine::events::ProgressCounter;
+use update_engine::ExecutionId;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -1063,6 +1064,12 @@ impl UpdateContext {
             }
         }
 
+        // This is a fake execution ID used as a placeholder until the
+        // installinator switches to using the update engine.
+        let execution_id = ExecutionId(
+            "2b1a3f6e-18cc-4b9b-8852-9d31aeb89a39".parse().expect("valid UUID"),
+        );
+
         // Currently, progress reports have zero or one progress events. Don't
         // assert that here, in case this version of wicketd is updating a
         // future installinator which reports multiple progress events.
@@ -1079,6 +1086,7 @@ impl UpdateContext {
                     total_bytes,
                     elapsed,
                 } => ProgressEvent {
+                    execution_id,
                     total_elapsed: elapsed,
                     kind: ProgressEventKind::Progress {
                         step: make_step_meta(format!(
@@ -1100,6 +1108,7 @@ impl UpdateContext {
                     percentage,
                     elapsed,
                 } => ProgressEvent {
+                    execution_id,
                     total_elapsed: elapsed,
                     kind: ProgressEventKind::Progress {
                         step: make_step_meta(format!(
@@ -1123,6 +1132,7 @@ impl UpdateContext {
                     total_bytes,
                     elapsed,
                 } => ProgressEvent {
+                    execution_id,
                     total_elapsed: elapsed,
                     kind: ProgressEventKind::Progress {
                         step: make_step_meta(format!(
@@ -1141,6 +1151,7 @@ impl UpdateContext {
             }
         } else {
             ProgressEvent {
+                execution_id,
                 total_elapsed: Duration::default(), // TODO
                 kind: ProgressEventKind::Progress {
                     step: make_step_meta("waiting for installinator"),
@@ -1289,7 +1300,7 @@ impl UpdateContext {
                 }
             };
 
-            StepEvent { total_elapsed: event.total_elapsed, kind }
+            StepEvent { execution_id, total_elapsed: event.total_elapsed, kind }
         });
 
         // TODO: This races with our task that receives events from the update

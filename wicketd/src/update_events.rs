@@ -153,6 +153,7 @@ impl fmt::Display for SpComponentUpdateStage {
 #[allow(clippy::large_enum_variant)]
 pub enum CurrentProgress {
     ProgressEvent(ProgressEvent),
+    // XXX: This will go away once wicketd is switched to the event coalescer.
     WaitingForProgressEvent,
 }
 

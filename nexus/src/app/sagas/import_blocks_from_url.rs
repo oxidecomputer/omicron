@@ -313,10 +313,14 @@ async fn sibfu_wait_for_import_from_url(
         endpoint,
     );
 
-    client
+    let response = client
         .job_result_ok(&job_id)
         .await
         .map_err(|e| ActionError::action_failed(e.to_string()))?;
+
+    if !response.job_result_ok {
+        return Err(ActionError::action_failed(format!("Job {job_id} failed")));
+    }
 
     Ok(())
 }
