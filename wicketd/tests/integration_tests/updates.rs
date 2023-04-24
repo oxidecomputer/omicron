@@ -19,7 +19,7 @@ use omicron_common::{
 use tempfile::TempDir;
 use uuid::Uuid;
 use wicketd::RunningUpdateState;
-use wicketd_client::types::{UpdateEventKind, UpdateTerminalEventKind};
+use wicketd_client::{types::UpdateComponent, StepEventKind};
 
 #[tokio::test]
 async fn test_updates() {
@@ -80,17 +80,17 @@ async fn test_updates() {
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
-        let update_log = wicketd_testctx
+        let event_report = wicketd_testctx
             .wicketd_client
             .get_update_sp(wicketd_client::types::SpType::Sled, 0)
             .await
             .expect("get_update_sp successful")
             .into_inner();
 
-        slog::debug!(log, "received update log"; "update_log" => ?update_log);
+        slog::debug!(log, "received event report"; "event_report" => ?event_report);
 
-        for event in update_log.events {
-            if let UpdateEventKind::Terminal(event) = event.kind {
+        for event in event_report.step_events {
+            if let StepEventKind::ExecutionFailed { .. } = event.data {
                 break 'outer event;
             }
         }
@@ -98,11 +98,11 @@ async fn test_updates() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    match terminal_event {
-        UpdateTerminalEventKind::ArtifactUpdateFailed { artifact, .. } => {
+    match terminal_event.data {
+        StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(artifact.kind, "gimlet_sp");
+            assert_eq!(failed_step.info.component, UpdateComponent::Sp);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");

@@ -13,7 +13,7 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use installinator_artifact_client::{ClientError, ResponseValue};
-use installinator_common::ProgressReport;
+use installinator_common::EventReport;
 use omicron_common::update::ArtifactHashId;
 use proptest::prelude::*;
 use reqwest::StatusCode;
@@ -259,7 +259,7 @@ impl PeersImpl for MockPeers {
         &self,
         _peer: SocketAddrV6,
         _update_id: Uuid,
-        _report: ProgressReport,
+        _report: EventReport,
     ) -> Result<(), ClientError> {
         panic!(
             "this is currently unused -- at some point we'll want to \
@@ -460,7 +460,7 @@ impl ResponseAction_ {
 #[derive(Debug)]
 struct MockReportPeers {
     update_id: Uuid,
-    report_sender: mpsc::Sender<ProgressReport>,
+    report_sender: mpsc::Sender<EventReport>,
 }
 
 impl MockReportPeers {
@@ -477,10 +477,7 @@ impl MockReportPeers {
         SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3), 2000, 0, 0)
     }
 
-    fn new(
-        update_id: Uuid,
-        report_sender: mpsc::Sender<ProgressReport>,
-    ) -> Self {
+    fn new(update_id: Uuid, report_sender: mpsc::Sender<EventReport>) -> Self {
         Self { update_id, report_sender }
     }
 }
@@ -517,7 +514,7 @@ impl PeersImpl for MockReportPeers {
         &self,
         peer: SocketAddrV6,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> Result<(), ClientError> {
         assert_eq!(update_id, self.update_id, "update ID matches");
         if peer == Self::valid_peer() {
@@ -676,7 +673,7 @@ mod tests {
                 }
             }
 
-            assert_progress_reports(&reports, expected_result);
+            assert_reports(&reports, expected_result);
 
             logctx.cleanup_successful();
         });
@@ -708,36 +705,10 @@ mod tests {
         .await
     }
 
-    fn assert_progress_reports(
-        reports: &[ProgressReport],
+    fn assert_reports(
+        reports: &[EventReport],
         expected_result: Result<(usize, SocketAddrV6), usize>,
     ) {
-        for report in reports {
-            // Assert that completion event timestamps are before report timestamps.
-            for event in &report.step_events {
-                assert!(
-                    event.total_elapsed <= report.total_elapsed,
-                    "event elapsed {:?} is before report elapsed {:?}",
-                    event.total_elapsed,
-                    report.total_elapsed
-                );
-            }
-            // For now we only send a single progress event at most.
-            assert!(
-                report.progress_events.len() <= 1,
-                "at most one progress event"
-            );
-            // Assert that progress event timestamps are before report timestamps.
-            for event in &report.progress_events {
-                assert!(
-                    event.total_elapsed <= report.total_elapsed,
-                    "event elapsed {:?} is before report elapsed {:?}",
-                    event.total_elapsed,
-                    report.total_elapsed
-                )
-            }
-        }
-
         let all_step_events: Vec<_> =
             reports.iter().flat_map(|report| &report.step_events).collect();
 

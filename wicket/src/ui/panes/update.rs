@@ -5,7 +5,9 @@
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, Control};
-use crate::state::{artifact_title, ComponentId, Inventory, ALL_COMPONENT_IDS};
+use crate::state::{
+    update_component_title, ComponentId, Inventory, ALL_COMPONENT_IDS,
+};
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
     BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
@@ -17,7 +19,7 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use wicketd_client::types::SemverVersion;
+use wicketd_client::types::{SemverVersion, UpdateComponent};
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -84,7 +86,7 @@ impl UpdatePane {
 
     pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
         let selected = state.rack_state.selected;
-        let logs = state.update_state.logs.get(&selected).map_or_else(
+        let logs = state.update_state.event_reports.get(&selected).map_or_else(
             || "No Logs Available".to_string(),
             |l| format!("{:#?}", l),
         );
@@ -198,14 +200,14 @@ impl UpdatePane {
             .map(|(id, states)| {
                 let children: Vec<_> = states
                     .iter()
-                    .map(|(artifact, s)| {
+                    .map(|(&component, s)| {
                         let target_version =
-                            artifact_version(artifact, &versions);
+                            artifact_version(id, component, &versions);
                         let installed_version =
-                            installed_version(id, artifact, inventory);
+                            installed_version(id, component, inventory);
                         let spans = vec![
                             Span::styled(
-                                artifact_title(*artifact),
+                                update_component_title(component),
                                 style::selected(),
                             ),
                             Span::styled(
@@ -306,30 +308,57 @@ impl UpdatePane {
 
 fn installed_version(
     id: &ComponentId,
-    artifact: &KnownArtifactKind,
+    update_component: UpdateComponent,
     inventory: &Inventory,
 ) -> String {
-    use KnownArtifactKind::*;
     let component = inventory.get_inventory(id);
-    match artifact {
-        GimletSp | PscSp | SwitchSp => component.map_or_else(
+    match update_component {
+        UpdateComponent::Sp => component.map_or_else(
             || "UNKNOWN".to_string(),
             |component| component.sp_version(),
         ),
-        GimletRot | PscRot | SwitchRot => component.map_or_else(
+        UpdateComponent::Rot => component.map_or_else(
             || "UNKNOWN".to_string(),
             |component| component.rot_version(),
         ),
-        _ => "UNKNOWN".to_string(),
+        UpdateComponent::Host => "UNKNOWN".to_string(),
     }
 }
 
 fn artifact_version(
-    artifact: &KnownArtifactKind,
+    id: &ComponentId,
+    component: UpdateComponent,
     versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
 ) -> String {
+    let artifact = match (id, component) {
+        (ComponentId::Sled(_), UpdateComponent::Rot) => {
+            KnownArtifactKind::GimletRot
+        }
+        (ComponentId::Sled(_), UpdateComponent::Sp) => {
+            KnownArtifactKind::GimletSp
+        }
+        (ComponentId::Sled(_), UpdateComponent::Host) => {
+            KnownArtifactKind::Host
+        }
+        (ComponentId::Switch(_), UpdateComponent::Rot) => {
+            KnownArtifactKind::SwitchRot
+        }
+        (ComponentId::Switch(_), UpdateComponent::Sp) => {
+            KnownArtifactKind::SwitchSp
+        }
+        (ComponentId::Psc(_), UpdateComponent::Rot) => {
+            KnownArtifactKind::PscRot
+        }
+        (ComponentId::Psc(_), UpdateComponent::Sp) => KnownArtifactKind::PscSp,
+
+        // Switches and PSCs do not have a host.
+        (ComponentId::Switch(_), UpdateComponent::Host)
+        | (ComponentId::Psc(_), UpdateComponent::Host) => {
+            return "N/A".to_string()
+        }
+    };
     versions
-        .get(artifact)
+        .get(&artifact)
         .cloned()
         .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string())
 }

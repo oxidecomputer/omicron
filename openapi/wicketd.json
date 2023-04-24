@@ -156,7 +156,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLogAll"
+                  "$ref": "#/components/schemas/EventReportAll"
                 }
               }
             }
@@ -201,7 +201,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLog"
+                  "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
                 }
               }
             }
@@ -330,6 +330,55 @@
           "request_id"
         ]
       },
+      "EventReportAll": {
+        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "EventReportForWicketdEngineSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
+            }
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
+        ]
+      },
       "GetArtifactsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
@@ -417,70 +466,6 @@
           }
         ]
       },
-      "HostPhase2Progress": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "age": {
-                "$ref": "#/components/schemas/Duration"
-              },
-              "image_id": {
-                "$ref": "#/components/schemas/HostPhase2RecoveryImageId"
-              },
-              "offset": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              },
-              "progress": {
-                "type": "string",
-                "enum": [
-                  "available"
-                ]
-              },
-              "total_size": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
-              }
-            },
-            "required": [
-              "age",
-              "image_id",
-              "offset",
-              "progress",
-              "total_size"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "progress": {
-                "type": "string",
-                "enum": [
-                  "none"
-                ]
-              }
-            },
-            "required": [
-              "progress"
-            ]
-          }
-        ]
-      },
-      "HostPhase2RecoveryImageId": {
-        "description": "Identity of a host phase2 recovery image.",
-        "type": "object",
-        "properties": {
-          "sha256_hash": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "sha256_hash"
-        ]
-      },
       "ImageVersion": {
         "type": "object",
         "properties": {
@@ -500,195 +485,6 @@
           "version"
         ]
       },
-      "InstallinatorCompletionMetadata": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "description": "The address the artifact was downloaded from.",
-                "type": "string"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "download"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "reason"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "output": {
-                "description": "The output of the write operation.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/WriteOutput"
-                  }
-                ]
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "write"
-                ]
-              }
-            },
-            "required": [
-              "output",
-              "reason"
-            ]
-          },
-          {
-            "description": "Future variants that might be unknown.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          }
-        ]
-      },
-      "InstallinatorComponent": {
-        "description": "Installinator components.",
-        "oneOf": [
-          {
-            "description": "The host phase 2 component.",
-            "type": "string",
-            "enum": [
-              "host_phase2"
-            ]
-          },
-          {
-            "description": "The control plane component.",
-            "type": "string",
-            "enum": [
-              "control_plane"
-            ]
-          },
-          {
-            "description": "A component that means \"both the host and the control plane\", used for writes for now. It is possible that this component will go away in the future.",
-            "type": "string",
-            "enum": [
-              "both"
-            ]
-          },
-          {
-            "description": "Future variants that might be unknown.",
-            "type": "string",
-            "enum": [
-              "unknown"
-            ]
-          }
-        ]
-      },
-      "InstallinatorProgressMetadata": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "peer": {
-                "description": "The peer being downloaded from.\n\nAvailable with downlad events.",
-                "type": "string"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "download"
-                ]
-              }
-            },
-            "required": [
-              "peer",
-              "reason"
-            ]
-          },
-          {
-            "description": "Future variants that might be unknown.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          }
-        ]
-      },
-      "InstallinatorStepId": {
-        "description": "Installinator step identifier.",
-        "type": "string",
-        "enum": [
-          "download",
-          "format",
-          "write"
-        ]
-      },
-      "InstallinatorStepMetadata": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "destination": {
-                "nullable": true,
-                "description": "The destination being formatted or written to.\n\nAvailable with format and destination events.",
-                "type": "string",
-                "format": "Utf8PathBuf"
-              },
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "write"
-                ]
-              }
-            },
-            "required": [
-              "destination",
-              "reason"
-            ]
-          },
-          {
-            "description": "Future variants that might be unknown.",
-            "type": "object",
-            "properties": {
-              "reason": {
-                "type": "string",
-                "enum": [
-                  "unknown"
-                ]
-              }
-            },
-            "required": [
-              "reason"
-            ]
-          }
-        ]
-      },
-      "M2Slot": {
-        "description": "An M.2 slot that was written.",
-        "type": "string",
-        "enum": [
-          "A",
-          "B"
-        ]
-      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
@@ -696,6 +492,460 @@
           "A0",
           "A1",
           "A2"
+        ]
+      },
+      "ProgressCounter": {
+        "description": "Current progress.\n\nBoth `current` and `total` are abstract counters. These counters are often a number of bytes. There is no guarantee that the counter won't go back in subsequent events; that can happen e.g. if a fetch happens from multiple peers within a single attempt.",
+        "type": "object",
+        "properties": {
+          "current": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "total": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "current"
+        ]
+      },
+      "ProgressEventForGenericSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForGenericSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForWicketdEngineSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventKindForGenericSpec": {
+        "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "progress"
+                ]
+              },
+              "metadata": {
+                "description": "Metadata that was returned with progress."
+              },
+              "progress": {
+                "nullable": true,
+                "description": "Current progress.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressCounter"
+                  }
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "metadata",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "event": {
+                "description": "The event that occurred.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nested"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "event",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Future variants that might be unknown.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "ProgressEventKindForWicketdEngineSpec": {
+        "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "progress"
+                ]
+              },
+              "metadata": {
+                "description": "Metadata that was returned with progress."
+              },
+              "progress": {
+                "nullable": true,
+                "description": "Current progress.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressCounter"
+                  }
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "metadata",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "event": {
+                "description": "The event that occurred.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ProgressEventForGenericSpec"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "nested"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "event",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
+          {
+            "description": "Future variants that might be unknown.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
         ]
       },
       "RackV1Inventory": {
@@ -946,6 +1196,14 @@
               "error"
             ]
           }
+        ]
+      },
+      "SpComponentUpdateStage": {
+        "type": "string",
+        "enum": [
+          "sending",
+          "preparing",
+          "writing"
         ]
       },
       "SpIdentifier": {
@@ -1216,14 +1474,14 @@
           "total_component_steps"
         ]
       },
-      "StepComponentSummaryForInstallinatorSpec": {
+      "StepComponentSummaryForWicketdEngineSpec": {
         "type": "object",
         "properties": {
           "component": {
             "description": "The component.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstallinatorComponent"
+                "$ref": "#/components/schemas/UpdateComponent"
               }
             ]
           },
@@ -1250,30 +1508,16 @@
               }
             ]
           },
-          "total_elapsed": {
-            "description": "Total time elapsed since the start of execution.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "data",
-          "total_elapsed"
-        ]
-      },
-      "StepEventForInstallinatorSpec": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "description": "The kind of event this is.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepEventKindForInstallinatorSpec"
-              }
-            ]
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
           },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
@@ -1286,6 +1530,46 @@
         },
         "required": [
           "data",
+          "event_index",
+          "execution_id",
+          "total_elapsed"
+        ]
+      },
+      "StepEventForWicketdEngineSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepEventKindForWicketdEngineSpec"
+              }
+            ]
+          },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "event_index",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -1720,7 +2004,7 @@
           }
         ]
       },
-      "StepEventKindForInstallinatorSpec": {
+      "StepEventKindForWicketdEngineSpec": {
         "oneOf": [
           {
             "description": "No steps were defined, and the executor exited without doing anything.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
@@ -1745,14 +2029,14 @@
                 "description": "A list of components, along with the number of items each component has.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepComponentSummaryForInstallinatorSpec"
+                  "$ref": "#/components/schemas/StepComponentSummaryForWicketdEngineSpec"
                 }
               },
               "first_step": {
                 "description": "Information about the first step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1766,7 +2050,7 @@
                 "description": "The list of steps that will be executed.",
                 "type": "array",
                 "items": {
-                  "$ref": "#/components/schemas/StepInfoForInstallinatorSpec"
+                  "$ref": "#/components/schemas/StepInfoForWicketdEngineSpec"
                 }
               }
             },
@@ -1806,18 +2090,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Progress-related metadata associated with this attempt.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/InstallinatorProgressMetadata"
-                  }
-                ]
+                "description": "Progress-related metadata associated with this attempt."
               },
               "step": {
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1872,7 +2151,7 @@
                 "description": "Information about the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1922,7 +2201,7 @@
                 "description": "The next step that is being started.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1930,7 +2209,7 @@
                 "description": "The outcome of the step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcomeForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1938,7 +2217,7 @@
                 "description": "Information about the step that just completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1989,7 +2268,7 @@
                 "description": "The outcome of the last step.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepOutcomeForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepOutcomeForWicketdEngineSpec"
                   }
                 ]
               },
@@ -1997,7 +2276,7 @@
                 "description": "Information about the last step that completed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -2042,7 +2321,7 @@
                 "description": "Information about the step that failed.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -2117,7 +2396,7 @@
                 "description": "Information about the step that's occurring.",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
                   }
                 ]
               },
@@ -2198,7 +2477,7 @@
           "total_component_steps"
         ]
       },
-      "StepInfoForInstallinatorSpec": {
+      "StepInfoForWicketdEngineSpec": {
         "description": "Serializable information about a step.",
         "type": "object",
         "properties": {
@@ -2206,7 +2485,7 @@
             "description": "The component that this step is part of.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstallinatorComponent"
+                "$ref": "#/components/schemas/UpdateComponent"
               }
             ]
           },
@@ -2224,7 +2503,7 @@
             "description": "An identifier for this step.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstallinatorStepId"
+                "$ref": "#/components/schemas/UpdateStepId"
               }
             ]
           },
@@ -2271,7 +2550,7 @@
           "info"
         ]
       },
-      "StepInfoWithMetadataForInstallinatorSpec": {
+      "StepInfoWithMetadataForWicketdEngineSpec": {
         "description": "Serializable information about a step.",
         "type": "object",
         "properties": {
@@ -2279,18 +2558,13 @@
             "description": "Information about this step.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/StepInfoForInstallinatorSpec"
+                "$ref": "#/components/schemas/StepInfoForWicketdEngineSpec"
               }
             ]
           },
           "metadata": {
             "nullable": true,
-            "description": "Additional metadata associated with this step.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstallinatorStepMetadata"
-              }
-            ]
+            "description": "Additional metadata associated with this step."
           }
         },
         "required": [
@@ -2368,7 +2642,7 @@
           }
         ]
       },
-      "StepOutcomeForInstallinatorSpec": {
+      "StepOutcomeForWicketdEngineSpec": {
         "oneOf": [
           {
             "description": "The step completed successfully.",
@@ -2381,12 +2655,7 @@
                 ]
               },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
-                  }
-                ]
+                "description": "Completion metadata associated with the step."
               }
             },
             "required": [
@@ -2409,12 +2678,7 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
-                  }
-                ]
+                "description": "Completion metadata associated with the step."
               }
             },
             "required": [
@@ -2438,11 +2702,7 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step.",
-                "type": "string",
-                "enum": [
-                  null
-                ]
+                "description": "Skipped metadata associated with the step."
               }
             },
             "required": [
@@ -2453,230 +2713,76 @@
           }
         ]
       },
-      "UpdateEvent": {
-        "type": "object",
-        "properties": {
-          "age": {
-            "$ref": "#/components/schemas/Duration"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/UpdateEventKind"
-          }
-        },
-        "required": [
-          "age",
-          "kind"
-        ]
-      },
-      "UpdateEventKind": {
+      "UpdateComponent": {
         "oneOf": [
           {
             "type": "object",
             "properties": {
-              "data": {
-                "$ref": "#/components/schemas/UpdateNormalEventKind"
-              },
-              "kind": {
+              "component": {
                 "type": "string",
                 "enum": [
-                  "normal"
+                  "rot"
                 ]
               }
             },
             "required": [
-              "data",
-              "kind"
+              "component"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "$ref": "#/components/schemas/UpdateTerminalEventKind"
-              },
-              "kind": {
+              "component": {
                 "type": "string",
                 "enum": [
-                  "terminal"
+                  "sp"
                 ]
               }
             },
             "required": [
-              "data",
-              "kind"
-            ]
-          }
-        ]
-      },
-      "UpdateLog": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/UpdateState"
-              }
+              "component"
             ]
           },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/UpdateEvent"
-            }
-          }
-        },
-        "required": [
-          "events"
-        ]
-      },
-      "UpdateLogAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
+          {
             "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/UpdateLog"
+            "properties": {
+              "component": {
+                "type": "string",
+                "enum": [
+                  "host"
+                ]
               }
-            }
+            },
+            "required": [
+              "component"
+            ]
           }
-        },
-        "required": [
-          "sps"
         ]
       },
-      "UpdateNormalEventKind": {
+      "UpdateStepId": {
         "oneOf": [
           {
             "type": "object",
             "properties": {
-              "kind": {
+              "id": {
                 "type": "string",
                 "enum": [
-                  "sp_reset_complete"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  }
-                },
-                "required": [
-                  "artifact"
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "artifact_update_complete"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "$ref": "#/components/schemas/StepEventForInstallinatorSpec"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "installinator_event"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
-            ]
-          }
-        ]
-      },
-      "UpdatePreparationProgress": {
-        "description": "Progress of an SP preparing to update.\n\nThe units of `current` and `total` are unspecified and defined by the SP; e.g., if preparing for an update requires erasing a flash device, this may indicate progress of that erasure without defining units (bytes, pages, sectors, etc.).",
-        "type": "object",
-        "properties": {
-          "current": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "total": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "current",
-          "total"
-        ]
-      },
-      "UpdateState": {
-        "type": "object",
-        "properties": {
-          "age": {
-            "$ref": "#/components/schemas/Duration"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/UpdateStateKind"
-          }
-        },
-        "required": [
-          "age",
-          "kind"
-        ]
-      },
-      "UpdateStateKind": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "component": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "component"
+                  "set_host_power_state"
                 ]
               },
               "state": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_progress"
-                ]
+                "$ref": "#/components/schemas/PowerState"
               }
             },
             "required": [
-              "data",
+              "id",
               "state"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "state": {
+              "id": {
                 "type": "string",
                 "enum": [
                   "resetting_sp"
@@ -2684,284 +2790,59 @@
               }
             },
             "required": [
-              "state"
+              "id"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  }
-                },
-                "required": [
-                  "artifact"
+              "id": {
+                "type": "string",
+                "enum": [
+                  "sp_component_update"
                 ]
               },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "sending_artifact_to_mgs"
-                ]
+              "stage": {
+                "$ref": "#/components/schemas/SpComponentUpdateStage"
               }
             },
             "required": [
-              "data",
-              "state"
+              "id",
+              "stage"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  },
-                  "progress": {
-                    "nullable": true,
-                    "allOf": [
-                      {
-                        "$ref": "#/components/schemas/UpdatePreparationProgress"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "artifact"
-                ]
-              },
-              "state": {
+              "id": {
                 "type": "string",
                 "enum": [
-                  "preparing_for_artifact"
+                  "setting_installinator_image_id"
                 ]
               }
             },
             "required": [
-              "data",
-              "state"
+              "id"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "attempt": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "downloaded_bytes": {
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "elapsed": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "kind": {
-                    "type": "string"
-                  },
-                  "total_bytes": {
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "attempt",
-                  "downloaded_bytes",
-                  "elapsed",
-                  "kind",
-                  "total_bytes"
-                ]
-              },
-              "state": {
+              "id": {
                 "type": "string",
                 "enum": [
-                  "artifact_download_progress"
+                  "clearing_installinator_image_id"
                 ]
               }
             },
             "required": [
-              "data",
-              "state"
+              "id"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "attempt": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "destination": {
-                    "nullable": true,
-                    "type": "string",
-                    "format": "Utf8PathBuf"
-                  },
-                  "elapsed": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "kind": {
-                    "type": "string"
-                  },
-                  "total_bytes": {
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  },
-                  "written_bytes": {
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "attempt",
-                  "destination",
-                  "elapsed",
-                  "kind",
-                  "total_bytes",
-                  "written_bytes"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "artifact_write_progress"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "attempt": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  },
-                  "elapsed": {
-                    "$ref": "#/components/schemas/Duration"
-                  },
-                  "path": {
-                    "type": "string",
-                    "format": "Utf8PathBuf"
-                  },
-                  "percentage": {
-                    "type": "integer",
-                    "format": "uint",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "attempt",
-                  "elapsed",
-                  "path",
-                  "percentage"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "installinator_format_progress"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  }
-                },
-                "required": [
-                  "artifact"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_status"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "power_state": {
-                    "$ref": "#/components/schemas/PowerState"
-                  }
-                },
-                "required": [
-                  "power_state"
-                ]
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "setting_host_power_state"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "setting_installinator_options"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
+              "id": {
                 "type": "string",
                 "enum": [
                   "setting_host_startup_options"
@@ -2969,125 +2850,51 @@
               }
             },
             "required": [
-              "state"
+              "id"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  },
-                  "progress": {
-                    "$ref": "#/components/schemas/HostPhase2Progress"
-                  }
-                },
-                "required": [
-                  "artifact",
-                  "progress"
-                ]
-              },
-              "state": {
+              "id": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_trampoline_image_delivery"
+                  "waiting_for_trampoline_phase2_upload"
                 ]
               }
             },
             "required": [
-              "data",
-              "state"
-            ]
-          }
-        ]
-      },
-      "UpdateTerminalEventKind": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "reason"
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "sp_reset_failed"
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind"
+              "id"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "data": {
-                "type": "object",
-                "properties": {
-                  "artifact": {
-                    "$ref": "#/components/schemas/ArtifactId"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "artifact",
-                  "reason"
-                ]
-              },
-              "kind": {
+              "id": {
                 "type": "string",
                 "enum": [
-                  "artifact_update_failed"
+                  "downloading_installinator"
                 ]
               }
             },
             "required": [
-              "data",
-              "kind"
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "running_installinator"
+                ]
+              }
+            },
+            "required": [
+              "id"
             ]
           }
-        ]
-      },
-      "WriteOutput": {
-        "description": "The output of a write operation.\n\nForms part of [`InstallinatorCompletionMetadata::Write`].",
-        "type": "object",
-        "properties": {
-          "slots_attempted": {
-            "description": "The slots that were requested to be written.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/M2Slot"
-            },
-            "uniqueItems": true
-          },
-          "slots_written": {
-            "description": "The slots that were actually written.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/M2Slot"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "slots_attempted",
-          "slots_written"
         ]
       },
       "IgnitionCommand": {

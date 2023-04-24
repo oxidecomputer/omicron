@@ -9,8 +9,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use installinator_artifactd::ProgressReportStatus;
-use installinator_common::ProgressReport;
+use installinator_artifactd::EventReportStatus;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
@@ -48,8 +47,8 @@ impl IprArtifactServer {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
-    ) -> ProgressReportStatus {
+        report: installinator_common::EventReport,
+    ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().await;
         if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
@@ -93,10 +92,10 @@ impl IprArtifactServer {
                 }
             }
 
-            ProgressReportStatus::Processed
+            EventReportStatus::Processed
         } else {
             slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
-            ProgressReportStatus::UnrecognizedUpdateId
+            EventReportStatus::UnrecognizedUpdateId
         }
     }
 }
@@ -140,17 +139,17 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<ProgressReport>>;
+    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<ProgressReport>>),
+    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
 
     /// Reports from the installinator have been received.
-    ReportsReceived(mpsc::Sender<ProgressReport>),
+    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -188,8 +187,8 @@ impl RunningUpdate {
     }
 
     async fn send_and_next_state(
-        sender: mpsc::Sender<ProgressReport>,
-        report: ProgressReport,
+        sender: mpsc::Sender<installinator_common::EventReport>,
+        report: installinator_common::EventReport,
     ) -> Self {
         let is_terminal = Self::is_terminal(&report);
         _ = sender.send(report).await;
@@ -200,7 +199,7 @@ impl RunningUpdate {
         }
     }
 
-    fn is_terminal(report: &ProgressReport) -> bool {
+    fn is_terminal(report: &installinator_common::EventReport) -> bool {
         report
             .step_events
             .last()
@@ -245,6 +244,7 @@ mod tests {
         StepInfoWithMetadata, StepOutcome, WriteOutput,
     };
     use omicron_test_utils::dev::test_setup_log;
+    use update_engine::ExecutionId;
 
     use super::*;
 
@@ -258,9 +258,12 @@ mod tests {
 
         assert_eq!(
             ipr_artifact
-                .report_progress(Uuid::new_v4(), ProgressReport::default())
+                .report_progress(
+                    Uuid::new_v4(),
+                    installinator_common::EventReport::default()
+                )
                 .await,
-            ProgressReportStatus::UnrecognizedUpdateId,
+            EventReportStatus::UnrecognizedUpdateId,
             "no registered UUIDs yet"
         );
 
@@ -272,14 +275,11 @@ mod tests {
             "no progress yet"
         );
 
-        let first_report = ProgressReport {
-            total_elapsed: Duration::from_secs(1),
-            ..Default::default()
-        };
+        let first_report = installinator_common::EventReport::default();
 
         assert_eq!(
             ipr_artifact.report_progress(update_id, first_report.clone()).await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "initial progress sent"
         );
 
@@ -291,10 +291,13 @@ mod tests {
             "first report matches"
         );
 
+        let execution_id = ExecutionId(Uuid::new_v4());
+
         // Send a completion report.
-        let completion_report = ProgressReport {
-            total_elapsed: Duration::from_secs(4),
+        let completion_report = installinator_common::EventReport {
             step_events: vec![StepEvent {
+                execution_id,
+                event_index: 0,
                 total_elapsed: Duration::from_secs(2),
                 kind: StepEventKind::ExecutionCompleted {
                     last_step: StepInfoWithMetadata {
@@ -332,7 +335,7 @@ mod tests {
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
                 .await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "completion report sent"
         );
 
@@ -356,7 +359,7 @@ mod tests {
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
                 .await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "completion report sent after being closed"
         );
 

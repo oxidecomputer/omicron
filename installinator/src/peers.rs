@@ -14,7 +14,7 @@ use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
 use installinator_common::{
-    InstallinatorProgressMetadata, ProgressReport, StepContext, StepProgress,
+    EventReport, InstallinatorProgressMetadata, StepContext, StepProgress,
 };
 use itertools::Itertools;
 use omicron_common::update::ArtifactHashId;
@@ -372,7 +372,7 @@ impl Peers {
     pub(crate) fn broadcast_report(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> impl Stream<Item = Result<(), ClientError>> + Send + '_ {
         futures::stream::iter(self.peers())
             .map(move |peer| {
@@ -417,7 +417,7 @@ pub(crate) trait PeersImpl: fmt::Debug + Send + Sync {
         &self,
         peer: SocketAddrV6,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> Result<(), ClientError>;
 }
 
@@ -462,7 +462,7 @@ impl PeersImpl for HttpPeers {
         &self,
         peer: SocketAddrV6,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> Result<(), ClientError> {
         let artifact_client = ArtifactClient::new(peer, &self.log);
         artifact_client.report_progress(update_id, report).await

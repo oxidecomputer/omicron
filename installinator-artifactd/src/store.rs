@@ -9,7 +9,7 @@ use std::fmt;
 use async_trait::async_trait;
 use dropshot::HttpError;
 use hyper::Body;
-use installinator_common::ProgressReport;
+use installinator_common::EventReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
 use slog::Logger;
 use uuid::Uuid;
@@ -27,15 +27,15 @@ pub trait ArtifactGetter: fmt::Debug + Send + Sync + 'static {
     async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
-    ) -> Result<ProgressReportStatus, HttpError>;
+        report: EventReport,
+    ) -> Result<EventReportStatus, HttpError>;
 }
 
 /// The status returned by [`ArtifactGetter::report_progress`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[must_use]
-pub enum ProgressReportStatus {
-    /// This event was processed by the server.
+pub enum EventReportStatus {
+    /// This report was processed by the server.
     Processed,
 
     /// The update ID was not recognized by the server.
@@ -79,9 +79,9 @@ impl ArtifactStore {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        event: ProgressReport,
-    ) -> Result<ProgressReportStatus, HttpError> {
-        slog::debug!(self.log, "Report event for {update_id}: {event:?}");
-        self.getter.report_progress(update_id, event).await
+        report: EventReport,
+    ) -> Result<EventReportStatus, HttpError> {
+        slog::debug!(self.log, "Report for {update_id}: {report:?}");
+        self.getter.report_progress(update_id, report).await
     }
 }

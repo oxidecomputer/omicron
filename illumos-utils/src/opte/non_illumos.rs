@@ -6,19 +6,15 @@
 
 use slog::Logger;
 
-mod port;
-mod port_manager;
-
-pub use port::Port;
-pub use port_manager::PortManager;
-pub use port_manager::PortTicket;
-
 use crate::addrobj::AddrObject;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
+    #[error("Invalid IP configuration for port")]
+    InvalidPortIpConfig,
+
+    #[error("Tried to release non-existent port ({0}, {1:?})")]
+    ReleaseMissingPort(uuid::Uuid, super::params::NetworkInterfaceKind),
 }
 
 pub fn initialize_xde_driver(

@@ -19,7 +19,7 @@ progenitor::generate_api!(
     }),
     derives = [schemars::JsonSchema],
     replace = {
-        ProgressReport = installinator_common::ProgressReport,
+        EventReportForInstallinatorSpec = installinator_common::EventReport,
         StepEventForInstallinatorSpec = installinator_common::StepEvent,
         ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
         StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,

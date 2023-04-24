@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fmt, net::SocketAddrV6, time::Duration};
+use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -258,27 +258,6 @@ impl AsError for WriteError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
-}
-
-/// A report, consisting of a list of events and some more metadata.
-#[derive(
-    Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case", tag = "reason")]
-pub struct ProgressReport {
-    /// How long it's been since the installinator started running.
-    pub total_elapsed: Duration,
-
-    /// A list of step events.
-    ///
-    /// Step events include success and failure events.
-    pub step_events: Vec<StepEvent>,
-
-    /// A list of progress events.
-    ///
-    /// For now, this is zero or one events since the installinator performs its
-    /// actions serially.
-    pub progress_events: Vec<ProgressEvent>,
 }
 
 fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {

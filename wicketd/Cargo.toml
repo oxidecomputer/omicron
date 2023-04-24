@@ -23,6 +23,7 @@ reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
 sha2.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
 tempfile.workspace = true

@@ -13,8 +13,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     errors::ExecutionError,
-    events::{Event, StepProgress},
-    NestedSpec, StepSpec, UpdateEngine,
+    events::{Event, EventReport, StepEventKind, StepProgress},
+    NestedError, NestedSpec, StepSpec, UpdateEngine,
 };
 
 /// Context for a step's execution function.
@@ -48,6 +48,69 @@ impl<S: StepSpec> StepContext<S> {
             .send(StepContextPayload::Progress(progress))
             .await
             .expect("our code always keeps the receiver open")
+    }
+
+    /// Sends a report from a nested engine, typically one running on a remote
+    /// machine.
+    ///
+    /// Returns an error if a
+    /// [`StepEventKind::ExecutionFailed`](crate::StepEventKind::ExecutionFailed)
+    /// event was seen.
+    #[inline]
+    pub async fn send_nested_report<S2: StepSpec>(
+        &self,
+        report: EventReport<S2>,
+    ) -> Result<(), NestedError> {
+        let mut res = Ok(());
+        for event in report.step_events {
+            if let StepEventKind::ExecutionFailed { message, causes, .. } =
+                &event.kind
+            {
+                res = Err(NestedError::new(message.clone(), causes.clone()));
+            }
+
+            match event.into_generic() {
+                Ok(event) => {
+                    self.payload_sender
+                        .send(StepContextPayload::Nested(Event::Step(event)))
+                        .await
+                        .expect("our code always keeps the receiver open");
+                }
+                Err(error) => {
+                    // All we can really do is log this as a
+                    // warning. This shouldn't happen unless a
+                    // serializer errors out.
+                    slog::warn!(
+                        self.log,
+                        "error serializing nested event: {error}"
+                    );
+                }
+            }
+        }
+
+        for event in report.progress_events {
+            match event.into_generic() {
+                Ok(event) => {
+                    self.payload_sender
+                        .send(StepContextPayload::Nested(Event::Progress(
+                            event,
+                        )))
+                        .await
+                        .expect("our code always keeps the receiver open");
+                }
+                Err(error) => {
+                    // All we can really do is log this as a
+                    // warning. This shouldn't happen unless a
+                    // serializer errors out.
+                    slog::warn!(
+                        self.log,
+                        "error serializing nested event: {error}"
+                    );
+                }
+            }
+        }
+
+        res
     }
 
     /// Creates a nested execution engine.
@@ -102,8 +165,9 @@ impl<S: StepSpec> StepContext<S> {
                                     .expect("we always keep the receiver open");
                                 }
                                 Err(error) => {
-                                    // All we can really do is log this as a warning.
-                                    // This
+                                    // All we can really do is log this as a
+                                    // warning. This shouldn't happen unless a
+                                    // serializer errors out.
                                     slog::warn!(self.log, "error serializing nested event: {error}");
                                 }
                             }

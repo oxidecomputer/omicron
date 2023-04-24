@@ -481,3 +481,89 @@ async fn test_make_disk_from_image_too_small(
         )
     );
 }
+
+#[nexus_test]
+async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    DiskTest::new(&cptestctx).await;
+
+    let server = ServerBuilder::new().run().unwrap();
+    server.expect(
+        Expectation::matching(request::method_path("HEAD", "/image.raw"))
+            .times(1..)
+            .respond_with(
+                status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                ),
+            ),
+    );
+
+    let silo_images_url = "/v1/images";
+    let images_url = get_project_images_url(PROJECT_NAME);
+
+    create_project(client, PROJECT_NAME).await;
+
+    let images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(images.len(), 0);
+
+    let image_create_params = get_image_create(params::ImageSource::Url {
+        url: server.url("/image.raw").to_string(),
+    });
+
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    let project_images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(project_images.len(), 1);
+    assert_eq!(project_images[0].identity.name, "alpine-edge");
+
+    let image_id = project_images[0].identity.id;
+    let project_image_url = format!("/v1/images/{}", image_id);
+
+    let project_image = NexusRequest::object_get(client, &project_image_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    assert_eq!(project_image.identity.id, image_id);
+
+    // promote the image to the silo
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 1);
+    assert_eq!(silo_images[0].identity.name, "alpine-edge");
+
+    let silo_image_url = format!("/v1/images/{}", image_id);
+    let silo_image = NexusRequest::object_get(client, &silo_image_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    assert_eq!(silo_image.identity.id, image_id);
+}

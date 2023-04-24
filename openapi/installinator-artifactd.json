@@ -125,7 +125,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ProgressReport"
+                "$ref": "#/components/schemas/EventReportForInstallinatorSpec"
               }
             }
           },
@@ -195,6 +195,37 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EventReportForInstallinatorSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForInstallinatorSpec"
+            }
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForInstallinatorSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
         ]
       },
       "InstallinatorCompletionMetadata": {
@@ -417,6 +448,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -428,6 +464,7 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -442,6 +479,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -453,11 +495,61 @@
         },
         "required": [
           "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
       "ProgressEventKindForGenericSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -595,6 +687,55 @@
       },
       "ProgressEventKindForInstallinatorSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -735,39 +876,6 @@
           }
         ]
       },
-      "ProgressReport": {
-        "description": "A report, consisting of a list of events and some more metadata.",
-        "type": "object",
-        "properties": {
-          "progress_events": {
-            "description": "A list of progress events.\n\nFor now, this is zero or one events since the installinator performs its actions serially.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProgressEventForInstallinatorSpec"
-            }
-          },
-          "step_events": {
-            "description": "A list of step events.\n\nStep events include success and failure events.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StepEventForInstallinatorSpec"
-            }
-          },
-          "total_elapsed": {
-            "description": "How long it's been since the installinator started running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
-          }
-        },
-        "required": [
-          "progress_events",
-          "step_events",
-          "total_elapsed"
-        ]
-      },
       "StepComponentSummaryForGenericSpec": {
         "type": "object",
         "properties": {
@@ -820,6 +928,17 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -831,6 +950,8 @@
         },
         "required": [
           "data",
+          "event_index",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -845,6 +966,17 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -856,6 +988,8 @@
         },
         "required": [
           "data",
+          "event_index",
+          "execution_id",
           "total_elapsed"
         ]
       },
