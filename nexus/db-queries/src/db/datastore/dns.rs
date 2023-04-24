@@ -29,6 +29,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::bail_unless;
 use slog::debug;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::num::NonZeroU32;
@@ -593,14 +594,16 @@ impl DnsVersionUpdateBuilder {
         name: String,
         records: Vec<DnsRecord>,
     ) -> Result<(), Error> {
-        if self.names_added.contains_key(&name) {
-            Err(Error::internal_error(&format!(
+        match self.names_added.entry(name) {
+            Entry::Vacant(entry) => {
+                entry.insert(records);
+                Ok(())
+            }
+            Entry::Occupied(entry) => Err(Error::internal_error(&format!(
                 "DNS update ({:?}) attempted to add name {:?} multiple times",
-                self.comment, &name
-            )))
-        } else {
-            assert!(self.names_added.insert(name, records).is_none());
-            Ok(())
+                self.comment,
+                entry.key()
+            ))),
         }
     }
 
@@ -623,7 +626,7 @@ impl DnsVersionUpdateBuilder {
                 self.comment, &name,
             )))
         } else {
-            assert!(self.names_removed.insert(name.clone()));
+            assert!(self.names_removed.insert(name));
             Ok(())
         }
     }
