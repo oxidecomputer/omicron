@@ -146,6 +146,7 @@ function install_packages {
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
     packages=(
+      'coreutils'
       'postgresql'
       'pkg-config'
       'libxmlsec1'
