@@ -203,7 +203,8 @@ impl InstanceStates {
         //       target explicitly, but there currently isn't enough information
         //       to do that (the source doesn't know the target's sled ID or
         //       Propolis IP), so just let the target deal with updating
-        //       everything.
+        //       everything. TODO(#3139): fix this once this information is
+        //       available here.
         //
         //       This is the one case in which this routine explicitly *should
         //       not* transition the current state (to avoid having a "stopped"

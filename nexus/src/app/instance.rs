@@ -1097,6 +1097,28 @@ impl super::Nexus {
         }
     }
 
+    /// Applies any system configuration changes that result from changes to an
+    /// instance's active sled and/or active Propolis ID.
+    ///
+    /// This routine is meant to be called in response to a call from sled agent
+    /// to update an instance's runtime state. This routine expects that sled
+    /// agent will retry these updates if they fail. Accordingly, this routine
+    /// is idempotent and will not panic on unexpected input (since a panic on
+    /// unexpected input could lead to a single sled taking down Nexuses one by
+    /// one).
+    ///
+    /// # Parameters
+    ///
+    /// - `opctx`: The internal operation context to use for database
+    ///   operations.
+    /// - `new_runtime`: The runtime state for the instance of interest that the
+    ///   caller will attempt to write back to CRDB.
+    /// - `db_instance`: The current instance runtime state the caller fetched
+    ///   from CRDB.
+    ///
+    /// # Return value
+    ///
+    /// `Ok` if all required updates were applied, `Err` otherwise.
     async fn handle_instance_propolis_gen_change(
         &self,
         opctx: &OpContext,
@@ -1142,6 +1164,11 @@ impl super::Nexus {
             None,
         )
         .await?;
+
+        // Clean up any resource reservations for Propolises that no longer
+        // appear in the instance record.
+        self.reclaim_unused_propolis_resources(opctx, new_runtime, db_instance)
+            .await?;
 
         Ok(())
     }
@@ -1352,6 +1379,127 @@ impl super::Nexus {
             })?;
 
             info!(log, "creation of nat entry successful for: {target_ip:#?}");
+        }
+
+        Ok(())
+    }
+
+    /// Compares the existing Propolis record in CRDB (`db_instance`) with a new
+    /// instance runtime state supplied from a sled agent, determines whether
+    /// any Propolis VMMs will be left unused as a result of this transition,
+    /// and releases the resources that were reserved to them.
+    async fn reclaim_unused_propolis_resources(
+        &self,
+        opctx: &OpContext,
+        new_runtime: &nexus::InstanceRuntimeState,
+        db_instance: &nexus_db_model::Instance,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+        let instance_id = db_instance.id();
+
+        // Handle changes to the instance's active Propolis ID. The only
+        // expected change is from the current ID to a migration destination ID.
+        let old_propolis_id = db_instance.runtime().propolis_id;
+        if new_runtime.propolis_id != old_propolis_id {
+            match db_instance.runtime().dst_propolis_id {
+                Some(dst_id) if dst_id != new_runtime.propolis_id => {
+                    warn!(log,
+                          "active Propolis did not change to migration target";
+                          "instance_id" => %instance_id,
+                          "new_propolis_id" => %new_runtime.propolis_id,
+                          "old_propolis_id" => %old_propolis_id,
+                          "dst_propolis_id" => %dst_id);
+                }
+                None => {
+                    warn!(log,
+                          "active Propolis changed without an active migration";
+                          "instance_id" => %instance_id,
+                          "new_propolis_id" => %new_runtime.propolis_id,
+                          "old_propolis_id" => %old_propolis_id);
+                }
+                Some(_) => {}
+            }
+
+            // Propolises stop themselves after a migration out, but there is no
+            // way to guarantee this has happened by the time this function
+            // executes (because this may have been triggered by an update from
+            // a migration target). To ensure the source Propolis is no longer
+            // consuming resources, explicitly unregister it before deleting
+            // its reservation.
+            info!(log, "reclaiming resources from migrated-out Propolis";
+                  "instance_id" => %instance_id,
+                  "propolis_id" => %old_propolis_id);
+
+            let old_sa =
+                self.sled_client(&db_instance.runtime().sled_id).await?;
+
+            // The caller is going to replace the instance runtime state with
+            // the newly-advanced state it supplied, so there's no need to write
+            // the returned runtime state back to CRDB here.
+            let _ = old_sa.instance_unregister(&instance_id).await?;
+            self.datastore()
+                .sled_reservation_delete(
+                    opctx,
+                    db_instance.runtime().propolis_id,
+                )
+                .await?;
+        }
+
+        // Handle changes to the migration destination ID.
+        let old_dst_id = match (
+            db_instance.runtime().dst_propolis_id,
+            new_runtime.dst_propolis_id,
+        ) {
+            // There was an ID and now there isn't one.
+            //
+            // If the destination Propolis ID has become the active ID, do
+            // nothing. (The code above handled cleaning up the old migration
+            // source.) Otherwise, the destination is not in use (probably
+            // because migration failed), so clean it up.
+            (Some(old_dst_id), None) => {
+                if old_dst_id == new_runtime.propolis_id {
+                    None
+                } else {
+                    Some(old_dst_id)
+                }
+            }
+            // The destination ID is not supposed to change from one value to
+            // another without passing through None first. If it does, warn,
+            // but then clean up the old destination to avoid leaking it.
+            (Some(old_dst_id), Some(new_dst_id))
+                if old_dst_id != new_dst_id =>
+            {
+                warn!(log,
+                      "destination Propolis ID changed unexpectedly";
+                      "instance_id" => %instance_id,
+                      "new_dst_propolis_id" => %new_dst_id,
+                      "old_dst_propolis_id" => %old_dst_id);
+
+                Some(old_dst_id)
+            }
+            // Either neither record had a destination ID, or the two IDs were
+            // the same, so there's no unused destination to clean up.
+            _ => None,
+        };
+
+        // TODO(#3139): Ideally, this code path would do the same thing as its
+        // counterpart above and call the destination sled to make sure the
+        // unused Propolis really is gone before deleting the reservation for
+        // it. The difficulty is that the destination sled ID is not readily
+        // available here, so it's not clear where to send that request.
+        //
+        // The (failed) destination will still clean up the old Propolis, so the
+        // resources will be released eventually, but this does create the
+        // possibility that the reservation will be released before the
+        // resources are. This might cause a subsequent VM creation on the
+        // affected sled to fail unexpectedly because its reservoir contains
+        // insufficient free memory.
+        if let Some(old_dst_id) = old_dst_id {
+            info!(log, "reclaiming resources from failed migration target";
+                  "instance_id" => %instance_id,
+                  "propolis_id" => %old_dst_id);
+
+            self.datastore().sled_reservation_delete(opctx, old_dst_id).await?;
         }
 
         Ok(())

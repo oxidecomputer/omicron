@@ -518,14 +518,38 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     // Explicitly create an instance with no disks. Simulated sled agent assumes
     // that disks are co-located with their instances.
-    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from(instance_name)).unwrap(),
+            description: String::from("birds are migratory"),
+        },
+        // Explicitly set the number of CPUs to the number of available CPUs
+        // on a simulated sled. This is used to test post-migration accounting.
+        ncpus: InstanceCpuCount::try_from(i64::from(
+            nexus_test_utils::TEST_HARDWARE_THREADS,
+        ))
+        .unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: String::from("test"),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        start: true,
+    };
+
+    let instance = NexusRequest::objects_post(
         client,
-        PROJECT_NAME,
-        instance_name,
-        &params::InstanceNetworkInterfaceAttachment::Default,
-        vec![],
+        &get_instances_url(),
+        &instance_params,
     )
-    .await;
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create first instance")
+    .parsed_body::<Instance>()
+    .unwrap();
+
     let instance_id = instance.identity.id;
 
     // Poke the instance into an active state.
@@ -568,6 +592,33 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
 
     let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
     assert_eq!(current_sled, dst_sled_id);
+
+    // Because the simulated migration succeeded, the old sled's resources
+    // should have been released, allowing a second instance to be created.
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("locust-movement")).unwrap(),
+            description: String::from("certain insects are also migratory"),
+        },
+        ..instance_params
+    };
+
+    let other_instance = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to create second instance")
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    // The second instance should have landed on the other sled.
+    let other_instance_id = other_instance.identity.id;
+    let other_sled = nexus.instance_sled_id(&other_instance_id).await.unwrap();
+    assert_ne!(current_sled, other_sled);
 }
 
 #[nexus_test]
