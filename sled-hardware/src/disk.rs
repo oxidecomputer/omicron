@@ -363,7 +363,7 @@ mod test {
         assert_eq!(
             paths
                 .partition_device_path(
-                    &[Partition::ZfsPool,],
+                    &[Partition::ZfsPool],
                     Partition::ZfsPool,
                     false,
                 )
