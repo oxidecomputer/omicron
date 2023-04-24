@@ -227,7 +227,7 @@ mod tests {
         let status_code = StatusCode::OK;
         tracker
             .update(
-                &RequestInfo::new(request, "0.0.0.0:0".parse().unwrap()),
+                &RequestInfo::new(&request, "0.0.0.0:0".parse().unwrap()),
                 status_code,
                 Duration::from_secs_f64(0.5),
             )
