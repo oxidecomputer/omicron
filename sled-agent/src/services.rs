@@ -39,7 +39,6 @@ use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
-use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
@@ -129,6 +128,9 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
+
+    #[error("No U.2 Zpools found")]
+    NoU2Zpool,
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -230,6 +232,49 @@ struct ZoneRequest {
     zone: ServiceZoneRequest,
     root: PathBuf,
 }
+
+// TODO TODO TODO TODO:
+//
+// We need to validate it against incoming requests, which probably don't know
+// which U.2 the zone FS exists upon.
+//
+// - TODO(separate PR): We should be agnostic to the zone fs, and using datasets
+// instead. Go fix the DNS services!
+//    -> Basically move 'em into the "StorageManager" purview
+// - TODO: We could do maintenance on the set of zone FSes -- if we see one that
+// should not exist, delete it.
+//    -> It probably makes sense to have the heavy "check all services request"
+//    through Nexus as a point of synchronization, but not as the only way to
+//    establish the services running on the sled.
+//    -> Though maybe it *does* make sense? Think about the RPW scenario
+// - TODO: If the U.2 for a zone FS disappears, move the zone elsewhere.
+//    -> Is this covered
+// - TODO: When selecting a U.2, we could ask the storage manager?
+//    -> It would be nice, perhaps if the service and storage manager were
+//    integrated.
+// - TODO: We could also merge the storage manager with the service manager? IDK
+//    -> feels like to *some* degree, yes. Basically where we enter the
+//    territory of zone management, and adding the complexity to picking a root
+//    dataset for the zone will make that overlap grow.
+//
+//    CONFIGS
+//    - Both of them write a config file down to mark what they're responsible
+//    for. And both of these could be unified w.r.t. how this information is
+//    inferred.
+//    - StorageManager writes dataset configuration into "/var/oxide/{dataset-UUID}"
+//      - Specifically, it writes down:
+//        - DatasetInfo: Address + DatasetKind + DatasetName
+//    - ServiceManager writes down configuration into "/var/oxide/services.toml"
+//        - Vec<ZoneRequest> -> ServiceZoneRequest + Path where Zone exists
+//        - ... but also it's like *all* services, so the whole thing gets
+//        re-written each time we use it? Little funky re: scaling.
+//    - TO MERGE:
+//      - For each zpool, create a zpool dataset
+//
+// - TODO: Also, later, we want the ability to remove services if Nexus requests that.
+// Generation number?
+//
+// TODO: I think instances have the same problem we have here
 
 struct Task {
     // A signal for the initializer task to terminate
@@ -1437,7 +1482,15 @@ impl ServiceManager {
 
         let mut zone_requests = AllZoneRequests::new();
         for zone in new_zone_requests.into_iter() {
-            let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            let root = self
+                .inner
+                .storage
+                .resources()
+                .random_u2_zpool()
+                .await
+                .ok_or_else(|| Error::NoU2Zpool)?
+                .dataset_path(sled_hardware::disk::ZONE_DATASET);
+
             zone_requests.requests.push(ZoneRequest { zone, root });
         }
 
@@ -1818,7 +1871,14 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let root = self
+            .inner
+            .storage
+            .resources()
+            .random_u2_zpool()
+            .await
+            .ok_or_else(|| Error::NoU2Zpool)?
+            .dataset_path(sled_hardware::disk::ZONE_DATASET);
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
         *sled_zone =
