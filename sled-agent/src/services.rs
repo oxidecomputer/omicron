@@ -549,14 +549,15 @@ impl ServiceManager {
     }
 
     // Check the services intended to run in the zone to determine whether any
-    // physical links or vnics need to be mapped into the zone when it is created.
-    //
-    // NOTE: This function is implemented to return the first link found, under
-    // the assumption that "at most one" would be necessary.
+    // physical links or vnics need to be mapped into the zone when it is
+    // created. Returns a list of links, plus whether or not they need link
+    // local addresses in the zone.
     fn links_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Vec<Link>, Error> {
+    ) -> Result<Vec<(Link, bool)>, Error> {
+        let mut links: Vec<(Link, bool)> = Vec::new();
+
         for svc in &req.services {
             match svc {
                 ServiceType::Nexus { .. }
@@ -572,7 +573,7 @@ impl ServiceManager {
                         .new_control(None)
                     {
                         Ok(n) => {
-                            return Ok(vec![n]);
+                            links.push((n, false));
                         }
                         Err(e) => {
                             return Err(Error::NexusVnicCreation(e));
@@ -585,7 +586,9 @@ impl ServiceManager {
                     // bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
-                            return Ok(vec![link]);
+                            // It's important that tfpkt does **not** receive a
+                            // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
+                            links.push((link, false));
                         }
                         Err(_) => {
                             return Err(Error::MissingDevice {
@@ -597,14 +600,12 @@ impl ServiceManager {
                 ServiceType::Maghemite { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
-                    let mut links = Vec::with_capacity(
-                        self.inner.switch_zone_maghemite_links.len(),
-                    );
-
                     for link in &self.inner.switch_zone_maghemite_links {
                         match Dladm::verify_link(&link.to_string()) {
                             Ok(link) => {
-                                links.push(link);
+                                // Link local addresses should be created in the
+                                // zone so that maghemite can listen on them.
+                                links.push((link, true));
                             }
 
                             Err(_) => {
@@ -614,14 +615,12 @@ impl ServiceManager {
                             }
                         }
                     }
-
-                    return Ok(links);
                 }
                 _ => (),
             }
         }
 
-        Ok(vec![])
+        Ok(links)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -712,7 +711,15 @@ impl ServiceManager {
                 Some((vnic, address)) => (Some(vnic), Some(address)),
                 None => (None, None),
             };
-        let links = self.links_needed(request)?;
+
+        // Unzip here, then zip later - it's important that the InstalledZone
+        // owns the links, but it doesn't care about the boolean for requesting
+        // link local addresses.
+        let links: Vec<Link>;
+        let links_need_link_local: Vec<bool>;
+        (links, links_need_link_local) =
+            self.links_needed(request)?.into_iter().unzip();
+
         let limit_priv = Self::privs_needed(request);
 
         let devices: Vec<zone::Device> = device_names
@@ -779,17 +786,22 @@ impl ServiceManager {
 
         let running_zone = RunningZone::boot(installed_zone).await?;
 
-        for link in running_zone.links() {
-            info!(
-                self.inner.log,
-                "Ensuring {}/{} exists in zone",
-                link.name(),
-                IPV6_LINK_LOCAL_NAME
-            );
-            Zones::ensure_has_link_local_v6_address(
-                Some(running_zone.name()),
-                &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME).unwrap(),
-            )?;
+        for (link, needs_link_local) in
+            running_zone.links().iter().zip(links_need_link_local)
+        {
+            if needs_link_local {
+                info!(
+                    self.inner.log,
+                    "Ensuring {}/{} exists in zone",
+                    link.name(),
+                    IPV6_LINK_LOCAL_NAME
+                );
+                Zones::ensure_has_link_local_v6_address(
+                    Some(running_zone.name()),
+                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
+                        .unwrap(),
+                )?;
+            }
         }
 
         if let Some(bootstrap_address) = bootstrap_address {
