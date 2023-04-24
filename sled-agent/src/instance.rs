@@ -77,9 +77,6 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
-    #[error("No U2 Zpool")]
-    NoU2Zpool,
-
     #[error("serde_json failure: {0}")]
     SerdeJsonError(#[from] serde_json::Error),
 
