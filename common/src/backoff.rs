@@ -19,19 +19,6 @@ pub use ::backoff::future::{retry, retry_notify};
 pub use ::backoff::Error as BackoffError;
 pub use ::backoff::{backoff::Backoff, ExponentialBackoff, Notify};
 
-pub trait NotifyTracking<E> {
-    fn notify_ext(&mut self, err: E, count: usize, duration: Duration);
-}
-
-impl<E, F> NotifyTracking<E> for F
-where
-    F: FnMut(E, usize, Duration),
-{
-    fn notify_ext(&mut self, err: E, count: usize, duration: Duration) {
-        self(err, count, duration)
-    }
-}
-
 /// A helper function which modifies what information is tracked within the
 /// callback of the notify function.
 ///
@@ -49,25 +36,22 @@ where
 /// retry is occuring).
 /// - (warning) Something more concerned after a total time threshold has passed.
 ///
-/// Identical to [::backoff::future::retry_notify], but with invokes
-/// the [NotifyTracking::notify_ext] method instead of
+/// Identical to [::backoff::future::retry_notify], but with invokes the a
+/// method passing the total count of calls and total duration instead of
 /// [::backoff::Notify::notify].
-pub async fn retry_notify_ext<I, E, Fn, Fut, B, N>(
-    backoff: B,
-    operation: Fn,
-    mut notify: N,
+pub async fn retry_notify_ext<I, E, Fut>(
+    backoff: impl Backoff,
+    operation: impl FnMut() -> Fut,
+    mut notify: impl FnMut(E, usize, Duration),
 ) -> Result<I, E>
 where
-    B: Backoff,
-    Fn: FnMut() -> Fut,
     Fut: Future<Output = Result<I, BackoffError<E>>>,
-    N: NotifyTracking<E>,
 {
     let mut count = 0;
     let start = Instant::now();
 
     let backoff_notify = |error, _duration| {
-        notify.notify_ext(error, count, start.elapsed());
+        notify(error, count, start.elapsed());
         count += 1;
     };
 
