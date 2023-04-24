@@ -506,10 +506,11 @@
     },
     "schemas": {
       "ByteCount": {
-        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "title": "Count of bytes",
+        "description": "Used to measure memory or disk capacity",
         "type": "integer",
-        "format": "uint64",
-        "minimum": 0
+        "minimum": 0,
+        "maximum": 9223372036854774784
       },
       "CrucibleOpts": {
         "type": "object",

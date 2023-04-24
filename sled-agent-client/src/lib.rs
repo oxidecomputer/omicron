@@ -70,7 +70,7 @@ impl From<omicron_common::api::external::InstanceCpuCount>
 
 impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
     fn from(s: omicron_common::api::external::ByteCount) -> Self {
-        Self(s.to_bytes())
+        Self(s.to_bytes() as i64)
     }
 }
 

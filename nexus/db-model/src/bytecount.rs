@@ -55,13 +55,13 @@ where
 
 impl From<ByteCount> for sled_agent_client::types::ByteCount {
     fn from(b: ByteCount) -> Self {
-        Self(b.to_bytes())
+        Self(b.to_bytes().try_into().unwrap())
     }
 }
 
 impl From<BlockSize> for ByteCount {
     fn from(bs: BlockSize) -> Self {
-        Self(bs.to_bytes().into())
+        Self(bs.to_bytes().try_into().unwrap())
     }
 }
 

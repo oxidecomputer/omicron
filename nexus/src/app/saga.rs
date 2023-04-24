@@ -13,12 +13,12 @@ use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use omicron_common::api::external;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResult;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal;
 use omicron_common::bail_unless;
 use std::sync::Arc;
 use steno::DagBuilder;
@@ -61,7 +61,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResult<external::Saga> {
+    ) -> ListResult<internal::Saga> {
         // The endpoint we're serving only supports `ScanById`, which only
         // supports an ascending scan.
         bail_unless!(
@@ -74,7 +74,7 @@ impl super::Nexus {
             .saga_list(marker, pagparams.limit)
             .await
             .into_iter()
-            .map(external::Saga::from)
+            .map(internal::Saga::from)
             .map(Ok);
         Ok(futures::stream::iter(saga_list).boxed())
     }
@@ -83,12 +83,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         id: Uuid,
-    ) -> LookupResult<external::Saga> {
+    ) -> LookupResult<internal::Saga> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.sec_client
             .saga_get(SagaId::from(id))
             .await
-            .map(external::Saga::from)
+            .map(internal::Saga::from)
             .map(Ok)
             .map_err(|_: ()| {
                 Error::not_found_by_id(ResourceType::SagaDbg, &id)

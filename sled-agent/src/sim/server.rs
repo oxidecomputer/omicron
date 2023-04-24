@@ -100,7 +100,7 @@ impl Server {
                             .hardware
                             .hardware_threads,
                         usable_physical_ram: NexusTypes::ByteCount::try_from(
-                            config.hardware.physical_ram,
+                            config.hardware.physical_ram as i64,
                         )
                         .unwrap(),
                     },

@@ -22,7 +22,9 @@ use uuid::Uuid;
 
 // SILOS
 
-/// Client view of a ['Silo']
+/// View of a Silo
+///
+/// A Silo is the highest level unit of isolation.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Silo {
     #[serde(flatten)]
@@ -45,7 +47,7 @@ pub enum IdentityProviderType {
     Saml,
 }
 
-/// Client view of an [`IdentityProvider`]
+/// View of an Identity Provider
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IdentityProvider {
     #[serde(flatten)]
@@ -81,7 +83,7 @@ pub struct SamlIdentityProvider {
 
 // PROJECTS
 
-/// Client view of a [`Project`]
+/// View of a Project
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Project {
     // TODO-correctness is flattening here (and in all the other types) the
@@ -93,7 +95,7 @@ pub struct Project {
 
 // CERTIFICATES
 
-/// Client view of a [`Certificate`]
+/// View of a Certificate
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Certificate {
     #[serde(flatten)]
@@ -103,7 +105,9 @@ pub struct Certificate {
 
 // IMAGES
 
-/// Client view of global Images
+/// View of a Global Image
+///
+/// Global images are visible to all users within a Silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalImage {
     #[serde(flatten)]
@@ -128,7 +132,9 @@ pub struct GlobalImage {
     pub size: ByteCount,
 }
 
-/// Client view of images
+/// View of an Image
+///
+/// Images are local to their containing project.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
@@ -167,7 +173,7 @@ pub enum SnapshotState {
     Destroyed,
 }
 
-/// Client view of a Snapshot
+/// View of a Snapshot
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Snapshot {
     #[serde(flatten)]
@@ -183,7 +189,7 @@ pub struct Snapshot {
 
 // VPCs
 
-/// Client view of a [`Vpc`]
+/// View of a VPC
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Vpc {
     #[serde(flatten)]
@@ -268,7 +274,7 @@ pub struct ExternalIp {
 
 // RACKS
 
-/// Client view of an [`Rack`]
+/// View of an Rack
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Rack {
     #[serde(flatten)]
@@ -308,7 +314,10 @@ pub enum PhysicalDiskType {
     External,
 }
 
-/// Client view of a [`PhysicalDisk`]
+/// View of a Physical Disk
+///
+/// Physical disks reside in a particular sled and are used to store both
+/// Instance Disk data as well as internal metadata.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PhysicalDisk {
     #[serde(flatten)]
@@ -326,7 +335,7 @@ pub struct PhysicalDisk {
 
 // SILO USERS
 
-/// Client view of a [`User`]
+/// View of a User
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct User {
     pub id: Uuid,
@@ -352,21 +361,24 @@ pub struct CurrentUser {
 
 // SILO GROUPS
 
-/// Client view of a [`Group`]
+/// View of a Group
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Group {
     pub id: Uuid,
 
-    /** Human-readable name that can identify the group */
+    /// Human-readable name that can identify the group
     pub display_name: String,
 
-    /** Uuid of the silo to which this group belongs */
+    /// Uuid of the silo to which this group belongs
     pub silo_id: Uuid,
 }
 
 // BUILT-IN USERS
 
-/// Client view of a [`UserBuiltin`]
+/// View of a Built-in User
+///
+/// A Built-in User is explicitly created as opposed to being derived from an
+/// Identify Provider.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltin {
     // TODO-correctness is flattening here (and in all the other types) the
@@ -377,7 +389,7 @@ pub struct UserBuiltin {
 
 // ROLES
 
-/// Client view of a [`Role`]
+/// View of a Role
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct Role {
     pub name: RoleName,
@@ -386,7 +398,7 @@ pub struct Role {
 
 // SSH KEYS
 
-/// Client view of a [`SshKey`]
+/// View of an SSH Key
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SshKey {
     #[serde(flatten)]

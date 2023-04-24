@@ -3755,6 +3755,7 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "omicron-common 0.1.0",
  "progenitor",
  "regress",
@@ -4611,12 +4612,14 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openapi-lint"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#91f0af87bdaed0e41c8b43f4b0d85cc706d6a961"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#c2ac10b65f6a39519c1e7ac808575b679b5ed93c"
 dependencies = [
  "heck 0.4.1",
  "indexmap",
+ "lazy_static",
  "openapiv3",
+ "regex",
 ]
 
 [[package]]

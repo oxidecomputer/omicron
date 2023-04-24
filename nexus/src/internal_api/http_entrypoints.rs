@@ -19,13 +19,21 @@ use dropshot::HttpResponseDeleted;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
+use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
+use omicron_common::api::external::http_pagination::data_page_params_for;
+use omicron_common::api::external::http_pagination::PaginatedById;
+use omicron_common::api::external::http_pagination::ScanById;
+use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::to_list;
+use omicron_common::api::internal::Saga;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -51,6 +59,10 @@ pub fn internal_api() -> NexusApiDescription {
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
+
+        api.register(saga_list)?;
+        api.register(saga_view)?;
+
         Ok(())
     }
 
@@ -384,4 +396,58 @@ async fn cpapi_artifact_download(
         nexus.download_artifact(&opctx, path_params.into_inner()).await?;
 
     Ok(HttpResponseOk(Body::from(body).into()))
+}
+
+// Sagas
+
+/// List sagas
+#[endpoint {
+    method = GET,
+    path = "/sagas",
+}]
+async fn saga_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
+        let view_list = to_list(saga_stream).await;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, saga: &Saga| saga.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Saga requests
+#[derive(Deserialize, JsonSchema)]
+struct SagaPathParam {
+    saga_id: Uuid,
+}
+
+/// Fetch a saga
+#[endpoint {
+    method = GET,
+    path = "/sagas/{saga_id}",
+}]
+async fn saga_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SagaPathParam>,
+) -> Result<HttpResponseOk<Saga>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
+        Ok(HttpResponseOk(saga))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
