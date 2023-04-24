@@ -16,45 +16,62 @@ use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// Kick off all background tasks
+/// Describes ongoing background tasks and provides interfaces for working with
+/// them
 ///
-/// Returns a `Driver` that can be used for inspecting background tasks and
-/// their state, along with some well-known tasks
-pub fn init(
-    opctx: &OpContext,
-    datastore: Arc<DataStore>,
-    config: &BackgroundTaskConfig,
-) -> (
-    common::Driver,
-    common::TaskHandle,
-    common::TaskHandle,
-    common::TaskHandle,
-    common::TaskHandle,
-) {
-    let mut driver = common::Driver::new();
+/// Most interaction happens through the `driver` field.  The rest of the fields
+/// are specific background tasks.
+pub struct BackgroundTasks {
+    /// interface for working with background tasks (activation, checking
+    /// status, etc.)
+    pub driver: common::Driver,
 
-    let (task_config, task_servers) = init_dns(
-        &mut driver,
-        opctx,
-        datastore.clone(),
-        DnsGroup::Internal,
-        &config.dns_internal,
-    );
-    let (external_task_config, external_task_servers) = init_dns(
-        &mut driver,
-        opctx,
-        datastore,
-        DnsGroup::External,
-        &config.dns_external,
-    );
+    /// task handle for the internal DNS config background task
+    pub task_internal_dns_config: common::TaskHandle,
+    /// task handle for the internal DNS servers background task
+    pub task_internal_dns_servers: common::TaskHandle,
+    /// task handle for the external DNS config background task
+    pub task_external_dns_config: common::TaskHandle,
+    /// task handle for the external DNS servers background task
+    pub task_external_dns_servers: common::TaskHandle,
+}
 
-    (
-        driver,
-        task_config,
-        task_servers,
-        external_task_config,
-        external_task_servers,
-    )
+impl BackgroundTasks {
+    /// Kick off all background tasks
+    pub fn start(
+        opctx: &OpContext,
+        datastore: Arc<DataStore>,
+        config: &BackgroundTaskConfig,
+    ) -> BackgroundTasks {
+        let mut driver = common::Driver::new();
+
+        let (task_internal_dns_config, task_internal_dns_servers) = init_dns(
+            &mut driver,
+            opctx,
+            datastore.clone(),
+            DnsGroup::Internal,
+            &config.dns_internal,
+        );
+        let (task_external_dns_config, task_external_dns_servers) = init_dns(
+            &mut driver,
+            opctx,
+            datastore,
+            DnsGroup::External,
+            &config.dns_external,
+        );
+
+        BackgroundTasks {
+            driver,
+            task_internal_dns_config,
+            task_internal_dns_servers,
+            task_external_dns_config,
+            task_external_dns_servers,
+        }
+    }
+
+    pub fn activate(&self, task: &common::TaskHandle) {
+        self.driver.activate(task);
+    }
 }
 
 fn init_dns(
@@ -240,7 +257,9 @@ pub mod test {
         write_test_dns_generation(datastore, internal_dns_zone_id).await;
 
         // Activate the internal DNS propagation pipeline.
-        nexus.background_tasks.activate(&nexus.task_internal_dns_config);
+        nexus
+            .background_tasks
+            .activate(&nexus.background_tasks.task_internal_dns_config);
 
         // Wait for the new generation to get propagated to both servers.
         wait_propagate_dns(

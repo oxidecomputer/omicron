@@ -115,7 +115,8 @@ impl super::Nexus {
                 dns_update,
             )
             .await?;
-        self.background_tasks.activate(&self.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_dns_config);
         Ok(silo)
     }
 
@@ -145,7 +146,8 @@ impl super::Nexus {
         datastore
             .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
             .await?;
-        self.background_tasks.activate(&self.task_external_dns_config);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_dns_config);
         Ok(())
     }
 
