@@ -20,11 +20,11 @@ use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-mod disk;
 mod gpt;
+mod partitions;
 mod sysconf;
 
-pub use disk::ensure_partition_layout;
+pub use partitions::ensure_partition_layout;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
