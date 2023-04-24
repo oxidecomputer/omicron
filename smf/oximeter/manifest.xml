@@ -3,7 +3,7 @@
 
 <service_bundle type='manifest' name='oximeter'>
 
-<service name='system/illumos/oximeter' type='service' version='1'>
+<service name='oxide/oximeter' type='service' version='1'>
   <create_default_instance enabled='false' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'

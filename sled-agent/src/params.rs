@@ -329,7 +329,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Wicketd => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
-            ServiceType::CruciblePantry => write!(f, "crucible_pantry"),
+            ServiceType::CruciblePantry => write!(f, "crucible/pantry"),
             ServiceType::Ntp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
@@ -341,7 +341,15 @@ impl crate::smf_helper::Service for ServiceType {
         self.to_string()
     }
     fn smf_name(&self) -> String {
-        format!("svc:/system/illumos/{}", self.service_name())
+        match self {
+            // NOTE: This style of service-naming is deprecated
+            ServiceType::Dendrite { .. }
+            | ServiceType::Tfport { .. }
+            | ServiceType::Maghemite { .. } => {
+                format!("svc:/system/illumos/{}", self.service_name())
+            }
+            _ => format!("svc:/oxide/{}", self.service_name()),
+        }
     }
     fn should_import(&self) -> bool {
         true
