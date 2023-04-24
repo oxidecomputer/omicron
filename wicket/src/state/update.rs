@@ -187,7 +187,7 @@ impl RackUpdateState {
                 | ProgressEventKind::Nested { step, .. } => {
                     Some(step.info.component)
                 }
-            ProgressEventKind::Unknown => None,
+                ProgressEventKind::Unknown => None,
             };
             update_component_state(items, component, UpdateState::Updating);
         }

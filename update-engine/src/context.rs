@@ -53,9 +53,7 @@ impl<S: StepSpec> StepContext<S> {
     /// Sends a report from a nested engine, typically one running on a remote
     /// machine.
     ///
-    /// Returns an error if a
-    /// [`StepEventKind::ExecutionFailed`](crate::StepEventKind::ExecutionFailed)
-    /// event was seen.
+    /// Returns an error if a [`StepEventKind::ExecutionFailed`] event was seen.
     #[inline]
     pub async fn send_nested_report<S2: StepSpec>(
         &self,

@@ -207,15 +207,13 @@ impl<'a> ArtifactWriter<'a> {
     ) -> WriteOutput {
         let mut done_drives = BTreeSet::new();
 
-        // How many drives did we finish writing this iteration?
-        let mut success_this_iter = 0;
-
-        // How many drives did we finish writing on a previous iteration?
-        let mut success_prev_iter;
+        // How many drives did we finish writing during the previous iteration?
+        let mut success_prev_iter = 0;
 
         loop {
-            success_prev_iter = success_this_iter;
-            success_this_iter = 0;
+            // How many drives did we finish writing during this iteration?
+            // Includes drives that were written during a previous iteration.
+            let mut success_this_iter = 0;
 
             for (drive, (destinations, progress)) in self.drives.iter_mut() {
                 // Register a separate nested engine for each drive, since we
@@ -236,7 +234,11 @@ impl<'a> ArtifactWriter<'a> {
 
                 match res {
                     Ok(_) => {
-                        // This drive succeeded in this iteration.
+                        // This drive succeeded in this iteration. This can be
+                        // either:
+                        // * the drive was written this time, or
+                        // * the drive was successfully written during a
+                        //   previous attempt.
                         *progress = DriveWriteProgress::Done;
                         done_drives.insert(*drive);
                         success_this_iter += 1;
@@ -275,6 +277,8 @@ impl<'a> ArtifactWriter<'a> {
 
             // Give it a short break, then keep trying.
             tokio::time::sleep(Duration::from_secs(5)).await;
+
+            success_prev_iter = success_this_iter;
         }
 
         WriteOutput {

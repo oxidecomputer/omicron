@@ -186,7 +186,6 @@ impl InstallOpts {
         let host_phase_2_id = ArtifactHashId {
             // TODO: currently we're assuming that wicketd will unpack the host
             // phase 2 image. We may instead have the installinator do it.
-            // kind: KnownArtifactKind::Host.into(),
             kind: ArtifactKind::HOST_PHASE_2,
             hash: image_id.host_phase_2,
         };
@@ -245,8 +244,6 @@ impl InstallOpts {
             WriteDestination::in_directory(destination)?
         };
 
-        // XXX: look at breaking this up into separate steps. This is tricky
-        // because of the combined logic around handling retries.
         engine
             .new_step(
                 InstallinatorComponent::Both,
