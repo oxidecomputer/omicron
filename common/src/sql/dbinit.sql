@@ -196,6 +196,10 @@ CREATE TABLE omicron.public.nexus_service (
     external_ip_id UUID NOT NULL
 );
 
+CREATE UNIQUE INDEX ON omicron.public.nexus_service (
+    external_ip_id
+);
+
 CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'

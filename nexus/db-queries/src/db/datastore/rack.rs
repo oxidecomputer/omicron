@@ -423,12 +423,7 @@ impl DataStore {
                 let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
                 conn.batch_execute_async(sql).await?;
                 Ok(extip_dsl::external_ip
-                    .filter(
-                        extip_dsl::id.eq_any(
-                            nexus_dsl::nexus_service
-                                .select(nexus_dsl::external_ip_id),
-                        ),
-                    )
+                    .inner_join(nexus_dsl::nexus_service)
                     .select(ExternalIp::as_select())
                     .get_results_async(&conn)
                     .await?
