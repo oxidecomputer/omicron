@@ -200,7 +200,7 @@ impl Plan {
             if call_count == 0 {
                 info!(log, "failed to get zpools from {address}"; "error" => ?error);
             } else if total_duration > std::time::Duration::from_secs(20) {
-                warn!(log, "failed to get zpools from {address}"; "error" => ?error);
+                warn!(log, "failed to get zpools from {address}"; "error" => ?error, "total duration" => ?total_duration);
             }
         };
         let u2_zpools = retry_notify_ext(

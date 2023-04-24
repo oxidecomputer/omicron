@@ -337,7 +337,7 @@ async fn ensure_running_zone(
                         } else if total_duration
                             > std::time::Duration::from_secs(5)
                         {
-                            warn!(log, "cockroachdb not yet alive");
+                            warn!(log, "cockroachdb not yet alive"; "total duration" => ?total_duration);
                         }
                     };
                     backoff::retry_notify_ext(

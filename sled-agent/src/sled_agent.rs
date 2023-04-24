@@ -468,12 +468,12 @@ impl SledAgent {
                 if call_count == 0 {
                     info!(
                         log,
-                        "failed to notify nexus about sled agent: {}", err
+                        "failed to notify nexus about sled agent"; "error" => err,
                     );
                 } else if total_duration > std::time::Duration::from_secs(30) {
                     warn!(
                         log,
-                        "failed to notify nexus about sled agent: {}", err
+                        "failed to notify nexus about sled agent"; "error" => err, "total duration" => ?total_duration,
                     );
                 }
             };
