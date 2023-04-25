@@ -228,16 +228,12 @@ impl ExampleContext {
                         temp_dirs_handle.into_value(cx.token()).await;
                     let num_bytes = buf_list.num_bytes() as u64;
 
-                    let destinations = temp_dirs
+                    let destinations: Vec<_> = temp_dirs
                         .iter()
                         .map(|dir| {
-                            let file_name = dir
-                                .path()
-                                .join(format!("write_{component:?}.out"));
-                            Utf8PathBuf::try_from(file_name)
-                                .context("could not convert path to UTF-8")
+                            dir.path().join(format!("write_{component:?}.out"))
                         })
-                        .collect::<Result<Vec<Utf8PathBuf>, _>>()?;
+                        .collect();
 
                     cx.with_nested_engine(|engine| {
                         register_nested_write_steps(
