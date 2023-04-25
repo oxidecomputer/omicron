@@ -288,6 +288,12 @@ async fn ensure_running_zone(
             let zone_root_path = dataset_name
                 .pool_name
                 .dataset_path(sled_hardware::disk::ZONE_DATASET);
+            info!(
+                log,
+                "Installing zone {} to {}",
+                dataset_name.full(),
+                zone_root_path.display()
+            );
             let installed_zone = InstalledZone::install(
                 log,
                 vnic_allocator,
@@ -637,6 +643,8 @@ impl StorageWorker {
         let Some(underlay) = underlay.as_ref() else {
             return Err(Error::UnderlayNotInitialized);
         };
+        let underlay_address = underlay.underlay_address;
+        drop(underlay);
 
         let zone = ensure_running_zone(
             &self.log,
@@ -644,7 +652,7 @@ impl StorageWorker {
             dataset_info,
             &dataset_name,
             do_format,
-            underlay.underlay_address,
+            underlay_address,
         )
         .await?;
 
@@ -675,11 +683,13 @@ impl StorageWorker {
             let underlay = underlay.clone();
 
             async move {
-                let underlay = underlay.lock().await;
-                let Some(underlay) = underlay.as_ref() else {
+                let underlay_guard = underlay.lock().await;
+                let Some(underlay) = underlay_guard.as_ref() else {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
+                let sled_id = underlay.sled_id;
                 let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                drop(underlay_guard);
 
                 lazy_nexus_client
                     .get()
@@ -687,7 +697,7 @@ impl StorageWorker {
                     .map_err(|e| {
                         backoff::BackoffError::transient(e.to_string())
                     })?
-                    .zpool_put(&underlay.sled_id, &pool_id, &zpool_request)
+                    .zpool_put(&sled_id, &pool_id, &zpool_request)
                     .await
                     .map_err(|e| {
                         backoff::BackoffError::transient(e.to_string())
@@ -912,11 +922,14 @@ impl StorageWorker {
             let disk = disk.clone();
             let underlay = underlay.clone();
             async move {
-                let underlay = underlay.lock().await;
-                let Some(underlay) = underlay.as_ref() else {
+                let underlay_guard = underlay.lock().await;
+                let Some(underlay) = underlay_guard.as_ref() else {
                     return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
+                let sled_id = underlay.sled_id;
                 let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                drop(underlay_guard);
+
                 let nexus = lazy_nexus_client.get().await.map_err(|e| {
                     backoff::BackoffError::transient(e.to_string())
                 })?;
@@ -931,7 +944,7 @@ impl StorageWorker {
                                 DiskVariant::U2 => PhysicalDiskKind::U2,
                                 DiskVariant::M2 => PhysicalDiskKind::M2,
                             },
-                            sled_id: underlay.sled_id,
+                            sled_id,
                         };
                         nexus.physical_disk_put(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
@@ -942,7 +955,7 @@ impl StorageWorker {
                             model: disk_identity.model.clone(),
                             serial: disk_identity.serial.clone(),
                             vendor: disk_identity.vendor.clone(),
-                            sled_id: underlay.sled_id,
+                            sled_id,
                         };
                         nexus.physical_disk_delete(&request).await.map_err(
                             |e| backoff::BackoffError::transient(e.to_string()),
