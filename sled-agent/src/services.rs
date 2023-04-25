@@ -1204,10 +1204,12 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    let maghemite_interfaces: Vec<AddrObject> =
-                        if is_gimlet().map_err(|e| {
+                    let is_gimlet = is_gimlet().map_err(|e| {
                             Error::Underlay(underlay::Error::SystemDetection(e))
-                        })? {
+                        })?;
+
+                    let maghemite_interfaces: Vec<AddrObject> =
+                        if is_gimlet {
                             (0..31)
                                 .map(|i| {
                                     // See the `tfport_name` function for how
@@ -1251,6 +1253,14 @@ impl ServiceManager {
                                 .join(" "),
                         ),
                     )?;
+
+                    if is_gimlet {
+                        // Maghemite for a scrimlet needs to be configured to
+                        // talk to dendrite
+                        smfh.setprop("config/dendrite", "true")?;
+                        smfh.setprop("config/dpd_host", "[::1]")?;
+                        smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
+                    }
 
                     smfh.refresh()?;
                 }
