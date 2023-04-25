@@ -66,6 +66,9 @@ pub struct StepEvent<S: StepSpec> {
     /// The execution ID.
     pub execution_id: ExecutionId,
 
+    /// A monotonically increasing index for this `StepEvent`.
+    pub event_index: usize,
+
     /// Total time elapsed since the start of execution.
     pub total_elapsed: Duration,
 
@@ -172,6 +175,7 @@ impl<S: StepSpec> StepEvent<S> {
     ) -> Result<Self, ConvertGenericError> {
         Ok(StepEvent {
             execution_id: value.execution_id,
+            event_index: value.event_index,
             total_elapsed: value.total_elapsed,
             kind: StepEventKind::from_generic(value.kind)
                 .map_err(|error| error.parent("kind"))?,
@@ -186,6 +190,7 @@ impl<S: StepSpec> StepEvent<S> {
     ) -> Result<StepEvent<GenericSpec<E>>, ConvertGenericError> {
         Ok(StepEvent {
             execution_id: self.execution_id,
+            event_index: self.event_index,
             total_elapsed: self.total_elapsed,
             kind: self
                 .kind
@@ -1290,6 +1295,7 @@ mod tests {
                 r#"
                   {
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
+                    "event_index": 0,
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1325,6 +1331,7 @@ mod tests {
                 "#,
                 StepEvent {
                     execution_id,
+                    event_index: 0,
                     total_elapsed: Duration::ZERO,
                     kind: StepEventKind::Unknown,
                 },
@@ -1333,6 +1340,7 @@ mod tests {
                 r#"
                   {
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
+                    "event_index": 1,
                     "total_elapsed": {
                       "secs": 0,
                       "nanos": 0
@@ -1369,6 +1377,7 @@ mod tests {
                 "#,
                 StepEvent::<TestSpec> {
                     execution_id,
+                    event_index: 1,
                     total_elapsed: Duration::ZERO,
                     kind: StepEventKind::ExecutionCompleted {
                         last_step: StepInfoWithMetadata {
