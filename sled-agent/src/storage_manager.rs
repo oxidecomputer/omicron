@@ -287,7 +287,7 @@ async fn ensure_running_zone(
 
             let zone_root_path = dataset_name
                 .pool_name
-                .dataset_path(sled_hardware::disk::ZONE_DATASET);
+                .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
             info!(
                 log,
                 "Installing zone {} to {}",

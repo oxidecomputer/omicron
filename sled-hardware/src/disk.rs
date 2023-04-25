@@ -242,7 +242,7 @@ impl Disk {
             DiskVariant::U2 => U2_EXPECTED_DATASETS.iter(),
         };
         for dataset in datasets.into_iter() {
-            let mountpoint = zpool_name.dataset_path(dataset);
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
 
             let zoned = false;
             let do_format = true;

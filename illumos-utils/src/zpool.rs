@@ -283,10 +283,10 @@ impl ZpoolName {
         self.kind
     }
 
-    /// Returns a path to a dataset within the zpool.
+    /// Returns a path to a dataset's mountpoint within the zpool.
     ///
     /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
-    pub fn dataset_path(&self, dataset: &str) -> PathBuf {
+    pub fn dataset_mountpoint(&self, dataset: &str) -> PathBuf {
         let mut path = PathBuf::new();
         path.push("/pool");
         match self.kind {
