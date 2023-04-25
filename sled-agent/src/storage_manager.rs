@@ -1254,7 +1254,7 @@ impl StorageManager {
                 unparsed_disks.into_iter().collect::<Vec<_>>(),
             ))
             .await
-            .map_err(|_| ())
+            .map_err(|e| e.to_string())
             .expect("Failed to send DisksChanged request");
     }
 
@@ -1266,7 +1266,7 @@ impl StorageManager {
             .tx
             .send(StorageWorkerRequest::AddDisk(disk))
             .await
-            .map_err(|_| ())
+            .map_err(|e| e.to_string())
             .expect("Failed to send AddDisk request");
     }
 
@@ -1279,7 +1279,7 @@ impl StorageManager {
             .tx
             .send(StorageWorkerRequest::RemoveDisk(disk))
             .await
-            .map_err(|_| ())
+            .map_err(|e| e.to_string())
             .expect("Failed to send RemoveDisk request");
     }
 
@@ -1290,7 +1290,7 @@ impl StorageManager {
             .tx
             .send(StorageWorkerRequest::AddSyntheticDisk(name))
             .await
-            .map_err(|_| ())
+            .map_err(|e| e.to_string())
             .expect("Failed to send AddSyntheticDisk request");
     }
 
@@ -1307,7 +1307,7 @@ impl StorageManager {
                 responder: tx,
             }))
             .await
-            .map_err(|_| ())
+            .map_err(|e| e.to_string())
             .expect("Failed to send SetupUnderlayAccess request");
         rx.await.expect("Failed to await underlay setup")
     }
