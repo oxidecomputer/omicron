@@ -17,6 +17,7 @@ use installinator_common::{
     CompletionEventKind, ProgressEventKind, ProgressReport,
 };
 use itertools::Itertools;
+use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
 use tokio::{sync::mpsc, time::Instant};
@@ -39,9 +40,6 @@ pub(crate) enum DiscoveryMechanism {
     List(Vec<SocketAddrV6>),
 }
 
-// TODO: This currently hardcodes this port for the artifact server, will want to sync on this.
-const ARTIFACT_SERVER_PORT: u16 = 14000;
-
 impl DiscoveryMechanism {
     /// Discover peers.
     pub(crate) async fn discover_peers(
@@ -62,7 +60,7 @@ impl DiscoveryMechanism {
                     })?;
                 addrs
                     .map(|addr| {
-                        SocketAddrV6::new(addr, ARTIFACT_SERVER_PORT, 0, 0)
+                        SocketAddrV6::new(addr, BOOTSTRAP_ARTIFACT_PORT, 0, 0)
                     })
                     .collect()
             }
