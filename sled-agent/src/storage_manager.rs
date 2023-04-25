@@ -857,6 +857,7 @@ impl StorageWorker {
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
+        sled_hardware::Disk::ensure_zpool_ready(&self.log, &zpool_name)?;
         let disk = DiskWrapper::Synthetic { zpool_name };
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }

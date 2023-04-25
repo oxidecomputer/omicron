@@ -37,20 +37,24 @@ function success {
 function ensure_zpools {
     # Find the list of zpools the sled agent expects, from its configuration
     # file.
-    readarray -t ZPOOLS < <( \
-            grep '"oxp_' "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
-            sed 's/[ ",]//g' \
-        )
-    for ZPOOL in "${ZPOOLS[@]}"; do
-        VDEV_PATH="$OMICRON_TOP/$ZPOOL.vdev"
-        if ! [[ -f "$VDEV_PATH" ]]; then
-            dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=10G
-        fi
-        success "ZFS vdev $VDEV_PATH exists"
-        if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
-            zpool create -f "$ZPOOL" "$VDEV_PATH"
-        fi
-        success "ZFS zpool $ZPOOL exists"
+    ZPOOL_TYPES=('oxp_' 'oxi_')
+    for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
+        readarray -t ZPOOLS < <( \
+                grep "\"$ZPOOL_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
+                sed 's/[ ",]//g' \
+            )
+        for ZPOOL in "${ZPOOLS[@]}"; do
+            echo "Zpool: [$ZPOOL]"
+            VDEV_PATH="$OMICRON_TOP/$ZPOOL.vdev"
+            if ! [[ -f "$VDEV_PATH" ]]; then
+                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=10G
+            fi
+            success "ZFS vdev $VDEV_PATH exists"
+            if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
+                zpool create -f "$ZPOOL" "$VDEV_PATH"
+            fi
+            success "ZFS zpool $ZPOOL exists"
+        done
     done
 }
 
