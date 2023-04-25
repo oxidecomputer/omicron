@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types shared between across Nexus and Sled Agent.
+//! Types shared between Nexus and Sled Agent.
 
 use crate::api::external;
 use schemars::JsonSchema;
