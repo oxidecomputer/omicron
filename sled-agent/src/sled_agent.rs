@@ -254,7 +254,7 @@ impl SledAgent {
         }
 
         let (gateway_mac, gateway_address) = match &request.gateway {
-            Some(g) => (Some(g.mac.0.clone()), g.address.clone()),
+            Some(g) => (Some(g.mac.0), g.address),
             None => (None, None),
         };
 
