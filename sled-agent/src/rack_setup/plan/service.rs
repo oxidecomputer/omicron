@@ -6,7 +6,8 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use dns_service_client::types::DnsConfigParams;
@@ -286,14 +287,17 @@ impl Plan {
                     zone_type: ZoneType::ExternalDns,
                     addresses: vec![internal_ip],
                     gz_addresses: vec![],
-                    services: vec![ServiceType::ExternalDns {
-                        http_address: SocketAddrV6::new(
-                            internal_ip,
-                            http_port,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddr::new(external_ip, dns_port),
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::ExternalDns {
+                            http_address: SocketAddrV6::new(
+                                internal_ip,
+                                http_port,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddr::new(external_ip, dns_port),
+                        },
                     }],
                 })
             }
@@ -322,9 +326,12 @@ impl Plan {
                     zone_type: ZoneType::Nexus,
                     addresses: vec![address],
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Nexus {
-                        internal_ip: address,
-                        external_ip,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Nexus {
+                            internal_ip: address,
+                            external_ip,
+                        },
                     }],
                 })
             }
@@ -346,7 +353,10 @@ impl Plan {
                     zone_type: ZoneType::Oximeter,
                     addresses: vec![address],
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Oximeter],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Oximeter,
+                    }],
                 })
             }
 
@@ -436,16 +446,19 @@ impl Plan {
                     zone_type: ZoneType::InternalDns,
                     addresses: vec![dns_addr],
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    services: vec![ServiceType::InternalDns {
-                        http_address: SocketAddrV6::new(
-                            dns_addr,
-                            DNS_HTTP_PORT,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddrV6::new(
-                            dns_addr, DNS_PORT, 0, 0,
-                        ),
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::InternalDns {
+                            http_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_HTTP_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     }],
                 });
             }
@@ -468,7 +481,10 @@ impl Plan {
                     zone_type: ZoneType::CruciblePantry,
                     addresses: vec![address],
                     gz_addresses: vec![],
-                    services: vec![ServiceType::CruciblePantry],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::CruciblePantry,
+                    }],
                 })
             }
 
@@ -486,21 +502,27 @@ impl Plan {
                     (
                         // XXXNTP - these boundary servers need a path to the
                         // external network via OPTE.
-                        vec![ServiceType::Ntp {
-                            ntp_servers: config.ntp_servers.clone(),
-                            boundary: true,
-                            dns_servers: config.dns_servers.clone(),
-                            domain: None,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::Ntp {
+                                ntp_servers: config.ntp_servers.clone(),
+                                boundary: true,
+                                dns_servers: config.dns_servers.clone(),
+                                domain: None,
+                            },
                         }],
                         ServiceName::BoundaryNTP,
                     )
                 } else {
                     (
-                        vec![ServiceType::Ntp {
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            boundary: false,
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::Ntp {
+                                ntp_servers: boundary_ntp_servers.clone(),
+                                boundary: false,
+                                dns_servers: rack_dns_servers.clone(),
+                                domain: None,
+                            },
                         }],
                         ServiceName::InternalNTP,
                     )

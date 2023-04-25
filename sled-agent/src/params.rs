@@ -465,7 +465,7 @@ pub struct ServiceZoneRequest {
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
-    pub services: Vec<ServiceType>,
+    pub services: Vec<ServiceZoneService>,
 }
 
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
@@ -482,6 +482,20 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
             gz_addresses: s.gz_addresses,
             services,
         }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct ServiceZoneService {
+    pub id: Uuid,
+    pub details: ServiceType,
+}
+
+impl From<ServiceZoneService> for sled_agent_client::types::ServiceZoneService {
+    fn from(s: ServiceZoneService) -> Self {
+        Self { id: s.id, details: s.details.into() }
     }
 }
 
