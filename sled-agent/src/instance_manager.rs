@@ -425,7 +425,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            MacAddr6::from([0u8; 6]),
+            Some(MacAddr6::from([0u8; 6])),
         )
         .unwrap();
 
@@ -537,7 +537,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            MacAddr6::from([0u8; 6]),
+            Some(MacAddr6::from([0u8; 6])),
         )
         .unwrap();
 
