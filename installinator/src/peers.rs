@@ -124,6 +124,10 @@ impl FetchedArtifact {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<Peers, DiscoverPeersError>>,
     {
+        // How long to sleep between retries if we fail to find a peer or fail
+        // to fetch an artifact from a found peer.
+        const RETRY_DELAY: Duration = Duration::from_secs(1);
+
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -135,8 +139,7 @@ impl FetchedArtifact {
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
                         DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
                     );
-                    // Add a small delay here to avoid slamming the CPU.
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    tokio::time::sleep(RETRY_DELAY).await;
                     continue;
                 }
                 Err(DiscoverPeersError::Abort(error)) => {
@@ -162,8 +165,7 @@ impl FetchedArtifact {
                         log,
                         "unable to fetch artifact from peers, retrying discovery",
                     );
-                    // Add a small delay here to avoid slamming the CPU.
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    tokio::time::sleep(RETRY_DELAY).await;
                 }
             }
         }
