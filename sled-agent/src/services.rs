@@ -1259,7 +1259,7 @@ impl ServiceManager {
                     })?;
 
                     let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
-                        (0..31)
+                        (0..32)
                             .map(|i| {
                                 // See the `tfport_name` function for how
                                 // tfportd names the addrconf it creates.
