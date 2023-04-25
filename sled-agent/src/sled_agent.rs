@@ -28,7 +28,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
@@ -461,13 +461,23 @@ impl SledAgent {
                     .await
                     .map_err(|err| BackoffError::transient(err.to_string()))
             };
-            let log_notification_failure = |err, delay| {
-                warn!(
-                    log,
-                    "failed to notify nexus about sled agent: {}, will retry in {:?}", err, delay;
-                );
+            // This notification is often invoked before Nexus has started
+            // running, so avoid flagging any errors as concerning until some
+            // time has passed.
+            let log_notification_failure = |err, call_count, total_duration| {
+                if call_count == 0 {
+                    info!(
+                        log,
+                        "failed to notify nexus about sled agent"; "error" => err,
+                    );
+                } else if total_duration > std::time::Duration::from_secs(30) {
+                    warn!(
+                        log,
+                        "failed to notify nexus about sled agent"; "error" => err, "total duration" => ?total_duration,
+                    );
+                }
             };
-            retry_notify(
+            retry_notify_ext(
                 retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_notification_failure,
