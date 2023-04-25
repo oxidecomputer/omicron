@@ -70,7 +70,7 @@ impl InstanceManager {
         lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
         underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        gateway_mac: Option<MacAddr6>,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
