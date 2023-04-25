@@ -639,12 +639,12 @@ impl StorageWorker {
             dataset_name.full()
         );
 
-        let underlay = self.underlay.lock().await;
-        let Some(underlay) = underlay.as_ref() else {
+        let underlay_guard = self.underlay.lock().await;
+        let Some(underlay) = underlay_guard.as_ref() else {
             return Err(Error::UnderlayNotInitialized);
         };
         let underlay_address = underlay.underlay_address;
-        drop(underlay);
+        drop(underlay_guard);
 
         let zone = ensure_running_zone(
             &self.log,
