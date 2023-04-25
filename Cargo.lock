@@ -757,6 +757,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "camino-tempfile"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ab15a83d13f75dbd86f082bdefd160b628476ef58d3b900a0ef74e001bb097"
+dependencies = [
+ "camino",
+ "tempfile",
+]
+
+[[package]]
 name = "cargo-lock"
 version = "8.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8206,6 +8216,7 @@ dependencies = [
  "bytes",
  "bytesize",
  "camino",
+ "camino-tempfile",
  "chrono",
  "debug-ignore",
  "flate2",
@@ -8221,7 +8232,6 @@ dependencies = [
  "sha2 0.10.6",
  "slog",
  "tar",
- "tempfile",
  "toml 0.7.3",
  "tough",
  "url",
@@ -8445,6 +8455,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
+ "camino-tempfile",
  "debug-ignore",
  "derive-where",
  "futures",
@@ -8458,7 +8469,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "tempfile",
  "tokio",
  "tokio-stream",
  "uuid",
@@ -8868,6 +8878,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
+ "camino-tempfile",
  "clap 4.2.4",
  "debug-ignore",
  "display-error-chain",
@@ -8901,7 +8912,6 @@ dependencies = [
  "snafu",
  "subprocess",
  "tar",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

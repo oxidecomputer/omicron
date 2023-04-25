@@ -130,6 +130,7 @@ buf-list = { version = "1.0.3", features = ["tokio1"] }
 bytes = "1.4.0"
 bytesize = "1.2.0"
 camino = "1.1"
+camino-tempfile = "1.0.2"
 ciborium = "0.2.0"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
