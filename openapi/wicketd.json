@@ -1484,6 +1484,12 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
           "execution_id": {
             "description": "The execution ID.",
             "type": "string",
@@ -1500,6 +1506,7 @@
         },
         "required": [
           "data",
+          "event_index",
           "execution_id",
           "total_elapsed"
         ]
@@ -1515,6 +1522,12 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
           "execution_id": {
             "description": "The execution ID.",
             "type": "string",
@@ -1531,6 +1544,7 @@
         },
         "required": [
           "data",
+          "event_index",
           "execution_id",
           "total_elapsed"
         ]

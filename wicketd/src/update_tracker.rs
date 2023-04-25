@@ -1300,7 +1300,12 @@ impl UpdateContext {
                 }
             };
 
-            StepEvent { execution_id, total_elapsed: event.total_elapsed, kind }
+            StepEvent {
+                execution_id,
+                event_index: 0,
+                total_elapsed: event.total_elapsed,
+                kind,
+            }
         });
 
         // TODO: This races with our task that receives events from the update

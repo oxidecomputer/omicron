@@ -12,4 +12,4 @@ mod init;
 
 pub use common::Driver;
 pub use common::TaskHandle;
-pub use init::init;
+pub use init::BackgroundTasks;

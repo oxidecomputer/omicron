@@ -793,6 +793,10 @@ impl ServiceInner {
             // the need for unencrypted communication.
             certs: vec![],
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
+            // TODO This eventually needs to come from the person setting up the
+            // system.
+            external_dns_zone_name:
+                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         };
 
         let notify_nexus = || async {

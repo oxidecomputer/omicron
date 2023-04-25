@@ -26,10 +26,12 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
@@ -40,6 +42,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Groups arguments related to rack initialization
@@ -401,6 +404,41 @@ impl DataStore {
             })?;
 
         Ok(())
+    }
+
+    pub async fn nexus_external_addresses(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<IpAddr>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
+
+        use crate::db::schema::external_ip::dsl as extip_dsl;
+        use crate::db::schema::nexus_service::dsl as nexus_dsl;
+        type TxnError = TransactionError<()>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                // This is the rare case where we want to allow table scans.
+                // There must not be enough Nexus instances for this to be a
+                // problem.  If there were, we couldn't fit them in DNS anyway.
+                let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+                conn.batch_execute_async(sql).await?;
+                Ok(extip_dsl::external_ip
+                    .inner_join(nexus_dsl::nexus_service)
+                    .select(ExternalIp::as_select())
+                    .get_results_async(&conn)
+                    .await?
+                    .into_iter()
+                    .map(|external_ip| external_ip.ip.ip())
+                    .collect())
+            })
+            .await
+            .map_err(|error: TxnError| match error {
+                TransactionError::CustomError(()) => unimplemented!(),
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
     }
 }
 

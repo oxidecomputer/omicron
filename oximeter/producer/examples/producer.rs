@@ -101,7 +101,7 @@ async fn main() {
     };
     let config = Config {
         server_info,
-        registration_address: "127.0.0.1:12221".parse().unwrap(),
+        registration_address: "[::1]:12221".parse().unwrap(),
         dropshot_config,
         logging_config,
     };

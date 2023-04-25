@@ -4,7 +4,14 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{borrow::Cow, fmt, sync::Mutex};
+use std::{
+    borrow::Cow,
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
+};
 
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
@@ -180,10 +187,19 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         // * Intermediate steps
         // * The last step
 
+        // TODO: this absolutely does not need to be an atomic! However it is
+        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
+        // once omicron is on Rust 1.70.
+        //
+        // https://github.com/rust-lang/rust/pull/107844
+        let event_index = AtomicUsize::new(0);
+        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
+
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
             self.sender.send(Event::Step(StepEvent {
                 execution_id: self.execution_id,
+                event_index: next_event_index(),
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
@@ -204,6 +220,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         self.sender
             .send(Event::Step(StepEvent {
                 execution_id: self.execution_id,
+                event_index: next_event_index(),
                 total_elapsed: total_start.elapsed(),
                 kind: StepEventKind::ExecutionStarted {
                     steps: step_infos,
@@ -218,6 +235,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
             .execute(
                 &self.log,
                 self.execution_id,
+                &next_event_index,
                 total_start,
                 first_step_info,
                 self.sender.clone(),
@@ -243,6 +261,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
                 .execute(
                     &self.log,
                     self.execution_id,
+                    &next_event_index,
                     total_start,
                     step_info,
                     self.sender.clone(),
@@ -511,15 +530,16 @@ struct StepExec<'a, S: StepSpec> {
 }
 
 impl<'a, S: StepSpec> StepExec<'a, S> {
-    async fn execute(
+    async fn execute<F: Fn() -> usize>(
         self,
         log: &slog::Logger,
         execution_id: ExecutionId,
+        next_event_index: F,
         total_start: Instant,
         step_info: StepInfoWithMetadata<S>,
         sender: mpsc::Sender<Event<S>>,
     ) -> Result<
-        (Result<StepOutcome<S>, S::Error>, StepProgressReporter<S>),
+        (Result<StepOutcome<S>, S::Error>, StepProgressReporter<S, F>),
         mpsc::error::SendError<Event<S>>,
     > {
         slog::debug!(
@@ -534,6 +554,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         let mut step_fut = (self.exec_fn.0)(cx);
         let mut reporter = StepProgressReporter::new(
             execution_id,
+            next_event_index,
             total_start,
             step_info,
             sender,
@@ -596,8 +617,9 @@ type StepExecFn<'a, S> = Box<
         + 'a,
 >;
 
-struct StepProgressReporter<S: StepSpec> {
+struct StepProgressReporter<S: StepSpec, F> {
     execution_id: ExecutionId,
+    next_event_index: F,
     total_start: Instant,
     step_info: StepInfoWithMetadata<S>,
     step_start: Instant,
@@ -606,9 +628,10 @@ struct StepProgressReporter<S: StepSpec> {
     sender: mpsc::Sender<Event<S>>,
 }
 
-impl<S: StepSpec> StepProgressReporter<S> {
+impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     fn new(
         execution_id: ExecutionId,
+        next_event_index: F,
         total_start: Instant,
         step_info: StepInfoWithMetadata<S>,
         sender: mpsc::Sender<Event<S>>,
@@ -616,6 +639,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
         let step_start = Instant::now();
         Self {
             execution_id,
+            next_event_index,
             total_start,
             step_info,
             step_start,
@@ -638,6 +662,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::Nested {
                             step: self.step_info.clone(),
@@ -694,6 +719,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::ProgressReset {
                             step: self.step_info.clone(),
@@ -716,6 +742,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::AttemptRetry {
                             step: self.step_info.clone(),
@@ -740,6 +767,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::StepCompleted {
                             step: self.step_info,
@@ -771,6 +799,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
                 self.sender
                     .send(Event::Step(StepEvent {
                         execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
                         kind: StepEventKind::ExecutionCompleted {
                             last_step: self.step_info,
@@ -815,6 +844,7 @@ impl<S: StepSpec> StepProgressReporter<S> {
         self.sender
             .send(Event::Step(StepEvent {
                 execution_id: self.execution_id,
+                event_index: (self.next_event_index)(),
                 total_elapsed: self.total_start.elapsed(),
                 kind: StepEventKind::ExecutionFailed {
                     failed_step: self.step_info,

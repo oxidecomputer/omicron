@@ -14,11 +14,14 @@ use anyhow::Context;
 use crucible_agent_client::types::State as RegionState;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
+use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
+use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -45,6 +48,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
+        rss_args: &RssArgs,
     ) -> Result<(Server, NexusTypes::RackInitializationRequest), String> {
         info!(log, "setting up sled agent server");
 
@@ -245,7 +249,7 @@ impl Server {
             SocketAddr::V4(_) => panic!("did not expect v4 address"),
             SocketAddr::V6(a) => a,
         };
-        let services = vec![
+        let mut services = vec![
             NexusTypes::ServicePutRequest {
                 address: dns_bound.to_string(),
                 kind: NexusTypes::ServiceKind::InternalDns,
@@ -262,12 +266,48 @@ impl Server {
             },
         ];
 
+        let mut internal_services_ip_pool_ranges = vec![];
+        if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
+            let ip = nexus_external_addr.ip();
+
+            services.push(NexusTypes::ServicePutRequest {
+                address: config.nexus_address.to_string(),
+                kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
+            });
+
+            internal_services_ip_pool_ranges.push(match ip {
+                IpAddr::V4(addr) => {
+                    IpRange::V4(Ipv4Range { first: addr, last: addr })
+                }
+                IpAddr::V6(addr) => {
+                    IpRange::V6(Ipv6Range { first: addr, last: addr })
+                }
+            });
+        }
+
+        if let Some(external_dns_internal_addr) =
+            rss_args.external_dns_internal_addr
+        {
+            services.push(NexusTypes::ServicePutRequest {
+                address: external_dns_internal_addr.to_string(),
+                kind: NexusTypes::ServiceKind::ExternalDnsConfig,
+                service_id: Uuid::new_v4(),
+                sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
+            });
+        }
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
-            internal_services_ip_pool_ranges: vec![],
+            internal_services_ip_pool_ranges,
             certs: vec![],
             internal_dns_zone_config: d2n_params(&dns_config),
+            external_dns_zone_name:
+                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         };
 
         Ok((
@@ -323,8 +363,22 @@ async fn handoff_to_nexus(
     Ok(())
 }
 
+/// RSS-related arguments for the simulated sled agent
+#[derive(Default)]
+pub struct RssArgs {
+    /// Specify the external address of Nexus so that we can include it in
+    /// external DNS
+    pub nexus_external_addr: Option<SocketAddr>,
+    /// Specify the (internal) address of an external DNS server so that Nexus
+    /// will know about it and keep it up to date
+    pub external_dns_internal_addr: Option<SocketAddrV6>,
+}
+
 /// Run an instance of the `Server`
-pub async fn run_server(config: &Config) -> Result<(), String> {
+pub async fn run_server(
+    config: &Config,
+    rss_args: &RssArgs,
+) -> Result<(), String> {
     let (drain, registration) = slog_dtrace::with_drain(
         config
             .log
@@ -340,7 +394,8 @@ pub async fn run_server(config: &Config) -> Result<(), String> {
         debug!(log, "registered DTrace probes");
     }
 
-    let (server, rack_init_request) = Server::start(config, &log).await?;
+    let (server, rack_init_request) =
+        Server::start(config, &log, rss_args).await?;
     info!(log, "sled agent started successfully");
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

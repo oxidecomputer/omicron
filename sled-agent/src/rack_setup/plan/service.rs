@@ -18,7 +18,7 @@ use omicron_common::address::{
     SLED_PREFIX,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -196,10 +196,15 @@ impl Plan {
 
             Ok(zpools)
         };
-        let log_failure = |error, _| {
-            warn!(log, "failed to get zpools"; "error" => ?error);
+
+        let log_failure = |error, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to get zpools from {address}"; "error" => ?error);
+            } else if total_duration > std::time::Duration::from_secs(20) {
+                warn!(log, "failed to get zpools from {address}"; "error" => ?error, "total duration" => ?total_duration);
+            }
         };
-        let u2_zpools = retry_notify(
+        let u2_zpools = retry_notify_ext(
             retry_policy_internal_service_aggressive(),
             get_u2_zpools,
             log_failure,

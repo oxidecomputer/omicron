@@ -12,6 +12,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
+use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
     run_server, Config, ConfigHardware, ConfigStorage, ConfigUpdates,
     ConfigZpool, SimMode,
@@ -47,6 +48,20 @@ struct Args {
 
     #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
+
+    #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
+    /// If specified, when the simulated sled agent initializes the rack, it
+    /// will record the Nexus service running with the specified external IP
+    /// address.  When combined with DNS_EXTERNAL_IP:PORT, this will cause
+    /// Nexus to publish DNS names to external DNS.
+    rss_nexus_external_addr: Option<SocketAddr>,
+
+    #[clap(long, name = "EXTERNAL_DNS_INTERNAL_IP:PORT", action)]
+    /// If specified, when the simulated sled agent initializes the rack, it
+    /// will record the external DNS service running with the specified internal
+    /// IP address.  When combined with NEXUS_EXTERNAL_IP:PORT, this will cause
+    /// Nexus to publish DNS names to external DNS.
+    rss_external_dns_internal_addr: Option<SocketAddrV6>,
 }
 
 #[tokio::main]
@@ -83,5 +98,10 @@ async fn do_run() -> Result<(), CmdError> {
         },
     };
 
-    run_server(&config).await.map_err(CmdError::Failure)
+    let rss_args = RssArgs {
+        nexus_external_addr: args.rss_nexus_external_addr,
+        external_dns_internal_addr: args.rss_external_dns_internal_addr,
+    };
+
+    run_server(&config, &rss_args).await.map_err(CmdError::Failure)
 }
