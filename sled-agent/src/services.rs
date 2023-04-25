@@ -1205,43 +1205,42 @@ impl ServiceManager {
                     smfh.setprop("config/admin_host", "::")?;
 
                     let is_gimlet = is_gimlet().map_err(|e| {
-                            Error::Underlay(underlay::Error::SystemDetection(e))
-                        })?;
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
 
-                    let maghemite_interfaces: Vec<AddrObject> =
-                        if is_gimlet {
-                            (0..31)
-                                .map(|i| {
-                                    // See the `tfport_name` function for how
-                                    // tfportd names the addrconf it creates.
-                                    // Right now, that's `tfportrear[0-31]_0`
-                                    // for all rear ports, which is what we're
-                                    // directing ddmd to listen for
-                                    // advertisements on.
-                                    //
-                                    // This may grow in a multi-rack future to
-                                    // include a subset of "front" ports too,
-                                    // when racks are cabled together.
-                                    AddrObject::new(
-                                        &format!("tfportrear{}_0", i),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            self.inner
-                                .switch_zone_maghemite_links
-                                .iter()
-                                .map(|i| {
-                                    AddrObject::new(
-                                        &i.to_string(),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        };
+                    let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
+                        (0..31)
+                            .map(|i| {
+                                // See the `tfport_name` function for how
+                                // tfportd names the addrconf it creates.
+                                // Right now, that's `tfportrear[0-31]_0`
+                                // for all rear ports, which is what we're
+                                // directing ddmd to listen for
+                                // advertisements on.
+                                //
+                                // This may grow in a multi-rack future to
+                                // include a subset of "front" ports too,
+                                // when racks are cabled together.
+                                AddrObject::new(
+                                    &format!("tfportrear{}_0", i),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    } else {
+                        self.inner
+                            .switch_zone_maghemite_links
+                            .iter()
+                            .map(|i| {
+                                AddrObject::new(
+                                    &i.to_string(),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    };
 
                     smfh.setprop(
                         "config/interfaces",
