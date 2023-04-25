@@ -40,12 +40,6 @@ impl DendriteInstance {
         let mut port = port;
         let temp_dir = TempDir::new()?;
         let address_one = format!("[::1]:{port}");
-        let current_dir = std::env::current_dir()?;
-        let p4_dir = current_dir
-            .join("..")
-            .join("out")
-            .join("dendrite-stub")
-            .join("bf_sde");
 
         let args = vec![
             "run".to_string(),
@@ -64,7 +58,6 @@ impl DendriteInstance {
                 temp_dir.path(),
                 "dendrite_stderr",
             )?))
-            .env("P4_DIR", p4_dir)
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `dpd` (with args: {:?})", &args)
