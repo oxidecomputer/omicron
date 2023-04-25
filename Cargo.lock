@@ -3175,6 +3175,7 @@ dependencies = [
  "ipcc-key-value",
  "itertools",
  "omicron-common 0.1.0",
+ "omicron-sled-agent",
  "omicron-test-utils",
  "once_cell",
  "partial-io",
