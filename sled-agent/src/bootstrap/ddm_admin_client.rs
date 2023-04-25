@@ -11,14 +11,13 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
+use sled_hardware::underlay::BOOTSTRAP_MASK;
+use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
-
-use crate::bootstrap::agent::BOOTSTRAP_MASK;
-use crate::bootstrap::agent::BOOTSTRAP_PREFIX;
 
 // TODO-cleanup Is it okay to hardcode this port number and assume ddmd is bound
 // to `::1`, or should we move that into our config?
