@@ -3968,6 +3968,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crucible-agent-client",
+ "dns-server",
  "dropshot",
  "headers",
  "http",
@@ -3990,6 +3991,8 @@ dependencies = [
  "slog",
  "tempfile",
  "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
  "uuid",
 ]
 
@@ -4459,6 +4462,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.3",
  "tough",
+ "trust-dns-resolver",
  "usdt",
  "uuid",
 ]

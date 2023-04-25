@@ -22,7 +22,7 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
+    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
     #[diesel(postgres_type(name = "ip_kind"))]
      pub struct IpKindEnum;
 
