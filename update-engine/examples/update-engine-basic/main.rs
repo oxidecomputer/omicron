@@ -10,6 +10,7 @@ use anyhow::{bail, Context};
 use buf_list::BufList;
 use bytes::Buf;
 use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
 use display::make_displayer;
 use omicron_test_utils::dev::test_setup_log;
 use spec::{
@@ -17,7 +18,6 @@ use spec::{
     ExampleSpec, ExampleStepId, ExampleStepMetadata, ExampleWriteSpec,
     ExampleWriteStepId, StepHandle, StepProgress, StepResult, UpdateEngine,
 };
-use tempfile::TempDir;
 use tokio::io::AsyncWriteExt;
 use update_engine::StepContext;
 
@@ -169,7 +169,7 @@ impl ExampleContext {
         &'a self,
         registrar: &ComponentRegistrar<'_, 'a>,
         total_count: usize,
-    ) -> StepHandle<Vec<TempDir>> {
+    ) -> StepHandle<Vec<Utf8TempDir>> {
         registrar
             .new_step(
                 ExampleStepId::CreateTempDir,
@@ -181,7 +181,7 @@ impl ExampleContext {
                     for current in 0..total_count as u64 {
                         tokio::time::sleep(Duration::from_millis(200)).await;
 
-                        let temp_dir = TempDir::new()
+                        let temp_dir = Utf8TempDir::new()
                             .context("failed to create temp dir")?;
                         paths.push(temp_dir.path().to_owned());
                         dirs.push(temp_dir);
@@ -206,7 +206,7 @@ impl ExampleContext {
         &'a self,
         registrar: &ComponentRegistrar<'_, 'a>,
         download_handle: StepHandle<BufList>,
-        temp_dirs_handle: StepHandle<Vec<TempDir>>,
+        temp_dirs_handle: StepHandle<Vec<Utf8TempDir>>,
         // The index at which this should fail, if any.
         error_index: Option<usize>,
     ) {

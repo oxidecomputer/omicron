@@ -10,6 +10,7 @@ buf-list.workspace = true
 bytes.workspace = true
 bytesize = { workspace = true, features = ["serde"] }
 camino.workspace = true
+camino-tempfile.workspace = true
 chrono.workspace = true
 debug-ignore.workspace = true
 flate2.workspace = true
@@ -25,7 +26,6 @@ serde_path_to_error.workspace = true
 sha2.workspace = true
 slog.workspace = true
 tar.workspace = true
-tempfile.workspace = true
 toml.workspace = true
 tough.workspace = true
 url = "2.3.1"

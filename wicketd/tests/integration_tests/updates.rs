@@ -7,7 +7,7 @@
 use std::{collections::BTreeSet, time::Duration};
 
 use super::setup::WicketdTestContext;
-use camino::Utf8Path;
+use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
@@ -16,7 +16,6 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use tempfile::TempDir;
 use uuid::Uuid;
 use wicketd::RunningUpdateState;
 use wicketd_client::{types::UpdateComponent, StepEventKind};
@@ -27,10 +26,8 @@ async fn test_updates() {
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
-    let temp_dir = TempDir::new().expect("temp dir created");
-    let path: &Utf8Path =
-        temp_dir.path().try_into().expect("temp dir is valid UTF-8");
-    let archive_path = path.join("archive.zip");
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
+    let archive_path = temp_dir.path().join("archive.zip");
 
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
@@ -118,10 +115,8 @@ async fn test_installinator_fetch() {
     let wicketd_testctx = WicketdTestContext::setup(gateway).await;
     let log = wicketd_testctx.log();
 
-    let temp_dir = TempDir::new().expect("temp dir created");
-    let path: &Utf8Path =
-        temp_dir.path().try_into().expect("temp dir is valid UTF-8");
-    let archive_path = path.join("archive.zip");
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
+    let archive_path = temp_dir.path().join("archive.zip");
 
     let args = tufaceous::Args::try_parse_from([
         "tufaceous",
@@ -190,7 +185,7 @@ async fn test_installinator_fetch() {
     wicketd_testctx.server.ipr_update_tracker.register(update_id).await;
 
     let update_id_str = update_id.to_string();
-    let dest_path = path.join("installinator-out");
+    let dest_path = temp_dir.path().join("installinator-out");
     let args = installinator::InstallinatorApp::try_parse_from([
         "installinator",
         "install",
