@@ -1367,7 +1367,7 @@ impl StorageManager {
     }
 }
 
-impl Drop for StorageManager {
+impl Drop for StorageManagerInner {
     fn drop(&mut self) {
         // NOTE: Ideally, with async drop, we'd await completion of the worker
         // somehow.
@@ -1375,7 +1375,7 @@ impl Drop for StorageManager {
         // Without that option, we instead opt to simply cancel the worker
         // task to ensure it does not remain alive beyond the StorageManager
         // itself.
-        self.inner.task.abort();
+        self.task.abort();
     }
 }
 
