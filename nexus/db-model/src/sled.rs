@@ -151,12 +151,21 @@ pub struct SledReservationConstraints {
 }
 
 impl SledReservationConstraints {
+    /// Creates a constraint set with no constraints in it.
     pub fn none() -> Self {
         Self { must_select_from: Vec::new() }
     }
 
-    pub fn must_select_from(&self) -> &[Uuid] {
-        &self.must_select_from
+    /// If the constraints include a set of sleds that the caller must select
+    /// from, returns `Some` and a slice containing the members of that set.
+    ///
+    /// If no "must select from these" constraint exists, returns None.
+    pub fn must_select_from(&self) -> Option<&[Uuid]> {
+        if self.must_select_from.is_empty() {
+            None
+        } else {
+            Some(&self.must_select_from)
+        }
     }
 }
 
@@ -172,11 +181,15 @@ impl SledReservationConstraintBuilder {
         }
     }
 
+    /// Adds a "must select from the following sled IDs" constraint. If such a
+    /// constraint already exists, appends the supplied sled IDs to the "must
+    /// select from" list.
     pub fn must_select_from(mut self, sled_ids: &[Uuid]) -> Self {
         self.constraints.must_select_from.extend(sled_ids);
         self
     }
 
+    /// Builds a set of constraints from this builder's current state.
     pub fn build(self) -> SledReservationConstraints {
         self.constraints
     }

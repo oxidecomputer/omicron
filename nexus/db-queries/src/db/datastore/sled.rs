@@ -140,11 +140,9 @@ impl DataStore {
 
                 // Further constrain the sled IDs according to any caller-
                 // supplied constraints.
-                if !constraints.must_select_from().is_empty() {
-                    sled_targets = sled_targets.filter(
-                        sled_dsl::id
-                            .eq_any(constraints.must_select_from().to_vec()),
-                    );
+                if let Some(must_select_from) = constraints.must_select_from() {
+                    sled_targets = sled_targets
+                        .filter(sled_dsl::id.eq_any(must_select_from.to_vec()));
                 }
 
                 sql_function!(fn random() -> diesel::sql_types::Float);
