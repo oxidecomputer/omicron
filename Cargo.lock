@@ -277,9 +277,9 @@ dependencies = [
 
 [[package]]
 name = "async-stream"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad445822218ce64be7a341abfb0b1ea43b5c23aa83902542a4542e78309d8e5e"
+checksum = "cd56dd203fef61ac097dd65721a419ddccb106b2d2b70ba60a6b529f03961a51"
 dependencies = [
  "async-stream-impl",
  "futures-core",
@@ -288,13 +288,13 @@ dependencies = [
 
 [[package]]
 name = "async-stream-impl"
-version = "0.3.4"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4655ae1a7b0cdf149156f780c5bf3f1352bc53cbd9e0a361a7ef7b22947e965"
+checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.15",
 ]
 
 [[package]]
@@ -757,6 +757,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "camino-tempfile"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ab15a83d13f75dbd86f082bdefd160b628476ef58d3b900a0ef74e001bb097"
+dependencies = [
+ "camino",
+ "tempfile",
+]
+
+[[package]]
 name = "cargo-lock"
 version = "8.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -962,9 +972,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.2.2"
+version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b802d85aaf3a1cdb02b224ba472ebdea62014fccfcb269b95a4d76443b5ee5a"
+checksum = "956ac1f6381d8d82ab4684768f89c0ea3afe66925ceadb4eeb3fc452ffc55d62"
 dependencies = [
  "clap_builder",
  "clap_derive 4.2.0",
@@ -973,9 +983,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.2.2"
+version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14a1a858f532119338887a4b8e1af9c60de8249cd7bafd68036a489e261e37b6"
+checksum = "84080e799e54cff944f4b4a4b0e71630b0e0443b25b985175c7dddc1a859b749"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1616,6 +1626,7 @@ name = "ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "omicron-common 0.1.0",
  "omicron-zone-package",
  "progenitor",
  "progenitor-client",
@@ -1623,7 +1634,10 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sled-hardware",
  "slog",
+ "thiserror",
+ "tokio",
  "toml 0.7.3",
 ]
 
@@ -1850,7 +1864,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.2.2",
+ "clap 4.2.4",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -1922,6 +1936,7 @@ name = "dpd-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "omicron-zone-package",
  "progenitor",
@@ -1933,12 +1948,13 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.7.3",
+ "uuid",
 ]
 
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#41c6593cf7daa7d42b1bacb77c7f73e8480c9577"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#d17f74d428f0adf7fcab09663c708c72c34b99c0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1981,7 +1997,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#41c6593cf7daa7d42b1bacb77c7f73e8480c9577"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#d17f74d428f0adf7fcab09663c708c72c34b99c0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2185,9 +2201,9 @@ dependencies = [
 
 [[package]]
 name = "expectorate"
-version = "1.0.6"
+version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74a483344b06e0a8183209bdf1c2e23b834d04dcdec591d2f617cc60b6c1298b"
+checksum = "710ab6a2d57038a835d66f78d5af3fa5d27c1ec4682f823b9203c48826cb0591"
 dependencies = [
  "console",
  "newline-converter",
@@ -2473,7 +2489,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.2",
+ "clap 4.2.4",
  "futures",
  "gateway-client",
  "hex",
@@ -3152,7 +3168,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.2.2",
+ "clap 4.2.4",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3209,7 +3225,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.2.2",
+ "clap 4.2.4",
  "dropshot",
  "expectorate",
  "hyper",
@@ -3428,9 +3444,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.141"
+version = "0.2.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3304a64d199bb964be99741b7a14d26972741915b3649639149b2479bb46f4b5"
+checksum = "6a987beff54b60ffa6d51982e1aa1146bc42f19bd26be28b0586f252fccf5317"
 
 [[package]]
 name = "libdlpi-sys"
@@ -3764,9 +3780,9 @@ checksum = "e4a24736216ec316047a1fc4252e27dabb04218aa4a3f37c6e7ddbf1f9782b54"
 
 [[package]]
 name = "newline-converter"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f71d09d5c87634207f894c6b31b6a2b2c64ea3bdcf71bd5599fdbbe1600c00f"
+checksum = "47b6b097ecb1cbfed438542d16e84fd7ad9b0c76c8a65b7f9039212a3d14dc7f"
 dependencies = [
  "unicode-segmentation",
 ]
@@ -3968,6 +3984,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crucible-agent-client",
+ "dns-server",
  "dropshot",
  "headers",
  "http",
@@ -3990,6 +4007,8 @@ dependencies = [
  "slog",
  "tempfile",
  "tokio",
+ "trust-dns-proto",
+ "trust-dns-resolver",
  "uuid",
 ]
 
@@ -4280,7 +4299,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.2",
+ "clap 4.2.4",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4297,7 +4316,7 @@ name = "omicron-dev-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.2",
+ "clap 4.2.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -4325,7 +4344,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "ciborium",
- "clap 4.2.2",
+ "clap 4.2.4",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4373,7 +4392,7 @@ dependencies = [
  "base64 0.21.0",
  "bb8",
  "chrono",
- "clap 4.2.2",
+ "clap 4.2.4",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4459,6 +4478,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.3",
  "tough",
+ "trust-dns-resolver",
  "usdt",
  "uuid",
 ]
@@ -4468,7 +4488,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.2",
+ "clap 4.2.4",
  "expectorate",
  "futures",
  "hex",
@@ -4514,7 +4534,7 @@ dependencies = [
  "bytes",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.2.2",
+ "clap 4.2.4",
  "crucible-agent-client",
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8)",
  "ddm-admin-client",
@@ -4663,9 +4683,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.50"
+version = "0.10.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e30d8bc91859781f0a943411186324d580f2bbeb71b452fe91ae344806af3f1"
+checksum = "01b8574602df80f7b85fdfc5392fa884a4e3b3f4f35402c070ab34c3d3f78d56"
 dependencies = [
  "bitflags",
  "cfg-if 1.0.0",
@@ -4695,9 +4715,9 @@ checksum = "ff011a302c396a5197692431fc1948019154afc178baf7d8e37367442a4601cf"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.85"
+version = "0.9.87"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d3d193fb1488ad46ffe3aaabc912cc931d02ee8518fe2959aea8ef52718b0c0"
+checksum = "8e17f59264b2809d77ae94f0e1ebabc434773f370d6ca667bd223ea10e06cc7e"
 dependencies = [
  "cc",
  "libc",
@@ -4872,7 +4892,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.2.2",
+ "clap 4.2.4",
  "dropshot",
  "expectorate",
  "futures",
@@ -4904,7 +4924,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.2.2",
+ "clap 4.2.4",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -5580,11 +5600,11 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c8f5c0e0384c2e16b1079cb94db4fcd870fc8e66"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#819ebb2d8bfebd103322729ab12604ff8432be68"
 dependencies = [
  "anyhow",
  "built",
- "clap 4.2.2",
+ "clap 4.2.4",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -5598,7 +5618,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c8f5c0e0384c2e16b1079cb94db4fcd870fc8e66"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#819ebb2d8bfebd103322729ab12604ff8432be68"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5612,7 +5632,7 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c8f5c0e0384c2e16b1079cb94db4fcd870fc8e66"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#819ebb2d8bfebd103322729ab12604ff8432be68"
 dependencies = [
  "getopts",
  "heck 0.4.1",
@@ -5634,7 +5654,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.2.1-dev"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c8f5c0e0384c2e16b1079cb94db4fcd870fc8e66"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#819ebb2d8bfebd103322729ab12604ff8432be68"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -7063,7 +7083,9 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "macaddr",
  "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "schemars",
  "serde",
@@ -7255,7 +7277,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.2.2",
+ "clap 4.2.4",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8177,7 +8199,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.2.2",
+ "clap 4.2.4",
  "console",
  "datatest-stable",
  "fs-err",
@@ -8202,6 +8224,7 @@ dependencies = [
  "bytes",
  "bytesize",
  "camino",
+ "camino-tempfile",
  "chrono",
  "debug-ignore",
  "flate2",
@@ -8217,7 +8240,6 @@ dependencies = [
  "sha2 0.10.6",
  "slog",
  "tar",
- "tempfile",
  "toml 0.7.3",
  "tough",
  "url",
@@ -8294,7 +8316,7 @@ checksum = "497961ef93d974e23eb6f433eb5fe1b7930b659f06d12dec6fc44a8f554c0bba"
 [[package]]
 name = "typify"
 version = "0.0.12-dev"
-source = "git+https://github.com/oxidecomputer/typify#1fec9405798424f089ea8bb668c828e053e6fd87"
+source = "git+https://github.com/oxidecomputer/typify#8d505f920c0865ead018db360d5c20e7cb668519"
 dependencies = [
  "typify-impl",
  "typify-macro",
@@ -8303,7 +8325,7 @@ dependencies = [
 [[package]]
 name = "typify-impl"
 version = "0.0.12-dev"
-source = "git+https://github.com/oxidecomputer/typify#1fec9405798424f089ea8bb668c828e053e6fd87"
+source = "git+https://github.com/oxidecomputer/typify#8d505f920c0865ead018db360d5c20e7cb668519"
 dependencies = [
  "heck 0.4.1",
  "log",
@@ -8320,7 +8342,7 @@ dependencies = [
 [[package]]
 name = "typify-macro"
 version = "0.0.12-dev"
-source = "git+https://github.com/oxidecomputer/typify#1fec9405798424f089ea8bb668c828e053e6fd87"
+source = "git+https://github.com/oxidecomputer/typify#8d505f920c0865ead018db360d5c20e7cb668519"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8441,6 +8463,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
+ "camino-tempfile",
  "debug-ignore",
  "derive-where",
  "either",
@@ -8456,7 +8479,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "tempfile",
  "tokio",
  "tokio-stream",
  "uuid",
@@ -8806,7 +8828,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.2.2",
+ "clap 4.2.4",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -8844,7 +8866,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.2.2",
+ "clap 4.2.4",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -8866,7 +8888,8 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.2.2",
+ "camino-tempfile",
+ "clap 4.2.4",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -8899,7 +8922,6 @@ dependencies = [
  "snafu",
  "subprocess",
  "tar",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

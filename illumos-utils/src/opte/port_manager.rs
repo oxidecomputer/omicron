@@ -56,7 +56,7 @@ struct PortManagerInner {
     //
     // We only need this while OPTE needs to forward traffic to the local
     // gateway. This will be replaced by boundary services.
-    gateway_mac: MacAddr6,
+    gateway_mac: Option<MacAddr6>,
 
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
@@ -87,7 +87,7 @@ impl PortManager {
     pub fn new(
         log: Logger,
         underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        gateway_mac: Option<MacAddr6>,
     ) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
@@ -224,9 +224,10 @@ impl PortManager {
             // code though, to determine how to set up the ARP layer, which is
             // why it's still here.
             proxy_arp_enable: true,
-            phys_gw_mac: Some(MacAddr::from(
-                self.inner.gateway_mac.into_array(),
-            )),
+            phys_gw_mac: match self.inner.gateway_mac {
+                Some(m) => Some(MacAddr::from(m.into_array())),
+                None => None,
+            },
             // TODO-completeness (#2153): Plumb domain search list
             domain_list: vec![],
         };

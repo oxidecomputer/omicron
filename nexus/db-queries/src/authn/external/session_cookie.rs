@@ -267,7 +267,16 @@ mod test {
             let headers = request.headers_mut();
             headers.insert(http::header::COOKIE, cookie.parse().unwrap());
         }
-        scheme.authn(context, &log, &request.into()).await
+        scheme
+            .authn(
+                context,
+                &log,
+                &dropshot::RequestInfo::new(
+                    &request,
+                    "0.0.0.0:0".parse().unwrap(),
+                ),
+            )
+            .await
     }
 
     #[tokio::test]
@@ -369,8 +378,7 @@ mod test {
         let context =
             TestServerContext { sessions: Mutex::new(HashMap::new()) };
         let result =
-            authn_with_cookie(&context, Some("unparseable garbage!!!!!1"))
-                .await;
+            authn_with_cookie(&context, Some("unparsable garbage!!!!!1")).await;
         assert!(matches!(result, SchemeResult::NotRequested));
     }
 

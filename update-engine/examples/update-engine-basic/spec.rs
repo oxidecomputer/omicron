@@ -4,7 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{fmt, path::PathBuf};
+use std::fmt;
 
 use camino::Utf8PathBuf;
 use schemars::{
@@ -97,7 +97,8 @@ pub(crate) enum ExampleCompletionMetadata {
         num_bytes: u64,
     },
     CreateTempDir {
-        paths: Vec<PathBuf>,
+        #[schemars(schema_with = "paths_schema")]
+        paths: Vec<Utf8PathBuf>,
     },
     Write {
         num_bytes: u64,

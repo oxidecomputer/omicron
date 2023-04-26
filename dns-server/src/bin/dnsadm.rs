@@ -25,7 +25,7 @@ use slog::{Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::iter::once;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Parser)]
 #[clap(name = "dnsadm", about = "Administer DNS records (for testing only)")]
@@ -41,12 +41,27 @@ struct Opt {
 enum SubCommand {
     /// List all records in all zones operated by the DNS server
     ListRecords,
+    /// Add an A record (non-transactionally) to the DNS server
+    AddA(AddACommand),
     /// Add a AAAA record (non-transactionally) to the DNS server
     AddAAAA(AddAAAACommand),
     /// Add a SRV record (non-transactionally) to the DNS server
     AddSRV(AddSRVCommand),
     /// Delete all records for a name (non-transactionally) in the DNS server
     DeleteRecord(DeleteRecordCommand),
+}
+
+#[derive(Debug, Args)]
+struct AddACommand {
+    /// name of one of the server's DNS zones (under ".oxide.test")
+    #[clap(action)]
+    zone_name: String,
+    /// name under which the new record should be added
+    #[clap(action)]
+    name: String,
+    /// IP address for the new A record
+    #[clap(action)]
+    addr: Ipv4Addr,
 }
 
 #[derive(Debug, Args)]
@@ -122,6 +137,9 @@ async fn main() -> Result<()> {
                     println!("    key {:?}:", name);
                     for record in records {
                         match record {
+                            DnsRecord::A(addr) => {
+                                println!("        A:    {:?}", addr);
+                            }
                             DnsRecord::Aaaa(addr) => {
                                 println!("        AAAA: {:?}", addr);
                             }
@@ -138,6 +156,17 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+
+        SubCommand::AddA(cmd) => {
+            let old_config = client.dns_config_get().await?.into_inner();
+            let new_config = add_record(
+                old_config,
+                &cmd.zone_name,
+                &cmd.name,
+                DnsRecord::A(cmd.addr),
+            )?;
+            client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
 
         SubCommand::AddAAAA(cmd) => {

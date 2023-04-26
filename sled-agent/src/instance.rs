@@ -1064,7 +1064,7 @@ mod test {
         );
         let mac = MacAddr6::from([0u8; 6]);
         let port_manager =
-            PortManager::new(log.new(slog::o!()), underlay_ip, mac);
+            PortManager::new(log.new(slog::o!()), underlay_ip, Some(mac));
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();
@@ -1073,7 +1073,7 @@ mod test {
             lazy_nexus_client.clone(),
             Etherstub("mylink".to_string()),
             underlay_ip,
-            mac,
+            Some(mac),
         )
         .unwrap();
 

@@ -247,6 +247,7 @@
             }
           },
           "gateway": {
+            "nullable": true,
             "description": "Internet gateway information.",
             "allOf": [
               {
@@ -281,7 +282,6 @@
         },
         "required": [
           "dns_servers",
-          "gateway",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
           "rack_secret_threshold",

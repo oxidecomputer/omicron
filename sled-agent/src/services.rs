@@ -25,7 +25,6 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
-use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
@@ -33,6 +32,7 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -42,8 +42,10 @@ use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::DENDRITE_PORT;
@@ -188,6 +190,9 @@ type ConfigDirGetter = Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>;
 
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
+    /// Identifies the sled being configured
+    pub sled_id: Uuid,
+
     /// Identifies the revision of the sidecar to be used.
     pub sidecar_revision: String,
 
@@ -205,10 +210,12 @@ pub struct Config {
 
 impl Config {
     pub fn new(
+        sled_id: Uuid,
         sidecar_revision: String,
         gateway_address: Option<Ipv4Addr>,
     ) -> Self {
         Self {
+            sled_id,
             sidecar_revision,
             gateway_address,
             all_svcs_config_path: default_services_config_path(),
@@ -345,7 +352,7 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::localhost(log)?,
+                ddmd_client: DdmAdminClient::localhost(&log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
@@ -1142,12 +1149,34 @@ impl ServiceManager {
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
+                    if let Some(info) = self.inner.sled_info.get() {
+                        smfh.setprop("config/rack_id", info.rack_id)?;
+                        smfh.setprop("config/sled_id", info.config.sled_id)?;
+                    } else {
+                        info!(
+                            self.inner.log,
+                            "no rack_id/sled_id available yet"
+                        );
+                    }
+
                     smfh.delpropvalue("config/address", "*")?;
+                    smfh.delpropvalue("config/dns_server", "*")?;
                     for address in &request.addresses {
                         smfh.addpropvalue(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
+                        if *address != Ipv6Addr::LOCALHOST {
+                            let az_prefix =
+                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                            for addr in Resolver::servers_from_subnet(az_prefix)
+                            {
+                                smfh.addpropvalue(
+                                    "config/dns_server",
+                                    &format!("{addr}"),
+                                )?;
+                            }
+                        }
                     }
                     match asic {
                         DendriteAsic::TofinoAsic => {
@@ -1254,42 +1283,43 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    let maghemite_interfaces: Vec<AddrObject> =
-                        if is_gimlet().map_err(|e| {
-                            Error::Underlay(underlay::Error::SystemDetection(e))
-                        })? {
-                            (0..31)
-                                .map(|i| {
-                                    // See the `tfport_name` function for how
-                                    // tfportd names the addrconf it creates.
-                                    // Right now, that's `tfportrear[0-31]_0`
-                                    // for all rear ports, which is what we're
-                                    // directing ddmd to listen for
-                                    // advertisements on.
-                                    //
-                                    // This may grow in a multi-rack future to
-                                    // include a subset of "front" ports too,
-                                    // when racks are cabled together.
-                                    AddrObject::new(
-                                        &format!("tfportrear{}_0", i),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            self.inner
-                                .switch_zone_maghemite_links
-                                .iter()
-                                .map(|i| {
-                                    AddrObject::new(
-                                        &i.to_string(),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        };
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
+
+                    let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
+                        (0..32)
+                            .map(|i| {
+                                // See the `tfport_name` function for how
+                                // tfportd names the addrconf it creates.
+                                // Right now, that's `tfportrear[0-31]_0`
+                                // for all rear ports, which is what we're
+                                // directing ddmd to listen for
+                                // advertisements on.
+                                //
+                                // This may grow in a multi-rack future to
+                                // include a subset of "front" ports too,
+                                // when racks are cabled together.
+                                AddrObject::new(
+                                    &format!("tfportrear{}_0", i),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    } else {
+                        self.inner
+                            .switch_zone_maghemite_links
+                            .iter()
+                            .map(|i| {
+                                AddrObject::new(
+                                    &i.to_string(),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    };
 
                     smfh.setprop(
                         "config/interfaces",
@@ -1301,6 +1331,14 @@ impl ServiceManager {
                                 .join(" "),
                         ),
                     )?;
+
+                    if is_gimlet {
+                        // Maghemite for a scrimlet needs to be configured to
+                        // talk to dendrite
+                        smfh.setprop("config/dendrite", "true")?;
+                        smfh.setprop("config/dpd_host", "[::1]")?;
+                        smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
+                    }
 
                     smfh.refresh()?;
                 }
@@ -1550,6 +1588,7 @@ impl ServiceManager {
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::Wicketd,
+                    ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
 
@@ -1738,12 +1777,38 @@ impl ServiceManager {
                             smfh.refresh()?;
                         }
                         ServiceType::Dendrite { .. } => {
+                            info!(self.inner.log, "configuring dendrite zone");
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_id", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_id",
+                                    info.config.sled_id,
+                                )?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no rack_id/sled_id available yet"
+                                );
+                            }
                             smfh.delpropvalue("config/address", "*")?;
+                            smfh.delpropvalue("config/dns_server", "*")?;
                             for address in &request.addresses {
                                 smfh.addpropvalue(
                                     "config/address",
                                     &format!("[{}]:{}", address, DENDRITE_PORT),
                                 )?;
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_server",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                }
                             }
                             smfh.refresh()?;
                         }
@@ -1980,6 +2045,7 @@ mod test {
                 self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
             let svc_config_dir = self.config_dir.path().to_path_buf();
             Config {
+                sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
                 gateway_address: None,
                 all_svcs_config_path,
@@ -2006,7 +2072,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            None, // skip_timesync
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
@@ -2045,7 +2111,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            None, // skip_timesync
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],

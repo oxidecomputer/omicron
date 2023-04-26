@@ -24,10 +24,10 @@ uuid.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true
 omicron-test-utils.workspace = true
 owo-colors.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-stream.workspace = true
