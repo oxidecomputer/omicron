@@ -367,8 +367,9 @@ impl super::Nexus {
                 .instance_refetch(opctx, &authz_instance)
                 .await?)
         } else {
-            Err(Error::internal_error(
-                "instance's Propolis generation is out of date",
+            Err(Error::unavail(
+                "instance is already migrating, or underwent an operation that \
+                 prevented this migration from proceeding"
             ))
         }
     }
