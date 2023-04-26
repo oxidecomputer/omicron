@@ -106,6 +106,16 @@ pub enum GetBootstrapInterfaceError {
     Unexpected { zone: String },
 }
 
+/// Errors which may be encountered getting addresses.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get address for name {name} in {zone}: {err}")]
+pub struct GetAddressError {
+    zone: String,
+    name: AddrObject,
+    #[source]
+    err: anyhow::Error,
+}
+
 /// Errors which may be encountered ensuring addresses.
 #[derive(thiserror::Error, Debug)]
 #[error(
@@ -472,7 +482,7 @@ impl Zones {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         |zone, addrobj, addrtype| -> Result<IpNetwork, anyhow::Error> {
-            match Self::get_address(zone, addrobj) {
+            match Self::get_address_impl(zone, addrobj) {
                 Ok(addr) => {
                     if let AddressRequest::Static(expected_addr) = addrtype {
                         // If the address is static, we need to validate that it
@@ -507,7 +517,23 @@ impl Zones {
     /// This `addrobj` may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
-    fn get_address<'a>(
+    pub fn get_address<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<IpNetwork, GetAddressError> {
+        Self::get_address_impl(zone, addrobj).map_err(|err| GetAddressError {
+            zone: zone.unwrap_or("global").to_string(),
+            name: addrobj.clone(),
+            err: anyhow!(err),
+        })
+    }
+
+    /// Gets the IP address of an interface.
+    ///
+    /// This address may optionally be within a zone named `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
+    #[allow(clippy::needless_lifetimes)]
+    fn get_address_impl<'a>(
         zone: Option<&'a str>,
         addrobj: &AddrObject,
     ) -> Result<IpNetwork, Error> {
@@ -693,7 +719,9 @@ impl Zones {
 
     // TODO(https://github.com/oxidecomputer/omicron/issues/821): We
     // should remove this function when Sled Agents are provided IPv6 addresses
-    // from RSS.
+    // from RSS. Edit to this TODO: we still need this for the bootstrap network
+    // (which exists pre-RSS), but we should remove all uses of it other than
+    // the bootstrap agent.
     pub fn ensure_has_global_zone_v6_address(
         link: EtherstubVnic,
         address: Ipv6Addr,
@@ -787,7 +815,7 @@ impl Zones {
         // Actually perform address allocation.
         Self::create_address_internal(zone, addrobj, addrtype)?;
 
-        Self::get_address(zone, addrobj)
+        Self::get_address_impl(zone, addrobj)
     }
 }
 
