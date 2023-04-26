@@ -9,6 +9,149 @@
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
 
-include!(concat!(env!("OUT_DIR"), "/ddm-admin-client.rs"));
+#[allow(dead_code)]
+mod inner {
+    include!(concat!(env!("OUT_DIR"), "/ddm-admin-client.rs"));
 
-impl Copy for types::Ipv6Prefix {}
+    impl Copy for types::Ipv6Prefix {}
+}
+
+pub use inner::types;
+pub use inner::Error;
+
+use inner::types::Ipv6Prefix;
+use inner::Client as InnerClient;
+use omicron_common::address::get_switch_zone_address;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
+use omicron_common::backoff::retry_notify;
+use omicron_common::backoff::retry_policy_internal_service_aggressive;
+use sled_hardware::underlay::BOOTSTRAP_MASK;
+use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use slog::info;
+use slog::Logger;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use thiserror::Error;
+
+// TODO-cleanup Is it okay to hardcode this port number here?
+const DDMD_PORT: u16 = 8000;
+
+#[derive(Debug, Error)]
+pub enum DdmError {
+    #[error("Failed to construct an HTTP client: {0}")]
+    HttpClient(#[from] reqwest::Error),
+
+    #[error("Failed making HTTP request to ddmd: {0}")]
+    DdmdApi(#[from] Error<types::Error>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Client {
+    inner: InnerClient,
+    log: Logger,
+}
+
+impl Client {
+    /// Creates a new [`Client`] that points to localhost
+    pub fn localhost(log: &Logger) -> Result<Self, DdmError> {
+        Self::new(log, SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0))
+    }
+
+    /// Creates a new [`Client`] that points to the switch zone in a
+    /// sled subnet.
+    pub fn switch_zone(
+        log: &Logger,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) -> Result<Self, DdmError> {
+        Self::new(
+            log,
+            SocketAddrV6::new(
+                get_switch_zone_address(sled_subnet),
+                DDMD_PORT,
+                0,
+                0,
+            ),
+        )
+    }
+
+    /// Creates a new [`Client`] that points to an IPv6 address
+    pub fn address(log: &Logger, address: Ipv6Addr) -> Result<Self, DdmError> {
+        Self::new(log, SocketAddrV6::new(address, DDMD_PORT, 0, 0))
+    }
+
+    fn new(log: &Logger, ddmd_addr: SocketAddrV6) -> Result<Self, DdmError> {
+        let dur = std::time::Duration::from_secs(60);
+        let log =
+            log.new(slog::o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr)));
+
+        let inner = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()?;
+        let inner = InnerClient::new_with_client(
+            &format!("http://{ddmd_addr}"),
+            inner,
+            log.clone(),
+        );
+        Ok(Self { inner, log })
+    }
+
+    /// Spawns a background task to instruct ddmd to advertise the given prefix
+    /// to peer sleds.
+    pub fn advertise_prefix(&self, address: Ipv6Subnet<SLED_PREFIX>) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            let prefix =
+                Ipv6Prefix { addr: address.net().network(), len: SLED_PREFIX };
+            retry_notify(retry_policy_internal_service_aggressive(), || async {
+                info!(
+                    me.log, "Sending prefix to ddmd for advertisement";
+                    "prefix" => ?prefix,
+                );
+
+                // TODO-cleanup Why does the generated openapi client require a
+                // `&Vec` instead of a `&[]`?
+                let prefixes = vec![prefix];
+                me.inner.advertise_prefixes(&prefixes).await?;
+                Ok(())
+            }, |err, duration| {
+                info!(
+                    me.log,
+                    "Failed to notify ddmd of our address (will retry after {duration:?}";
+                    "err" => %err,
+                );
+            }).await.unwrap();
+        });
+    }
+
+    /// Returns the addresses of connected sleds.
+    ///
+    /// Note: These sleds have not yet been verified.
+    pub async fn peer_addrs(
+        &self,
+    ) -> Result<impl Iterator<Item = Ipv6Addr> + '_, DdmError> {
+        let prefixes = self.inner.get_prefixes().await?.into_inner();
+        info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
+        Ok(prefixes.into_iter().filter_map(|(_, prefixes)| {
+            // If we receive multiple bootstrap prefixes from one peer, trim it
+            // down to just one. Connections on the bootstrap network are always
+            // authenticated via sprockets, which only needs one address.
+            prefixes.into_iter().find_map(|prefix| {
+                let mut segments = prefix.destination.addr.segments();
+                if prefix.destination.len == BOOTSTRAP_MASK
+                    && segments[0] == BOOTSTRAP_PREFIX
+                {
+                    // Bootstrap agent IPs always end in ::1; convert the
+                    // `BOOTSTRAP_PREFIX::*/BOOTSTRAP_PREFIX` address we
+                    // received into that specific address.
+                    segments[7] = 1;
+                    Some(Ipv6Addr::from(segments))
+                } else {
+                    None
+                }
+            })
+        }))
+    }
+}

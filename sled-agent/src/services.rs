@@ -25,7 +25,6 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
-use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
     ZoneType,
@@ -33,6 +32,7 @@ use crate::params::{
 use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
@@ -345,7 +345,7 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::localhost(log)?,
+                ddmd_client: DdmAdminClient::localhost(&log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,

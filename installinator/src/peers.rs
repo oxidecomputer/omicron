@@ -10,6 +10,7 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
+use ddm_admin_client::Client as DdmAdminClient;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
@@ -25,7 +26,6 @@ use uuid::Uuid;
 
 use crate::{
     artifact::ArtifactClient,
-    ddm_admin_client::DdmAdminClient,
     errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
     reporter::ReportEvent,
 };
@@ -51,7 +51,7 @@ impl DiscoveryMechanism {
                 // XXX: consider adding aborts to this after a certain number of tries.
 
                 let ddm_admin_client =
-                    DdmAdminClient::new(log).map_err(|err| {
+                    DdmAdminClient::localhost(log).map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
                     })?;
                 let addrs =

@@ -8,7 +8,6 @@ use super::client::Client as BootstrapAgentClient;
 use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
 };
-use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
@@ -24,6 +23,7 @@ use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use crate::updates::UpdateManager;
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
@@ -303,7 +303,7 @@ impl Agent {
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        let ddmd_client = DdmAdminClient::localhost(log.clone())?;
+        let ddmd_client = DdmAdminClient::localhost(&log)?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
@@ -585,7 +585,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         // Ask the switch zone's maghemite for peers
         let ddm_admin_client =
-            DdmAdminClient::switch_zone(self.log.clone(), sled_subnet)?;
+            DdmAdminClient::switch_zone(&self.log, sled_subnet)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {

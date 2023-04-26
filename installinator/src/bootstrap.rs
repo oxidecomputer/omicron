@@ -9,14 +9,12 @@
 use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
+use ddm_admin_client::Client as DdmAdminClient;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
-// TODO Maybe `DdmAdminClient` should be in a separate crate so we don't have to
-// depend on sled-agent?
-use omicron_sled_agent::bootstrap::ddm_admin_client::DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware::underlay::bootstrap_ip;
 use slog::info;
@@ -74,7 +72,7 @@ pub(crate) async fn bootstrap_sled(log: Logger) -> Result<()> {
 
     // Spawn a background task to notify our local ddmd of our bootstrap address
     // so it can advertise it to other sleds.
-    let ddmd_client = DdmAdminClient::localhost(log)?;
+    let ddmd_client = DdmAdminClient::localhost(&log)?;
     ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
     Ok(())
