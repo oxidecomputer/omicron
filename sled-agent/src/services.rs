@@ -2152,7 +2152,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
@@ -2182,7 +2182,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
@@ -2220,7 +2220,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
@@ -2252,7 +2252,7 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
+            Some(true),
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
