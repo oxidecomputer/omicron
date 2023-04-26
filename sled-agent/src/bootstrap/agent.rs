@@ -26,6 +26,7 @@ use crate::storage_manager::StorageManager;
 use crate::updates::UpdateManager;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
     self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
@@ -45,7 +46,7 @@ use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -87,6 +88,9 @@ pub enum BootstrapError {
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
+
+    #[error("Failed to get bootstrap address: {err}")]
+    GetBootstrapAddress { err: illumos_utils::zone::GetAddressError },
 
     #[error("RSS is already executing, and should not run concurrently")]
     ConcurrentRSSAccess,
@@ -195,6 +199,7 @@ pub struct Agent {
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
 
+    global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone_bootstrap_address: Ipv6Addr,
 }
 
@@ -307,6 +312,24 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
+        let global_zone_bootstrap_link_local_address = Zones::get_address(
+            None,
+            // AddrObject::link_local() can only fail if the interface name is
+            // malformed, but we just got it from `Dladm`, so we know it's
+            // valid.
+            &AddrObject::link_local(&bootstrap_etherstub_vnic.0).unwrap(),
+        )
+        .map_err(|err| BootstrapError::GetBootstrapAddress { err })?;
+
+        // Convert the `IpNetwork` down to just the IP address.
+        let global_zone_bootstrap_link_local_address =
+            match global_zone_bootstrap_link_local_address.ip() {
+                IpAddr::V4(_) => {
+                    unreachable!("link local bootstrap address must be ipv6")
+                }
+                IpAddr::V6(addr) => addr,
+            };
+
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::localhost(&log)?;
@@ -365,6 +388,7 @@ impl Agent {
             sled_config,
             sp,
             ddmd_client,
+            global_zone_bootstrap_link_local_address,
             switch_zone_bootstrap_address,
         };
 
@@ -411,6 +435,7 @@ impl Agent {
         let hardware_monitor = HardwareMonitor::new(
             &self.log,
             &self.sled_config,
+            self.global_zone_bootstrap_link_local_address,
             underlay_etherstub,
             underlay_etherstub_vnic,
             bootstrap_etherstub,
