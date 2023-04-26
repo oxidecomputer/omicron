@@ -6,6 +6,7 @@
 
 use anyhow::anyhow;
 use ipnetwork::IpNetwork;
+use ipnetwork::IpNetworkError;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
@@ -164,6 +165,33 @@ impl AddressRequest {
 
 /// Wraps commands for interacting with Zones.
 pub struct Zones {}
+
+// Helper function to parse the output of `ipadm show-addr -o ADDR`, which might
+// or might not contain an interface scope (which `ipnetwork` doesn't know how
+// to parse).
+fn parse_ip_network(s: &str) -> Result<IpNetwork, IpNetworkError> {
+    // Does `s` appear to contain a scope identifier? If so, we want to trim it
+    // out.
+    if let Some(scope_start) = s.find('%') {
+        let (ip, rest) = s.split_at(scope_start);
+
+        // Is there a `/prefix` _after_ the scope? If so, we want to reconstruct
+        // a string consisting of the leading `ip` and the trailing `/prefix`,
+        // removing the `%scope` in the middle.
+        if let Some(prefix_start) = rest.find('/') {
+            let (_scope, prefix) = rest.split_at(prefix_start);
+            let without_scope = format!("{ip}{prefix}");
+            without_scope.parse()
+        } else {
+            // We found a `%` indicating a scope but no `/` after it; parse just
+            // the IP address.
+            ip.parse()
+        }
+    } else {
+        // No `%` found; just try parsing `s` directly.
+        s.parse()
+    }
+}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zones {
@@ -497,7 +525,7 @@ impl Zones {
         let output = execute(cmd)?;
         String::from_utf8_lossy(&output.stdout)
             .lines()
-            .find_map(|s| s.parse().ok())
+            .find_map(|s| parse_ip_network(s).ok())
             .ok_or(Error::AddressNotFound { addrobj: addrobj.clone() })
     }
 
@@ -760,5 +788,35 @@ impl Zones {
         Self::create_address_internal(zone, addrobj, addrtype)?;
 
         Self::get_address(zone, addrobj)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ip_network() {
+        for (s, ip, prefix) in [
+            (
+                "fdb0:a840:2504:355::1/64",
+                "fdb0:a840:2504:355::1".parse::<IpAddr>().unwrap(),
+                64,
+            ),
+            (
+                "fe80::aa40:25ff:fe04:355%cxgbe0/10",
+                "fe80::aa40:25ff:fe04:355".parse::<IpAddr>().unwrap(),
+                10,
+            ),
+            (
+                "fe80::aa40:25ff:fe04:355%cxgbe0",
+                "fe80::aa40:25ff:fe04:355".parse::<IpAddr>().unwrap(),
+                128,
+            ),
+        ] {
+            let parsed = parse_ip_network(s).unwrap();
+            assert_eq!(parsed.ip(), ip);
+            assert_eq!(parsed.prefix(), prefix);
+        }
     }
 }
