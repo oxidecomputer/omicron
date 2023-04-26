@@ -91,14 +91,26 @@ pub fn ensure_links_have_global_zone_link_local_v6_addresses(
     Ok(addr_objs)
 }
 
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-pub fn bootstrap_ip(
-    link: &PhysicalLink,
-    interface_id: u64,
-) -> Result<Ipv6Addr, dladm::GetMacError> {
-    let mac = Dladm::get_mac(link)?;
-    Ok(mac_to_bootstrap_ip(mac, interface_id))
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapInterface {
+    GlobalZone,
+    SwitchZone,
+}
+
+impl BootstrapInterface {
+    // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
+    // could be randomly generated when it no longer needs to be durable.
+    pub fn ip(
+        self,
+        link: &PhysicalLink,
+    ) -> Result<Ipv6Addr, dladm::GetMacError> {
+        let mac = Dladm::get_mac(link)?;
+        let interface_id = match self {
+            BootstrapInterface::GlobalZone => 1,
+            BootstrapInterface::SwitchZone => 2,
+        };
+        Ok(mac_to_bootstrap_ip(mac, interface_id))
+    }
 }
 
 fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
