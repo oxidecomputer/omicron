@@ -32,6 +32,7 @@ use illumos_utils::zfs::{
     ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error as ExternalError;
@@ -62,6 +63,9 @@ pub enum BootstrapError {
 
     #[error("Error cleaning up old state: {0}")]
     Cleanup(anyhow::Error),
+
+    #[error("Failed to enable routing: {0}")]
+    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -330,6 +334,21 @@ impl Agent {
         //
         // This means all VNICs, zones, etc.
         cleanup_all_old_global_state(&log).await?;
+
+        // Ipv6 forwarding must be enabled to route traffic between zones,
+        // including the switch zone which we may launch below if we find we're
+        // actually running on a scrimlet.
+        //
+        // This should be a no-op if already enabled.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            "/usr/sbin/routeadm",
+            // Needed to access all zones, which are on the underlay.
+            "-e",
+            "ipv6-forwarding",
+            "-u",
+        ]);
+        execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
 
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
