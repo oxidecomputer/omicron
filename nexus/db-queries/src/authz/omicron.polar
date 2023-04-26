@@ -327,6 +327,24 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 # Fleet.  None of these resources defines their own roles.
 #
 
+# Describes the policy for reading and modifying DNS configuration
+# (both internal and external)
+resource DnsConfig {
+	permissions = [ "read", "modify" ];
+	relations = { parent_fleet: Fleet };
+	# "external-authenticator" requires these permissions because that's the
+	# context that Nexus uses when creating and deleting Silos.  These
+	# operations necessarily need to read and modify DNS configuration.
+	"read" if "external-authenticator" on "parent_fleet";
+	"modify" if "external-authenticator" on "parent_fleet";
+	# "admin" on the parent fleet also gets these permissions, primarily for
+	# the test suite.
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", dns_config: DnsConfig)
+	if dns_config.fleet = fleet;
+
 # Describes the policy for accessing "/v1/system/ip-pools" in the API
 resource IpPoolList {
 	permissions = [

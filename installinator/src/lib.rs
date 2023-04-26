@@ -4,7 +4,6 @@
 
 mod artifact;
 mod bootstrap;
-mod ddm_admin_client;
 mod dispatch;
 mod errors;
 mod hardware;

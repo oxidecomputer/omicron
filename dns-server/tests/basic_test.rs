@@ -10,7 +10,7 @@ use dns_service_client::{
 use dropshot::test_util::LogContext;
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
-use std::{collections::HashMap, net::Ipv6Addr};
+use std::{collections::HashMap, net::Ipv4Addr, net::Ipv6Addr};
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use trust_dns_resolver::{
@@ -19,6 +19,36 @@ use trust_dns_resolver::{
 };
 
 const TEST_ZONE: &'static str = "oxide.internal";
+
+#[tokio::test]
+pub async fn a_crud() -> Result<(), anyhow::Error> {
+    let test_ctx = init_client_server("a_crud").await?;
+    let client = &test_ctx.client;
+    let resolver = &test_ctx.resolver;
+
+    // records should initially be empty
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert!(records.is_empty());
+
+    // add an a record
+    let name = "devron".to_string();
+    let addr = Ipv4Addr::new(10, 1, 2, 3);
+    let a = DnsRecord::A(addr);
+    let input_records = HashMap::from([(name.clone(), vec![a])]);
+    dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
+
+    // read back the a record
+    let records = dns_records_list(client, TEST_ZONE).await?;
+    assert_eq!(input_records, records);
+
+    // resolve the name
+    let response = resolver.lookup_ip(name + "." + TEST_ZONE + ".").await?;
+    let address = response.iter().next().expect("no addresses returned!");
+    assert_eq!(address, addr);
+
+    test_ctx.cleanup().await;
+    Ok(())
+}
 
 #[tokio::test]
 pub async fn aaaa_crud() -> Result<(), anyhow::Error> {

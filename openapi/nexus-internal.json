@@ -1280,6 +1280,25 @@
             "properties": {
               "data": {
                 "type": "string",
+                "format": "ipv4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
                 "format": "ipv6"
               },
               "type": {
@@ -2194,6 +2213,10 @@
               "$ref": "#/components/schemas/DatasetCreateRequest"
             }
           },
+          "external_dns_zone_name": {
+            "description": "delegated DNS name for external DNS",
+            "type": "string"
+          },
           "internal_dns_zone_config": {
             "description": "initial internal DNS config",
             "allOf": [
@@ -2220,6 +2243,7 @@
         "required": [
           "certs",
           "datasets",
+          "external_dns_zone_name",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
           "services"

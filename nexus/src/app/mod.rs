@@ -169,16 +169,7 @@ pub struct Nexus {
     dpd_client: Arc<dpd_client::Client>,
 
     /// Background tasks
-    background_tasks: background::Driver,
-
-    /// task handle for the internal DNS config background task
-    task_internal_dns_config: background::TaskHandle,
-
-    /// task handle for the internal DNS servers background task
-    task_internal_dns_servers: background::TaskHandle,
-
-    /// task handle for the external DNS servers background task
-    task_external_dns_servers: background::TaskHandle,
+    background_tasks: background::BackgroundTasks,
 }
 
 impl Nexus {
@@ -268,12 +259,7 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
-        let (
-            background_tasks,
-            task_internal_dns_config,
-            task_internal_dns_servers,
-            task_external_dns_servers,
-        ) = background::init(
+        let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
@@ -312,9 +298,6 @@ impl Nexus {
             resolver,
             dpd_client,
             background_tasks,
-            task_internal_dns_config,
-            task_internal_dns_servers,
-            task_external_dns_servers,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -355,8 +338,8 @@ impl Nexus {
                         task_log,
                         "populate complete; activating background tasks"
                     );
-                    for task in task_nexus.background_tasks.tasks() {
-                        task_nexus.background_tasks.activate(task);
+                    for task in task_nexus.background_tasks.driver.tasks() {
+                        task_nexus.background_tasks.driver.activate(task);
                     }
                 }
                 Err(_) => {

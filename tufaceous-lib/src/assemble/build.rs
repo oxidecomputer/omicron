@@ -49,14 +49,12 @@ impl OmicronRepoAssembler {
             Some(dir) => (dir.clone(), false),
             None => {
                 // Create a new temporary directory.
-                let dir =
-                    tempfile::Builder::new().prefix("tufaceous").tempdir()?;
+                let dir = camino_tempfile::Builder::new()
+                    .prefix("tufaceous")
+                    .tempdir()?;
                 // This will cause the directory to be preserved -- we're going
                 // to clean it up if it's successful.
-                let path = dir
-                    .into_path()
-                    .try_into()
-                    .context("temp dir is invalid UTF-8")?;
+                let path = dir.into_path();
                 (path, true)
             }
         };

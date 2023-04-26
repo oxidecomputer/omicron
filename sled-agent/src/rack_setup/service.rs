@@ -56,7 +56,6 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
@@ -69,6 +68,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
@@ -444,10 +444,8 @@ impl ServiceInner {
         // Ask the switch zone for a list of peers - note that the rack subnet
         // has not been sent out, and there the switch zone does not have an
         // underlay address yet, so the bootstrap address is used here.
-        let ddm_admin_client = DdmAdminClient::address(
-            self.log.clone(),
-            switch_zone_bootstrap_address,
-        )?;
+        let ddm_admin_client =
+            DdmAdminClient::address(&self.log, switch_zone_bootstrap_address)?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -783,6 +781,10 @@ impl ServiceInner {
             // the need for unencrypted communication.
             certs: vec![],
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
+            // TODO This eventually needs to come from the person setting up the
+            // system.
+            external_dns_zone_name:
+                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         };
 
         let notify_nexus = || async {
@@ -813,7 +815,7 @@ impl ServiceInner {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
         let ddm_admin_client = DdmAdminClient::address(
-            self.log.clone(),
+            &self.log,
             local_bootstrap_agent.switch_zone_bootstrap_address(),
         )?;
         let peer_addrs = ddm_admin_client.peer_addrs().await?;

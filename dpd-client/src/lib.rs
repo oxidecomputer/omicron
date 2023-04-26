@@ -9,6 +9,11 @@
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
 #![allow(clippy::unnecessary_to_owned)]
+// The progenitor-generated API for dpd currently incorporates a type from
+// oximeter, which includes a docstring that has a doc-test in it.
+// That test passes for code that lives in omicron, but fails for code imported
+// by omicron.
+#![allow(rustdoc::broken_intra_doc_links)]
 
 use slog::Logger;
 

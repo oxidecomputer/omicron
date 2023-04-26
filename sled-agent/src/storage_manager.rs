@@ -162,6 +162,10 @@ impl Pool {
         self.name.id()
     }
 
+    fn parent(&self) -> &DiskIdentity {
+        &self.parent
+    }
+
     /// Returns the path for the configuration of a particular
     /// dataset within the pool. This configuration file provides
     /// the necessary information for zones to "launch themselves"
@@ -327,10 +331,16 @@ async fn ensure_running_zone(
                         .await
                         .map_err(backoff::BackoffError::transient)
                     };
-                    let log_failure = |_, _| {
-                        warn!(log, "cockroachdb not yet alive");
+                    let log_failure = |_, call_count, total_duration| {
+                        if call_count == 0 {
+                            info!(log, "cockroachdb not yet alive");
+                        } else if total_duration
+                            > std::time::Duration::from_secs(5)
+                        {
+                            warn!(log, "cockroachdb not yet alive"; "total duration" => ?total_duration);
+                        }
                     };
-                    backoff::retry_notify(
+                    backoff::retry_notify_ext(
                         backoff::retry_policy_internal_service(),
                         check_health,
                         log_failure,
@@ -623,14 +633,18 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus, will retry in {:?}", delay;
-            );
+        let name = pool.name.clone();
+        let disk = pool.parent().clone();
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "total duration" => ?total_duration);
+            }
         };
         self.nexus_notifications.push_back(
-            backoff::retry_notify(
+            backoff::retry_notify_ext(
                 backoff::retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_post_failure,
@@ -825,16 +839,17 @@ impl StorageWorker {
     // about the addition/removal of a physical disk to this sled.
     fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
         let sled_id = self.sled_id;
+        let disk2 = disk.clone();
         let lazy_nexus_client = self.lazy_nexus_client.clone();
         let notify_nexus = move || {
-            let disk = disk.clone();
+            let disk = disk2.clone();
             let lazy_nexus_client = lazy_nexus_client.clone();
             async move {
                 let nexus = lazy_nexus_client.get().await.map_err(|e| {
                     backoff::BackoffError::transient(e.to_string())
                 })?;
 
-                match disk {
+                match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
                         let request = PhysicalDiskPutRequest {
                             model: identity.model.clone(),
@@ -866,14 +881,19 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus, will retry in {:?}", delay;
-            );
+        // This notification is often invoked before Nexus has started
+        // running, so avoid flagging any errors as concerning until some
+        // time has passed.
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about {disk:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about {disk:?}";
+                    "total duration" => ?total_duration);
+            }
         };
         self.nexus_notifications.push_back(
-            backoff::retry_notify(
+            backoff::retry_notify_ext(
                 backoff::retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_post_failure,

@@ -4,6 +4,7 @@
 
 //! [`DataStore`] methods related to [`Silo`]s.
 
+use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
@@ -88,6 +89,7 @@ impl DataStore {
         opctx: &OpContext,
         group_opctx: &OpContext,
         new_silo_params: params::SiloCreate,
+        dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
@@ -169,6 +171,8 @@ impl DataStore {
                     insert_new_query.execute_async(&conn).await?;
                 }
 
+                self.dns_update(group_opctx, &conn, dns_update).await?;
+
                 Ok(silo)
             })
             .await
@@ -226,6 +230,8 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         db_silo: &db::model::Silo,
+        dns_opctx: &OpContext,
+        dns_update: DnsVersionUpdateBuilder,
     ) -> DeleteResult {
         assert_eq!(authz_silo.id(), db_silo.id());
         opctx.authorize(authz::Action::Delete, authz_silo).await?;
@@ -284,12 +290,14 @@ impl DataStore {
                     }));
                 }
 
-                info!(opctx.log, "deleted silo {}", id);
-
                 self.virtual_provisioning_collection_delete_on_connection(
                     &conn,
                     id,
                 ).await?;
+
+                self.dns_update(dns_opctx, &conn, dns_update).await?;
+
+                info!(opctx.log, "deleted silo {}", id);
 
                 Ok(())
             })
