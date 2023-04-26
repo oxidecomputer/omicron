@@ -76,7 +76,7 @@ pub enum EnsureAddressError {
     )]
     MissingOptePort { zone: String, port_idx: usize },
 
-    // TODO-remove: See comment in `ensure_address_for_port`
+    // TODO-remove(#2931): See comment in `ensure_address_for_port`
     #[error(transparent)]
     OpteGatewayConfig(#[from] RunCommandError),
 }
@@ -263,7 +263,7 @@ impl RunningZone {
                 port_idx,
             }
         })?;
-        // TODO-remove: Switch to using port directly once vnic is no longer needed.
+        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
         let addrobj =
             AddrObject::new(port.vnic_name(), name).map_err(|err| {
                 EnsureAddressError::AddrObject {
@@ -276,11 +276,10 @@ impl RunningZone {
         if let IpAddr::V4(gateway) = port.gateway().ip() {
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
-            // TODO-remove: OPTE's DHCP "server" returns the list of routes to add
-            // via option 121 (Classless Static Route). The illumos DHCP client
-            // currently does not support this option, so we add the routes
+            // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
+            // to add via option 121 (Classless Static Route). The illumos DHCP
+            // client currently does not support this option, so we add the routes
             // manually here.
-            // https://www.illumos.org/issues/11990
             let gateway_ip = gateway.to_string();
             let private_ip = addr.ip();
             self.run_cmd(&[

@@ -24,7 +24,7 @@ struct PortInner {
     vni: Vni,
     // Information about the virtual gateway, aka OPTE
     gateway: Gateway,
-    // TODO-correctness: Remove this once we can put Viona directly on top of an
+    // TODO-remove(#2932): Remove this once we can put Viona directly on top of an
     // OPTE port device.
     //
     // NOTE: This is intentionally not an actual `Vnic` object. We'd like to

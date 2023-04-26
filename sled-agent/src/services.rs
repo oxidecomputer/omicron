@@ -697,6 +697,8 @@ impl ServiceManager {
                 None => (external_ips[0], 0, u16::MAX),
             };
 
+            // TODO-correctness(#2933): If we fail part-way we need to
+            // clean up previous entries instead of leaking them.
             let nat_create = || async {
                 info!(
                     self.inner.log, "creating NAT entry for service";

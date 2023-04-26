@@ -269,7 +269,7 @@ impl PortManager {
             "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
         );
 
-        // TODO-remove: Nexus will plumb proper service fw rules
+        // TODO-remove(#2930): Nexus will plumb proper service fw rules
         if let NetworkInterfaceKind::Service { .. } = nic.kind {
             rules.push("dir=in priority=100 action=allow".parse().unwrap());
         }
@@ -286,7 +286,7 @@ impl PortManager {
             rules,
         })?;
 
-        // Create a VNIC on top of this device, to hook Viona into.
+        // TODO-remove(#2932): Create a VNIC on top of this device, to hook Viona into.
         //
         // Viona is the illumos MAC provider that implements the VIRTIO
         // specification. It sits on top of a MAC provider, which is responsible
