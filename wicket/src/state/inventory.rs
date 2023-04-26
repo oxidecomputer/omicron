@@ -21,7 +21,8 @@ pub static ALL_COMPONENT_IDS: Lazy<Vec<ComponentId>> = Lazy::new(|| {
     (0..=31u8)
         .map(|i| ComponentId::Sled(i))
         .chain((0..=1u8).map(|i| ComponentId::Switch(i)))
-        .chain((0..=1u8).map(|i| ComponentId::Psc(i)))
+        // Currently shipping racks don't have PSC 1.
+        .chain(std::iter::once(ComponentId::Psc(0)))
         .collect()
 });
 
