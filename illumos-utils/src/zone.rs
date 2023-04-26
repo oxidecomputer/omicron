@@ -292,10 +292,10 @@ impl Zones {
         }
 
         for dataset in datasets {
-            cfg.add_dataset(&dataset);
+            cfg.add_dataset(dataset);
         }
         for filesystem in filesystems {
-            cfg.add_fs(&filesystem);
+            cfg.add_fs(filesystem);
         }
         for device in devices {
             cfg.add_device(device);
