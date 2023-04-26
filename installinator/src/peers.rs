@@ -124,7 +124,7 @@ impl FetchedArtifact {
     {
         // How long to sleep between retries if we fail to find a peer or fail
         // to fetch an artifact from a found peer.
-        const RETRY_DELAY: Duration = Duration::from_secs(1);
+        const RETRY_DELAY: Duration = Duration::from_secs(5);
 
         let mut attempt = 0;
         loop {
