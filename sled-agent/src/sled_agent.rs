@@ -252,18 +252,24 @@ impl SledAgent {
                 storage.upsert_synthetic_disk(pool.clone()).await;
             }
         }
+
+        let (gateway_mac, gateway_address) = match &request.gateway {
+            Some(g) => (Some(g.mac.0), g.address),
+            None => (None, None),
+        };
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             lazy_nexus_client.clone(),
             etherstub.clone(),
             *sled_address.ip(),
-            request.gateway.mac.0,
+            gateway_mac,
         )?;
 
         let svc_config = services::Config::new(
             request.id,
             config.sidecar_revision.clone(),
-            request.gateway.address,
+            gateway_address,
         );
 
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())

@@ -968,10 +968,10 @@ mod tests {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
-                gateway: crate::bootstrap::params::Gateway {
+                gateway: Some(crate::bootstrap::params::Gateway {
                     address: None,
                     mac: MacAddr6::nil().into(),
-                },
+                }),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

@@ -70,7 +70,7 @@ impl InstanceManager {
         lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
         underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        gateway_mac: Option<MacAddr6>,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -425,7 +425,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            MacAddr6::from([0u8; 6]),
+            Some(MacAddr6::from([0u8; 6])),
         )
         .unwrap();
 
@@ -537,7 +537,7 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            MacAddr6::from([0u8; 6]),
+            Some(MacAddr6::from([0u8; 6])),
         )
         .unwrap();
 
