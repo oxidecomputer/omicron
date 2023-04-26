@@ -85,6 +85,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
@@ -473,8 +474,10 @@ impl ServiceInner {
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                let peer_addrs =
-                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                let peer_addrs = ddm_admin_client
+                    .peer_addrs(&[BootstrapInterface::GlobalZone])
+                    .await
+                    .map_err(|err| {
                         BackoffError::transient(format!(
                             "Failed getting peers from mg-ddm: {err}"
                         ))
@@ -847,7 +850,9 @@ impl ServiceInner {
             &self.log,
             local_bootstrap_agent.switch_zone_bootstrap_address(),
         )?;
-        let peer_addrs = ddm_admin_client.peer_addrs().await?;
+        let peer_addrs = ddm_admin_client
+            .peer_addrs(&[BootstrapInterface::GlobalZone])
+            .await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
             .chain(iter::once(our_bootstrap_address))

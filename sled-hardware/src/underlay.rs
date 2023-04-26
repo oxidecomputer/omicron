@@ -98,6 +98,13 @@ pub enum BootstrapInterface {
 }
 
 impl BootstrapInterface {
+    pub fn interface_id(self) -> u64 {
+        match self {
+            BootstrapInterface::GlobalZone => 1,
+            BootstrapInterface::SwitchZone => 2,
+        }
+    }
+
     // TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
     // could be randomly generated when it no longer needs to be durable.
     pub fn ip(
@@ -105,11 +112,7 @@ impl BootstrapInterface {
         link: &PhysicalLink,
     ) -> Result<Ipv6Addr, dladm::GetMacError> {
         let mac = Dladm::get_mac(link)?;
-        let interface_id = match self {
-            BootstrapInterface::GlobalZone => 1,
-            BootstrapInterface::SwitchZone => 2,
-        };
-        Ok(mac_to_bootstrap_ip(mac, interface_id))
+        Ok(mac_to_bootstrap_ip(mac, self.interface_id()))
     }
 }
 
