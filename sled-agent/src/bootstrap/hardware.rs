@@ -138,6 +138,7 @@ impl HardwareMonitor {
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
@@ -184,6 +185,7 @@ impl HardwareMonitor {
 
         let service_manager = ServiceManager::new(
             log.clone(),
+            global_zone_bootstrap_link_local_address,
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,
