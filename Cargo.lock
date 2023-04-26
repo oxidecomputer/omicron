@@ -1626,6 +1626,7 @@ name = "ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "omicron-common 0.1.0",
  "omicron-zone-package",
  "progenitor",
  "progenitor-client",
@@ -1633,7 +1634,10 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sled-hardware",
  "slog",
+ "thiserror",
+ "tokio",
  "toml 0.7.3",
 ]
 
@@ -7079,7 +7083,9 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "macaddr",
  "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "schemars",
  "serde",
