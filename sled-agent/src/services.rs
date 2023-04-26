@@ -1023,7 +1023,7 @@ impl ServiceManager {
         };
 
         if let Some(gateway) = maybe_gateway {
-            running_zone.add_default_route(gateway).await.map_err(|err| {
+            running_zone.add_default_route(gateway).map_err(|err| {
                 Error::ZoneCommand { intent: "Adding Route".to_string(), err }
             })?;
         }
@@ -1866,12 +1866,12 @@ impl ServiceManager {
                 }
 
                 if let Some(info) = self.inner.sled_info.get() {
-                    zone.add_default_route(info.underlay_address)
-                        .await
-                        .map_err(|err| Error::ZoneCommand {
+                    zone.add_default_route(info.underlay_address).map_err(
+                        |err| Error::ZoneCommand {
                             intent: "Adding Route".to_string(),
                             err,
-                        })?;
+                        },
+                    )?;
                 }
 
                 for service in &request.services {
