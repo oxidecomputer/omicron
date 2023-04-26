@@ -156,6 +156,7 @@ dns-server = { path = "dns-server" }
 dns-service-client = { path = "dns-service-client" }
 dpd-client = { path = "dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+either = "1.8.1"
 expectorate = "1.0.7"
 fatfs = "0.3.6"
 flate2 = "1.0.25"

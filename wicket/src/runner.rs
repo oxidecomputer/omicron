@@ -115,10 +115,10 @@ impl RunnerCore {
                     .update_artifacts(system_version, artifacts);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateLog(logs) => {
+            Event::EventReportAll(reports) => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", logs);
-                self.state.update_state.update_logs(&self.log, logs);
+                debug!(self.log, "{:#?}", reports);
+                self.state.update_state.update_logs(&self.log, reports);
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),

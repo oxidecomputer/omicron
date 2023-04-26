@@ -10,8 +10,8 @@ use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
 use crate::update_events::ComponentRegistrar;
-use crate::update_events::CurrentProgress;
-use crate::update_events::Event;
+use crate::update_events::EventBuffer;
+use crate::update_events::EventReport;
 use crate::update_events::ProgressEvent;
 use crate::update_events::ProgressEventKind;
 use crate::update_events::SpComponentUpdateStage;
@@ -26,7 +26,6 @@ use crate::update_events::StepProgress;
 use crate::update_events::StepResult;
 use crate::update_events::UpdateComponent;
 use crate::update_events::UpdateEngine;
-use crate::update_events::UpdateLog;
 use crate::update_events::UpdateStepId;
 use crate::update_events::UpdateTerminalError;
 use anyhow::anyhow;
@@ -79,7 +78,7 @@ struct SpUpdateData {
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
-    update_log: Arc<StdMutex<UpdateLog>>,
+    event_buffer: Arc<StdMutex<EventBuffer>>,
 }
 
 #[derive(Debug)]
@@ -184,12 +183,12 @@ impl UpdateTracker {
         };
 
         let spawn_update_driver = || async {
-            let update_log = Arc::default();
+            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
                 self.ipr_update_tracker.register(update_id).await;
 
             let update_cx = UpdateContext {
-                update_log: Arc::clone(&update_log),
+                event_buffer: Arc::clone(&event_buffer),
                 update_id,
                 sp,
                 mgs_client: self.mgs_client.clone(),
@@ -208,7 +207,7 @@ impl UpdateTracker {
                 ipr_start_receiver,
             ));
 
-            SpUpdateData { task, update_log }
+            SpUpdateData { task, event_buffer }
         };
 
         let mut sp_update_data = self.sp_update_data.lock().await;
@@ -251,31 +250,29 @@ impl UpdateTracker {
         UploadTrampolinePhase2ToMgs { status: status_rx, task }
     }
 
-    pub(crate) async fn update_log(
-        &self,
-        sp: SpIdentifier,
-    ) -> crate::update_events::UpdateLog {
+    pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
         let mut sp_update_data = self.sp_update_data.lock().await;
         match sp_update_data.entry(sp) {
-            Entry::Vacant(_) => crate::update_events::UpdateLog::default(),
+            Entry::Vacant(_) => EventReport::default(),
             Entry::Occupied(slot) => {
-                slot.get().update_log.lock().unwrap().clone()
+                slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
     }
 
     /// Clone the current state of the update log for every SP, returning a map
     /// suitable for conversion to JSON.
-    pub(crate) async fn update_log_all(
+    pub(crate) async fn event_report_all(
         &self,
-    ) -> BTreeMap<SpType, BTreeMap<u32, crate::update_events::UpdateLog>> {
+    ) -> BTreeMap<SpType, BTreeMap<u32, EventReport>> {
         let sp_update_data = self.sp_update_data.lock().await;
         let mut converted_logs = BTreeMap::new();
         for (sp, update_data) in &*sp_update_data {
-            let update_log = update_data.update_log.lock().unwrap().clone();
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
             let inner: &mut BTreeMap<_, _> =
                 converted_logs.entry(sp.type_).or_default();
-            inner.insert(sp.slot, update_log);
+            inner.insert(sp.slot, event_report);
         }
         converted_logs
     }
@@ -388,32 +385,14 @@ impl UpdateDriver {
         // Spawn a task to accept all events from the executing engine.
         //
         // TODO see note in `process_installinator_report()` below: we're racing
-        // it for access to `update_log`. We should be the only one with it, but
-        // for now we share it to allow installinator reports to go into the log
-        // directly.
-        let update_log = Arc::clone(&update_cx.update_log);
+        // it for access to `event_buffer`. We should be the only one with it,
+        // but for now we share it to allow installinator reports to go into the
+        // log directly.
+        let event_buffer = Arc::clone(&update_cx.event_buffer);
         let event_receiving_task = tokio::spawn(async move {
-            // TODO Is this event receiving handler right? Can we end up seeing
-            // `current` set to a progress report for a step that is also
-            // present in the completed `.events` list?
             while let Some(event) = receiver.recv().await {
-                match event {
-                    Event::Step(event) => {
-                        let mut update_log = update_log.lock().unwrap();
-                        update_log.current =
-                            Some(CurrentProgress::WaitingForProgressEvent);
-                        update_log.events.push(event);
-                    }
-                    Event::Progress(event) => {
-                        update_log.lock().unwrap().current =
-                            Some(CurrentProgress::ProgressEvent(event));
-                    }
-                }
+                event_buffer.lock().unwrap().add_event(event);
             }
-
-            // All events received and the engine is complete; we no longer have
-            // a "current" progress.
-            update_log.lock().unwrap().current = None;
         });
 
         // Execute the update engine.
@@ -903,7 +882,7 @@ impl UpdateDriver {
 }
 
 struct UpdateContext {
-    update_log: Arc<StdMutex<UpdateLog>>,
+    event_buffer: Arc<StdMutex<EventBuffer>>,
     update_id: Uuid,
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
@@ -1310,14 +1289,13 @@ impl UpdateContext {
 
         // TODO: This races with our task that receives events from the update
         // engine in `run()` above. Once we integrate installinator sub-steps we
-        // should remove `update_log` from `UpdateContext` altogether, and let
+        // should remove `event_buffer` from `UpdateContext` altogether, and let
         // just the event-receiving task hold it.
-        let mut update_log = self.update_log.lock().unwrap();
-        update_log.current =
-            Some(CurrentProgress::ProgressEvent(progress_event));
+        let mut event_buffer = self.event_buffer.lock().unwrap();
         for event in events {
-            update_log.events.push(event);
+            event_buffer.add_step_event(event);
         }
+        event_buffer.add_progress_event(progress_event);
     }
 
     async fn set_host_power_state(

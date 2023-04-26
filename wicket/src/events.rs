@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::time::{Duration, SystemTime};
 use wicketd_client::types::{
-    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion, UpdateLogAll,
+    ArtifactId, EventReportAll, IgnitionCommand, RackV1Inventory, SemverVersion,
 };
 
 /// An event that will update state
@@ -22,8 +22,8 @@ pub enum Event {
     /// An Inventory Update Event
     Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
 
-    /// Update Log Event
-    UpdateLog(UpdateLogAll),
+    /// Event report
+    EventReportAll(EventReportAll),
 
     /// TUF repo artifacts unpacked by wicketd
     UpdateArtifacts {
