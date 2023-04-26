@@ -1695,45 +1695,41 @@
             "description": "A vNIC attached to a guest instance",
             "type": "object",
             "properties": {
-              "instance": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
                 ]
               }
             },
             "required": [
-              "instance"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           },
           {
             "description": "A vNIC associated with an internal service",
             "type": "object",
             "properties": {
-              "service": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "id"
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
                 ]
               }
             },
             "required": [
-              "service"
-            ],
-            "additionalProperties": false
+              "id",
+              "type"
+            ]
           }
         ]
       },
@@ -1763,12 +1759,22 @@
             "type": "object",
             "properties": {
               "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
                 "format": "ip"
               },
               "internal_ip": {
+                "description": "The address at which the internal nexus server is reachable.",
                 "type": "string",
                 "format": "ipv6"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1780,6 +1786,7 @@
             "required": [
               "external_ip",
               "internal_ip",
+              "nic",
               "type"
             ]
           },
@@ -1787,10 +1794,20 @@
             "type": "object",
             "properties": {
               "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
                 "type": "string"
               },
               "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
                 "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1802,6 +1819,7 @@
             "required": [
               "dns_address",
               "http_address",
+              "nic",
               "type"
             ]
           },
@@ -1922,9 +1940,56 @@
           {
             "type": "object",
             "properties": {
-              "boundary": {
-                "type": "boolean"
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "dns_servers": {
                 "type": "array",
                 "items": {
@@ -1944,12 +2009,11 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "internal_ntp"
                 ]
               }
             },
             "required": [
-              "boundary",
               "dns_servers",
               "ntp_servers",
               "type"
@@ -2066,22 +2130,22 @@
         "minimum": 0
       },
       "SourceNatConfig": {
-        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests or services.",
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
           "first_port": {
-            "description": "The first port used for instance NAT, inclusive.",
+            "description": "The first port used for source NAT, inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "ip": {
-            "description": "The external address provided to the instance",
+            "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
           },
           "last_port": {
-            "description": "The last port used for instance NAT, also inclusive.",
+            "description": "The last port used for source NAT, also inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0

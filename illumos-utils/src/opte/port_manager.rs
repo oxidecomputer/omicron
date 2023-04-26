@@ -6,10 +6,7 @@
 
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
-use crate::opte::params::NetworkInterface;
-use crate::opte::params::NetworkInterfaceKind;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
-use crate::opte::params::SourceNatConfig;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
 use crate::opte::Gateway;
@@ -17,6 +14,9 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
@@ -269,6 +269,11 @@ impl PortManager {
             "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
         );
 
+        // TODO-remove(#2930): Nexus will plumb proper service fw rules
+        if let NetworkInterfaceKind::Service { .. } = nic.kind {
+            rules.push("dir=in priority=100 action=allow".parse().unwrap());
+        }
+
         debug!(
             self.inner.log,
             "Setting firewall rules";
@@ -281,7 +286,7 @@ impl PortManager {
             rules,
         })?;
 
-        // Create a VNIC on top of this device, to hook Viona into.
+        // TODO-remove(#2932): Create a VNIC on top of this device, to hook Viona into.
         //
         // Viona is the illumos MAC provider that implements the VIRTIO
         // specification. It sits on top of a MAC provider, which is responsible

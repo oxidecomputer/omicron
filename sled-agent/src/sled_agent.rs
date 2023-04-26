@@ -19,6 +19,7 @@ use crate::storage_manager::StorageManager;
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::PortManager;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -221,6 +222,18 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics()?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
+        let (gateway_mac, gateway_address) = match &request.gateway {
+            Some(g) => (Some(g.mac.0), g.address),
+            None => (None, None),
+        };
+
+        // Create the PortManager to manage all the OPTE ports on the sled.
+        let port_manager = PortManager::new(
+            parent_log.new(o!("component" => "PortManager")),
+            *sled_address.ip(),
+            gateway_mac,
+        );
+
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
         // This should be a no-op if already enabled.
@@ -253,17 +266,11 @@ impl SledAgent {
             }
         }
 
-        let (gateway_mac, gateway_address) = match &request.gateway {
-            Some(g) => (Some(g.mac.0), g.address),
-            None => (None, None),
-        };
-
         let instances = InstanceManager::new(
             parent_log.clone(),
             lazy_nexus_client.clone(),
             etherstub.clone(),
-            *sled_address.ip(),
-            gateway_mac,
+            port_manager.clone(),
         )?;
 
         let svc_config = services::Config::new(
@@ -282,7 +289,7 @@ impl SledAgent {
         services
             .sled_agent_started(
                 svc_config,
-                config.get_link()?,
+                port_manager,
                 *sled_address.ip(),
                 request.rack_id,
             )

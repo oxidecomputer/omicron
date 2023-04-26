@@ -29,8 +29,8 @@ pub enum ServiceName {
     CruciblePantry,
     SledAgent(Uuid),
     Crucible(Uuid),
-    BoundaryNTP,
-    InternalNTP,
+    BoundaryNtp,
+    InternalNtp,
     Maghemite,
 }
 
@@ -50,8 +50,8 @@ impl ServiceName {
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
-            ServiceName::BoundaryNTP => "boundary-ntp",
-            ServiceName::InternalNTP => "internal-ntp",
+            ServiceName::BoundaryNtp => "boundary-ntp",
+            ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Maghemite => "maghemite",
         }
     }
@@ -71,8 +71,8 @@ impl ServiceName {
             | ServiceName::Dendrite
             | ServiceName::Tfport
             | ServiceName::CruciblePantry
-            | ServiceName::BoundaryNTP
-            | ServiceName::InternalNTP
+            | ServiceName::BoundaryNtp
+            | ServiceName::InternalNtp
             | ServiceName::Maghemite => {
                 format!("_{}._tcp", self.service_kind())
             }

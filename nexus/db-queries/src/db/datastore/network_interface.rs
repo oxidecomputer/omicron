@@ -66,14 +66,10 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
-                sled_client_types::NetworkInterfaceKind::Instance {
-                    id: nic.parent_id,
-                }
+                sled_client_types::NetworkInterfaceKind::Instance(nic.parent_id)
             }
             NetworkInterfaceKind::Service => {
-                sled_client_types::NetworkInterfaceKind::Service {
-                    id: nic.parent_id,
-                }
+                sled_client_types::NetworkInterfaceKind::Service(nic.parent_id)
             }
         };
         sled_client_types::NetworkInterface {
