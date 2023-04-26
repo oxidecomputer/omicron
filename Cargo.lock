@@ -8905,6 +8905,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "indexmap",
  "libsw",
  "omicron-common 0.1.0",
  "once_cell",
@@ -8927,6 +8928,7 @@ dependencies = [
  "toml 0.7.3",
  "tui",
  "tui-tree-widget",
+ "update-engine",
  "wicket-common",
  "wicketd-client",
 ]
