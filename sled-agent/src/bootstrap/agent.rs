@@ -41,7 +41,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
-use sled_hardware::underlay::bootstrap_ip;
+use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
@@ -274,8 +274,9 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
         let link = config.link.clone();
-        let ip = bootstrap_ip(&link, 1)?;
-        let switch_zone_bootstrap_address = bootstrap_ip(&link, 2)?;
+        let ip = BootstrapInterface::GlobalZone.ip(&link)?;
+        let switch_zone_bootstrap_address =
+            BootstrapInterface::SwitchZone.ip(&link)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -431,7 +432,8 @@ impl Agent {
         let underlay_etherstub_vnic =
             underlay_etherstub_vnic(&underlay_etherstub)?;
         let bootstrap_etherstub = bootstrap_etherstub()?;
-        let switch_zone_bootstrap_address = bootstrap_ip(&self.config.link, 2)?;
+        let switch_zone_bootstrap_address =
+            BootstrapInterface::SwitchZone.ip(&self.config.link)?;
         let hardware_monitor = HardwareMonitor::new(
             &self.log,
             &self.sled_config,
