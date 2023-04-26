@@ -4,6 +4,7 @@
 
 use super::instance_create::allocate_sled_ipv6;
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
+use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::db::{identity::Resource, lookup::LookupPath};
 use crate::external_api::params;
@@ -40,6 +41,19 @@ pub struct Params {
 // both the saga and the work that happen after it have to specify carefully
 // which of the two participating VMMs is actually running the VM once the
 // migration is over.
+//
+// At the start of the saga, the participating sleds have the following
+// information about the instance's location. (Instance runtime states include
+// other information, like per-Propolis states, that's not relevant here and
+// is ignored.)
+//
+// | Item         | Source | Dest | CRDB |
+// |--------------|--------|------|------|
+// | Propolis gen | G      | None | G    |
+// | Propolis ID  | P1     | None | P1   |
+// | Sled ID      | S1     | None | S1   |
+// | Dst Prop. ID | None   | None | None |
+// | Migration ID | None   | None | None |
 declare_saga_actions! {
     instance_migrate;
 
@@ -59,72 +73,85 @@ declare_saga_actions! {
     // that if multiple concurrent sagas try to set migration IDs at the same
     // Propolis generation, then only one will win and get to proceed through
     // the saga.
+    //
+    // Once this update completes, the sleds have the following states, and the
+    // source sled's state will be stored in CRDB:
+    //
+    // | Item         | Source | Dest | CRDB |
+    // |--------------|--------|------|------|
+    // | Propolis gen | G+1    | None | G+1  |
+    // | Propolis ID  | P1     | None | P1   |
+    // | Sled ID      | S1     | None | S1   |
+    // | Dst Prop. ID | P2     | None | P2   |
+    // | Migration ID | M      | None | M    |
+    //
+    // Unwinding this step clears the migration IDs using the source sled:
+    //
+    // | Item         | Source | Dest | CRDB |
+    // |--------------|--------|------|------|
+    // | Propolis gen | G+2    | None | G+2  |
+    // | Propolis ID  | P1     | None | P1   |
+    // | Sled ID      | S1     | None | S1   |
+    // | Dst Prop. ID | None   | None | None |
+    // | Migration ID | None   | None | None |
     SET_MIGRATION_IDS -> "set_migration_ids" {
         + sim_set_migration_ids
+        - sim_clear_migration_ids
     }
 
     // The instance state on the destination looks like the instance state on
     // the source, except that it bears all of the destination's "location"
     // information--its Propolis ID, sled ID, and Propolis IP--with the same
     // Propolis generation number as the source set in the previous step.
-    // Consider an example:
-    //
-    // - Before the saga begins, the instance has Propolis generation 10 and no
-    //   migration IDs.
-    // - The previous step sets Propolis generation 11 and sets the instance's
-    //   migration ID.
-    // - This step synthesizes a record with Propolis generation 11 and the same
-    //   migration IDs, but with the Propolis identifiers set to the
-    //   destination's IDs.
-    //
-    // When the migration resolves one way or the other, one or both of the
-    // participating sleds will update CRDB with Propolis generation 12 and the
-    // Propolis ID set to whichever Propolis ended up running the instance.
-    //
-    // This step must be infallible and does not have an undo action for reasons
-    // described below.
     CREATE_DESTINATION_STATE -> "dst_runtime_state" {
         + sim_create_destination_state
     }
 
-    // The next three steps are organized so that if the saga unwinds after the
-    // destination Propolis is created, the "set migration IDs" step is undone
-    // before the "ensure destination Propolis" step. Consider again the example
-    // above, but this time, let the saga unwind after the destination Propolis
-    // starts. If sled agent changes an instance's Propolis generation when a
-    // Propolis is destroyed, and the undo steps are specified in the
-    // traditional way, the following can occur:
+    // Instantiate the new Propolis on the destination sled. This uses the
+    // record created in the previous step, so the sleds end up with the
+    // following state:
     //
-    // - After the steps above, the instance is registered with the source and
-    //   target sleds, both at Propolis generation 11.
-    // - Undoing the "ensure destination Propolis" step sets the Propolis
-    //   generation to 12, but with the location information from the target!
-    // - When the "set migration IDs" step is undone, the source will publish
-    //   Propolis generation 12, but this will be dropped because the generation
-    //   was already incremented.
+    // | Item         | Source | Dest | CRDB |
+    // |--------------|--------|------|------|
+    // | Propolis gen | G+1    | G+1  | G+1  |
+    // | Propolis ID  | P1     | P2   | P1   |
+    // | Sled ID      | S1     | S2   | S1   |
+    // | Dst Prop. ID | P2     | P2   | P2   |
+    // | Migration ID | M      | M    | M    |
     //
-    // Now CRDB is pointing at the wrong Propolis, and instance state updates
-    // from the former migration source will be ignored. Oops.
+    // Note that, because the source and destination have the same Propolis
+    // generation, the destination's record will not be written back to CRDB.
     //
-    // Instead of asking sled agent to reason about what steps in a migration
-    // have and haven't been undertaken, the following steps are arranged so
-    // that the update that clears migration IDs happens before the one that
-    // destroys the destination Propolis, which unwinds the saga to the expected
-    // state.
+    // Once the migration completes (whether successfully or not), the sled that
+    // ends up with the instance will publish an update that clears the
+    // generation numbers and (on success) updates the Propolis ID pointer. If
+    // migration succeeds, this produces the following:
     //
-    // Note that this implies that `sim_ensure_destination_propolis_undo` must
-    // be able to succeed even if the "ensure destination Propolis" step was
-    // never reached.
-    ENSURE_DESTINATION_PROPOLIS_UNDO -> "unused_ensure_destination_undo" {
-        + sim_noop
-        - sim_ensure_destination_propolis_undo
-    }
-    SET_MIGRATION_IDS_UNDO -> "unused_set_ids_undo" {
-        + sim_noop
-        - sim_clear_migration_ids
-    }
+    // | Item         | Source | Dest | CRDB |
+    // |--------------|--------|------|------|
+    // | Propolis gen | G+1    | G+2  | G+2  |
+    // | Propolis ID  | P1     | P2   | P2   |
+    // | Sled ID      | S1     | S2   | S2   |
+    // | Dst Prop. ID | P2     | None | None |
+    // | Migration ID | M      | None | None |
+    //
+    // The undo step for this node requires special care. Unregistering a
+    // Propolis from a sled typically increments its Propolis generation number.
+    // (This is so that Nexus can rudely terminate a Propolis via unregistration
+    // and end up with the state it would have gotten if the Propolis had shut
+    // down normally.) If this step unwinds, this will produce the same state
+    // on the destination as in the previous table, even though no migration
+    // has started yet. If that update gets written back, then it will write
+    // Propolis generation G+2 to CRDB (as in the table above) with the wrong
+    // Propolis ID, and the subsequent request to clear migration IDs will not
+    // fix it (because the source sled's generation number is still at G+1 and
+    // will move to G+2, which is not recent enough to push another update).
+    //
+    // To avoid this problem, this undo step takes special care not to write
+    // back the updated record the destination sled returns to it.
     ENSURE_DESTINATION_PROPOLIS -> "ensure_destination" {
         + sim_ensure_destination_propolis
+        - sim_ensure_destination_propolis_undo
     }
 
     // Note that this step only requests migration by sending a "migrate in"
@@ -167,18 +194,11 @@ impl NexusSaga for SagaInstanceMigrate {
         builder.append(allocate_propolis_ip_action());
         builder.append(set_migration_ids_action());
         builder.append(create_destination_state_action());
-        builder.append(ensure_destination_propolis_undo_action());
-        builder.append(set_migration_ids_undo_action());
         builder.append(ensure_destination_propolis_action());
         builder.append(instance_migrate_action());
 
         Ok(builder.build()?)
     }
-}
-
-/// A no-op forward action.
-async fn sim_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
-    Ok(())
 }
 
 /// Reserves resources for the destination on the specified target sled.
@@ -371,12 +391,17 @@ async fn sim_ensure_destination_propolis_undo(
     // Ensure that the destination sled has no Propolis matching the description
     // the saga previously generated.
     //
-    // Note that this step can run before the instance was actually ensured.
-    // This is OK; sled agent will quietly succeed if asked to unregister an
-    // unregistered instance.
+    // The updated instance record from this undo action must be dropped so
+    // that a later undo action (clearing migration IDs) can update the record
+    // instead. See the saga definition for more details.
     osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &db_instance)
+        .instance_ensure_unregistered(
+            &opctx,
+            &authz_instance,
+            &db_instance,
+            WriteBackUpdatedInstance::Drop,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -682,29 +707,7 @@ mod tests {
         };
 
         let dag = create_saga_dag::<SagaInstanceMigrate>(params).unwrap();
-
-        // Some of the nodes in the DAG are expected to be infallible to allow
-        // certain undo steps to be reordered. Specify these nodes here, then
-        // verify that every infallible node actually appears in the DAG (to try
-        // to detect drift between the saga specification and the test).
-        let infallible_nodes = vec![
-            "dst_runtime_state",
-            "unused_ensure_destination_undo",
-            "unused_set_ids_undo",
-        ];
-        let dag_node_names: Vec<String> =
-            dag.get_nodes().map(|n| n.name().as_ref().to_owned()).collect();
-        assert!(infallible_nodes
-            .iter()
-            .all(|n| dag_node_names.iter().any(|d| d == n)));
-
         for node in dag.get_nodes() {
-            if infallible_nodes.contains(&node.name().as_ref()) {
-                info!(log, "Skipping infallible node";
-                      "node_name" => node.name().as_ref());
-                continue;
-            }
-
             info!(
                 log,
                 "Creating new saga which will fail at index {:?}", node.index();

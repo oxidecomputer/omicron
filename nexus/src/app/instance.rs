@@ -53,6 +53,11 @@ use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
+pub(crate) enum WriteBackUpdatedInstance {
+    WriteBack,
+    Drop,
+}
+
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -488,6 +493,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
+        write_back: WriteBackUpdatedInstance,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.instance_sled(&db_instance).await?;
@@ -495,7 +501,17 @@ impl super::Nexus {
             .instance_unregister(&db_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime);
-        self.handle_instance_put_result(db_instance, result).await.map(|_| ())
+
+        match write_back {
+            WriteBackUpdatedInstance::WriteBack => self
+                .handle_instance_put_result(db_instance, result)
+                .await
+                .map(|_| ()),
+            WriteBackUpdatedInstance::Drop => {
+                result?;
+                Ok(())
+            }
+        }
     }
 
     /// Returns the SledAgentClient for the host where this Instance is running.

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
@@ -1401,7 +1402,12 @@ async fn sic_instance_ensure_registered_undo(
 
     osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &db_instance)
+        .instance_ensure_unregistered(
+            &opctx,
+            &authz_instance,
+            &db_instance,
+            WriteBackUpdatedInstance::WriteBack,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
