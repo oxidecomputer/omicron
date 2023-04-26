@@ -261,6 +261,7 @@ impl SledAgent {
         )?;
 
         let svc_config = services::Config::new(
+            request.id,
             config.sidecar_revision.clone(),
             request.gateway.address,
         );
