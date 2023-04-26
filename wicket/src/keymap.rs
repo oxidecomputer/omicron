@@ -64,6 +64,9 @@ pub enum Cmd {
     /// Accept
     Yes,
 
+    /// Begin an update.
+    StartUpdate,
+
     /// Goto top of list/screen/etc...
     GotoTop,
 
@@ -146,6 +149,9 @@ impl KeyHandler {
             KeyCode::Right => Cmd::Right,
             KeyCode::Left => Cmd::Left,
             KeyCode::Char('y') => Cmd::Yes,
+            KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
+                Cmd::StartUpdate
+            }
             KeyCode::Char('n') => Cmd::No,
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::KnightRiderMode
