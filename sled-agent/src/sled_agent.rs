@@ -19,6 +19,7 @@ use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -31,11 +32,14 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use sled_hardware::underlay;
+use sled_hardware::DiskVariant;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs::File;
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
 
 #[cfg(not(test))]
@@ -132,6 +136,49 @@ impl From<Error> for dropshot::HttpError {
 
             e => HttpError::for_internal_error(e.to_string()),
         }
+    }
+}
+
+// A file that wraps a zfs encryption key. We put this in a tmpfs
+// and zero it on drop.
+pub struct KeyFile {
+    path: Keypath,
+    file: File,
+    log: Logger,
+}
+
+impl KeyFile {
+    pub async fn create(
+        path: Keypath,
+        log: &Logger,
+    ) -> std::io::Result<KeyFile> {
+        // TODO(AJS): Use a real key, wrapped in `Zeroize`.
+        let dummy_key = [0x1du8; 32];
+        // We want to overwrite any existing contents.
+        // If we truncate we may leave dirty pages around
+        // containing secrets.
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path.0)
+            .await?;
+        let _ = file.seek(SeekFrom::Start(0)).await?;
+        file.write_all(&dummy_key).await?;
+        Ok(KeyFile { path, file, log: log.clone() })
+    }
+
+    // It'd be nice to `impl Drop for `KeyFile` and then call `zero`
+    // from within the drop handler, but async `Drop` isn't supported.
+    pub async fn zero(&mut self) -> std::io::Result<()> {
+        let zeroes = [0u8; 32];
+        let _ = self.file.seek(SeekFrom::Start(0)).await?;
+        self.file.write_all(&zeroes).await?;
+        info!(self.log, "Zeroed keyfile {}", self.path);
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Keypath {
+        &self.path
     }
 }
 
@@ -317,6 +364,29 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
+    async fn load_keys_for_disks(&self, log: &Logger) -> Vec<KeyFile> {
+        let mut files = vec![];
+        for disk in self.inner.hardware.disks() {
+            if disk.variant() == DiskVariant::U2 {
+                let keypath: Keypath = disk.identity().into();
+                info!(log, "Loading key into {keypath}");
+                let file = match KeyFile::create(keypath.clone(), log).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        // TODO(AJS): What do we actually want to do here?
+                        error!(
+                            log,
+                            "Error creating keyfile: {}: {}", keypath, e
+                        );
+                        panic!("keyfile creation error");
+                    }
+                };
+                files.push(file);
+            }
+        }
+        files
+    }
+
     // Observe the current hardware state manually.
     //
     // We use this when we're monitoring hardware for the first
@@ -340,10 +410,18 @@ impl SledAgent {
             }
         }
 
+        let files = self.load_keys_for_disks(log).await;
+
         self.inner
             .storage
             .ensure_using_exactly_these_disks(self.inner.hardware.disks())
             .await;
+
+        for mut file in files {
+            if let Err(e) = file.zero().await {
+                error!(log, "Failed to zero keyfile: {}: {}", file.path(), e);
+            }
+        }
     }
 
     async fn hardware_monitor_task(&self, log: Logger) {
@@ -386,6 +464,7 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
+                        // TODO(AJS): load keys
                         self.inner.storage.upsert_disk(disk).await;
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
