@@ -338,8 +338,7 @@ impl super::Nexus {
         let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
             .instance_id(instance_id)
             .lookup_for(authz::Action::Modify)
-            .await
-            .unwrap();
+            .await?;
 
         let sa = self.instance_sled(&db_instance).await?;
         let instance_put_result = sa
