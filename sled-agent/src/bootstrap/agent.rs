@@ -200,7 +200,6 @@ pub struct Agent {
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
-    switch_zone_bootstrap_address: Ipv6Addr,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -275,8 +274,6 @@ impl Agent {
         ));
         let link = config.link.clone();
         let ip = BootstrapInterface::GlobalZone.ip(&link)?;
-        let switch_zone_bootstrap_address =
-            BootstrapInterface::SwitchZone.ip(&link)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -390,7 +387,6 @@ impl Agent {
             sp,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
-            switch_zone_bootstrap_address,
         };
 
         let hardware_monitor = agent.start_hardware_monitor().await?;
@@ -781,7 +777,6 @@ impl Agent {
             &self.parent_log,
             request,
             self.ip,
-            self.switch_zone_bootstrap_address,
             self.sp.clone(),
             // TODO-cleanup: Remove this arg once RSS can discover the trust
             // quorum members over the management network.
@@ -803,13 +798,7 @@ impl Agent {
             .try_lock()
             .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
-        RssHandle::run_rss_reset(
-            &self.parent_log,
-            self.ip,
-            self.switch_zone_bootstrap_address,
-            None,
-        )
-        .await?;
+        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
         Ok(())
     }
 
