@@ -588,40 +588,6 @@ pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
     }
 }
 
-/// Return the schema for a `Target` and `Metric`
-pub(crate) fn schema_for_parts<T, M>(target: &T, metric: &M) -> TimeseriesSchema
-where
-    T: traits::Target,
-    M: traits::Metric,
-{
-    let make_field_schema = |name: &str,
-                             value: FieldValue,
-                             source: FieldSource| {
-        FieldSchema { name: name.to_string(), ty: value.field_type(), source }
-    };
-    let target_field_schema =
-        target.field_names().iter().zip(target.field_values().into_iter());
-    let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values().into_iter());
-    let field_schema = target_field_schema
-        .map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Target)
-        })
-        .chain(metric_field_schema.map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Metric)
-        }))
-        .collect();
-    TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(oximeter::timeseries_name(
-            target, metric,
-        ))
-        .expect("Failed to parse timeseries name"),
-        field_schema,
-        datum_type: metric.datum_type(),
-        created: Utc::now(),
-    }
-}
-
 // A scalar timestamped sample from a gauge timeseries, as extracted from a query to the database.
 #[derive(Debug, Clone, Deserialize)]
 struct DbTimeseriesScalarGaugeSample<T> {

@@ -5,16 +5,38 @@
 //! Rust client to ClickHouse database
 // Copyright 2021 Oxide Computer Company
 
-use crate::{
-    model, query, Error, Metric, Target, Timeseries, TimeseriesPageSelector,
-    TimeseriesScanParams, TimeseriesSchema,
-};
-use crate::{TimeseriesKey, TimeseriesName};
+use crate::model;
+use crate::query;
+use crate::query::Timestamp;
+use crate::scan::TimeseriesMetadataPage;
+use crate::scan::TimeseriesMetadataScan;
+use crate::scan::TimeseriesPage;
+use crate::scan::TimeseriesScan;
+use crate::scan::TimeseriesSchemaPage;
+use crate::scan::TimeseriesSchemaScan;
+use crate::Error;
+use crate::Metric;
+use crate::Target;
+use crate::Timeseries;
+use crate::TimeseriesKey;
+use crate::TimeseriesMetadata;
+use crate::TimeseriesName;
+use crate::TimeseriesPageSelector;
+use crate::TimeseriesScanParams;
+use crate::TimeseriesSchema;
 use async_trait::async_trait;
-use dropshot::{EmptyScanParams, ResultsPage, WhichPage};
+use dropshot::EmptyScanParams;
+use dropshot::ResultsPage;
+use dropshot::WhichPage;
+use futures::Stream;
 use oximeter::types::Sample;
-use slog::{debug, error, trace, Logger};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use slog::debug;
+use slog::error;
+use slog::trace;
+use slog::Logger;
+use std::collections::btree_map::Entry;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
@@ -57,6 +79,277 @@ impl Client {
         .await?;
         debug!(self.log, "successful ping of ClickHouse server");
         Ok(())
+    }
+
+    /// Return a stream of all timeseries schema.
+    pub async fn stream_timeseries_schema(
+        &self,
+    ) -> impl Stream<Item = Result<TimeseriesSchema, Error>> + Unpin + '_ {
+        use futures::StreamExt;
+        use futures::TryFutureExt;
+        use futures::TryStreamExt;
+        let scan = TimeseriesSchemaScan::new(NonZeroU32::new(100).unwrap());
+        self.timeseries_schema_list2(scan)
+            .map_ok(move |page| {
+                let TimeseriesSchemaPage { schema, next_page } = page;
+                let first = futures::stream::iter(schema.into_iter().map(Ok));
+                let rest = futures::stream::try_unfold(
+                    next_page,
+                    |maybe_next_page| async {
+                        match maybe_next_page {
+                            None => Ok(None),
+                            Some(next_page) => {
+                                self.timeseries_schema_list2(next_page)
+                                    .map_ok(|page| {
+                                        let schema =
+                                            page.schema.into_iter().map(Ok);
+                                        Some((
+                                            futures::stream::iter(schema),
+                                            page.next_page,
+                                        ))
+                                    })
+                                    .await
+                            }
+                        }
+                    },
+                )
+                .try_flatten();
+                first.chain(rest)
+            })
+            .try_flatten_stream()
+            .boxed()
+    }
+
+    /// Fetch a page of timeseries schema.
+    ///
+    /// This method can be used to fetch the next page of timeseries schema.
+    /// Users generally initiate a paginated scan by creating a
+    /// `TimeseriesSchemaScan` with a page limit. This function may then be
+    /// called with that scan, returning a page of results. That page contains
+    /// the schema themselves, as well as a possible scan used to fetch the next
+    /// page. Repeatedly feeding the output into this function in loop will
+    /// effect a paginated scan of all timeseries schema.
+    // TODO-cleanup: Rename to `timeseries_schema_list`.
+    pub async fn timeseries_schema_list2(
+        &self,
+        scan: TimeseriesSchemaScan,
+    ) -> Result<TimeseriesSchemaPage, Error> {
+        let sql = if let Some(name) = &scan.timeseries_name {
+            format!(
+                concat!(
+                    "SELECT * ",
+                    "FROM {}.timeseries_schema ",
+                    "WHERE timeseries_name > '{}' ",
+                    "LIMIT {} ",
+                    "FORMAT JSONEachRow;",
+                ),
+                crate::DATABASE_NAME,
+                name,
+                scan.limit.get(),
+            )
+        } else {
+            format!(
+                concat!(
+                    "SELECT * ",
+                    "FROM {}.timeseries_schema ",
+                    "LIMIT {} ",
+                    "FORMAT JSONEachRow;",
+                ),
+                crate::DATABASE_NAME,
+                scan.limit.get(),
+            )
+        };
+        let body = self.execute_with_body(sql).await?;
+        let schema = body
+            .lines()
+            .map(|line| {
+                TimeseriesSchema::from(
+                    serde_json::from_str::<model::DbTimeseriesSchema>(line)
+                        .expect(
+                        "Failed to deserialize TimeseriesSchema from database",
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        // Set up the parameters for fetching the next page.
+        let next_page = schema.last().map(|s| TimeseriesSchemaScan {
+            timeseries_name: Some(s.timeseries_name.clone()),
+            limit: scan.limit,
+        });
+        Ok(TimeseriesSchemaPage { schema, next_page })
+    }
+
+    /// Return a stream that yields all timeseries compatible with the provided
+    /// filtering criteria.
+    pub async fn stream_compatible_timeseries_metadata<S>(
+        &self,
+        timeseries_name: &TimeseriesName,
+        criteria: &[S],
+    ) -> impl Stream<Item = Result<TimeseriesMetadata, Error>> + Unpin + '_
+    where
+        S: AsRef<str>,
+    {
+        use futures::StreamExt;
+        use futures::TryFutureExt;
+        use futures::TryStreamExt;
+        let scan = match self
+            .setup_compatible_timeseries_metadata_scan(
+                timeseries_name,
+                criteria,
+                NonZeroU32::new(100).unwrap(),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => return futures::stream::once(async { Err(e) }).boxed(),
+        };
+        self.compatible_timeseries_metadata_list(scan)
+            .map_ok(move |page| {
+                let TimeseriesMetadataPage { metadata, next_page } = page;
+                let first = futures::stream::iter(metadata.into_iter().map(Ok));
+                let rest = futures::stream::try_unfold(
+                    next_page,
+                    |maybe_next_page| async {
+                        match maybe_next_page {
+                            None => Ok(None),
+                            Some(next_page) => {
+                                self.compatible_timeseries_metadata_list(
+                                    next_page,
+                                )
+                                .map_ok(|page| {
+                                    let metadata =
+                                        page.metadata.into_iter().map(Ok);
+                                    Some((
+                                        futures::stream::iter(metadata),
+                                        page.next_page,
+                                    ))
+                                })
+                                .await
+                            }
+                        }
+                    },
+                )
+                .try_flatten();
+                first.chain(rest)
+            })
+            .try_flatten_stream()
+            .boxed()
+    }
+
+    /// Set up a paginated scan of for the metadata of compatible timeseries.
+    pub async fn setup_compatible_timeseries_metadata_scan<S>(
+        &self,
+        timeseries_name: &TimeseriesName,
+        criteria: &[S],
+        limit: NonZeroU32,
+    ) -> Result<TimeseriesMetadataScan, Error>
+    where
+        S: AsRef<str>,
+    {
+        let schema =
+            self.schema_for_timeseries(&timeseries_name).await?.ok_or_else(
+                || Error::TimeseriesNotFound(timeseries_name.0.clone()),
+            )?;
+        let mut query_builder =
+            query::SelectQueryBuilder::new(&schema).offset(0).limit(limit);
+        for crit in criteria.iter() {
+            query_builder = query_builder.filter_raw(crit)?;
+        }
+        let query = query_builder.build();
+        Ok(TimeseriesMetadataScan(query))
+    }
+
+    /// Fetch the next page of timeseries metadata compatible with the provided query.
+    pub async fn compatible_timeseries_metadata_list(
+        &self,
+        scan: TimeseriesMetadataScan,
+    ) -> Result<TimeseriesMetadataPage, Error> {
+        let query = scan.0;
+        let timeseries_name = &query.schema().timeseries_name;
+        match query.metadata_query() {
+            Some(mq) => {
+                let metadata: Vec<_> = self
+                    .select_matching_timeseries_info(&mq, query.schema())
+                    .await?
+                    .into_values()
+                    .map(|(target, metric)| TimeseriesMetadata {
+                        timeseries_name: timeseries_name.clone(),
+                        target,
+                        metric,
+                    })
+                    .collect();
+                let n_items = u32::try_from(metadata.len()).unwrap();
+                let next_page =
+                    query.next_page(n_items).map(TimeseriesMetadataScan);
+                Ok(TimeseriesMetadataPage { metadata, next_page })
+            }
+            None => {
+                // No compatible timeseries, end the scan.
+                Ok(TimeseriesMetadataPage {
+                    metadata: Vec::new(),
+                    next_page: None,
+                })
+            }
+        }
+    }
+
+    /// Set up a paginated scan of timeseries data.
+    pub async fn setup_timeseries_scan<S>(
+        &self,
+        timeseries_name: &TimeseriesName,
+        criteria: &[S],
+        start_time: Option<Timestamp>,
+        end_time: Option<Timestamp>,
+        limit: NonZeroU32,
+    ) -> Result<TimeseriesScan, Error>
+    where
+        S: AsRef<str>,
+    {
+        let schema =
+            self.schema_for_timeseries(&timeseries_name).await?.ok_or_else(
+                || Error::TimeseriesNotFound(timeseries_name.0.clone()),
+            )?;
+        let mut query_builder = query::SelectQueryBuilder::new(&schema)
+            .start_time(start_time)
+            .end_time(end_time)
+            .limit(limit);
+        for crit in criteria.iter() {
+            query_builder = query_builder.filter_raw(crit)?;
+        }
+        let query = query_builder.build();
+        Ok(TimeseriesScan(query))
+    }
+
+    /// Fetch the next page of timeseries measurements compatible with the provided query.
+    pub async fn compatible_timeseries_list(
+        &self,
+        scan: TimeseriesScan,
+    ) -> Result<TimeseriesPage, Error> {
+        let query = scan.0;
+        let schema = query.schema();
+        match query.field_query() {
+            Some(field_query) => {
+                let info = self
+                    .select_matching_timeseries_info(&field_query, &schema)
+                    .await?;
+                let timeseries = self
+                    .select_timeseries_with_keys(&query, &info, schema)
+                    .await?;
+                let n_items = u32::try_from(
+                    timeseries
+                        .iter()
+                        .map(|x| x.measurements.len())
+                        .sum::<usize>(),
+                )
+                .unwrap();
+                let next_page = query.next_page(n_items).map(TimeseriesScan);
+                Ok(TimeseriesPage { timeseries, next_page })
+            }
+            None => {
+                Ok(TimeseriesPage { timeseries: Vec::new(), next_page: None })
+            }
+        }
     }
 
     /// Select timeseries from criteria on the fields and start/end timestamps.
@@ -270,6 +563,44 @@ impl Client {
         }))
     }
 
+    /*
+    /// List the timeseries that are compatible with the provided set of
+    /// filters.
+    ///
+    /// Given a single timeseries schema, there may be many actual concrete
+    /// timeseries that are compatible with it. Each unique combination of
+    /// fields constitutes a separate timeseries. This method can be used to
+    /// list all those which are compatible with the provided filters.
+    pub async fn compatible_timeseries_list(
+        &self,
+        timeseries_name: &TimeseriesName,
+        criteria: &[&str],
+        page: &WhichPage<CompatibleTimeseriesScanParams, CompatibleTimeseriesPageSelector>,
+    ) -> Result<ResultsPage<TimeseriesMetadata>, Error> {
+        let timeseries_name = TimeseriesName::try_from(timeseries_name)?;
+        let schema =
+            self.schema_for_timeseries(timeseries_name).await?.ok_or_else(
+                || Error::TimeseriesNotFound(format!("{timeseries_name}")),
+            )?;
+        let query_builder = query::SelectQueryBuilder::new(&schema)
+            .start_time(start_time)
+            .end_time(end_time);
+        for criterion in criteria.iter() {
+            query_builder = query_builder.filter_raw(criterion)?;
+        }
+        let query = query_builder.build();
+        match query.field_query() {
+            Some(field_query) => {
+                let info = self.select_matching_timeseries_info(&field_query, &schema)
+                    .await?;
+                for (target, metric) in info.into_iter() {
+                }
+            }
+            None => Ok(ResultsPage::new(vec![]))
+        }
+    }
+    */
+
     // Select the timeseries, including keys and field values, that match the given field-selection
     // query.
     async fn select_matching_timeseries_info(
@@ -310,9 +641,11 @@ impl Client {
                         .expect("Timeseries key in measurement query but not field query")
                         .clone();
                     Timeseries {
-                        timeseries_name: schema.timeseries_name.to_string(),
-                        target,
-                        metric,
+                        metadata: TimeseriesMetadata {
+                            timeseries_name: schema.timeseries_name.clone(),
+                            target,
+                            metric,
+                        },
                         measurements: Vec::new(),
                     }
                 }

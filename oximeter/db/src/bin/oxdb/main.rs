@@ -12,9 +12,10 @@ use chrono::DateTime;
 use chrono::Utc;
 use clap::Args;
 use clap::Parser;
-use oximeter_db::query::Timestamp;
 use oximeter_db::Client;
 use oximeter_db::DbWrite;
+use oximeter_db::TimeseriesName;
+use oximeter_db::Timestamp;
 use slog::o;
 use slog::Drain;
 use slog::Level;
@@ -53,31 +54,6 @@ struct OxDb {
     cmd: Subcommand,
 }
 
-/// Arguments used to populate the database with simulated data.
-#[derive(Debug, Args)]
-pub struct PopulateArgs {
-    /// The number of samples to generate, per timeseries
-    #[clap(short = 'n', long, default_value = "100", action)]
-    n_samples: usize,
-
-    /// Number of projects to simulate
-    #[clap(short = 'p', long, default_value = "2", action)]
-    n_projects: usize,
-
-    /// Number of VM instances to simulate, _per project_
-    #[clap(short = 'i', long, default_value = "2", action)]
-    n_instances: usize,
-
-    /// Number of vCPUs to simulate, per instance.
-    #[clap(short = 'c', long, default_value = "4", action)]
-    n_cpus: usize,
-
-    /// If true, generate data and report logs, but do not actually insert anything into the
-    /// database.
-    #[clap(short, long, action)]
-    dry_run: bool,
-}
-
 // The main `oxdb` subcommand.
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
@@ -105,12 +81,50 @@ enum Subcommand {
     /// List the schema for all available timeseries.
     ListSchema,
 
+    /// List the timeseries with their fields that are consistent with the
+    /// provided schema.
+    ListTimeseries {
+        /// The name of the schema to restrict the search to.
+        timeseries_name: TimeseriesName,
+
+        /// Zero or more filters for narrowing the search.
+        ///
+        /// The returned list of timeseries will be restricted to those which
+        /// are consistent with the set of provided fields.
+        filters: Vec<String>,
+    },
+
     /// Inspect timeseries in a dashboard.
     #[clap(visible_alias = "dash")]
     Dashboard {
         #[clap(flatten)]
-        query: QueryArgs,
+        dashboard: DashboardArgs,
     },
+}
+
+/// Arguments used to populate the database with simulated data.
+#[derive(Debug, Args)]
+pub struct PopulateArgs {
+    /// The number of samples to generate, per timeseries
+    #[clap(short = 'n', long, default_value = "100", action)]
+    n_samples: usize,
+
+    /// Number of projects to simulate
+    #[clap(short = 'p', long, default_value = "2", action)]
+    n_projects: usize,
+
+    /// Number of VM instances to simulate, _per project_
+    #[clap(short = 'i', long, default_value = "2", action)]
+    n_instances: usize,
+
+    /// Number of vCPUs to simulate, per instance.
+    #[clap(short = 'c', long, default_value = "4", action)]
+    n_cpus: usize,
+
+    /// If true, generate data and report logs, but do not actually insert anything into the
+    /// database.
+    #[clap(short, long, action)]
+    dry_run: bool,
 }
 
 /// Arguments for querying the timeseries database.
@@ -118,7 +132,7 @@ enum Subcommand {
 pub struct QueryArgs {
     /// The name of the timeseries to search for.
     #[clap(action)]
-    timeseries_name: String,
+    timeseries_name: TimeseriesName,
 
     /// Filters applied to the timeseries's fields.
     #[clap(required = true, num_args(1..), action)]
@@ -141,6 +155,23 @@ pub struct QueryArgs {
     end_exclusive: Option<DateTime<Utc>>,
 }
 
+/// Arguments for displaying a dashboard view of timeseries data.
+#[derive(Clone, Debug, Args)]
+pub struct DashboardArgs {
+    /// The name of the timeseries to search for.
+    #[clap(action)]
+    timeseries_name: TimeseriesName,
+
+    /// Filters applied to the timeseries's fields.
+    #[clap(action)]
+    filters: Vec<String>,
+
+    /// Plot multiple timeseries on independent subplots, rather than sharing a
+    /// single plot.
+    #[clap(short, long, default_value_t = false)]
+    independent: bool,
+}
+
 /// Create a client to the timeseries database, and initialize the DB.
 ///
 /// This will fail if the ClickHouse server cannot be reached or if the
@@ -151,7 +182,7 @@ pub async fn make_client(
     log: &Logger,
 ) -> Result<Client, anyhow::Error> {
     let address = SocketAddr::new(address, port);
-    let client = Client::new(address, &log);
+    let client = Client::new(address, log);
     client
         .init_db()
         .await
@@ -186,6 +217,15 @@ async fn main() -> anyhow::Result<()> {
             let client = make_client(args.address, args.port, &log).await?;
             query::list_schema(&client).await
         }
+        Subcommand::ListTimeseries { timeseries_name, filters } => {
+            let client = make_client(args.address, args.port, &log).await?;
+            query::list_compatible_timeseries(
+                &client,
+                &timeseries_name,
+                &filters,
+            )
+            .await
+        }
         Subcommand::Query { query } => {
             let client = make_client(args.address, args.port, &log).await?;
             let start = match (query.start, query.start_exclusive) {
@@ -200,16 +240,16 @@ async fn main() -> anyhow::Result<()> {
             };
             query::run_query(
                 &client,
-                query.timeseries_name,
+                &query.timeseries_name,
                 query.filters,
                 start,
                 end,
             )
             .await
         }
-        Subcommand::Dashboard { query } => {
+        Subcommand::Dashboard { dashboard } => {
             let client = make_client(args.address, args.port, &log).await?;
-            dashboard::run(&client, &log, &query).await
+            dashboard::run(client, log, dashboard).await
         }
     }
 }

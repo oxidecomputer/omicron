@@ -358,7 +358,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.database.temp_dir().display()
     );
     println!(
-        "omicron-dev: clickhouse URL:        127.0.0.1:{}",
+        "omicron-dev: clickhouse URL:        [::1]:{}",
         cptestctx.clickhouse.port(),
     );
 

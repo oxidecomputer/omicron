@@ -4,24 +4,38 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
+
+mod client;
+mod model;
+mod query;
+mod scan;
 
 use crate::query::StringFieldSelector;
-use chrono::{DateTime, Utc};
-use dropshot::{EmptyScanParams, PaginationParams};
-pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
+use chrono::DateTime;
+use chrono::Utc;
+pub use client::Client;
+pub use client::DbWrite;
+use dropshot::EmptyScanParams;
+use dropshot::PaginationParams;
+pub use oximeter::DatumType;
+pub use oximeter::Field;
+pub use oximeter::FieldType;
+pub use oximeter::Measurement;
+pub use oximeter::Sample;
+pub use query::Timestamp;
+pub use scan::TimeseriesPage;
+pub use scan::TimeseriesSchemaPage;
+pub use scan::TimeseriesSchemaScan;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 use thiserror::Error;
 
-mod client;
-pub mod model;
-pub mod query;
-pub use client::{Client, DbWrite};
-
+/// An error operating on the timeseries database.
 #[derive(Clone, Debug, Error)]
 pub enum Error {
     #[error("Oximeter core error: {0}")]
@@ -135,6 +149,13 @@ impl std::fmt::Display for TimeseriesName {
     }
 }
 
+impl std::str::FromStr for TimeseriesName {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s)
+    }
+}
+
 impl std::convert::TryFrom<&str> for TimeseriesName {
     type Error = Error;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
@@ -219,27 +240,80 @@ impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
 }
 
 /// The target identifies the resource or component about which metric data is produced.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
 pub struct Target {
     pub name: String,
     pub fields: Vec<Field>,
 }
 
 /// The metric identifies the measured aspect or feature of a target.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
 pub struct Metric {
     pub name: String,
     pub fields: Vec<Field>,
     pub datum_type: DatumType,
 }
 
-/// A list of timestamped measurements from a single timeseries.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Timeseries {
-    pub timeseries_name: String,
+/// The metadata describing a timeseries, which includes the name and the
+/// fields.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    JsonSchema,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+)]
+pub struct TimeseriesMetadata {
+    pub timeseries_name: TimeseriesName,
     pub target: Target,
     pub metric: Metric,
+}
+
+/// A list of timestamped measurements from a single timeseries.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct Timeseries {
+    #[serde(flatten)]
+    pub metadata: TimeseriesMetadata,
     pub measurements: Vec<Measurement>,
+}
+
+impl Timeseries {
+    /// Return true if other is the same timeseries.
+    ///
+    /// Timeseries are the same if they have the same metadata, i.e., name and
+    /// fields.
+    pub fn is_same(&self, other: &Self) -> bool {
+        self.matches_metadata(&other.metadata)
+    }
+
+    /// Return true if the provided metadata matches that of `self`.
+    pub fn matches_metadata(&self, md: &TimeseriesMetadata) -> bool {
+        &self.metadata == md
+    }
 }
 
 /// The source from which a field is derived, the target or metric.
@@ -259,6 +333,19 @@ pub struct Timeseries {
 pub enum FieldSource {
     Target,
     Metric,
+}
+
+impl std::fmt::Display for FieldSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                FieldSource::Target => "target",
+                FieldSource::Metric => "metric",
+            }
+        )
+    }
 }
 
 #[derive(

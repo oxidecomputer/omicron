@@ -50,7 +50,7 @@ pub fn describe_data() {
     let vm = VirtualMachine::new();
     print!("Target:\n\n Name: {target_name:?}\n", target_name = vm.name());
     for (i, (field_name, field_type)) in
-        vm.field_names().into_iter().zip(vm.field_types()).enumerate()
+        vm.field_names().iter().zip(vm.field_types()).enumerate()
     {
         print!(
             " Field {i}:\n   Name: {field_name:?}\n   Type: {field_type}\n",
@@ -67,7 +67,7 @@ pub fn describe_data() {
         ty = cpu.datum_type()
     );
     for (i, (field_name, field_type)) in
-        cpu.field_names().into_iter().zip(cpu.field_types()).enumerate()
+        cpu.field_names().iter().zip(cpu.field_types()).enumerate()
     {
         print!(
             " Field {i}:\n   Name: {field_name:?}\n   Type: {field_type}\n",
@@ -93,7 +93,7 @@ async fn insert_samples(
     );
     if !dry_run {
         client
-            .insert_samples(&samples)
+            .insert_samples(samples)
             .await
             .context("Failed to insert samples")?;
     }
@@ -139,7 +139,7 @@ pub async fn populate(
                     let sample = Sample::new(&vm, &cpu_busy);
                     samples.push(sample);
                     if samples.len() == chunk_size {
-                        insert_samples(&client, &log, &samples, args.dry_run)
+                        insert_samples(client, log, &samples, args.dry_run)
                             .await?;
                         samples.clear();
                     }
@@ -148,7 +148,7 @@ pub async fn populate(
         }
     }
     if !samples.is_empty() {
-        insert_samples(&client, &log, &samples, args.dry_run).await?;
+        insert_samples(client, log, &samples, args.dry_run).await?;
     }
     Ok(())
 }

@@ -19,7 +19,7 @@ use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::internal::nexus;
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
-use oximeter_db::query::Timestamp;
+use oximeter_db::Timestamp;
 use oximeter_db::Measurement;
 use oximeter_producer::register;
 use slog::Logger;

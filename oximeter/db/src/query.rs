@@ -3,18 +3,24 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Functions for querying the timeseries database.
-// Copyright 2021 Oxide Computer Company
 
-use crate::{
-    Error, FieldSchema, FieldSource, TimeseriesKey, TimeseriesSchema,
-    DATABASE_NAME, DATABASE_SELECT_FORMAT,
-};
-use chrono::{DateTime, Utc};
-use oximeter::types::{DatumType, FieldType, FieldValue};
-use oximeter::{Metric, Target};
+// Copyright 2023 Oxide Computer Company
+
+use crate::Error;
+use crate::FieldSchema;
+use crate::TimeseriesKey;
+use crate::TimeseriesSchema;
+use crate::DATABASE_NAME;
+use crate::DATABASE_SELECT_FORMAT;
+use chrono::DateTime;
+use chrono::Utc;
+use oximeter::types::DatumType;
+use oximeter::FieldType;
+use oximeter::FieldValue;
 use regex::Regex;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::IpAddr;
@@ -73,57 +79,6 @@ impl SelectQueryBuilder {
     pub fn offset(mut self, offset: u32) -> Self {
         self.offset.replace(offset);
         self
-    }
-
-    /// Add a filter for a field with the given name, comparison operator, and value.
-    ///
-    /// An error is returned if the field cannot be found or the field value is not of the correct
-    /// type for the field.
-    pub fn filter<S, T>(
-        mut self,
-        field_name: S,
-        op: FieldCmp,
-        field_value: T,
-    ) -> Result<Self, Error>
-    where
-        S: AsRef<str>,
-        T: Into<FieldValue>,
-    {
-        let field_name = field_name.as_ref().to_string();
-        let field_schema = self
-            .timeseries_schema
-            .field_schema(&field_name)
-            .ok_or_else(|| Error::NoSuchField {
-                timeseries_name: self
-                    .timeseries_schema
-                    .timeseries_name
-                    .to_string(),
-                field_name: field_name.clone(),
-            })?;
-        let field_value: FieldValue = field_value.into();
-        let expected_type = field_schema.ty;
-        let found_type = field_value.field_type();
-        if expected_type != found_type {
-            return Err(Error::IncorrectFieldType {
-                field_name: field_name.to_string(),
-                expected_type,
-                found_type,
-            });
-        }
-        if !op.valid_for_type(found_type) {
-            return Err(Error::InvalidFieldCmp {
-                op: format!("{:?}", op),
-                ty: found_type,
-            });
-        }
-        let comparison = FieldComparison { op, value: field_value };
-        let selector = FieldSelector {
-            name: field_name.clone(),
-            comparison: Some(comparison),
-            ty: found_type,
-        };
-        self.field_selectors.insert(field_schema.clone(), selector);
-        Ok(self)
     }
 
     /// Add a filter for a field by parsing the given string selector into a strongly typed field
@@ -189,7 +144,7 @@ impl SelectQueryBuilder {
     ///
     /// Field selectors may be specified by a mini-DSL, where selectors are generally of the form:
     /// `NAME OP VALUE`. The name should be the name of the field. `OP` specifies the field
-    /// comparison operator (see [`FieldCmp`] for details. `VALUE` should be a string that can be
+    /// comparison operator (see [`FieldCmp`] for details). `VALUE` should be a string that can be
     /// parsed into a `FieldValue` of the correct type for the given field.
     ///
     /// Whitespace surrounding the `OP` is ignored, but whitespace elsewhere is significant.
@@ -202,37 +157,6 @@ impl SelectQueryBuilder {
         S: AsRef<str>,
     {
         self.filter_str(&selector.as_ref().parse()?)
-    }
-
-    /// Create a `SelectQueryBuilder` that selects the exact timeseries indicated by the given
-    /// target and metric.
-    pub fn from_parts<T, M>(target: &T, metric: &M) -> Result<Self, Error>
-    where
-        T: Target,
-        M: Metric,
-    {
-        let schema = crate::model::schema_for_parts(target, metric);
-        let mut builder = Self::new(&schema);
-        let target_fields =
-            target.field_names().iter().zip(target.field_values().into_iter());
-        let metric_fields =
-            metric.field_names().iter().zip(metric.field_values().into_iter());
-        for (name, value) in target_fields.chain(metric_fields) {
-            builder = builder.filter(name, FieldCmp::Eq, value)?;
-        }
-        Ok(builder)
-    }
-
-    /// Return the current field selector, if any, for the given field name and source.
-    pub fn field_selector<S>(
-        &self,
-        source: FieldSource,
-        name: S,
-    ) -> Option<&FieldSelector>
-    where
-        S: AsRef<str>,
-    {
-        find_field_selector(&self.field_selectors, source, name)
     }
 
     /// Build a query that can be sent to the ClickHouse database from the given query.
@@ -279,7 +203,7 @@ where
 }
 
 /// A `FieldComparison` combines a comparison operation and field value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct FieldComparison {
     op: FieldCmp,
     value: FieldValue,
@@ -289,7 +213,7 @@ pub struct FieldComparison {
 ///
 /// If the comparison is `None`, then the selector will match any value of the corresponding field
 /// name.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
 pub struct FieldSelector {
     name: String,
     ty: FieldType,
@@ -367,6 +291,7 @@ impl FromStr for StringFieldSelector {
     }
 }
 
+/// A comparison operator used to filter timeseries based on their fields.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub enum FieldCmp {
     Eq,
@@ -432,9 +357,14 @@ impl fmt::Display for FieldCmp {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+/// A range of times to which measurements are limited.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct TimeRange {
+    /// The time at which measurements start. If none, the earliest measurement
+    /// in the data itself will be used.
     pub start: Option<Timestamp>,
+    /// The time at which measurements end. If none, the latest measurement in
+    /// the data itself will be used.
     pub end: Option<Timestamp>,
 }
 
@@ -466,18 +396,27 @@ impl TimeRange {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+/// A timestamp used to filter measurements by time.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
 pub enum Timestamp {
+    /// A timestamp inclusive of the endpoint.
     Inclusive(DateTime<Utc>),
+    /// A timestamp exclusive of the endpoint.
     Exclusive(DateTime<Utc>),
 }
 
-#[derive(Debug, Clone)]
+/// A query used to select matching timeseries and measurements from them.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SelectQuery {
+    // The schema of the timeseries itself.
     timeseries_schema: TimeseriesSchema,
+    // The provided selection criteria on the fields of the timeseries.
     field_selectors: BTreeMap<FieldSchema, FieldSelector>,
+    // The time range to which the measurements are limited.
     time_range: TimeRange,
+    // An optional limit, when paginating the measurements.
     limit: Option<NonZeroU32>,
+    // An optional offset, when paginating the measurements.
     offset: Option<u32>,
 }
 
@@ -496,41 +435,28 @@ fn create_join_on_condition(columns: &[&str], current: usize) -> String {
         .join(" AND ")
 }
 
-fn find_field_selector<S>(
-    field_selectors: &BTreeMap<FieldSchema, FieldSelector>,
-    source: FieldSource,
-    name: S,
-) -> Option<&FieldSelector>
-where
-    S: AsRef<str>,
-{
-    let name = name.as_ref();
-    field_selectors
-        .iter()
-        .find(|(field, _)| field.source == source && field.name == name)
-        .map(|(_, selector)| selector)
-}
-
 impl SelectQuery {
+    /// Return the timeseries schema for this query.
     pub fn schema(&self) -> &TimeseriesSchema {
         &self.timeseries_schema
     }
 
-    pub fn field_selector<S>(
-        &self,
-        source: FieldSource,
-        name: S,
-    ) -> Option<&FieldSelector>
-    where
-        S: AsRef<str>,
-    {
-        find_field_selector(&self.field_selectors, source, name)
+    /// Construct the query used to select the matching field records, used in a
+    /// timeseries metadata query.
+    pub fn metadata_query(&self) -> Option<String> {
+        self.field_query_impl(true)
     }
 
     /// Construct and return the query used to select the matching field records from the database.
     ///
     /// If there are no fields in the associated timeseries, None is returned.
     pub fn field_query(&self) -> Option<String> {
+        self.field_query_impl(false)
+    }
+
+    // Shared implementation of the field query generation, for both a field
+    // query used in the timeseries metadata and measurement selections.
+    fn field_query_impl(&self, for_metadata: bool) -> Option<String> {
         match self.field_selectors.len() {
             0 => None,
             n => {
@@ -578,15 +504,44 @@ impl SelectQuery {
                         ));
                     }
                 }
+                let maybe_offset_limit = if for_metadata {
+                    let maybe_limit = if let Some(limit) = self.limit {
+                        format!("LIMIT {} ", limit)
+                    } else {
+                        String::new()
+                    };
+                    let maybe_offset = if let Some(offset) = self.offset {
+                        format!("OFFSET {} ", offset)
+                    } else {
+                        String::new()
+                    };
+                    format!("{maybe_limit} {maybe_offset}")
+                } else {
+                    String::new()
+                };
+                let order_by =
+                    if !for_metadata || self.field_selectors.is_empty() {
+                        String::from(
+                            "filter0.timeseries_name, filter0.timeseries_key",
+                        )
+                    } else {
+                        (0..self.field_selectors.len())
+                            .map(|i| format!("filter{}.field_value", i))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
                 let query = format!(
                     concat!(
                         "SELECT {top_level_columns} ",
                         "FROM {from_statements}",
-                        "ORDER BY (filter0.timeseries_name, filter0.timeseries_key) ",
+                        "ORDER BY ({order_by}) ",
+                        "{maybe_offset_limit}",
                         "FORMAT {fmt};",
                     ),
                     top_level_columns = top_level_columns.join(", "),
                     from_statements = from_statements,
+                    order_by = order_by,
+                    maybe_offset_limit = maybe_offset_limit,
                     fmt = DATABASE_SELECT_FORMAT,
                 );
                 Some(query)
@@ -641,6 +596,20 @@ impl SelectQuery {
             pagination_clause = pagination_clause,
             fmt = DATABASE_SELECT_FORMAT,
         )
+    }
+
+    /// Return the next page of results, by shifting the offset by the specified
+    /// size.
+    ///
+    /// If `count` is zero, `None` is returned.
+    pub fn next_page(&self, count: u32) -> Option<Self> {
+        if count == 0 {
+            None
+        } else {
+            let mut copy = self.clone();
+            copy.offset = Some(copy.offset.unwrap_or(0) + count);
+            Some(copy)
+        }
     }
 }
 
@@ -891,49 +860,6 @@ mod tests {
                 "LIMIT 10 OFFSET 5 ",
                 "FORMAT JSONEachRow;"
             )
-        );
-    }
-
-    #[test]
-    fn test_select_query_builder_from_parts() {
-        #[derive(oximeter::Target)]
-        struct Targ {
-            foo: String,
-        }
-
-        #[derive(oximeter::Metric)]
-        struct Met {
-            baz: i64,
-            datum: f64,
-        }
-        let targ = Targ { foo: String::from("bar") };
-        let met = Met { baz: 0, datum: 0.0 };
-        let builder = SelectQueryBuilder::from_parts(&targ, &met).unwrap();
-
-        assert_eq!(
-            builder.field_selector(FieldSource::Target, "foo").unwrap(),
-            &FieldSelector {
-                name: String::from("foo"),
-                ty: FieldType::String,
-                comparison: Some(FieldComparison {
-                    op: FieldCmp::Eq,
-                    value: FieldValue::from("bar"),
-                }),
-            },
-            "Expected an exact comparison when building a query from parts",
-        );
-
-        assert_eq!(
-            builder.field_selector(FieldSource::Metric, "baz").unwrap(),
-            &FieldSelector {
-                name: String::from("baz"),
-                ty: FieldType::I64,
-                comparison: Some(FieldComparison {
-                    op: FieldCmp::Eq,
-                    value: FieldValue::from(0),
-                }),
-            },
-            "Expected an exact comparison when building a query from parts",
         );
     }
 

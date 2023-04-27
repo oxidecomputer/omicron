@@ -67,7 +67,7 @@ impl_field_type_from! { bool, FieldType::Bool }
 
 /// The `FieldValue` contains the value of a target or metric field.
 #[derive(
-    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonSchema, Serialize, Deserialize,
 )]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum FieldValue {
@@ -189,7 +189,7 @@ where
 
 /// A `Field` is a named aspect of a target or metric.
 #[derive(
-    Clone, Debug, Hash, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
+    Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, JsonSchema, Serialize, Deserialize,
 )]
 pub struct Field {
     pub name: String,

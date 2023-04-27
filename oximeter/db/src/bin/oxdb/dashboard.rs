@@ -6,62 +6,68 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::QueryArgs;
-use crossterm::event::DisableMouseCapture;
-use crossterm::event::EnableMouseCapture;
-use crossterm::execute;
-use crossterm::terminal::disable_raw_mode;
-use crossterm::terminal::enable_raw_mode;
-use crossterm::terminal::EnterAlternateScreen;
-use crossterm::terminal::LeaveAlternateScreen;
-use dropshot::EmptyScanParams;
-use dropshot::WhichPage;
+mod event;
+mod timeseries;
+mod ui;
+
+use crate::DashboardArgs;
+use crossterm::event::Event;
+use crossterm::event::EventStream;
+use futures::FutureExt;
+use futures::StreamExt;
 use oximeter_db::Client;
 use slog::Logger;
-use std::io;
-use std::num::NonZeroU32;
-use tui::backend::CrosstermBackend;
-use tui::Terminal;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc;
+
+// Spawn task which loops for events from crossterm and sends to main thread.
+//
+//  (Sends Option which is none if timeout occurred)
+//
+// Spawn tokio task which fetches the actual data and sends to the main thread.
+
+// Handle events from the terminal
+async fn event_loop(
+    tx: mpsc::Sender<Event>,
+    mut quit: broadcast::Receiver<()>,
+) {
+    let mut reader = EventStream::new();
+    loop {
+        let event = reader.next().fuse();
+        tokio::select! {
+            maybe_event = event => match maybe_event {
+                Some(Ok(event)) => tx.send(event).await.unwrap(),
+                Some(Err(e)) => panic!("{e}"),
+                None => break,
+            },
+            _ = quit.recv() => break,
+        }
+    }
+}
 
 /// Run a query and display the results in a dashboard.
 pub async fn run(
-    client: &Client,
-    _log: &Logger,
-    _query: &QueryArgs,
+    client: Client,
+    _log: Logger,
+    args: DashboardArgs,
 ) -> anyhow::Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    let mut it = 0;
+    // Notify others when it's time to quit.
+    let (quit_tx, quit_rx) = broadcast::channel(1);
 
-    loop {
-        let page = WhichPage::First(EmptyScanParams {});
-        let count = NonZeroU32::new(1).unwrap();
-        let results = client.timeseries_schema_list(&page, count).await?;
-        let schema = results.items.first().unwrap();
-        terminal.draw(|f| {
-            let size = f.size();
-            let block = tui::widgets::Block::default()
-                .title(format!("{} ({})", schema.timeseries_name, it))
-                .borders(tui::widgets::Borders::ALL);
-            f.render_widget(block, size);
-        })?;
-        it += 1;
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if it == 5 {
-            break;
-        }
-    }
+    // Send events from the `event_loop` task to the UI loop.
+    let (event_tx, event_rx) = mpsc::channel(32);
+    tokio::spawn(event_loop(event_tx, quit_tx.subscribe()));
 
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+    // Spawn task for fetching and updating the actual plotted data.
+    let (data_tx, data_rx) = mpsc::channel(32);
+    tokio::spawn(timeseries::fetch_loop(
+        client,
+        args,
+        data_tx,
+        quit_tx.clone(),
+        quit_tx.subscribe(),
+    ));
 
-    Ok(())
+    // Run the UI loop in the main thread.
+    ui::run(event_rx, quit_tx, quit_rx, data_rx).await
 }
