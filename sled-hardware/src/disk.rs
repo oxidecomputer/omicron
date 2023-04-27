@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
@@ -191,6 +192,9 @@ pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const ZONE_DATASET: &'static str = "zone";
 
+// This is the root dataset for all U.2 drives. Encryption is inherited.
+pub const CRYPT_DATASET: &'static str = "crypt";
+
 const U2_EXPECTED_DATASET_COUNT: usize = 1;
 static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
@@ -320,20 +324,39 @@ impl Disk {
     fn ensure_zpool_has_datasets(
         zpool_name: &ZpoolName,
     ) -> Result<(), DiskError> {
-        let datasets = match zpool_name.kind().into() {
-            DiskVariant::M2 => M2_EXPECTED_DATASETS.iter(),
-            DiskVariant::U2 => U2_EXPECTED_DATASETS.iter(),
+        let (root, datasets) = match zpool_name.kind().into() {
+            DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
+            DiskVariant::U2 => {
+                (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter())
+            }
         };
-        for dataset in datasets.into_iter() {
-            let mountpoint = zpool_name.dataset_mountpoint(dataset);
 
-            let zoned = false;
-            let do_format = true;
+        let zoned = false;
+        let do_format = true;
+
+        // Ensure the root encrypted filesystem exists
+        // Datasets below this in the hierarchy will inherit encryption
+        if let Some(dataset) = root {
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+            let keypath = Keypath::new(&zpool_name.id().to_string());
             Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
+                Some(keypath),
+            )?;
+        }
+
+        for dataset in datasets.into_iter() {
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+            let encrypt = None;
+            Zfs::ensure_filesystem(
+                &format!("{}/{}", zpool_name, dataset),
+                Mountpoint::Path(mountpoint),
+                zoned,
+                do_format,
+                encrypt,
             )?;
         }
         Ok(())
