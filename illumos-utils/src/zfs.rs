@@ -12,8 +12,6 @@ pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
 
-pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
-
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
 #[error("Could not list datasets within zpool {name}: {err}")]
@@ -108,17 +106,7 @@ impl fmt::Display for Mountpoint {
 
 /// This is the path for an encryption key used by ZFS
 #[derive(Debug, Clone)]
-pub struct Keypath(PathBuf);
-
-impl Keypath {
-    pub fn new(zpool_id: &str) -> Keypath {
-        let filename = format!("{}.key", zpool_id);
-        let mut path = PathBuf::new();
-        path.push(KEYPATH_ROOT);
-        path.push(filename);
-        Keypath(path)
-    }
-}
+pub struct Keypath(pub PathBuf);
 
 impl fmt::Display for Keypath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
