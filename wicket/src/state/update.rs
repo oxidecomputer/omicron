@@ -14,10 +14,10 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::{
     types::{
-        ArtifactId, CurrentProgress, SemverVersion, UpdateComponent, UpdateLog,
-        UpdateLogAll, UpdateStepId,
+        ArtifactId, EventReportAll, SemverVersion, UpdateComponent,
+        UpdateStepId,
     },
-    ProgressEventKind, StepEventKind,
+    EventReport, ProgressEventKind, StepEventKind,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ pub struct RackUpdateState {
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
     pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
-    pub logs: BTreeMap<ComponentId, UpdateLog>,
+    pub event_reports: BTreeMap<ComponentId, EventReport>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,22 +92,22 @@ impl RackUpdateState {
                 .collect(),
             artifacts: vec![],
             artifact_versions: BTreeMap::default(),
-            logs: BTreeMap::default(),
+            event_reports: BTreeMap::default(),
         }
     }
 
-    pub fn update_logs(&mut self, logger: &Logger, logs: UpdateLogAll) {
-        for (sp_type, logs) in logs.sps {
+    pub fn update_logs(&mut self, logger: &Logger, reports: EventReportAll) {
+        for (sp_type, logs) in reports.sps {
             for (i, log) in logs {
                 let Ok(id) = ComponentId::try_from(ParsableComponentId {
                     sp_type: &sp_type,
                     i: &i,
                 }) else {
-                    warn!(logger, "Invalid ComponentId in UpdateLog: {} {}", &sp_type, &i);
+                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
                     continue;
                 };
                 self.update_items(&id, &log);
-                self.logs.insert(id, log);
+                self.event_reports.insert(id, log);
             }
         }
     }
@@ -128,9 +128,13 @@ impl RackUpdateState {
     }
 
     /// Scan through `log` and update the components status given by `id`
-    pub fn update_items(&mut self, id: &ComponentId, log: &UpdateLog) {
+    pub fn update_items(
+        &mut self,
+        id: &ComponentId,
+        event_report: &EventReport,
+    ) {
         let items = self.items.get_mut(id).unwrap();
-        if log.events.is_empty() {
+        if event_report.step_events.is_empty() {
             // Reset all items to default
             for (_, state) in items.iter_mut() {
                 *state = UpdateState::Waiting;
@@ -139,7 +143,7 @@ impl RackUpdateState {
 
         // Mark artifacts as either 'succeeded' or `failed' by looking in
         // the event log.
-        for event in &log.events {
+        for event in &event_report.step_events {
             match &event.data {
                 StepEventKind::NoStepsDefined
                 | StepEventKind::ExecutionStarted { .. }
@@ -176,21 +180,17 @@ impl RackUpdateState {
         }
 
         // Mark any known artifacts as updating
-        let Some(state) = &log.current else {
-            return;
-        };
-        let component = match state {
-            CurrentProgress::ProgressEvent { data, .. } => match data {
+        for progress_event in &event_report.progress_events {
+            let component = match &progress_event.data {
                 ProgressEventKind::WaitingForProgress { step, .. }
                 | ProgressEventKind::Progress { step, .. }
                 | ProgressEventKind::Nested { step, .. } => {
                     Some(step.info.component)
                 }
                 ProgressEventKind::Unknown => None,
-            },
-            CurrentProgress::WaitingForProgressEvent => None,
-        };
-        update_component_state(items, component, UpdateState::Updating);
+            };
+            update_component_state(items, component, UpdateState::Updating);
+        }
     }
 }
 

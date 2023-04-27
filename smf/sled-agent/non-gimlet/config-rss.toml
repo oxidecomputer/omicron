@@ -19,7 +19,7 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 # pool as its external IP.
 [[internal_services_ip_pool_ranges]]
 first = "192.168.1.20"
-last = "192.168.1.21"
+last = "192.168.1.22"
 
 [gateway]
 

@@ -16,8 +16,8 @@ crossterm.workspace = true
 futures.workspace = true
 hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
-lazy_static.workspace = true
 omicron-common.workspace = true
+once_cell.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 serde.workspace = true

@@ -42,6 +42,7 @@ progenitor::generate_api!(
     }
 );
 
+pub type EventReport = types::EventReportForWicketdEngineSpec;
 pub type ProgressEventKind = types::ProgressEventKindForWicketdEngineSpec;
 pub type StepEventKind = types::StepEventKindForWicketdEngineSpec;
 pub type StepInfoWithMetadata = types::StepInfoWithMetadataForWicketdEngineSpec;

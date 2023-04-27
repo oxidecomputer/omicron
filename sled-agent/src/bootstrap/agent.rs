@@ -8,7 +8,6 @@ use super::client::Client as BootstrapAgentClient;
 use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
 };
-use super::ddm_admin_client::{DdmAdminClient, DdmError};
 use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
@@ -25,10 +24,9 @@ use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use crate::storage_manager::StorageManager;
 use crate::updates::UpdateManager;
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
-use illumos_utils::dladm::{
-    self, Dladm, Etherstub, EtherstubVnic, GetMacError, PhysicalLink,
-};
+use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
     self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
     ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
@@ -36,11 +34,12 @@ use illumos_utils::zfs::{
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::external::{Error as ExternalError, MacAddr};
+use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
+use sled_hardware::underlay::bootstrap_ip;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
@@ -50,12 +49,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
-
-/// Initial octet of IPv6 for bootstrap addresses.
-pub(crate) const BOOTSTRAP_PREFIX: u16 = 0xfdb0;
-
-/// IPv6 prefix mask for bootstrap addresses.
-pub(crate) const BOOTSTRAP_MASK: u8 = 64;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -206,32 +199,6 @@ fn get_sled_agent_request_path() -> PathBuf {
         .join("sled-agent-request.toml")
 }
 
-fn mac_to_bootstrap_ip(mac: MacAddr, interface_id: u64) -> Ipv6Addr {
-    let mac_bytes = mac.into_array();
-    assert_eq!(6, mac_bytes.len());
-
-    Ipv6Addr::new(
-        BOOTSTRAP_PREFIX,
-        ((mac_bytes[0] as u16) << 8) | mac_bytes[1] as u16,
-        ((mac_bytes[2] as u16) << 8) | mac_bytes[3] as u16,
-        ((mac_bytes[4] as u16) << 8) | mac_bytes[5] as u16,
-        (interface_id >> 48 & 0xffff).try_into().unwrap(),
-        (interface_id >> 32 & 0xffff).try_into().unwrap(),
-        (interface_id >> 16 & 0xffff).try_into().unwrap(),
-        (interface_id & 0xfff).try_into().unwrap(),
-    )
-}
-
-// TODO(https://github.com/oxidecomputer/omicron/issues/945): This address
-// could be randomly generated when it no longer needs to be durable.
-fn bootstrap_ip(
-    link: PhysicalLink,
-    interface_id: u64,
-) -> Result<Ipv6Addr, dladm::GetMacError> {
-    let mac = Dladm::get_mac(link)?;
-    Ok(mac_to_bootstrap_ip(mac, interface_id))
-}
-
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
 //
@@ -298,8 +265,8 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
         let link = config.link.clone();
-        let ip = bootstrap_ip(link.clone(), 1)?;
-        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
+        let ip = bootstrap_ip(&link, 1)?;
+        let switch_zone_bootstrap_address = bootstrap_ip(&link, 2)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -338,7 +305,7 @@ impl Agent {
 
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
-        let ddmd_client = DdmAdminClient::localhost(log.clone())?;
+        let ddmd_client = DdmAdminClient::localhost(&log)?;
         ddmd_client.advertise_prefix(Ipv6Subnet::new(ip));
 
         // Before we start creating zones, we need to ensure that the
@@ -421,8 +388,7 @@ impl Agent {
         let underlay_etherstub_vnic =
             underlay_etherstub_vnic(&underlay_etherstub)?;
         let bootstrap_etherstub = bootstrap_etherstub()?;
-        let link = self.config.link.clone();
-        let switch_zone_bootstrap_address = bootstrap_ip(link, 2)?;
+        let switch_zone_bootstrap_address = bootstrap_ip(&self.config.link, 2)?;
         let hardware_monitor = HardwareMonitor::new(
             &self.log,
             &self.sled_config,
@@ -628,7 +594,7 @@ impl Agent {
     ) -> Result<RackSecret, BootstrapError> {
         // Ask the switch zone's maghemite for peers
         let ddm_admin_client =
-            DdmAdminClient::switch_zone(self.log.clone(), sled_subnet)?;
+            DdmAdminClient::switch_zone(&self.log, sled_subnet)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -1003,16 +969,6 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn test_mac_to_bootstrap_ip() {
-        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
-
-        assert_eq!(
-            mac_to_bootstrap_ip(mac, 1),
-            "fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
-        );
-    }
-
-    #[test]
     fn persistent_sled_agent_request_serialization_round_trips() {
         let secret = RackSecret::new();
         let (mut shares, verifier) = secret.split(2, 4).unwrap();
@@ -1021,10 +977,10 @@ mod tests {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
-                gateway: crate::bootstrap::params::Gateway {
+                gateway: Some(crate::bootstrap::params::Gateway {
                     address: None,
                     mac: MacAddr6::nil().into(),
-                },
+                }),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

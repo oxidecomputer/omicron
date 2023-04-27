@@ -10,6 +10,7 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Bytes;
+use ddm_admin_client::Client as DdmAdminClient;
 use display_error_chain::DisplayErrorChain;
 use futures::{Stream, StreamExt};
 use installinator_artifact_client::ClientError;
@@ -17,6 +18,7 @@ use installinator_common::{
     CompletionEventKind, ProgressEventKind, ProgressReport,
 };
 use itertools::Itertools;
+use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
 use tokio::{sync::mpsc, time::Instant};
@@ -24,7 +26,6 @@ use uuid::Uuid;
 
 use crate::{
     artifact::ArtifactClient,
-    ddm_admin_client::DdmAdminClient,
     errors::{ArtifactFetchError, DiscoverPeersError, HttpError},
     reporter::ReportEvent,
 };
@@ -39,9 +40,6 @@ pub(crate) enum DiscoveryMechanism {
     List(Vec<SocketAddrV6>),
 }
 
-// TODO: This currently hardcodes this port for the artifact server, will want to sync on this.
-const ARTIFACT_SERVER_PORT: u16 = 14000;
-
 impl DiscoveryMechanism {
     /// Discover peers.
     pub(crate) async fn discover_peers(
@@ -53,7 +51,7 @@ impl DiscoveryMechanism {
                 // XXX: consider adding aborts to this after a certain number of tries.
 
                 let ddm_admin_client =
-                    DdmAdminClient::new(log).map_err(|err| {
+                    DdmAdminClient::localhost(log).map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
                     })?;
                 let addrs =
@@ -62,7 +60,7 @@ impl DiscoveryMechanism {
                     })?;
                 addrs
                     .map(|addr| {
-                        SocketAddrV6::new(addr, ARTIFACT_SERVER_PORT, 0, 0)
+                        SocketAddrV6::new(addr, BOOTSTRAP_ARTIFACT_PORT, 0, 0)
                     })
                     .collect()
             }
@@ -124,6 +122,10 @@ impl FetchedArtifact {
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<Peers, DiscoverPeersError>>,
     {
+        // How long to sleep between retries if we fail to find a peer or fail
+        // to fetch an artifact from a found peer.
+        const RETRY_DELAY: Duration = Duration::from_secs(5);
+
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -135,8 +137,7 @@ impl FetchedArtifact {
                         "(attempt {attempt}) failed to discover peers, retrying: {}",
                         DisplayErrorChain::new(AsRef::<dyn std::error::Error>::as_ref(&error)),
                     );
-                    // Add a small delay here to avoid slamming the CPU.
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    tokio::time::sleep(RETRY_DELAY).await;
                     continue;
                 }
                 Err(DiscoverPeersError::Abort(error)) => {
@@ -162,8 +163,7 @@ impl FetchedArtifact {
                         log,
                         "unable to fetch artifact from peers, retrying discovery",
                     );
-                    // Add a small delay here to avoid slamming the CPU.
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    tokio::time::sleep(RETRY_DELAY).await;
                 }
             }
         }

@@ -7,8 +7,8 @@
 //! This addressing functionality is shared by both initialization services
 //! and Nexus, who need to agree upon addressing schemes.
 
-use crate::api::external::{self, Error, Ipv6Net};
-use ipnetwork::Ipv6Network;
+use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
+use ipnetwork::{Ipv4Network, Ipv6Network};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -46,6 +46,82 @@ pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
 
 pub const NTP_PORT: u16 = 123;
+
+// The number of ports available to an SNAT IP.
+// Note that for static NAT, this value isn't used, and all ports are available.
+//
+// NOTE: This must be a power of 2. We're expecting to provide the Tofino with a
+// port mask, e.g., a 16-bit mask such as `0b01...`, where those dots are any 14
+// bits. This signifies the port range `[16384, 32768)`. Such a port mask only
+// works when the port-ranges are limited to powers of 2, not arbitrary ranges.
+//
+// Also NOTE: This is not going to work if we modify this value across different
+// versions of Nexus. Currently, we're considering a port range free simply by
+// checking if the _first_ address in a range is free. However, we'll need to
+// instead to check if a candidate port range has any overlap with an existing
+// port range, which is more complicated. That's deferred until we actually have
+// that situation (which may be as soon as allocating ephemeral IPs).
+pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
+
+lazy_static::lazy_static! {
+    // Services that require external connectivity are given an OPTE port
+    // with a "Service VNIC" record. Like a "Guest VNIC", a service is
+    // placed within a VPC (a built-in services VPC), along with a VPC subnet.
+    // But unlike guest instances which are created at runtime by Nexus, these
+    // services are created by RSS early on. So, we have some fixed values
+    // used to bootstrap service OPTE ports. Each service kind uses a distinct
+    // VPC subnet which RSS will allocate addresses from for those services.
+    // The specific values aren't deployment-specific as they are virtualized
+    // within OPTE.
+
+    /// The IPv6 prefix assigned to the built-in services VPC.
+    // The specific prefix here was randomly chosen from the expected VPC
+    // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
+    // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
+    // /64's within this prefix.
+    pub static ref SERVICE_VPC_IPV6_PREFIX: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+            Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for External DNS OPTE ports.
+    pub static ref DNS_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 24).unwrap());
+
+    /// The IPv6 subnet for External DNS OPTE ports.
+    pub static ref DNS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
+
+    /// The IPv6 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
+    /// The IPv4 subnet for Boundary NTP OPTE ports.
+    pub static ref NTP_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+
+    /// The IPv6 subnet for Boundary NTP OPTE ports.
+    pub static ref NTP_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+}
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.

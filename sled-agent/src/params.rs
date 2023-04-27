@@ -5,14 +5,15 @@
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceRuntimeState,
 };
+use omicron_common::api::internal::shared::{
+    NetworkInterface, SourceNatConfig,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
-pub use illumos_utils::opte::params::NetworkInterface;
-pub use illumos_utils::opte::params::SourceNatConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 pub use sled_hardware::DendriteAsic;
@@ -286,12 +287,20 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServiceType {
     Nexus {
+        /// The address at which the internal nexus server is reachable.
         internal_ip: Ipv6Addr,
+        /// The address at which the external nexus server is reachable.
         external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
     },
     ExternalDns {
+        /// The address at which the external DNS server API is reachable.
         http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
         dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
     },
     InternalDns {
         http_address: SocketAddrV6,
@@ -307,9 +316,17 @@ pub enum ServiceType {
         pkt_source: String,
     },
     CruciblePantry,
-    Ntp {
+    BoundaryNtp {
         ntp_servers: Vec<String>,
-        boundary: bool,
+        dns_servers: Vec<String>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+    InternalNtp {
+        ntp_servers: Vec<String>,
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
@@ -330,7 +347,8 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible/pantry"),
-            ServiceType::Ntp { .. } => write!(f, "ntp"),
+            ServiceType::BoundaryNtp { .. }
+            | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
         }
     }
@@ -362,13 +380,14 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
         use ServiceType as St;
 
         match s {
-            St::Nexus { internal_ip, external_ip } => {
-                AutoSt::Nexus { internal_ip, external_ip }
+            St::Nexus { internal_ip, external_ip, nic } => {
+                AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() }
             }
-            St::ExternalDns { http_address, dns_address } => {
+            St::ExternalDns { http_address, dns_address, nic } => {
                 AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
+                    nic: nic.into(),
                 }
             }
             St::InternalDns { http_address, dns_address } => {
@@ -391,8 +410,21 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
             }
             St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
             St::CruciblePantry => AutoSt::CruciblePantry,
-            St::Ntp { ntp_servers, boundary, dns_servers, domain } => {
-                AutoSt::Ntp { ntp_servers, boundary, dns_servers, domain }
+            St::BoundaryNtp {
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => AutoSt::BoundaryNtp {
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic: nic.into(),
+                snat_cfg: snat_cfg.into(),
+            },
+            St::InternalNtp { ntp_servers, dns_servers, domain } => {
+                AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
             }
             St::Maghemite { mode } => AutoSt::Maghemite { mode },
         }

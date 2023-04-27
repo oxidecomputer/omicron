@@ -92,7 +92,7 @@ impl WicketdManager {
         let (poll_interval_now_tx, poll_interval_now_rx) = mpsc::channel(1);
 
         self.poll_inventory(poll_interval_now_rx).await;
-        self.poll_update_log().await;
+        self.poll_event_report().await;
         self.poll_artifacts().await;
 
         loop {
@@ -196,7 +196,7 @@ impl WicketdManager {
         });
     }
 
-    async fn poll_update_log(&self) {
+    async fn poll_event_report(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
@@ -211,8 +211,8 @@ impl WicketdManager {
                 match client.get_update_all().await {
                     Ok(val) => {
                         // TODO: Only send on changes
-                        let logs = val.into_inner();
-                        let _ = tx.send(Event::UpdateLog(logs));
+                        let reports = val.into_inner();
+                        let _ = tx.send(Event::EventReportAll(reports));
                     }
                     Err(e) => {
                         warn!(log, "{e}");
