@@ -3,46 +3,25 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt,
     time::Duration,
 };
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use installinator_common::{CompletionEventKind, ProgressEventKind};
+use installinator_common::{
+    M2Slot, StepContext, StepHandle, StepProgress, StepResult, UpdateEngine,
+    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
+};
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
-use tokio::{
-    io::{AsyncWrite, AsyncWriteExt},
-    sync::mpsc,
-    time::Instant,
-};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::{hardware::Hardware, reporter::ReportEvent};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum M2Slot {
-    A,
-    B,
-}
-
-impl TryFrom<i64> for M2Slot {
-    type Error = anyhow::Error;
-
-    fn try_from(value: i64) -> std::result::Result<Self, Self::Error> {
-        match value {
-            // Gimlet should have 2 M.2 drives: drive A is assigned slot 17, and
-            // drive B is assigned slot 18.
-            17 => Ok(Self::A),
-            18 => Ok(Self::B),
-            _ => Err(anyhow!("unexpected M.2 slot {value}")),
-        }
-    }
-}
+use crate::hardware::Hardware;
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -172,11 +151,11 @@ impl WriteDestination {
 enum DriveWriteProgress {
     /// We have not yet attempted any writes to the drive.
     Unstarted,
-    /// We've tried and failed to write the host phase 2 image `attempts` times.
-    HostPhase2Failed { attempts: usize },
+    /// We've tried and failed to write the host phase 2 image.
+    HostPhase2Failed,
     /// We succeeded in writing the host phase 2 image, but failed to write the
     /// control plane `attempts` times.
-    ControlPlaneFailed { attempts: usize },
+    ControlPlaneFailed,
     /// We succeeded in writing both the host phase 2 image and the control
     /// plane image.
     Done,
@@ -213,92 +192,71 @@ impl<'a> ArtifactWriter<'a> {
 
     pub(crate) async fn write(
         &mut self,
+        cx: &StepContext,
         log: &Logger,
-        event_sender: &mpsc::Sender<ReportEvent>,
-    ) -> Vec<M2Slot> {
+    ) -> WriteOutput {
         let mut transport = FileTransport;
-        self.write_with_transport(log, &mut transport, event_sender).await
+        self.write_with_transport(cx, log, &mut transport).await
     }
 
     async fn write_with_transport(
         &mut self,
+        cx: &StepContext,
         log: &Logger,
         transport: &mut impl WriteTransport,
-        event_sender: &mpsc::Sender<ReportEvent>,
-    ) -> Vec<M2Slot> {
-        let mut done_drives = Vec::new();
+    ) -> WriteOutput {
+        let mut done_drives = BTreeSet::new();
+
+        // How many drives did we finish writing during the previous iteration?
+        let mut success_prev_iter = 0;
 
         loop {
-            // How many drives did we finish writing this iteration?
+            // How many drives did we finish writing during this iteration?
+            // Includes drives that were written during a previous iteration.
             let mut success_this_iter = 0;
 
-            // How many drives did we finish writing on a previous iteration?
-            let mut success_prev_iter = 0;
-
             for (drive, (destinations, progress)) in self.drives.iter_mut() {
-                *progress = match progress {
-                    DriveWriteProgress::Unstarted => {
-                        let new_progress = self
-                            .artifacts
-                            .write_starting_with_host_phase_2(
-                                log,
-                                1,
-                                destinations,
-                                transport,
-                                event_sender,
-                            )
-                            .await;
-
-                        if new_progress == DriveWriteProgress::Done {
-                            done_drives.push(*drive);
-                            success_this_iter += 1;
-                        }
-
-                        new_progress
-                    }
-                    DriveWriteProgress::HostPhase2Failed { attempts } => {
-                        let new_progress = self
-                            .artifacts
-                            .write_starting_with_host_phase_2(
-                                log,
-                                *attempts + 1,
-                                destinations,
-                                transport,
-                                event_sender,
-                            )
-                            .await;
-
-                        if new_progress == DriveWriteProgress::Done {
-                            done_drives.push(*drive);
-                            success_this_iter += 1;
-                        }
-
-                        new_progress
-                    }
-                    DriveWriteProgress::ControlPlaneFailed { attempts } => {
-                        let new_progress = self
-                            .artifacts
-                            .write_starting_with_control_plane(
-                                log,
-                                *attempts + 1,
-                                destinations,
-                                transport,
-                                event_sender,
-                            )
-                            .await;
-
-                        if new_progress == DriveWriteProgress::Done {
-                            done_drives.push(*drive);
-                            success_this_iter += 1;
-                        }
-
-                        new_progress
-                    }
-                    DriveWriteProgress::Done => {
-                        success_prev_iter += 1;
-                        DriveWriteProgress::Done
-                    }
+                // Register a separate nested engine for each drive, since we
+                // want each drive to track success and failure independently.
+                let write_cx = SlotWriteContext {
+                    log: log.clone(),
+                    artifacts: self.artifacts,
+                    slot: *drive,
+                    destinations,
+                    progress: *progress,
                 };
+                let res = cx
+                    .with_nested_engine(|engine| {
+                        write_cx.register_steps(engine, transport);
+                        Ok(())
+                    })
+                    .await;
+
+                match res {
+                    Ok(_) => {
+                        // This drive succeeded in this iteration. This can be
+                        // either:
+                        // * the drive was written this time, or
+                        // * the drive was successfully written during a
+                        //   previous attempt.
+                        *progress = DriveWriteProgress::Done;
+                        done_drives.insert(*drive);
+                        success_this_iter += 1;
+                    }
+                    Err(error) => match error.component {
+                        WriteComponent::HostPhase2 => {
+                            *progress = DriveWriteProgress::HostPhase2Failed;
+                        }
+                        WriteComponent::ControlPlane => {
+                            *progress = DriveWriteProgress::ControlPlaneFailed;
+                        }
+                        WriteComponent::Unknown => {
+                            unreachable!(
+                                "we should never generate an unknown component"
+                            )
+                        }
+                    },
+                }
             }
 
             // Stop if either:
@@ -310,16 +268,111 @@ impl<'a> ArtifactWriter<'a> {
                 break;
             }
 
+            cx.send_progress(StepProgress::retry(format!(
+                "{}/{} slots succeeded",
+                success_this_iter,
+                self.drives.len()
+            )))
+            .await;
+
             // Give it a short break, then keep trying.
             tokio::time::sleep(Duration::from_secs(5)).await;
+
+            success_prev_iter = success_this_iter;
         }
 
-        done_drives.sort();
-
-        done_drives
+        WriteOutput {
+            slots_attempted: self.drives.keys().copied().collect(),
+            slots_written: done_drives.into_iter().collect(),
+        }
     }
 }
 
+struct SlotWriteContext<'a> {
+    log: Logger,
+    artifacts: ArtifactsToWrite<'a>,
+    slot: M2Slot,
+    destinations: &'a ArtifactDestination,
+    progress: DriveWriteProgress,
+}
+
+impl<'a> SlotWriteContext<'a> {
+    fn register_steps<'b>(
+        &'b self,
+        engine: &UpdateEngine<'b, WriteSpec>,
+        transport: &'b mut impl WriteTransport,
+    ) {
+        match self.progress {
+            DriveWriteProgress::Unstarted
+            | DriveWriteProgress::HostPhase2Failed => {
+                let transport_handle =
+                    self.register_host_phase_2_step(engine, transport);
+                self.register_control_plane_step(engine, transport_handle);
+            }
+            DriveWriteProgress::ControlPlaneFailed => {
+                let transport_handle = StepHandle::ready(transport);
+                self.register_control_plane_step(engine, transport_handle);
+            }
+            DriveWriteProgress::Done => {
+                // Don't register any steps -- this is done.
+            }
+        }
+    }
+
+    fn register_host_phase_2_step<'b, WT: WriteTransport>(
+        &'b self,
+        engine: &UpdateEngine<'b, WriteSpec>,
+        transport: &'b mut WT,
+    ) -> StepHandle<&'b mut WT, WriteSpec> {
+        engine
+            .new_step(
+                WriteComponent::HostPhase2,
+                WriteStepId::Writing { slot: self.slot },
+                format!("Writing host phase 2 to slot {}", self.slot),
+                move |cx2| async move {
+                    self.artifacts
+                        .write_host_phase_2(
+                            &self.log,
+                            self.slot,
+                            self.destinations,
+                            transport,
+                            &cx2,
+                        )
+                        .await
+                },
+            )
+            .register()
+    }
+
+    fn register_control_plane_step<'b>(
+        &'b self,
+        engine: &UpdateEngine<'b, WriteSpec>,
+        transport_handle: StepHandle<&'b mut impl WriteTransport, WriteSpec>,
+    ) {
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                WriteStepId::Writing { slot: self.slot },
+                format!("Writing control plane to slot {}", self.slot),
+                move |cx2| async move {
+                    let transport =
+                        transport_handle.into_value(cx2.token()).await;
+                    self.artifacts
+                        .write_control_plane(
+                            &self.log,
+                            self.slot,
+                            self.destinations,
+                            transport,
+                            &cx2,
+                        )
+                        .await
+                },
+            )
+            .register();
+    }
+}
+
+#[derive(Copy, Clone)]
 struct ArtifactsToWrite<'a> {
     host_phase_2_id: &'a ArtifactHashId,
     host_phase_2_data: &'a BufList,
@@ -328,91 +381,81 @@ struct ArtifactsToWrite<'a> {
 }
 
 impl ArtifactsToWrite<'_> {
-    // Attempt to write the host phase 2 and then, if successful, the control
-    // plane image.
-    async fn write_starting_with_host_phase_2(
+    /// Attempt to write the host phase 2 image.
+    async fn write_host_phase_2<'b, WT: WriteTransport>(
         &self,
         log: &Logger,
-        host_phase_2_attempt: usize,
+        slot: M2Slot,
         destinations: &ArtifactDestination,
-        transport: &mut impl WriteTransport,
-        event_sender: &mpsc::Sender<ReportEvent>,
-    ) -> DriveWriteProgress {
-        if let Err(error) = write_artifact_impl(
-            host_phase_2_attempt,
-            self.host_phase_2_id,
+        transport: &'b mut WT,
+        cx: &StepContext<WriteSpec>,
+    ) -> Result<StepResult<&'b mut WT, WriteSpec>, WriteError> {
+        write_artifact_impl(
+            WriteComponent::HostPhase2,
+            slot,
             self.host_phase_2_data.clone(),
             &destinations.host_phase_2,
             destinations.create_host_phase_2,
             transport,
-            event_sender,
+            cx,
         )
         .await
-        {
+        .map_err(|error| {
             info!(log, "{error:?}"; "artifact_id" => ?self.host_phase_2_id);
-            return DriveWriteProgress::HostPhase2Failed {
-                attempts: host_phase_2_attempt,
-            };
-        }
+            error
+        })?;
 
-        self.write_starting_with_control_plane(
-            log,
-            1,
-            destinations,
-            transport,
-            event_sender,
-        )
-        .await
+        StepResult::success(transport, ())
     }
 
-    // Attempt to write the control plane image, assuming the host phase 2 has
-    // already been written.
-    async fn write_starting_with_control_plane(
+    // Attempt to write the control plane image.
+    async fn write_control_plane(
         &self,
         log: &Logger,
-        control_plane_attempt: usize,
+        slot: M2Slot,
         destinations: &ArtifactDestination,
         transport: &mut impl WriteTransport,
-        event_sender: &mpsc::Sender<ReportEvent>,
-    ) -> DriveWriteProgress {
+        cx: &StepContext<WriteSpec>,
+    ) -> Result<StepResult<(), WriteSpec>, WriteError> {
         // Temporary workaround while we may not know how to write the control
         // plane image: if we don't know where to put it, we're done.
         let Some(control_plane_dest) = destinations.control_plane.as_ref() else
         {
-            return DriveWriteProgress::Done;
+            return StepResult::skipped((), (), "We don't yet know how to write the control plane");
         };
 
-        if let Err(error) = write_artifact_impl(
-            control_plane_attempt,
-            self.control_plane_id,
+        write_artifact_impl(
+            WriteComponent::ControlPlane,
+            slot,
             self.control_plane_data.clone(),
             control_plane_dest,
             true,
             transport,
-            event_sender,
+            cx,
         )
         .await
-        {
+        .map_err(|error| {
             info!(log, "{error:?}"; "artifact_id" => ?self.control_plane_id);
-            return DriveWriteProgress::ControlPlaneFailed {
-                attempts: control_plane_attempt,
-            };
-        }
+            error
+        })?;
 
-        DriveWriteProgress::Done
+        StepResult::success((), ())
     }
 }
 
 // Used in tests to test against file failures.
 #[async_trait]
-trait WriteTransport: fmt::Debug {
-    type W: AsyncWrite + Unpin;
+trait WriteTransport: fmt::Debug + Send {
+    type W: AsyncWrite + Send + Unpin;
 
     async fn make_writer(
         &mut self,
+        component: WriteComponent,
+        slot: M2Slot,
         destination: &Utf8Path,
+        total_bytes: u64,
         create: bool,
-    ) -> Result<Self::W>;
+    ) -> Result<Self::W, WriteError>;
 }
 
 #[derive(Debug)]
@@ -424,75 +467,68 @@ impl WriteTransport for FileTransport {
 
     async fn make_writer(
         &mut self,
+        component: WriteComponent,
+        slot: M2Slot,
         destination: &Utf8Path,
+        total_bytes: u64,
         create: bool,
-    ) -> Result<Self::W> {
-        Ok(tokio::fs::OpenOptions::new()
+    ) -> Result<Self::W, WriteError> {
+        tokio::fs::OpenOptions::new()
             .create(create)
             .write(true)
             .truncate(true)
             .open(destination)
             .await
-            .with_context(|| {
-                format!(
-                    "failed to open destination `{destination}` for writing",
-                )
-            })?)
+            .map_err(|error| WriteError {
+                component,
+                slot,
+                written_bytes: 0,
+                total_bytes,
+                error,
+            })
     }
 }
 
 async fn write_artifact_impl(
-    attempt: usize,
-    artifact_id: &ArtifactHashId,
+    component: WriteComponent,
+    slot: M2Slot,
     mut artifact: BufList,
     destination: &Utf8Path,
     create: bool,
     transport: &mut impl WriteTransport,
-    event_sender: &mpsc::Sender<ReportEvent>,
-) -> Result<()> {
-    let mut writer = transport.make_writer(destination, create).await?;
+    cx: &StepContext<WriteSpec>,
+) -> Result<(), WriteError> {
+    let mut writer = transport
+        .make_writer(
+            component,
+            slot,
+            destination,
+            artifact.num_bytes() as u64,
+            create,
+        )
+        .await?;
 
     let total_bytes = artifact.num_bytes() as u64;
     let mut written_bytes = 0u64;
-
-    let start = Instant::now();
 
     while artifact.has_remaining() {
         match writer.write_buf(&mut artifact).await {
             Ok(n) => {
                 written_bytes += n as u64;
-                let _ = event_sender
-                    .send(ReportEvent::Progress(
-                        ProgressEventKind::WriteProgress {
-                            attempt,
-                            kind: artifact_id.kind.clone(),
-                            destination: destination.to_owned(),
-                            written_bytes,
-                            total_bytes,
-                            elapsed: start.elapsed(),
-                        },
-                    ))
-                    .await;
+                cx.send_progress(StepProgress::with_current_and_total(
+                    written_bytes,
+                    total_bytes,
+                    (),
+                ))
+                .await;
             }
             Err(error) => {
-                let _ = event_sender
-                    .send(ReportEvent::Completion(
-                        CompletionEventKind::WriteFailed {
-                            attempt,
-                            kind: artifact_id.kind.clone(),
-                            destination: destination.to_owned(),
-                            written_bytes,
-                            total_bytes,
-                            elapsed: start.elapsed(),
-                            message: error.to_string(),
-                        },
-                    ))
-                    .await;
-                return Err(error).with_context(|| {
-                    format!(
-                        "failed to write artifact {artifact_id:?} \
-                         ({total_bytes} bytes) to destination `{destination}`"
-                    )
+                return Err(WriteError {
+                    component,
+                    slot,
+                    written_bytes,
+                    total_bytes,
+                    error,
                 });
             }
         }
@@ -501,37 +537,15 @@ async fn write_artifact_impl(
     match writer.flush().await {
         Ok(()) => {}
         Err(error) => {
-            let _ = event_sender
-                .send(ReportEvent::Completion(
-                    CompletionEventKind::WriteFailed {
-                        attempt,
-                        kind: artifact_id.kind.clone(),
-                        destination: destination.to_owned(),
-                        written_bytes,
-                        total_bytes,
-                        elapsed: start.elapsed(),
-                        message: format!("flush failed: {error}"),
-                    },
-                ))
-                .await;
-            return Err(error).with_context(|| {
-                format!(
-                    "failed to flush artifact {artifact_id:?} \
-                     ({total_bytes} bytes) to destination `{destination}`"
-                )
+            return Err(WriteError {
+                component,
+                slot,
+                written_bytes,
+                total_bytes,
+                error,
             });
         }
     };
-
-    let _ = event_sender
-        .send(ReportEvent::Completion(CompletionEventKind::WriteCompleted {
-            attempt,
-            kind: artifact_id.kind.clone(),
-            destination: destination.to_owned(),
-            artifact_size: total_bytes,
-            elapsed: start.elapsed(),
-        }))
-        .await;
 
     Ok(())
 }
@@ -547,6 +561,10 @@ mod tests {
     use bytes::{Buf, Bytes};
     use camino::Utf8Path;
     use futures::StreamExt;
+    use installinator_common::{
+        Event, InstallinatorCompletionMetadata, InstallinatorComponent,
+        InstallinatorStepId, StepEventKind, StepOutcome,
+    };
     use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
     use partial_io::{
@@ -567,63 +585,89 @@ mod tests {
         data1: Vec<Vec<u8>>,
         #[strategy(prop::collection::vec(prop::collection::vec(any::<u8>(), 0..8192), 0..16))]
         data2: Vec<Vec<u8>>,
-        #[strategy(op_strategy())] partial_ops: VecDeque<Vec<PartialOp>>,
+        #[strategy(WriteOps::strategy())] write_ops: WriteOps,
     ) {
         with_test_runtime(move || async move {
-            proptest_write_artifact_impl(data1, data2, partial_ops)
+            proptest_write_artifact_impl(data1, data2, write_ops)
                 .await
                 .expect("test failed");
         })
     }
 
-    fn op_strategy() -> impl Strategy<Value = VecDeque<Vec<PartialOp>>> {
-        // XXX: Ideally we'd be able to figure out how many bytes get written by
-        // merely inspecting the list of operations, but partial-io is a bit
-        // broken:
-        // https://github.com/sunshowers-code/partial-io/issues/32
-        //
-        // For now, always error out on earlier attempts and have one successful
-        // attempt at the end. Revisit this after fixing upstream.
-        //
-        // Because we will write the host image and then the control plane
-        // image, we return two concatenated lists of "fails then one success".
-        let success_strategy_host = prop::collection::vec(
-            partial_op_strategy(interrupted_would_block_strategy(), 1024),
-            0..16,
-        );
-        let success_strategy_control_plane = prop::collection::vec(
-            partial_op_strategy(interrupted_would_block_strategy(), 1024),
-            0..16,
-        );
+    #[derive(Debug)]
+    struct WriteOps {
+        ops: VecDeque<Vec<PartialOp>>,
+        host_failure_count: usize,
+        control_plane_failure_count: usize,
+    }
 
-        (
-            0..16u32,
-            success_strategy_host,
-            0..16u32,
-            success_strategy_control_plane,
-        )
-            .prop_map(
-                |(failure_count1, success1, failure_count2, success2)| {
-                    let failure1 = (0..failure_count1).map(|_| {
-                        vec![PartialOp::Err(std::io::ErrorKind::Other)]
-                    });
-                    let failure2 = (0..failure_count2).map(|_| {
-                        vec![PartialOp::Err(std::io::ErrorKind::Other)]
-                    });
+    impl WriteOps {
+        fn strategy() -> impl Strategy<Value = Self> {
+            // XXX: Ideally we'd be able to figure out how many bytes get written by
+            // merely inspecting the list of operations, but partial-io is a bit
+            // broken:
+            // https://github.com/sunshowers-code/partial-io/issues/32
+            //
+            // For now, always error out on earlier attempts and have one successful
+            // attempt at the end. Revisit this after fixing upstream.
+            //
+            // Because we will write the host image and then the control plane
+            // image, we return two concatenated lists of "fails then one success".
+            let success_strategy_host = prop::collection::vec(
+                partial_op_strategy(interrupted_would_block_strategy(), 1024),
+                0..16,
+            );
+            let success_strategy_control_plane = prop::collection::vec(
+                partial_op_strategy(interrupted_would_block_strategy(), 1024),
+                0..16,
+            );
 
-                    failure1
-                        .chain(std::iter::once(success1))
-                        .chain(failure2)
-                        .chain(std::iter::once(success2))
-                        .collect()
-                },
+            (
+                0..16usize,
+                success_strategy_host,
+                0..16usize,
+                success_strategy_control_plane,
             )
+                .prop_map(
+                    |(
+                        host_failure_count,
+                        success1,
+                        control_plane_failure_count,
+                        success2,
+                    )| {
+                        let failure1 = (0..host_failure_count).map(|_| {
+                            vec![PartialOp::Err(std::io::ErrorKind::Other)]
+                        });
+                        let failure2 =
+                            (0..control_plane_failure_count).map(|_| {
+                                vec![PartialOp::Err(std::io::ErrorKind::Other)]
+                            });
+
+                        let ops = failure1
+                            .chain(std::iter::once(success1))
+                            .chain(failure2)
+                            .chain(std::iter::once(success2))
+                            .collect();
+
+                        Self {
+                            ops,
+                            host_failure_count,
+                            control_plane_failure_count,
+                        }
+                    },
+                )
+        }
+
+        fn total_attempts(&self) -> usize {
+            // +1 because if there are no failures, we start counting at 1.
+            self.host_failure_count + self.control_plane_failure_count + 1
+        }
     }
 
     async fn proptest_write_artifact_impl(
         data1: Vec<Vec<u8>>,
         data2: Vec<Vec<u8>>,
-        partial_ops: VecDeque<Vec<PartialOp>>,
+        write_ops: WriteOps,
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
         let tempdir = tempdir()?;
@@ -642,35 +686,16 @@ mod tests {
         let control_plane_id =
             dummy_artifact_hash_id(KnownArtifactKind::ControlPlane);
 
-        // Which attempt is this going to first succeed at? For now, we expect a
-        // sequence of: [failures, success, failures, success]; the host will
-        // succeed on the first success and the control plane on the second, but
-        // its attempt count is just its sequence of failures. Scan
-        // `partial_ops` to produce these counts.
-        let mut expected_attempt_host = None;
-        let mut expected_attempt_control_plane = None;
-        for (i, op) in partial_ops.iter().enumerate() {
-            if !matches!(op[..], [PartialOp::Err(std::io::ErrorKind::Other)]) {
-                match expected_attempt_host {
-                    Some(attempt) => {
-                        expected_attempt_control_plane = Some(i + 1 - attempt);
-                        break;
-                    }
-                    None => {
-                        expected_attempt_host = Some(i + 1);
-                    }
-                }
-            }
-        }
-        let expected_attempt_host = expected_attempt_host
-            .expect("did not find first success in partial_ops");
-        let expected_attempt_control_plane = expected_attempt_control_plane
-            .expect("did not find second success in partial_ops");
+        // XXX: note we don't assert on the number of attempts it took to write
+        // just the host image at the moment.
+        let expected_total_attempts = write_ops.total_attempts();
 
-        let mut transport =
-            PartialIoTransport { file_transport: FileTransport, partial_ops };
+        let mut transport = PartialIoTransport {
+            file_transport: FileTransport,
+            partial_ops: write_ops.ops,
+        };
 
-        let (event_sender, event_receiver) = mpsc::channel(512);
+        let (event_sender, event_receiver) = tokio::sync::mpsc::channel(512);
 
         let receiver_handle = tokio::spawn(async move {
             ReceiverStream::new(event_receiver).collect::<Vec<_>>().await
@@ -700,204 +725,75 @@ mod tests {
             destination,
         );
 
-        writer
-            .write_with_transport(&logctx.log, &mut transport, &event_sender)
-            .await;
+        let engine = UpdateEngine::new(&logctx.log, event_sender);
+        let log = logctx.log.clone();
+        engine
+            .new_step(
+                InstallinatorComponent::Both,
+                InstallinatorStepId::Write,
+                "Writing",
+                |cx| async move {
+                    let write_output = writer
+                        .write_with_transport(&cx, &log, &mut transport)
+                        .await;
+                    StepResult::success(
+                        (),
+                        InstallinatorCompletionMetadata::Write {
+                            output: write_output,
+                        },
+                    )
+                },
+            )
+            .register();
 
-        std::mem::drop(event_sender);
+        engine.execute().await.expect("we keep retrying until success");
 
         let events = receiver_handle.await?;
 
-        let mut seen_completion_host = false;
-        let mut seen_completion_control_plane = false;
-        let mut current_attempt_host = 1;
-        let mut current_attempt_control_plane = 1;
-        let mut last_written_bytes_host = 0;
-        let mut last_written_bytes_control_plane = 0;
-
-        for event in events {
-            match event {
-                ReportEvent::Progress(ProgressEventKind::WriteProgress {
-                    attempt,
-                    kind,
-                    destination,
-                    written_bytes,
-                    total_bytes,
+        // For now, just ensure that we receive an execution completed event
+        // with the right number of attempts.
+        //
+        // TODO: expand this in the future.
+        let last_event = events.last().expect("at least one event present");
+        match last_event {
+            Event::Step(event) => match &event.kind {
+                StepEventKind::ExecutionCompleted {
+                    last_attempt,
+                    last_outcome,
                     ..
-                }) => {
-                    if kind == KnownArtifactKind::Host.into() {
-                        assert!(
-                            !seen_completion_host,
-                            "no more progress events after completion"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "host should be written before control plane"
-                        );
-                        assert_eq!(attempt, current_attempt_host);
-                        assert_eq!(destination, destination_host);
-                        assert_eq!(
-                            total_bytes,
-                            artifact_host.num_bytes() as u64
-                        );
-                        assert!(
-                            written_bytes > 0,
-                            "non-zero number of bytes should be written"
-                        );
-                        assert!(
-                            written_bytes > last_written_bytes_host,
-                            "progress made with written bytes {written_bytes} > {last_written_bytes_host}"
-                        );
-                        last_written_bytes_host = written_bytes;
-                    } else if kind == KnownArtifactKind::ControlPlane.into() {
-                        assert!(
-                            seen_completion_host,
-                            "control plane should only be written after host completes"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "no more progress events after completion"
-                        );
-                        assert_eq!(attempt, current_attempt_control_plane);
-                        assert_eq!(destination, destination_control_plane);
-                        assert_eq!(
-                            total_bytes,
-                            artifact_control_plane.num_bytes() as u64
-                        );
-                        assert!(
-                            written_bytes > 0,
-                            "non-zero number of bytes should be written"
-                        );
-                        assert!(
-                            written_bytes > last_written_bytes_control_plane,
-                            "progress made with written bytes {written_bytes} > {last_written_bytes_control_plane}"
-                        );
-                        last_written_bytes_control_plane = written_bytes;
-                    } else {
-                        panic!("unexpected kind {kind:?}");
-                    }
-                }
-                ReportEvent::Completion(
-                    CompletionEventKind::WriteCompleted {
-                        attempt,
-                        kind,
-                        destination,
-                        artifact_size,
-                        ..
-                    },
-                ) => {
-                    if kind == KnownArtifactKind::Host.into() {
-                        assert!(
-                            !seen_completion_host,
-                            "only one WriteCompleted event seen"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "host should be written before control plane"
-                        );
-                        seen_completion_host = true;
-                        assert_eq!(
-                            attempt, expected_attempt_host,
-                            "succeeded on expected attempt"
-                        );
-                        assert_eq!(destination, destination_host);
-                        assert_eq!(
-                            artifact_size,
-                            artifact_host.num_bytes() as u64
-                        );
-                    } else if kind == KnownArtifactKind::ControlPlane.into() {
-                        assert!(
-                            seen_completion_host,
-                            "host should be written before control plane"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "only one WriteCompleted event seen"
-                        );
-                        seen_completion_control_plane = true;
-                        assert_eq!(
-                            attempt, expected_attempt_control_plane,
-                            "succeeded on expected attempt"
-                        );
-                        assert_eq!(destination, destination_control_plane);
-                        assert_eq!(
-                            artifact_size,
-                            artifact_control_plane.num_bytes() as u64
-                        );
-                    } else {
-                        panic!("unexpected kind {kind:?}");
-                    }
-                }
-                ReportEvent::Completion(CompletionEventKind::WriteFailed {
-                    attempt,
-                    kind,
-                    destination,
-                    written_bytes,
-                    total_bytes,
-                    ..
-                }) => {
-                    if kind == KnownArtifactKind::Host.into() {
-                        assert!(
-                            !seen_completion_host,
-                            "no more failure events after completion"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "host should be written before control plane"
-                        );
-                        assert_eq!(
-                            attempt, current_attempt_host,
-                            "attempt matches"
-                        );
-                        assert_eq!(destination, destination_host);
-                        assert_eq!(written_bytes, last_written_bytes_host);
-                        assert_eq!(
-                            total_bytes,
-                            artifact_host.num_bytes() as u64
-                        );
-
-                        // Reset the counter of last written bytes since we're
-                        // starting afresh.
-                        last_written_bytes_host = 0;
-                        current_attempt_host += 1;
-                    } else if kind == KnownArtifactKind::ControlPlane.into() {
-                        assert!(
-                            seen_completion_host,
-                            "host should be written before control plane"
-                        );
-                        assert!(
-                            !seen_completion_control_plane,
-                            "no more failure events after completion"
-                        );
-                        assert_eq!(
-                            attempt, current_attempt_control_plane,
-                            "attempt matches"
-                        );
-                        assert_eq!(destination, destination_control_plane);
-                        assert_eq!(
-                            written_bytes,
-                            last_written_bytes_control_plane
-                        );
-                        assert_eq!(
-                            total_bytes,
-                            artifact_control_plane.num_bytes() as u64
-                        );
-
-                        // Reset the counter of last written bytes since we're
-                        // starting afresh.
-                        last_written_bytes_control_plane = 0;
-                        current_attempt_control_plane += 1;
-                    } else {
-                        panic!("unexpected kind {kind:?}");
+                } => {
+                    assert_eq!(
+                        *last_attempt, expected_total_attempts,
+                        "last attempt matches expected"
+                    );
+                    match last_outcome {
+                        StepOutcome::Success {
+                            metadata:
+                                InstallinatorCompletionMetadata::Write { output },
+                        } => {
+                            assert_eq!(
+                                &output
+                                    .slots_written
+                                    .iter()
+                                    .copied()
+                                    .collect::<Vec<_>>(),
+                                &vec![M2Slot::A],
+                                "correct slots written"
+                            );
+                        }
+                        other => {
+                            panic!("unexpected last_outcome: {other:?}")
+                        }
                     }
                 }
                 other => {
-                    panic!("unexpected event: {other:?}");
+                    panic!("unexpected step event: {other:?}");
                 }
+            },
+            other => {
+                panic!("unexpected event: {other:?}");
             }
         }
-
-        assert!(seen_completion_host, "seen a WriteCompleted event for host");
 
         // Read the host artifact from disk and ensure it is correct.
         let mut file = tokio::fs::File::open(&destination_host)
@@ -918,11 +814,6 @@ mod tests {
 
         let bytes = artifact_host.copy_to_bytes(artifact_host.num_bytes());
         assert_eq!(buf, bytes, "bytes written to disk match");
-
-        assert!(
-            seen_completion_control_plane,
-            "seen a WriteCompleted event for control_plane"
-        );
 
         // Read the control_plane artifact from disk and ensure it is correct.
         let mut file = tokio::fs::File::open(&destination_control_plane)
@@ -963,11 +854,16 @@ mod tests {
 
         async fn make_writer(
             &mut self,
+            component: WriteComponent,
+            slot: M2Slot,
             destination: &Utf8Path,
+            total_bytes: u64,
             create: bool,
-        ) -> Result<Self::W> {
-            let f =
-                self.file_transport.make_writer(destination, create).await?;
+        ) -> Result<Self::W, WriteError> {
+            let f = self
+                .file_transport
+                .make_writer(component, slot, destination, total_bytes, create)
+                .await?;
             // This is the next series of operations.
             let these_ops =
                 self.partial_ops.pop_front().unwrap_or_else(Vec::new);
