@@ -135,7 +135,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user (i.e., log in) via username and password",
+        "summary": "Authenticate a user via username and password",
         "operationId": "login_local",
         "parameters": [
           {
@@ -232,7 +232,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user (i.e., log in) via SAML",
+        "summary": "Authenticate a user via SAML",
         "operationId": "login_saml",
         "parameters": [
           {
@@ -1326,7 +1326,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Promote a project image to be visible to all projects in the silo",
+        "summary": "Promote a project image",
+        "description": "Promote a project image to be visible to all projects in the silo",
         "operationId": "image_promote",
         "parameters": [
           {
@@ -3281,7 +3282,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a new system-wide x.509 certificate.",
+        "summary": "Create a new system-wide x.509 certificate",
         "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
         "operationId": "certificate_create",
         "requestBody": {
@@ -3702,7 +3703,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List a silo's IDPs_name",
+        "summary": "List a silo's IdP's name",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -3909,7 +3910,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a SAML IDP",
+        "summary": "Create a SAML IdP",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -3957,7 +3958,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch a SAML IDP",
+        "summary": "Fetch a SAML IdP",
         "operationId": "saml_identity_provider_view",
         "parameters": [
           {
@@ -4358,7 +4359,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch the IP pool used for Oxide services.",
+        "summary": "Fetch the IP pool used for Oxide services",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -4436,7 +4437,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Add a range to an IP pool used for Oxide services.",
+        "summary": "Add a range to an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -4473,7 +4474,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "summary": "Remove a range from an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -6298,7 +6299,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a router",
+        "summary": "Fetch a router",
         "operationId": "vpc_router_view",
         "parameters": [
           {
@@ -6459,7 +6460,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Fetch a subnet",
+        "summary": "List subnets",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
