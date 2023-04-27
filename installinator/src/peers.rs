@@ -57,7 +57,7 @@ impl DiscoveryMechanism {
                 // We want to find both sled-agent (global zone) and wicketd
                 // (switch zone) peers.
                 let addrs = ddm_admin_client
-                    .peer_addrs(&[
+                    .derive_bootstrap_addrs_from_prefixes(&[
                         BootstrapInterface::GlobalZone,
                         BootstrapInterface::SwitchZone,
                     ])

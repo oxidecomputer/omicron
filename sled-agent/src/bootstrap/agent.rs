@@ -645,7 +645,7 @@ impl Agent {
                     // so we can log if we see any duplicates.
                     let mut addrs = HashSet::new();
                     for addr in ddm_admin_client
-                        .peer_addrs(&[BootstrapInterface::GlobalZone])
+                        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
                         .await
                         .map_err(BootstrapError::DdmError)
                         .map_err(|err| BackoffError::transient(err))?
