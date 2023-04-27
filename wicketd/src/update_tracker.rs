@@ -11,18 +11,6 @@ use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
-use crate::update_events::ComponentRegistrar;
-use crate::update_events::EventBuffer;
-use crate::update_events::EventReport;
-use crate::update_events::SpComponentUpdateStage;
-use crate::update_events::StepContext;
-use crate::update_events::StepHandle;
-use crate::update_events::StepProgress;
-use crate::update_events::StepResult;
-use crate::update_events::UpdateComponent;
-use crate::update_events::UpdateEngine;
-use crate::update_events::UpdateStepId;
-use crate::update_events::UpdateTerminalError;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::ensure;
@@ -65,6 +53,18 @@ use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+use wicket_common::update_events::ComponentRegistrar;
+use wicket_common::update_events::EventBuffer;
+use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SpComponentUpdateStage;
+use wicket_common::update_events::StepContext;
+use wicket_common::update_events::StepHandle;
+use wicket_common::update_events::StepProgress;
+use wicket_common::update_events::StepResult;
+use wicket_common::update_events::UpdateComponent;
+use wicket_common::update_events::UpdateEngine;
+use wicket_common::update_events::UpdateStepId;
+use wicket_common::update_events::UpdateTerminalError;
 
 #[derive(Debug)]
 struct SpUpdateData {
