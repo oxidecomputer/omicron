@@ -272,11 +272,13 @@ impl StorageWorker {
         let zoned = true;
         let fs_name = &dataset_name.full();
         let do_format = true;
+        let keypath = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(PathBuf::from("/data")),
             zoned,
             do_format,
+            keypath,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
@@ -486,7 +488,16 @@ impl StorageWorker {
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
-        sled_hardware::Disk::ensure_zpool_ready(&self.log, &zpool_name)?;
+        let synthetic_id = DiskIdentity {
+            vendor: "fake_vendor".to_string(),
+            serial: "fake_serial".to_string(),
+            model: zpool_name.id().to_string(),
+        };
+        sled_hardware::Disk::ensure_zpool_ready(
+            &self.log,
+            &zpool_name,
+            &synthetic_id,
+        )?;
         let disk = DiskWrapper::Synthetic { zpool_name };
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }
