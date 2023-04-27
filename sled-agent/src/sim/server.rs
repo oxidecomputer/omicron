@@ -296,6 +296,18 @@ impl Server {
             });
         }
 
+        let recovery_silo = NexusTypes::RecoverySiloConfig {
+            silo_name: "demo-silo".parse().unwrap(),
+            user_name: "demo-privileged".parse().unwrap(),
+            // The demo setup's password is "oxide".  This is obviously only
+            // intended for transient deployments in development with no
+            // sensitive data.
+            user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
+            RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
+                .parse()
+                .unwrap(),
+        };
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
@@ -304,6 +316,7 @@ impl Server {
             internal_dns_zone_config: d2n_params(&dns_config),
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
+            recovery_silo,
         };
 
         Ok((

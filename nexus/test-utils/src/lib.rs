@@ -11,6 +11,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServicePutRequest;
 use omicron_common::api::external::IdentityMetadata;
@@ -260,11 +262,24 @@ pub async fn test_setup_with_config<N: NexusServer>(
     };
     let external_dns_zone_name =
         internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
+    let recovery_silo = RecoverySiloConfig {
+        silo_name: "test-suite-silo".parse().unwrap(),
+        user_name: UserId::try_from("test-privileged".to_string()).unwrap(),
+        // The test suite's password is "oxide".  This password is only used by
+        // the test suite (and `omicron-dev run-all`) in transient deployments
+        // with no sensitive data.
+        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
+            RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
+            .to_string()
+            .try_into()
+            .unwrap(),
+    };
     let server = N::start(
         nexus_internal,
         &config,
         vec![dns_service_internal, dns_service_external, nexus_service],
         &external_dns_zone_name,
+        recovery_silo,
     )
     .await;
 

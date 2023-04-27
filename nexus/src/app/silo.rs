@@ -14,7 +14,7 @@ use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
-use nexus_db_model::UserProvisionType;
+use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_types::internal_api::params::DnsRecord;
@@ -68,7 +68,9 @@ impl super::Nexus {
     /// _within_ the control plane DNS zone (i.e., without that zone's suffix)
     ///
     /// This specific naming scheme is determined under RFD 357.
-    fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
+    pub(crate) fn silo_dns_name(
+        name: &omicron_common::api::external::Name,
+    ) -> String {
         // RFD 4 constrains resource names (including Silo names) to DNS-safe
         // strings, which is why it's safe to directly put the name of the
         // resource into the DNS name rather than doing any kind of escaping.
@@ -101,7 +103,7 @@ impl super::Nexus {
 
         let silo_name = &new_silo_params.identity.name;
         let mut dns_update = DnsVersionUpdateBuilder::new(
-            datastore.dns_zone_external(external_authn_opctx).await?,
+            DnsGroup::External,
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
         );
@@ -138,7 +140,7 @@ impl super::Nexus {
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
         let mut dns_update = DnsVersionUpdateBuilder::new(
-            datastore.dns_zone_external(opctx).await?,
+            DnsGroup::External,
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),
         );

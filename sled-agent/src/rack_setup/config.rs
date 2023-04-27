@@ -39,7 +39,7 @@ impl SetupServiceConfig {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::bootstrap::params::Gateway;
+    use crate::bootstrap::params::{Gateway, RecoverySiloConfig};
     use omicron_common::address::IpRange;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -54,9 +54,21 @@ mod test {
             }),
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec![String::from("1.1.1.1")],
+            external_dns_zone_name: String::from("oxide.test"),
             internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(
                 Ipv4Addr::new(129, 168, 1, 20),
             ))],
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "test-silo".parse().unwrap(),
+                user_name: "dummy".parse().unwrap(),
+                // This is the hash for the password "oxide".  It doesn't
+                // matter; it's just a dummy value here.
+                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
+                    RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/\
+                    ek3GL0el/oProgTwWpHJZ8lsQQoY"
+                    .parse()
+                    .unwrap(),
+            },
         };
 
         assert_eq!(

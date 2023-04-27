@@ -8,7 +8,6 @@ license = "MPL-2.0"
 anyhow.workspace = true
 chrono.workspace = true
 base64.workspace = true
-dns-service-client.workspace = true
 newtype_derive.workspace = true
 openssl.workspace = true
 openssl-sys.workspace = true
@@ -19,5 +18,6 @@ serde_json.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true
+dns-service-client.workspace = true
 nexus-passwords.workspace = true
 omicron-common.workspace = true

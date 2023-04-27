@@ -21,6 +21,7 @@ use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
@@ -91,6 +92,37 @@ impl DataStore {
         new_silo_params: params::SiloCreate,
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
+        let conn = self.pool_authorized(opctx).await?;
+        self.silo_create_conn(
+            conn,
+            opctx,
+            group_opctx,
+            new_silo_params,
+            dns_update,
+        )
+        .await
+    }
+
+    pub async fn silo_create_conn<ConnErr, CalleeConnErr>(
+        &self,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+        opctx: &OpContext,
+        group_opctx: &OpContext,
+        new_silo_params: params::SiloCreate,
+        dns_update: DnsVersionUpdateBuilder,
+    ) -> CreateResult<Silo>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+        TransactionError<Error>: From<ConnErr>,
+
+        CalleeConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<CalleeConnErr>,
+        TransactionError<Error>: From<CalleeConnErr>,
+        async_bb8_diesel::Connection<DbConnection>:
+            AsyncConnection<DbConnection, CalleeConnErr>,
+    {
         let silo_id = Uuid::new_v4();
         let silo_group_id = Uuid::new_v4();
 
@@ -147,41 +179,38 @@ impl DataStore {
                 None
             };
 
-        self.pool_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let silo = silo_create_query.get_result_async(&conn).await?;
-                self.virtual_provisioning_collection_create_on_connection(
-                    &conn,
-                    VirtualProvisioningCollection::new(
-                        silo.id(),
-                        CollectionTypeProvisioned::Silo,
-                    ),
-                )
-                .await?;
+        conn.transaction_async(|conn| async move {
+            let silo = silo_create_query.get_result_async(&conn).await?;
+            self.virtual_provisioning_collection_create_on_connection(
+                &conn,
+                VirtualProvisioningCollection::new(
+                    silo.id(),
+                    CollectionTypeProvisioned::Silo,
+                ),
+            )
+            .await?;
 
-                if let Some(query) = silo_admin_group_ensure_query {
-                    query.get_result_async(&conn).await?;
-                }
+            if let Some(query) = silo_admin_group_ensure_query {
+                query.get_result_async(&conn).await?;
+            }
 
-                if let Some(queries) = silo_admin_group_role_assignment_queries
-                {
-                    let (delete_old_query, insert_new_query) = queries;
-                    delete_old_query.execute_async(&conn).await?;
-                    insert_new_query.execute_async(&conn).await?;
-                }
+            if let Some(queries) = silo_admin_group_role_assignment_queries {
+                let (delete_old_query, insert_new_query) = queries;
+                delete_old_query.execute_async(&conn).await?;
+                insert_new_query.execute_async(&conn).await?;
+            }
 
-                self.dns_update(group_opctx, &conn, dns_update).await?;
+            self.dns_update(group_opctx, &conn, dns_update).await?;
 
-                Ok(silo)
-            })
-            .await
-            .map_err(|e| match e {
-                TransactionError::CustomError(e) => e,
-                TransactionError::Pool(e) => {
-                    public_error_from_diesel_pool(e, ErrorHandler::Server)
-                }
-            })
+            Ok(silo)
+        })
+        .await
+        .map_err(|e| match e {
+            TransactionError::CustomError(e) => e,
+            TransactionError::Pool(e) => {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            }
+        })
     }
 
     pub async fn silos_list_by_id(

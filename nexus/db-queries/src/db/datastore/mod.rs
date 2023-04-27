@@ -276,10 +276,10 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, DnsGroup, ExternalIp, InitialDnsGroup,
-        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, Sled, SledBaseboard, SledSystemHardware, SshKey,
-        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
+        Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
+        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
+        UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -291,7 +291,6 @@ mod test {
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_test_utils::dev;
-    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
@@ -1215,35 +1214,11 @@ mod test {
         assert_eq!(result.id(), rack.id());
         assert_eq!(result.initialized, false);
 
-        let internal_dns = InitialDnsGroup::new(
-            DnsGroup::Internal,
-            internal_dns::DNS_ZONE,
-            "test suite",
-            "test suite",
-            HashMap::new(),
-        );
-
-        let external_dns = InitialDnsGroup::new(
-            DnsGroup::External,
-            "testing.oxide.example",
-            "test suite",
-            "test suite",
-            HashMap::new(),
-        );
-
         // Initialize the Rack.
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                RackInit {
-                    rack_id: rack.id(),
-                    services: vec![],
-                    datasets: vec![],
-                    service_ip_pool_ranges: vec![],
-                    certificates: vec![],
-                    internal_dns: internal_dns.clone(),
-                    external_dns: external_dns.clone(),
-                },
+                RackInit { rack_id: rack.id(), ..Default::default() },
             )
             .await
             .unwrap();
@@ -1253,15 +1228,7 @@ mod test {
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                RackInit {
-                    rack_id: rack.id(),
-                    services: vec![],
-                    datasets: vec![],
-                    service_ip_pool_ranges: vec![],
-                    certificates: vec![],
-                    internal_dns,
-                    external_dns,
-                },
+                RackInit { rack_id: rack.id(), ..Default::default() },
             )
             .await
             .unwrap();

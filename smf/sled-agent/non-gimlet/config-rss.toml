@@ -14,6 +14,9 @@ rack_secret_threshold = 1
 ntp_servers = [ "ntp.eng.oxide.computer" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
+# Delegated external DNS zone name
+external_dns_zone_name = "oxide.test"
+
 # The IP ranges configured as part of the services IP Pool.
 # e.g., Nexus will be configured to use an address from this
 # pool as its external IP.
@@ -36,3 +39,11 @@ last = "192.168.1.22"
 # in their local network, using the current workaround methods in OPTE. See
 # how-to-run.adoc for details on how to determine the value for your network.
 mac = "00:0d:b9:54:fe:e4"
+
+# Configuration for the initial Silo, user, and password.
+[recovery_silo]
+silo_name = "recovery"
+user_name = "recovery"
+# Hash for password "oxide".  This configuration is (obviously) only intended
+# for transient development environments with no sensitive data or resources.
+user_password_hash = "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
