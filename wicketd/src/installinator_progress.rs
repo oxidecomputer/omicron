@@ -9,9 +9,9 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use installinator_artifactd::ProgressReportStatus;
-use installinator_common::{CompletionEventKind, ProgressReport};
+use installinator_artifactd::EventReportStatus;
 use tokio::sync::{mpsc, oneshot, Mutex};
+use update_engine::events::StepEventIsTerminal;
 use uuid::Uuid;
 
 /// Creates the artifact server and update tracker's interfaces to the
@@ -47,14 +47,14 @@ impl IprArtifactServer {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
-    ) -> ProgressReportStatus {
+        report: installinator_common::EventReport,
+    ) -> EventReportStatus {
         let mut running_updates = self.running_updates.lock().await;
         if let Some(update) = running_updates.get_mut(&update_id) {
             slog::debug!(
                 self.log,
-                "progress report seen ({} completion events, {} progress events)",
-                report.completion_events.len(),
+                "progress report seen ({} step events, {} progress events)",
+                report.step_events.len(),
                 report.progress_events.len();
                 "update_id" => %update_id
             );
@@ -92,10 +92,10 @@ impl IprArtifactServer {
                 }
             }
 
-            ProgressReportStatus::Processed
+            EventReportStatus::Processed
         } else {
             slog::debug!(self.log, "update ID unrecognized"; "update_id" => %update_id);
-            ProgressReportStatus::UnrecognizedUpdateId
+            EventReportStatus::UnrecognizedUpdateId
         }
     }
 }
@@ -139,17 +139,17 @@ impl IprUpdateTracker {
 /// Type alias for the receiver that resolves when the first message from the
 /// installinator has been received.
 pub(crate) type IprStartReceiver =
-    oneshot::Receiver<mpsc::Receiver<ProgressReport>>;
+    oneshot::Receiver<mpsc::Receiver<installinator_common::EventReport>>;
 
 #[derive(Debug)]
 #[must_use]
 enum RunningUpdate {
     /// This is the initial state: the first message from the installinator
     /// hasn't been received yet.
-    Initial(oneshot::Sender<mpsc::Receiver<ProgressReport>>),
+    Initial(oneshot::Sender<mpsc::Receiver<installinator_common::EventReport>>),
 
     /// Reports from the installinator have been received.
-    ReportsReceived(mpsc::Sender<ProgressReport>),
+    ReportsReceived(mpsc::Sender<installinator_common::EventReport>),
 
     /// All messages have been received.
     ///
@@ -187,21 +187,29 @@ impl RunningUpdate {
     }
 
     async fn send_and_next_state(
-        sender: mpsc::Sender<ProgressReport>,
-        report: ProgressReport,
+        sender: mpsc::Sender<installinator_common::EventReport>,
+        report: installinator_common::EventReport,
     ) -> Self {
-        let is_completed = Self::is_completed(&report);
+        let is_terminal = Self::is_terminal(&report);
         _ = sender.send(report).await;
-        if is_completed {
+        if is_terminal {
             Self::Closed
         } else {
             Self::ReportsReceived(sender)
         }
     }
 
-    fn is_completed(report: &ProgressReport) -> bool {
-        report.completion_events.last().map(|e| &e.kind)
-            == Some(&CompletionEventKind::Completed)
+    fn is_terminal(report: &installinator_common::EventReport) -> bool {
+        report
+            .step_events
+            .last()
+            .map(|e| {
+                matches!(
+                    e.kind.is_terminal(),
+                    StepEventIsTerminal::Terminal { .. }
+                )
+            })
+            .unwrap_or(false)
     }
 }
 
@@ -230,8 +238,13 @@ pub enum RunningUpdateState {
 mod tests {
     use std::time::Duration;
 
-    use installinator_common::CompletionEvent;
+    use installinator_common::{
+        InstallinatorCompletionMetadata, InstallinatorComponent,
+        InstallinatorStepId, M2Slot, StepEvent, StepEventKind, StepInfo,
+        StepInfoWithMetadata, StepOutcome, WriteOutput,
+    };
     use omicron_test_utils::dev::test_setup_log;
+    use update_engine::ExecutionId;
 
     use super::*;
 
@@ -245,9 +258,12 @@ mod tests {
 
         assert_eq!(
             ipr_artifact
-                .report_progress(Uuid::new_v4(), ProgressReport::default())
+                .report_progress(
+                    Uuid::new_v4(),
+                    installinator_common::EventReport::default()
+                )
                 .await,
-            ProgressReportStatus::UnrecognizedUpdateId,
+            EventReportStatus::UnrecognizedUpdateId,
             "no registered UUIDs yet"
         );
 
@@ -259,14 +275,11 @@ mod tests {
             "no progress yet"
         );
 
-        let first_report = ProgressReport {
-            total_elapsed: Duration::from_secs(1),
-            ..Default::default()
-        };
+        let first_report = installinator_common::EventReport::default();
 
         assert_eq!(
             ipr_artifact.report_progress(update_id, first_report.clone()).await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "initial progress sent"
         );
 
@@ -278,12 +291,42 @@ mod tests {
             "first report matches"
         );
 
+        let execution_id = ExecutionId(Uuid::new_v4());
+
         // Send a completion report.
-        let completion_report = ProgressReport {
-            total_elapsed: Duration::from_secs(4),
-            completion_events: vec![CompletionEvent {
+        let completion_report = installinator_common::EventReport {
+            step_events: vec![StepEvent {
+                execution_id,
+                event_index: 0,
                 total_elapsed: Duration::from_secs(2),
-                kind: CompletionEventKind::Completed,
+                kind: StepEventKind::ExecutionCompleted {
+                    last_step: StepInfoWithMetadata {
+                        info: StepInfo {
+                            id: InstallinatorStepId::Write,
+                            component: InstallinatorComponent::Both,
+                            description: "Fake step".into(),
+                            index: 0,
+                            component_index: 0,
+                            total_component_steps: 1,
+                        },
+                        metadata: None,
+                    },
+                    last_attempt: 1,
+                    last_outcome: StepOutcome::Success {
+                        metadata: InstallinatorCompletionMetadata::Write {
+                            output: WriteOutput {
+                                slots_attempted: vec![M2Slot::A, M2Slot::B]
+                                    .into_iter()
+                                    .collect(),
+                                slots_written: vec![M2Slot::A]
+                                    .into_iter()
+                                    .collect(),
+                            },
+                        },
+                    },
+                    step_elapsed: Duration::from_secs(1),
+                    attempt_elapsed: Duration::from_secs(1),
+                },
             }],
             ..Default::default()
         };
@@ -292,7 +335,7 @@ mod tests {
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
                 .await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "completion report sent"
         );
 
@@ -316,7 +359,7 @@ mod tests {
             ipr_artifact
                 .report_progress(update_id, completion_report.clone())
                 .await,
-            ProgressReportStatus::Processed,
+            EventReportStatus::Processed,
             "completion report sent after being closed"
         );
 

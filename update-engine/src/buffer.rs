@@ -123,6 +123,20 @@ impl<S: StepSpec> EventBuffer<S> {
         EventReport { step_events, progress_events, last_seen }
     }
 
+    /// Returns true if any further step events are pending since `last_seen`.
+    ///
+    /// This does not currently care about pending progress events, just pending
+    /// step events. A typical use for this is to check that all step events
+    /// have been reported before a sender shuts down.
+    pub fn has_pending_events_since(&self, last_seen: Option<usize>) -> bool {
+        for value in self.event_store.map.values() {
+            if value.step_events_since(last_seen).next().is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn add_progress_event(&mut self, event: ProgressEvent<S>) {
         self.event_store.handle_progress_event(event);
     }

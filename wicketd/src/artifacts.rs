@@ -17,8 +17,7 @@ use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
 use futures::stream;
 use hyper::Body;
-use installinator_artifactd::{ArtifactGetter, ProgressReportStatus};
-use installinator_common::ProgressReport;
+use installinator_artifactd::{ArtifactGetter, EventReportStatus};
 use omicron_common::api::{
     external::SemverVersion, internal::nexus::KnownArtifactKind,
 };
@@ -101,8 +100,8 @@ impl ArtifactGetter for WicketdArtifactServer {
     async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
-    ) -> Result<ProgressReportStatus, HttpError> {
+        report: installinator_common::EventReport,
+    ) -> Result<EventReportStatus, HttpError> {
         Ok(self.ipr_artifact.report_progress(update_id, report).await)
     }
 }
