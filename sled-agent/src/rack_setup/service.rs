@@ -473,7 +473,9 @@ impl ServiceInner {
             retry_policy_internal_service_aggressive(),
             || async {
                 let peer_addrs = ddm_admin_client
-                    .peer_addrs(&[BootstrapInterface::GlobalZone])
+                    .derive_bootstrap_addrs_from_prefixes(&[
+                        BootstrapInterface::GlobalZone,
+                    ])
                     .await
                     .map_err(|err| {
                         BackoffError::transient(format!(
@@ -846,7 +848,9 @@ impl ServiceInner {
         // network.
         let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
         let peer_addrs = ddm_admin_client
-            .peer_addrs(&[BootstrapInterface::GlobalZone])
+            .derive_bootstrap_addrs_from_prefixes(&[
+                BootstrapInterface::GlobalZone,
+            ])
             .await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs

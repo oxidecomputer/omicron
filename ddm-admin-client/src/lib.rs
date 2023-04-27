@@ -131,7 +131,7 @@ impl Client {
     /// Returns the addresses of connected sleds.
     ///
     /// Note: These sleds have not yet been verified.
-    pub async fn peer_addrs<'a>(
+    pub async fn derive_bootstrap_addrs_from_prefixes<'a>(
         &self,
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
