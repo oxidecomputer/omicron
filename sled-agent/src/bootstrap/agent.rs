@@ -22,12 +22,14 @@ use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
+use crate::storage_manager::StorageManager;
 use crate::updates::UpdateManager;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
-    self, Mountpoint, Zfs, ZONE_ZFS_DATASET, ZONE_ZFS_DATASET_MOUNTPOINT,
+    self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
+    ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
@@ -312,13 +314,15 @@ impl Agent {
         // TODO(https://github.com/oxidecomputer/omicron/issues/1934):
         // We should carefully consider which dataset this is using; it's
         // currently part of the ramdisk.
-        Zfs::ensure_zoned_filesystem(
-            ZONE_ZFS_DATASET,
+        let zoned = true;
+        let do_format = true;
+        Zfs::ensure_filesystem(
+            ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(std::path::PathBuf::from(
-                ZONE_ZFS_DATASET_MOUNTPOINT,
+                ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
             )),
-            // do_format=
-            true,
+            zoned,
+            do_format,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
@@ -429,17 +433,18 @@ impl Agent {
                 // we should restart the hardware monitor, so we can react to
                 // changes in the switch regardless of the success or failure of
                 // this sled agent.
-                let (hardware, services) = match hardware_monitor.take() {
-                    // This is the normal case; transfer hardware monitoring responsibilities from
-                    // the bootstrap agent to the sled agent.
-                    Some(hardware_monitor) => hardware_monitor,
-                    // This is a less likely case, but if we previously failed to start (or
-                    // restart) the hardware monitor, for any reason, recreate it.
-                    None => self.start_hardware_monitor().await?,
-                }
-                .stop()
-                .await
-                .expect("Failed to stop hardware monitor");
+                let (hardware, services, storage) =
+                    match hardware_monitor.take() {
+                        // This is the normal case; transfer hardware monitoring responsibilities from
+                        // the bootstrap agent to the sled agent.
+                        Some(hardware_monitor) => hardware_monitor,
+                        // This is a less likely case, but if we previously failed to start (or
+                        // restart) the hardware monitor, for any reason, recreate it.
+                        None => self.start_hardware_monitor().await?,
+                    }
+                    .stop()
+                    .await
+                    .expect("Failed to stop hardware monitor");
 
                 // This acts like a "run-on-drop" closure, to restart the
                 // hardware monitor in the bootstrap agent if we fail to
@@ -452,6 +457,7 @@ impl Agent {
                     log: Logger,
                     hardware: Option<HardwareManager>,
                     services: Option<ServiceManager>,
+                    storage: Option<StorageManager>,
                     monitor: &'a mut Option<HardwareMonitor>,
                 }
                 impl<'a> RestartMonitor<'a> {
@@ -466,6 +472,7 @@ impl Agent {
                                 &self.log,
                                 self.hardware.take().unwrap(),
                                 self.services.take().unwrap(),
+                                self.storage.take().unwrap(),
                             ));
                         }
                     }
@@ -475,6 +482,7 @@ impl Agent {
                     log: self.log.clone(),
                     hardware: Some(hardware),
                     services: Some(services.clone()),
+                    storage: Some(storage.clone()),
                     monitor: hardware_monitor,
                 };
 
@@ -484,6 +492,7 @@ impl Agent {
                     self.parent_log.clone(),
                     request.clone(),
                     services.clone(),
+                    storage.clone(),
                 )
                 .await
                 .map_err(|e| {

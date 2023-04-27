@@ -15,7 +15,7 @@ use crate::params::{
     SledRole, TimeSync, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
@@ -90,6 +90,9 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
+
+    #[error(transparent)]
+    ZpoolList(#[from] illumos_utils::zpool::ListError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -190,6 +193,7 @@ impl SledAgent {
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
         services: ServiceManager,
+        storage: StorageManager,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -247,14 +251,13 @@ impl SledAgent {
         ]);
         execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
 
-        let storage = StorageManager::new(
-            &parent_log,
-            request.id,
-            lazy_nexus_client.clone(),
-            etherstub.clone(),
-            *sled_address.ip(),
-        )
-        .await;
+        storage
+            .setup_underlay_access(storage_manager::UnderlayAccess {
+                lazy_nexus_client: lazy_nexus_client.clone(),
+                underlay_address: *sled_address.ip(),
+                sled_id: request.id,
+            })
+            .await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -273,12 +276,6 @@ impl SledAgent {
             port_manager.clone(),
         )?;
 
-        let svc_config = services::Config::new(
-            request.id,
-            config.sidecar_revision.clone(),
-            gateway_address,
-        );
-
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
@@ -286,6 +283,11 @@ impl SledAgent {
             ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
         let updates = UpdateManager::new(update_config);
 
+        let svc_config = services::Config::new(
+            request.id,
+            config.sidecar_revision.clone(),
+            gateway_address,
+        );
         services
             .sled_agent_started(
                 svc_config,

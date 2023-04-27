@@ -3,11 +3,14 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
+use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use slog::Logger;
 use slog::{info, warn};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 cfg_if::cfg_if! {
@@ -28,6 +31,8 @@ pub enum DiskError {
     BadPartitionLayout { path: PathBuf, why: String },
     #[error("Requested partition {partition:?} not found on device {path}")]
     NotFound { path: PathBuf, partition: Partition },
+    #[error(transparent)]
+    EnsureFilesystem(#[from] illumos_utils::zfs::EnsureFilesystemError),
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
     #[error("Cannot import zpool: {0}")]
@@ -179,17 +184,52 @@ pub struct Disk {
     zpool_name: ZpoolName,
 }
 
+pub const FACTORY_DATASET: &'static str = "factory";
+pub const INSTALL_DATASET: &'static str = "install";
+pub const CRASH_DATASET: &'static str = "crash";
+pub const CLUSTER_DATASET: &'static str = "cluster";
+pub const CONFIG_DATASET: &'static str = "config";
+pub const ZONE_DATASET: &'static str = "zone";
+
+const U2_EXPECTED_DATASET_COUNT: usize = 1;
+static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
+    // Stores filesystems for zones
+    ZONE_DATASET,
+];
+
+const M2_EXPECTED_DATASET_COUNT: usize = 5;
+static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
+    // Stores a "factory install" set of software
+    FACTORY_DATASET,
+    // Stores software images.
+    //
+    // Should be duplicated to both M.2s.
+    INSTALL_DATASET,
+    // Stores crash dumps.
+    CRASH_DATASET,
+    // Stores cluter configuration information.
+    //
+    // Should be duplicated to both M.2s.
+    CLUSTER_DATASET,
+    // Stores configuration data, including:
+    // - What services should be launched on this sled
+    // - Information about how to initialize the Sled Agent
+    // - (For scrimlets) RSS setup information
+    //
+    // Should be duplicated to both M.2s.
+    CONFIG_DATASET,
+];
+
 impl Disk {
-    #[allow(dead_code)]
     pub fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
     ) -> Result<Self, DiskError> {
         let paths = &unparsed_disk.paths;
-        // First, ensure the GPT has the right format. This does not necessarily
+        let variant = unparsed_disk.variant;
+        // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions =
-            ensure_partition_layout(&log, &paths, unparsed_disk.variant)?;
+        let partitions = ensure_partition_layout(&log, &paths, variant)?;
 
         // Find the path to the zpool which exists on this disk.
         //
@@ -201,6 +241,33 @@ impl Disk {
             false,
         )?;
 
+        let zpool_name = Self::ensure_zpool_exists(log, variant, &zpool_path)?;
+        Self::ensure_zpool_ready(log, &zpool_name)?;
+
+        Ok(Self {
+            paths: unparsed_disk.paths,
+            slot: unparsed_disk.slot,
+            variant: unparsed_disk.variant,
+            identity: unparsed_disk.identity,
+            partitions,
+            zpool_name,
+        })
+    }
+
+    pub fn ensure_zpool_ready(
+        log: &Logger,
+        zpool_name: &ZpoolName,
+    ) -> Result<(), DiskError> {
+        Self::ensure_zpool_imported(log, &zpool_name)?;
+        Self::ensure_zpool_has_datasets(&zpool_name)?;
+        Ok(())
+    }
+
+    fn ensure_zpool_exists(
+        log: &Logger,
+        variant: DiskVariant,
+        zpool_path: &Path,
+    ) -> Result<ZpoolName, DiskError> {
         let zpool_name = match Fstyp::get_zpool(&zpool_path) {
             Ok(zpool_name) => zpool_name,
             Err(_) => {
@@ -217,11 +284,11 @@ impl Disk {
                 // To remedy: Let's enforce that the partition exists.
                 info!(
                     log,
-                    "GPT exists without Zpool: formatting zpool on disk {}",
-                    paths.devfs_path.display()
+                    "GPT exists without Zpool: formatting zpool at {}",
+                    zpool_path.display(),
                 );
                 // If a zpool does not already exist, create one.
-                let zpool_name = match unparsed_disk.variant {
+                let zpool_name = match variant {
                     DiskVariant::M2 => ZpoolName::new_internal(Uuid::new_v4()),
                     DiskVariant::U2 => ZpoolName::new_external(Uuid::new_v4()),
                 };
@@ -229,20 +296,47 @@ impl Disk {
                 zpool_name
             }
         };
-
         Zpool::import(zpool_name.clone()).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
             DiskError::ZpoolImport(e)
         })?;
 
-        Ok(Self {
-            paths: unparsed_disk.paths,
-            slot: unparsed_disk.slot,
-            variant: unparsed_disk.variant,
-            identity: unparsed_disk.identity,
-            partitions,
-            zpool_name,
-        })
+        Ok(zpool_name)
+    }
+
+    fn ensure_zpool_imported(
+        log: &Logger,
+        zpool_name: &ZpoolName,
+    ) -> Result<(), DiskError> {
+        Zpool::import(zpool_name.clone()).map_err(|e| {
+            warn!(log, "Failed to import zpool {zpool_name}: {e}");
+            DiskError::ZpoolImport(e)
+        })?;
+        Ok(())
+    }
+
+    // Ensure that the zpool contains all the datasets we would like it to
+    // contain.
+    fn ensure_zpool_has_datasets(
+        zpool_name: &ZpoolName,
+    ) -> Result<(), DiskError> {
+        let datasets = match zpool_name.kind().into() {
+            DiskVariant::M2 => M2_EXPECTED_DATASETS.iter(),
+            DiskVariant::U2 => U2_EXPECTED_DATASETS.iter(),
+        };
+        for dataset in datasets.into_iter() {
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+
+            let zoned = false;
+            let do_format = true;
+            Zfs::ensure_filesystem(
+                &format!("{}/{}", zpool_name, dataset),
+                Mountpoint::Path(mountpoint),
+                zoned,
+                do_format,
+            )?;
+        }
+        Ok(())
     }
 
     pub fn identity(&self) -> &DiskIdentity {
@@ -282,6 +376,15 @@ impl Disk {
 pub enum DiskVariant {
     U2,
     M2,
+}
+
+impl From<ZpoolKind> for DiskVariant {
+    fn from(kind: ZpoolKind) -> DiskVariant {
+        match kind {
+            ZpoolKind::External => DiskVariant::U2,
+            ZpoolKind::Internal => DiskVariant::M2,
+        }
+    }
 }
 
 #[cfg(test)]
