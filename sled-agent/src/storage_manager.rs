@@ -22,6 +22,7 @@ use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
+use rand::seq::SliceRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
@@ -133,6 +134,10 @@ pub enum Error {
 }
 
 impl Error {
+    fn io_path(err: std::io::Error, path: &std::path::Path) -> Self {
+        Self::Io { message: format!("Cannot access {}", path.display()), err }
+    }
+
     fn io(message: &str, err: std::io::Error) -> Self {
         Self::Io { message: message.to_string(), err }
     }
@@ -552,6 +557,101 @@ impl StorageResources {
                 None
             })
             .collect()
+    }
+
+    /// Returns a single U.2 zpool, randomly selected
+    pub async fn random_u2_zpool(&self) -> Option<ZpoolName> {
+        let disks = self.disks.lock().await;
+        let mut rng = rand::thread_rng();
+        disks
+            .values()
+            .filter_map(|disk| {
+                if let DiskWrapper::Real { disk, .. } = disk {
+                    if disk.variant() == DiskVariant::U2 {
+                        return Some(disk.zpool_name().clone());
+                    }
+                };
+                None
+            })
+            .collect::<Vec<_>>()
+            .choose(&mut rng)
+            .cloned()
+    }
+
+    // - We can write down all config data to:
+    //
+    //  /pool/int/<M.2 UUID>/config/u2s/<U.2 UUID>/<zone-name>
+    //      "What services should this sled launch, and from which U.2s?"
+    //  /pool/int/<M.2 UUID>/config/rss-...
+    //      "What RSS configuration is saved to this sled"
+    //  /pool/int/<M.2 UUID>/config/sled-agent-request.toml
+    //      "What SledAgent information is saved to this sled"
+    //
+    //  /pool/ext/<U.2 UUID>/zone
+    //      "Zone filesystems"
+    //
+    // - TODO: On disk add, we should probably be clearing all zones if the M.2s
+    // don't recognize the disk.
+    // - TODO: On disk remove, we should probably patch up our M.2s to "no
+    // longer consider those zones".
+    // - TODO: How do we deal with the M.2s having skew?
+    // - TODO: Obviously, we gotta keep Nexus in-the-loop about what's
+    // happening.
+    //
+    // TODO: Everywhere that you call "random_u2_zpool", instead call this fn
+    pub async fn ensure_zpool_for_zone(
+        &self,
+        zone_name: &str,
+    ) -> Result<ZpoolName, Error> {
+        let u2_config_dir_in_m2 = |pool: &ZpoolName| {
+            assert!(pool.kind() == ZpoolKind::Internal);
+            pool.dataset_path(sled_hardware::disk::CONFIG_DATASET).join("u2s")
+        };
+
+        // Scans:
+        //    /pool/int/<M.2 UUID>/config/u2s/<U.2 UUID>/<zone name>
+        //
+        // Looks for a file indicating that we have previously provisioned this
+        // zone to a U.2.
+        //
+        // This ensures that even if the U.2s are still enumerating,
+        // we'll still wait for the provision.
+        let m2s = self.all_zpools(DiskVariant::M2).await;
+        for m2 in &m2s {
+            let u2_config_dir = u2_config_dir_in_m2(&m2);
+            for u2 in std::fs::read_dir(&u2_config_dir)
+                .map_err(|e| Error::io_path(e, &u2_config_dir))?
+            {
+                let u2 = u2.map_err(|e| Error::io_path(e, &u2_config_dir))?;
+                if u2.path().join(zone_name).exists() {
+                    let id = Uuid::parse_str(&u2.file_name().to_string_lossy())
+                        .map_err(|err| Error::ParseUuid {
+                            path: u2.path(),
+                            err,
+                        })?;
+                    return Ok(ZpoolName::new_external(id));
+                }
+            }
+        }
+
+        // None of the U.2s we've seen know about this zone - provision a new
+        // one.
+        let u2 =
+            self.random_u2_zpool().await.ok_or_else(|| Error::NoU2Zpool)?;
+
+        // TODO: What if a write to one of the M.2s fails? How do we unwind?
+        // TODO: What about atomicity?
+        for m2 in &m2s {
+            let u2_config_dir = u2_config_dir_in_m2(&m2);
+
+            let path = u2_config_dir.join(u2.id().to_string());
+            std::fs::create_dir_all(&path)
+                .map_err(|e| Error::io_path(e, &path))?;
+            let path = path.join(zone_name);
+            std::fs::File::create(&path)
+                .map_err(|e| Error::io_path(e, &path))?;
+        }
+        Ok(u2)
     }
 }
 

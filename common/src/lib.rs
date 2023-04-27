@@ -56,4 +56,8 @@ macro_rules! generate_logging_api {
 ///
 /// NOTE: Be careful when modifying this path - the installation tools will
 /// **remove the entire directory** to re-install/uninstall the system.
+// TODO: Either deprecate this or make it a symlink from one of the M.2s.
+// As-is, this is using the rpool, so putting things here is basically
+// throwing them away.
+// #[deprecated]
 pub const OMICRON_CONFIG_PATH: &'static str = "/var/oxide";

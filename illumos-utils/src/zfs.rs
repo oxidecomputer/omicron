@@ -138,6 +138,8 @@ impl Zfs {
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     pub fn ensure_filesystem(
+        // TODO: This could be a ZpoolName when the ramdisk usage has
+        // been removed?
         name: &str,
         mountpoint: Mountpoint,
         zoned: bool,
@@ -171,9 +173,11 @@ impl Zfs {
         // If it doesn't exist, make it.
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "create"]);
+
         if zoned {
             cmd.args(&["-o", "zoned=on"]);
         }
+
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
@@ -246,13 +250,14 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
 
     // Collect all datasets within Oxide zpools.
     //
-    // This includes cockroachdb, clickhouse, and crucible datasets.
+    // This includes cockroachdb, clickhouse, and crucible datasets,
+    // and all zone filesystems.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
         let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
-            // Avoid erasing crashdump datasets on internal pools
+            // Avoid erasing crashdump datasets which exist on internal zpools.
             if dataset == "crash" && internal {
                 continue;
             }
@@ -261,9 +266,10 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         }
     }
 
-    // Collect all datasets for ramdisk-based Oxide zones.
-    for dataset in &Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)? {
-        datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
+    // Old format of datasets
+    let old_zone_zfs_dataset = ZONE_ZFS_RAMDISK_DATASET;
+    for dataset in &Zfs::list_datasets(&old_zone_zfs_dataset)? {
+        datasets.push(format!("{old_zone_zfs_dataset}/{dataset}"));
     }
 
     Ok(datasets)
