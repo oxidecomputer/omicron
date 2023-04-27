@@ -454,7 +454,7 @@ impl SledAgent {
                             baseboard: baseboard.clone(),
                             usable_hardware_threads,
                             usable_physical_ram: nexus_client::types::ByteCount(
-                                usable_physical_ram as i64,
+                                usable_physical_ram,
                             ),
                         },
                     )

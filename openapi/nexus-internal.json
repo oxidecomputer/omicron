@@ -792,11 +792,10 @@
         ]
       },
       "ByteCount": {
-        "title": "Count of bytes",
-        "description": "Used to measure memory or disk capacity",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
-        "minimum": 0,
-        "maximum": 9223372036854774784
+        "format": "uint64",
+        "minimum": 0
       },
       "Certificate": {
         "type": "object",
@@ -2320,6 +2319,7 @@
         ]
       },
       "Saga": {
+        "description": "Sagas\n\nThese are currently only intended for observability by developers.  We will eventually want to flesh this out into something more observable for end users.",
         "type": "object",
         "properties": {
           "id": {

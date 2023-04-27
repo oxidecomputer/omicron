@@ -550,11 +550,10 @@
     },
     "schemas": {
       "ByteCount": {
-        "title": "Count of bytes",
-        "description": "Used to measure memory or disk capacity",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
-        "minimum": 0,
-        "maximum": 9223372036854774784
+        "format": "uint64",
+        "minimum": 0
       },
       "CrucibleOpts": {
         "type": "object",

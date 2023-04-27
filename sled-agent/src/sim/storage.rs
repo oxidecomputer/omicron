@@ -509,7 +509,7 @@ impl Storage {
 
         // Notify Nexus
         let request = ZpoolPutRequest {
-            size: ByteCount(size as i64),
+            size: ByteCount(size),
             disk_vendor,
             disk_serial,
             disk_model,

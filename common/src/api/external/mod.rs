@@ -488,58 +488,21 @@ impl JsonSchema for RoleName {
     }
 }
 
-/// This is used to express memory or storage capacity.
-///
-/// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
-/// inconvenient to define constructors: a u32 constructor can be infallible,
-/// but an i64 constructor can fail (if the value is negative) and a u64
-/// constructor can fail (if the value is larger than i64::MAX).  We provide
-/// all of these for consumers' convenience.
-///
-/// The maximum byte count of i64::MAX comes from the fact that this is stored
-/// in the database as an i64.  Constraining it here ensures that we can't fail
-/// to serialize the value.
-///
-/// TODO-cleanup This could benefit from a more complete implementation.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq)]
+/// Byte count to express memory or storage capacity.
+//
+// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+// inconvenient to define constructors: a u32 constructor can be infallible,
+// but an i64 constructor can fail (if the value is negative) and a u64
+// constructor can fail (if the value is larger than i64::MAX).  We provide
+// all of these for consumers' convenience.
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored
+// in the database as an i64.  Constraining it here ensures that we can't fail
+// to serialize the value.
+//
+// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
-
-impl JsonSchema for ByteCount {
-    fn schema_name() -> String {
-        "ByteCount".to_string()
-    }
-
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(
-                schemars::schema::Metadata {
-                    title: Some("Count of bytes".to_string()),
-                    description: Some(
-                        "Used to measure memory or disk capacity".to_string(),
-                    ),
-                    ..Default::default()
-                }
-                .into(),
-            ),
-            instance_type: Some(schemars::schema::InstanceType::Integer.into()),
-            number: Some(
-                schemars::schema::NumberValidation {
-                    minimum: Some(0.0),
-                    // i64::MAX as f64 actually gets rounded up to a slightly
-                    // higher value due to f64 imprecision. This is the highest
-                    // value representable by an f64 that is <= i64::MAX.
-                    maximum: Some(9223372036854775000.0),
-                    ..Default::default()
-                }
-                .into(),
-            ),
-            ..Default::default()
-        }
-        .into()
-    }
-}
 
 #[allow(non_upper_case_globals)]
 const KiB: u64 = 1024;

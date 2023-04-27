@@ -4012,6 +4012,7 @@ dependencies = [
  "base64 0.21.0",
  "chrono",
  "dns-service-client",
+ "futures",
  "newtype_derive",
  "nexus-passwords",
  "omicron-common 0.1.0",
@@ -4021,6 +4022,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "steno",
  "uuid",
 ]
 
