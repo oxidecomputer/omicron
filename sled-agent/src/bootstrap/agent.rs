@@ -340,6 +340,7 @@ impl Agent {
         // currently part of the ramdisk.
         let zoned = true;
         let do_format = true;
+        let encrypt = None;
         Zfs::ensure_filesystem(
             ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(std::path::PathBuf::from(
@@ -347,6 +348,7 @@ impl Agent {
             )),
             zoned,
             do_format,
+            encrypt,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
