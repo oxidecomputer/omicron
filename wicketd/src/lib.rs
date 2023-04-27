@@ -9,7 +9,6 @@ mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
-mod update_events;
 mod update_tracker;
 
 use anyhow::{anyhow, Result};

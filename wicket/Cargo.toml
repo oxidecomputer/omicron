@@ -37,6 +37,7 @@ toml.workspace = true
 tui.workspace = true
 tui-tree-widget = "0.11.0"
 
+wicket-common.workspace = true
 wicketd-client.workspace = true
 
 [dev-dependencies]

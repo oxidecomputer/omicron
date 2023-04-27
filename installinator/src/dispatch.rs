@@ -7,18 +7,21 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
-use installinator_common::CompletionEventKind;
+use installinator_common::{
+    InstallinatorCompletionMetadata, InstallinatorComponent,
+    InstallinatorStepId, StepContext, UpdateEngine,
+};
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
 use slog::Drain;
-use tokio::sync::mpsc;
+use update_engine::StepResult;
 
 use crate::{
     artifact::ArtifactIdOpts,
     peers::{DiscoveryMechanism, FetchedArtifact, Peers},
-    reporter::{ProgressReporter, ReportEvent},
+    reporter::ProgressReporter,
     write::{ArtifactWriter, WriteDestination},
 };
 
@@ -161,14 +164,6 @@ impl InstallOpts {
 
         let image_id = self.artifact_ids.resolve()?;
 
-        let host_phase_2_id = ArtifactHashId {
-            // TODO: currently we're assuming that wicket will unpack the host
-            // phase 2 image. We may instead have the installinator do it.
-            // kind: KnownArtifactKind::Host.into(),
-            kind: ArtifactKind::HOST_PHASE_2,
-            hash: image_id.host_phase_2,
-        };
-
         let discovery = self.discover_opts.mechanism.clone();
         let discovery_log = log.clone();
         let (progress_reporter, event_sender) =
@@ -184,54 +179,118 @@ impl InstallOpts {
                 }
             });
         let progress_handle = progress_reporter.start();
+        let discovery = &self.discover_opts.mechanism;
 
-        let host_phase_2_artifact = fetch_artifact(
-            &host_phase_2_id,
-            &self.discover_opts.mechanism,
-            &log,
-            &event_sender,
-        )
-        .await?;
+        let engine = UpdateEngine::new(&log, event_sender);
+
+        let host_phase_2_id = ArtifactHashId {
+            // TODO: currently we're assuming that wicketd will unpack the host
+            // phase 2 image. We may instead have the installinator do it.
+            kind: ArtifactKind::HOST_PHASE_2,
+            hash: image_id.host_phase_2,
+        };
+        let host_2_phase_id_2 = host_phase_2_id.clone();
+        let host_phase_2_artifact = engine
+            .new_step(
+                InstallinatorComponent::HostPhase2,
+                InstallinatorStepId::Download,
+                "Downloading artifact",
+                |cx| async move {
+                    let host_phase_2_artifact =
+                        fetch_artifact(&cx, &host_phase_2_id, discovery, &log)
+                            .await?;
+
+                    let address = host_phase_2_artifact.addr;
+
+                    StepResult::success(
+                        host_phase_2_artifact,
+                        InstallinatorCompletionMetadata::Download { address },
+                    )
+                },
+            )
+            .register();
 
         let control_plane_id = ArtifactHashId {
             kind: KnownArtifactKind::ControlPlane.into(),
             hash: image_id.control_plane,
         };
+        let control_plane_id_2 = control_plane_id.clone();
+        let control_plane_artifact = engine
+            .new_step(
+                InstallinatorComponent::ControlPlane,
+                InstallinatorStepId::Download,
+                "Downloading artifact",
+                |cx| async move {
+                    let control_plane_artifact =
+                        fetch_artifact(&cx, &control_plane_id, discovery, &log)
+                            .await?;
 
-        let control_plane_artifact = fetch_artifact(
-            &control_plane_id,
-            &self.discover_opts.mechanism,
-            &log,
-            &event_sender,
-        )
-        .await?;
+                    let address = control_plane_artifact.addr;
+
+                    StepResult::success(
+                        control_plane_artifact,
+                        InstallinatorCompletionMetadata::Download { address },
+                    )
+                },
+            )
+            .register();
 
         let destination = if self.install_on_gimlet {
             WriteDestination::from_hardware(&log)?
         } else {
-            // clap ensures `self.destinatino` is not `None` if
+            // clap ensures `self.destination` is not `None` if
             // `install_on_gimlet` is false.
             let destination = self.destination.as_ref().unwrap();
             WriteDestination::in_directory(destination)?
         };
 
-        let mut writer = ArtifactWriter::new(
-            &host_phase_2_id,
-            &host_phase_2_artifact.artifact,
-            &control_plane_id,
-            &control_plane_artifact.artifact,
-            destination,
-        );
+        engine
+            .new_step(
+                InstallinatorComponent::Both,
+                InstallinatorStepId::Write,
+                "Writing host and control plane artifacts",
+                |cx| async move {
+                    let host_phase_2_artifact =
+                        host_phase_2_artifact.into_value(cx.token()).await;
+                    let control_plane_artifact =
+                        control_plane_artifact.into_value(cx.token()).await;
 
-        writer.write(&log, &event_sender).await;
+                    let mut writer = ArtifactWriter::new(
+                        &host_2_phase_id_2,
+                        &host_phase_2_artifact.artifact,
+                        &control_plane_id_2,
+                        &control_plane_artifact.artifact,
+                        destination,
+                    );
 
-        // TODO: verify artifact was correctly written out to disk.
+                    // TODO: verify artifact was correctly written out to disk.
 
-        // Drop the event sender: this signals completion.
-        _ = event_sender
-            .send(ReportEvent::Completion(CompletionEventKind::Completed))
-            .await;
-        std::mem::drop(event_sender);
+                    let write_output = writer.write(&cx, &log).await;
+                    let slots_not_written = write_output.slots_not_written();
+
+                    let metadata = InstallinatorCompletionMetadata::Write {
+                        output: write_output,
+                    };
+
+                    if slots_not_written.is_empty() {
+                        StepResult::success((), metadata)
+                    } else {
+                        // Some slots were not properly written out.
+                        let mut message =
+                            "Some M.2 slots were not written: ".to_owned();
+                        for (i, slot) in slots_not_written.iter().enumerate() {
+                            message.push_str(&format!("{slot}"));
+                            if i + 1 < slots_not_written.len() {
+                                message.push_str(", ");
+                            }
+                        }
+                        StepResult::warning((), metadata, message)
+                    }
+                },
+            )
+            .register();
+
+        engine.execute().await.context("failed to execute installinator")?;
 
         // Wait for all progress reports to be sent.
         progress_handle.await.context("progress reporter to complete")?;
@@ -248,15 +307,16 @@ impl InstallOpts {
 }
 
 async fn fetch_artifact(
+    cx: &StepContext,
     id: &ArtifactHashId,
     discovery: &DiscoveryMechanism,
     log: &slog::Logger,
-    event_sender: &mpsc::Sender<ReportEvent>,
 ) -> Result<FetchedArtifact> {
     // TODO: Not sure why slog::o!("artifact" => ?id) isn't working, figure it
     // out at some point.
     let log = log.new(slog::o!("artifact" => format!("{id:?}")));
     let artifact = FetchedArtifact::loop_fetch_from_peers(
+        cx,
         &log,
         || async {
             Ok(Peers::new(
@@ -266,7 +326,6 @@ async fn fetch_artifact(
             ))
         },
         id,
-        event_sender,
     )
     .await
     .with_context(|| format!("error fetching image with id {id:?}"))?;

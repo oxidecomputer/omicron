@@ -6,7 +6,6 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
-use crate::update_events::EventReport;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -28,6 +27,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use uuid::Uuid;
+use wicket_common::update_events::EventReport;
 
 use crate::ServerContext;
 

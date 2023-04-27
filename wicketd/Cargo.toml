@@ -41,6 +41,7 @@ installinator-common.workspace = true
 omicron-common.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
+wicket-common.workspace = true
 
 [[bin]]
 name = "wicketd"

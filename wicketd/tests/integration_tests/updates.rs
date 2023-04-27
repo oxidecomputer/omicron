@@ -17,8 +17,8 @@ use omicron_common::{
     update::{ArtifactHashId, ArtifactKind},
 };
 use uuid::Uuid;
+use wicket_common::update_events::{StepEventKind, UpdateComponent};
 use wicketd::RunningUpdateState;
-use wicketd_client::{types::UpdateComponent, StepEventKind};
 
 #[tokio::test]
 async fn test_updates() {
@@ -87,7 +87,7 @@ async fn test_updates() {
         slog::debug!(log, "received event report"; "event_report" => ?event_report);
 
         for event in event_report.step_events {
-            if let StepEventKind::ExecutionFailed { .. } = event.data {
+            if let StepEventKind::ExecutionFailed { .. } = event.kind {
                 break 'outer event;
             }
         }
@@ -95,7 +95,7 @@ async fn test_updates() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    match terminal_event.data {
+    match terminal_event.kind {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.

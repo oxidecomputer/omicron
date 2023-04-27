@@ -13,4 +13,5 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
+update-engine.workspace = true
 uuid.workspace = true

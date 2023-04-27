@@ -11,7 +11,7 @@ mod store;
 
 pub use context::ServerContext;
 pub use server::ArtifactServer;
-pub use store::{ArtifactGetter, ProgressReportStatus};
+pub use store::{ArtifactGetter, EventReportStatus};
 
 use anyhow::Result;
 

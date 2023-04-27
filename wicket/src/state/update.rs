@@ -3,6 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use tui::style::Style;
+use wicket_common::update_events::{
+    EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
+    UpdateStepId,
+};
 
 use crate::ui::defaults::style;
 
@@ -12,13 +16,7 @@ use serde::{Deserialize, Serialize};
 use slog::{warn, Logger};
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::{
-    types::{
-        ArtifactId, EventReportAll, SemverVersion, UpdateComponent,
-        UpdateStepId,
-    },
-    EventReport, ProgressEventKind, StepEventKind,
-};
+use wicketd_client::types::{ArtifactId, EventReportAll, SemverVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
@@ -144,7 +142,7 @@ impl RackUpdateState {
         // Mark artifacts as either 'succeeded' or `failed' by looking in
         // the event log.
         for event in &event_report.step_events {
-            match &event.data {
+            match &event.kind {
                 StepEventKind::NoStepsDefined
                 | StepEventKind::ExecutionStarted { .. }
                 | StepEventKind::ProgressReset { .. }
@@ -181,7 +179,7 @@ impl RackUpdateState {
 
         // Mark any known artifacts as updating
         for progress_event in &event_report.progress_events {
-            let component = match &progress_event.data {
+            let component = match &progress_event.kind {
                 ProgressEventKind::WaitingForProgress { step, .. }
                 | ProgressEventKind::Progress { step, .. }
                 | ProgressEventKind::Nested { step, .. } => {
