@@ -4,7 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::collections::{hash_map, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 use derive_where::derive_where;
 use either::Either;
@@ -13,9 +13,9 @@ use petgraph::prelude::*;
 use crate::{
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
-        StepEventKind, StepEventPriority,
+        StepEventKind, StepEventPriority, StepInfo,
     },
-    ExecutionId, StepSpec,
+    ExecutionId, NestedSpec, StepSpec,
 };
 
 /// A receiver for events that provides a pull-based model with periodic
@@ -165,65 +165,26 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
-        if let Some(key) = self.recurse_for_step_event(&event, None) {
-            match self.map.entry(key) {
-                hash_map::Entry::Occupied(mut entry) => {
-                    let value = entry.get_mut();
-                    let progress_event = event.progress_event();
-                    if event.kind.priority() == StepEventPriority::High {
-                        value.add_high_priority_step_event(event);
-                    } else {
-                        value.add_low_priority_step_event(
-                            event,
-                            max_low_priority,
-                        );
-                    }
-                    if let Some(progress) = progress_event {
-                        value.set_progress(progress);
-                    }
+        let actions = self.recurse_for_step_event(&event);
+        for (new_step_key, new_step) in actions.steps_to_add {
+            // These are brand new steps so their keys shouldn't exist in the
+            // map. But if they do, don't overwrite them.
+            self.map
+                .entry(new_step_key)
+                .or_insert_with(|| EventMapValue::new(new_step));
+        }
+
+        if let Some(key) = actions.operating_key {
+            if let Some(value) = self.map.get_mut(&key) {
+                // Set progress *before* adding the step event so that it can
+                // transition to the running state if it isn't there already.
+                if let Some(current_progress) = event.progress_event() {
+                    value.set_progress(current_progress);
                 }
-
-                hash_map::Entry::Vacant(entry) => {
-                    let priority = event.kind.priority();
-                    let progress_event = event.progress_event();
-
-                    match (priority, progress_event) {
-                        (StepEventPriority::High, Some(progress_event)) => {
-                            let value = entry
-                                .insert(EventMapValue::new(progress_event));
-                            value.add_high_priority_step_event(event);
-                        }
-                        (StepEventPriority::High, None) => {
-                            // The only way to reach this branch is with a
-                            // NoStepsDefined event.
-                            entry
-                                .insert(EventMapValue::no_steps_defined(event));
-                        }
-                        (StepEventPriority::Low, Some(progress_event)) => {
-                            let value = entry
-                                .insert(EventMapValue::new(progress_event));
-                            value.add_low_priority_step_event(
-                                event,
-                                max_low_priority,
-                            );
-                        }
-                        (StepEventPriority::Low, None) => {
-                            // This branch is reached if:
-                            //
-                            // * This is a vacant entry, AND
-                            // * this is a low-priority event, AND
-                            // * the event doesn't have any progress associated
-                            //   with it
-                            //
-                            // The only possibility is that this is an unknown
-                            // event, which we already filtered out at the top
-                            // of this function.
-                            debug_assert!(
-                                false,
-                                "This branch cannot be reached"
-                            );
-                        }
-                    }
+                if event.kind.priority() == StepEventPriority::High {
+                    value.add_high_priority_step_event(event);
+                } else {
+                    value.add_low_priority_step_event(event, max_low_priority);
                 }
             }
         }
@@ -235,14 +196,9 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
-        if let Some(key) = self.recurse_for_progress_event(&event, None) {
-            match self.map.entry(key) {
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().set_progress(event);
-                }
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(EventMapValue::new(event));
-                }
+        if let Some(key) = self.recurse_for_progress_event(&event) {
+            if let Some(value) = self.map.get_mut(&key) {
+                value.set_progress(event);
             }
         }
     }
@@ -253,16 +209,27 @@ impl<S: StepSpec> EventStore<S> {
     fn recurse_for_step_event<S2: StepSpec>(
         &mut self,
         event: &StepEvent<S2>,
-        parent_node: Option<StepKey>,
-    ) -> Option<StepKey> {
-        match &event.kind {
-            StepEventKind::ExecutionStarted { first_step, .. } => {
-                // Register the start of progress here.
-                let key =
-                    self.add_node(event.execution_id, first_step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, key, ());
+    ) -> RecurseActions<S2> {
+        let mut steps_to_add = Vec::new();
+        let operating_key = match &event.kind {
+            StepEventKind::ExecutionStarted { steps, first_step, .. } => {
+                // All keys are added during the ExecutionStarted phase.
+                for step in steps {
+                    let key = self.add_node(event.execution_id, step.index);
+                    steps_to_add.push((
+                        key,
+                        StepInfoWithNested {
+                            step_info: step.clone(),
+                            nested: None,
+                        },
+                    ))
                 }
+
+                // Register the start of progress.
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: first_step.info.index,
+                };
                 Some(key)
             }
             StepEventKind::StepCompleted { step, next_step, .. } => {
@@ -273,17 +240,16 @@ impl<S: StepSpec> EventStore<S> {
                 // Mark this key and all child keys completed.
                 self.mark_event_key_completed(key);
 
-                // Register the next step in the progress map.
-                let next_key =
-                    self.add_node(event.execution_id, next_step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, next_key, ());
-                }
+                // Register the next step in the event map.
+                let next_key = StepKey {
+                    execution_id: event.execution_id,
+                    index: next_step.info.index,
+                };
                 Some(next_key)
             }
             StepEventKind::ProgressReset { step, .. }
             | StepEventKind::AttemptRetry { step, .. } => {
-                // Reset progress for the step in the progress map.
+                // Reset progress for the step in the event map.
                 let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
@@ -307,44 +273,47 @@ impl<S: StepSpec> EventStore<S> {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
-                self.recurse_for_step_event(nested_event, Some(parent_node))
+                let actions = self.recurse_for_step_event(nested_event);
+                for (new_step_key, new_step) in actions.steps_to_add {
+                    steps_to_add.push((
+                        new_step_key,
+                        StepInfoWithNested {
+                            step_info: step.info.clone(),
+                            nested: Some(Box::new(new_step)),
+                        },
+                    ));
+                    self.event_tree.add_edge(parent_node, new_step_key, ());
+                }
+                actions.operating_key
             }
             StepEventKind::NoStepsDefined | StepEventKind::Unknown => None,
-        }
+        };
+
+        RecurseActions { steps_to_add, operating_key }
     }
 
     fn recurse_for_progress_event<S2: StepSpec>(
         &mut self,
         event: &ProgressEvent<S2>,
-        parent_node: Option<StepKey>,
     ) -> Option<StepKey> {
         match &event.kind {
             ProgressEventKind::WaitingForProgress { step, .. }
             | ProgressEventKind::Progress { step, .. } => {
-                let key = self.add_node(event.execution_id, step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, key, ());
-                }
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                };
                 Some(key)
             }
-            ProgressEventKind::Nested { step, event: nested_event, .. } => {
-                // Add a node for this event.
-                let parent =
-                    self.add_node(event.execution_id, step.info.index)?;
-
-                // Add nodes for nested events.
-                self.recurse_for_progress_event(nested_event, Some(parent))
+            ProgressEventKind::Nested { event: nested_event, .. } => {
+                self.recurse_for_progress_event(nested_event)
             }
             ProgressEventKind::Unknown => None,
         }
     }
 
-    fn add_node(
-        &mut self,
-        execution_id: ExecutionId,
-        index: usize,
-    ) -> Option<StepKey> {
-        Some(self.event_tree.add_node(StepKey { execution_id, index }))
+    fn add_node(&mut self, execution_id: ExecutionId, index: usize) -> StepKey {
+        self.event_tree.add_node(StepKey { execution_id, index })
     }
 
     fn mark_event_key_completed(&mut self, key: StepKey) {
@@ -371,34 +340,36 @@ impl<S: StepSpec> EventStore<S> {
     }
 }
 
+/// Actions taken by a recursion step.
+#[derive_where(Clone, Debug)]
+struct RecurseActions<S: StepSpec> {
+    // New steps to add, generated by ExecutionStarted events.
+    steps_to_add: Vec<(StepKey, StepInfoWithNested<S>)>,
+    // New steps to add
+    operating_key: Option<StepKey>,
+}
+
+#[derive_where(Clone, Debug)]
+struct StepInfoWithNested<S: StepSpec> {
+    pub step_info: StepInfo<S>,
+    pub nested: Option<Box<StepInfoWithNested<NestedSpec>>>,
+}
+
 /// The list of events for a particular key.
 #[derive_where(Clone, Debug)]
 struct EventMapValue<S: StepSpec> {
+    step_info: StepInfoWithNested<S>,
     // Invariant: stored in order sorted by event_index.
     high_priority: Vec<StepEvent<S>>,
     step_status: StepStatus<S>,
 }
 
 impl<S: StepSpec> EventMapValue<S> {
-    fn new(progress_event: ProgressEvent<S>) -> Self {
+    fn new(step_info: StepInfoWithNested<S>) -> Self {
         Self {
+            step_info,
             high_priority: Vec::new(),
-            step_status: StepStatus::Running {
-                low_priority: VecDeque::new(),
-                progress_event,
-            },
-        }
-    }
-
-    fn no_steps_defined(step_event: StepEvent<S>) -> Self {
-        assert_eq!(
-            step_event.kind,
-            StepEventKind::NoStepsDefined,
-            "this constructor should only be called on NoStepsDefined"
-        );
-        Self {
-            high_priority: vec![step_event],
-            step_status: StepStatus::Completed,
+            step_status: StepStatus::NotStarted,
         }
     }
 
@@ -442,25 +413,35 @@ impl<S: StepSpec> EventMapValue<S> {
         event: StepEvent<S>,
         max_low_priority: usize,
     ) {
-        if let StepStatus::Running { low_priority, .. } = &mut self.step_status
-        {
-            match low_priority.binary_search_by(|probe| {
-                probe.event_index.cmp(&event.event_index)
-            }) {
-                Ok(_) => {
-                    // This is a duplicate.
+        match &mut self.step_status {
+            StepStatus::NotStarted => {
+                unreachable!(
+                    "we always set progress before adding low-pri step events"
+                );
+            }
+            StepStatus::Running { low_priority, .. } => {
+                match low_priority.binary_search_by(|probe| {
+                    probe.event_index.cmp(&event.event_index)
+                }) {
+                    Ok(_) => {
+                        // This is a duplicate.
+                    }
+                    Err(index) => {
+                        // The index is almost always at the end, so this is
+                        // efficient enough.
+                        low_priority.insert(index, event);
+                    }
                 }
-                Err(index) => {
-                    // The index is almost always at the end, so this is
-                    // efficient enough.
-                    low_priority.insert(index, event);
+
+                // Limit the number of events to the maximum low priority, ejecting
+                // the oldest event(s) if necessary.
+                while low_priority.len() > max_low_priority {
+                    low_priority.pop_front();
                 }
             }
-
-            // Limit the number of events to the maximum low priority, ejecting
-            // the oldest event(s) if necessary.
-            while low_priority.len() > max_low_priority {
-                low_priority.pop_front();
+            StepStatus::Completed => {
+                // Ignore low-priority events for completed steps since they're
+                // likely duplicate events.
             }
         }
     }
@@ -470,10 +451,19 @@ impl<S: StepSpec> EventMapValue<S> {
     }
 
     fn set_progress(&mut self, current_progress: ProgressEvent<S>) {
-        if let StepStatus::Running { progress_event, .. } =
-            &mut self.step_status
-        {
-            *progress_event = current_progress;
+        match &mut self.step_status {
+            StepStatus::NotStarted => {
+                self.step_status = StepStatus::Running {
+                    low_priority: VecDeque::new(),
+                    progress_event: current_progress,
+                };
+            }
+            StepStatus::Running { progress_event, .. } => {
+                *progress_event = current_progress;
+            }
+            StepStatus::Completed => {
+                // Ignore progress events for completed steps.
+            }
         }
     }
 }
@@ -481,6 +471,7 @@ impl<S: StepSpec> EventMapValue<S> {
 /// The step status as last seen by events.
 #[derive_where(Clone, Debug)]
 enum StepStatus<S: StepSpec> {
+    NotStarted,
     Running {
         // Invariant: stored in sorted order by index.
         low_priority: VecDeque<StepEvent<S>>,
@@ -500,14 +491,16 @@ impl<S: StepSpec> StepStatus<S> {
             Self::Running { low_priority, .. } => {
                 Either::Left(low_priority.iter())
             }
-            Self::Completed => Either::Right(std::iter::empty()),
+            Self::NotStarted | Self::Completed => {
+                Either::Right(std::iter::empty())
+            }
         }
     }
 
     fn progress_event(&self) -> Option<&ProgressEvent<S>> {
         match self {
             Self::Running { progress_event, .. } => Some(progress_event),
-            Self::Completed => None,
+            Self::NotStarted | Self::Completed => None,
         }
     }
 }
