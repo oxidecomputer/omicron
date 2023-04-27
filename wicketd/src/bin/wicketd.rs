@@ -32,7 +32,38 @@ enum Args {
         /// The port on localhost for MGS
         #[clap(long, action)]
         mgs_address: SocketAddrV6,
+
+        #[clap(flatten)]
+        baseboard: Option<Baseboard>,
     },
+}
+
+// clap's support for `flatten` on an `Option` is a little wonky - we mark all
+// of these fields as `required = false`, which has the effect of not requiring
+// them _unless_ one of them is passed, in which case all of them are required.
+#[derive(Debug, clap::Args)]
+struct Baseboard {
+    /// The identifier (serial number) of the Gimlet on which we're running
+    #[clap(long, required = false)]
+    baseboard_identifier: String,
+
+    /// The model of the Gimlet on which we're running
+    #[clap(long, required = false)]
+    baseboard_model: String,
+
+    /// The revision of the Gimlet on which we're running
+    #[clap(long, required = false)]
+    baseboard_revision: i64,
+}
+
+impl From<Baseboard> for sled_hardware::Baseboard {
+    fn from(b: Baseboard) -> Self {
+        Self::new(
+            b.baseboard_identifier,
+            b.baseboard_model,
+            b.baseboard_revision,
+        )
+    }
 }
 
 #[tokio::main]
@@ -52,7 +83,12 @@ async fn do_run() -> Result<(), CmdError> {
             address,
             artifact_address,
             mgs_address,
+            baseboard,
         } => {
+            let baseboard = baseboard
+                .map(sled_hardware::Baseboard::from)
+                .unwrap_or_else(sled_hardware::Baseboard::unknown);
+
             let config = Config::from_file(&config_file_path).map_err(|e| {
                 CmdError::Failure(format!(
                     "failed to parse {}: {}",
@@ -61,7 +97,12 @@ async fn do_run() -> Result<(), CmdError> {
                 ))
             })?;
 
-            let args = wicketd::Args { address, artifact_address, mgs_address };
+            let args = wicketd::Args {
+                address,
+                artifact_address,
+                mgs_address,
+                baseboard,
+            };
             let log = config.log.to_logger("wicketd").map_err(|msg| {
                 CmdError::Failure(format!("initializing logger: {}", msg))
             })?;

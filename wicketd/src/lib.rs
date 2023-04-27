@@ -20,6 +20,7 @@ pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use sled_hardware::Baseboard;
 
 use dropshot::{ConfigDropshot, HttpServer};
 use slog::{debug, error, o, Drain};
@@ -43,6 +44,7 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
+    pub baseboard: Baseboard,
 }
 
 pub struct Server {
@@ -101,6 +103,7 @@ impl Server {
                     mgs_client,
                     artifact_store: store.clone(),
                     update_tracker,
+                    baseboard: args.baseboard,
                 },
                 &log,
             )

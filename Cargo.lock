@@ -8934,6 +8934,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.6",
+ "sled-hardware",
  "slog",
  "slog-dtrace",
  "snafu",
