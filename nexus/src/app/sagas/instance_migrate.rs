@@ -304,9 +304,12 @@ async fn sim_clear_migration_ids(
     // clear them. The only exception is if the instance stopped, but that also
     // clears its migration IDs; in that case there is no work to do here.
     //
-    // Other error cases (e.g. an unreachable sled agent) are handled by this
-    // callee using the standard discipline for handling failed requests to
-    // change an instance's state. Warn for these errors.
+    // Other failures to clear migration IDs are handled like any other failure
+    // to update an instance's state: the callee attempts to mark the instance
+    // as failed; if the failure occurred because the instance changed state
+    // such that sled agent could not fulfill the request, the callee will
+    // produce a stale generation number and will not actually mark the instance
+    // as failed.
     if let Err(e) = osagactx
         .nexus()
         .instance_clear_migration_ids(db_instance.id(), &db_instance)
