@@ -465,9 +465,6 @@ impl ServiceInner {
         expectation: PeerExpectation,
         our_bootstrap_address: Ipv6Addr,
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        // Ask the switch zone for a list of peers - note that the rack subnet
-        // has not been sent out, and there the switch zone does not have an
-        // underlay address yet, so the bootstrap address is used here.
         let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),

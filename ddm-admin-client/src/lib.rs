@@ -22,7 +22,6 @@ pub use inner::Error;
 use either::Either;
 use inner::types::Ipv6Prefix;
 use inner::Client as InnerClient;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
@@ -59,28 +58,6 @@ impl Client {
     /// Creates a new [`Client`] that points to localhost
     pub fn localhost(log: &Logger) -> Result<Self, DdmError> {
         Self::new(log, SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0))
-    }
-
-    /// Creates a new [`Client`] that points to the switch zone in a
-    /// sled subnet.
-    pub fn switch_zone(
-        log: &Logger,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Result<Self, DdmError> {
-        Self::new(
-            log,
-            SocketAddrV6::new(
-                get_switch_zone_address(sled_subnet),
-                DDMD_PORT,
-                0,
-                0,
-            ),
-        )
-    }
-
-    /// Creates a new [`Client`] that points to an IPv6 address
-    pub fn address(log: &Logger, address: Ipv6Addr) -> Result<Self, DdmError> {
-        Self::new(log, SocketAddrV6::new(address, DDMD_PORT, 0, 0))
     }
 
     fn new(log: &Logger, ddmd_addr: SocketAddrV6) -> Result<Self, DdmError> {

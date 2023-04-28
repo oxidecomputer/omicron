@@ -35,7 +35,6 @@ use illumos_utils::zfs::{
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -463,8 +462,7 @@ impl Agent {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
                 if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone(), request.subnet)
-                        .await?;
+                    self.establish_sled_quorum(share.clone()).await?;
                     *self.share.lock().await = Some(share);
                 }
 
@@ -632,11 +630,8 @@ impl Agent {
     async fn establish_sled_quorum(
         &self,
         share: ShareDistribution,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) -> Result<RackSecret, BootstrapError> {
-        // Ask the switch zone's maghemite for peers
-        let ddm_admin_client =
-            DdmAdminClient::switch_zone(&self.log, sled_subnet)?;
+        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
