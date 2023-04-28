@@ -154,16 +154,17 @@ impl KeyFile {
         log: &Logger,
     ) -> std::io::Result<KeyFile> {
         // TODO(AJS): Use a real key, wrapped in `Zeroize`.
-        let dummy_key = [0x1du8; 32];
+        let dummy_key = [0x1d_u8; 32];
+        // TODO: fix this to not truncate
         // We want to overwrite any existing contents.
         // If we truncate we may leave dirty pages around
         // containing secrets.
         let mut file = tokio::fs::OpenOptions::new()
             .create(true)
-            .append(true)
+            .truncate(true)
             .open(&path.0)
             .await?;
-        let _ = file.seek(SeekFrom::Start(0)).await?;
+        //let _ = file.seek(SeekFrom::Start(0)).await?;
         file.write_all(&dummy_key).await?;
         Ok(KeyFile { path, file, log: log.clone() })
     }
