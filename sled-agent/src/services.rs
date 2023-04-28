@@ -26,8 +26,8 @@
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
-    ZoneType,
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
+    ServiceZoneService, TimeSync, ZoneType,
 };
 use crate::profile::*;
 use crate::smf_helper::Service;
@@ -541,7 +541,7 @@ impl ServiceManager {
     fn devices_needed(req: &ServiceZoneRequest) -> Result<Vec<String>, Error> {
         let mut devices = vec![];
         for svc in &req.services {
-            match svc {
+            match &svc.details {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     if let Ok(Some(n)) = tofino::get_tofino() {
                         if let Ok(device_path) = n.device_path() {
@@ -598,7 +598,7 @@ impl ServiceManager {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
         for svc in &req.services {
-            match svc {
+            match &svc.details {
                 ServiceType::Tfport { pkt_source } => {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
@@ -676,7 +676,7 @@ impl ServiceManager {
         let mut ports = vec![];
         for svc in &req.services {
             let external_ip;
-            let (nic, snat, external_ips) = match svc {
+            let (nic, snat, external_ips) = match &svc.details {
                 ServiceType::Nexus { external_ip, nic, .. } => {
                     (nic, None, std::slice::from_ref(external_ip))
                 }
@@ -698,7 +698,7 @@ impl ServiceManager {
             let port = port_manager
                 .create_port(nic, snat, external_ips, &[])
                 .map_err(|err| Error::ServicePortCreation {
-                service: svc.to_string(),
+                service: svc.details.to_string(),
                 err: Box::new(err),
             })?;
 
@@ -773,7 +773,7 @@ impl ServiceManager {
     fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
         let mut needed = Vec::new();
         for svc in &req.services {
-            match svc {
+            match &svc.details {
                 ServiceType::Tfport { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
@@ -1058,10 +1058,10 @@ impl ServiceManager {
             // avoid importing this manifest?
             debug!(self.inner.log, "importing manifest");
 
-            let smfh = SmfHelper::new(&running_zone, service);
+            let smfh = SmfHelper::new(&running_zone, &service.details);
             smfh.import_manifest()?;
 
-            match &service {
+            match &service.details {
                 ServiceType::Nexus { internal_ip, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
@@ -1364,8 +1364,10 @@ impl ServiceManager {
                     dns_servers,
                     domain,
                 } => {
-                    let boundary =
-                        matches!(service, ServiceType::BoundaryNtp { .. });
+                    let boundary = matches!(
+                        service.details,
+                        ServiceType::BoundaryNtp { .. }
+                    );
                     info!(
                         self.inner.log,
                         "Set up NTP service boundary={}, Servers={:?}",
@@ -1772,7 +1774,10 @@ impl ServiceManager {
             zone_type: ZoneType::Switch,
             addresses,
             gz_addresses: vec![],
-            services,
+            services: services
+                .into_iter()
+                .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
+                .collect(),
         };
 
         self.ensure_zone(
@@ -1901,9 +1906,9 @@ impl ServiceManager {
                 }
 
                 for service in &request.services {
-                    let smfh = SmfHelper::new(&zone, service);
+                    let smfh = SmfHelper::new(&zone, &service.details);
 
-                    match service {
+                    match &service.details {
                         ServiceType::ManagementGatewayService => {
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
@@ -2049,7 +2054,7 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::params::ZoneType;
+    use crate::params::{ServiceZoneService, ZoneType};
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -2132,7 +2137,10 @@ mod test {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                services: vec![ServiceType::Oximeter],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Oximeter,
+                }],
             }],
         })
         .await
@@ -2148,7 +2156,10 @@ mod test {
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
                 gz_addresses: vec![],
-                services: vec![ServiceType::Oximeter],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Oximeter,
+                }],
             }],
         })
         .await

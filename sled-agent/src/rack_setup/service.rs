@@ -381,7 +381,7 @@ impl ServiceInner {
                                 // and port that have been assigned to it.
                                 // There should be exactly one.
                                 let addrs = svc.services.iter().filter_map(|s| {
-                                    if let ServiceType::InternalDns { http_address, .. } = s {
+                                    if let ServiceType::InternalDns { http_address, .. } = &s.details {
                                         Some(*http_address)
                                     } else {
                                         None
@@ -666,14 +666,17 @@ impl ServiceInner {
                     // the port assumption into multiple places and we can also
                     // more easily support things running on different ports
                     // (which is useful in dev/test situations).
-                    match svc {
+                    let service_id = svc.id;
+                    let zone_id = Some(zone.id);
+                    match &svc.details {
                         ServiceType::Nexus {
                             external_ip,
                             internal_ip: _,
                             ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -689,7 +692,8 @@ impl ServiceInner {
                         }
                         ServiceType::Dendrite { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -703,7 +707,8 @@ impl ServiceInner {
                         }
                         ServiceType::ExternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
@@ -715,14 +720,16 @@ impl ServiceInner {
                             dns_address,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
                                     NexusTypes::ServiceKind::InternalDnsConfig,
                             });
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: dns_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
@@ -730,7 +737,8 @@ impl ServiceInner {
                         }
                         ServiceType::Oximeter => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -744,7 +752,8 @@ impl ServiceInner {
                         }
                         ServiceType::CruciblePantry => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -759,7 +768,8 @@ impl ServiceInner {
                         ServiceType::BoundaryNtp { .. }
                         | ServiceType::InternalNtp { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -771,10 +781,10 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Ntp,
                             });
                         }
-                        _ => {
+                        details => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
-                                svc
+                                details
                             )));
                         }
                     }
