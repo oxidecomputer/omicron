@@ -55,6 +55,7 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Groups arguments related to rack initialization
+#[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
     pub services: Vec<internal_params::ServicePutRequest>,
@@ -586,6 +587,7 @@ mod test {
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::lookup::LookupPath;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -596,10 +598,12 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
+    use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+    use std::num::NonZeroU32;
 
     // Default impl is for tests only, and really just so that tests can more
     // easily specify just the parts that they want.
@@ -662,10 +666,11 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let before = Utc::now();
+        let rack_init = RackInit::default();
 
         // Initializing the rack with no data is odd, but allowed.
         let rack = datastore
-            .rack_set_initialized(&opctx, RackInit::default())
+            .rack_set_initialized(&opctx, rack_init.clone())
             .await
             .expect("Failed to initialize rack");
 
@@ -673,6 +678,7 @@ mod test {
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
 
+        // Verify the DNS configuration.
         let dns_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
@@ -691,9 +697,63 @@ mod test {
         assert_eq!(dns_internal.generation + 1, dns_external.generation);
         assert_eq!(dns_internal.zones, dns_external.zones);
 
+        // Verify the details about the initial Silo.
+        let silos = datastore
+            .silos_list(
+                &opctx,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    limit: NonZeroU32::new(2).unwrap(),
+                    direction: dropshot::PaginationOrder::Ascending,
+                }),
+            )
+            .await
+            .expect("Failed to list Silos");
+        // It should *not* show up in the list because it's not discoverable.
+        assert_eq!(silos.len(), 0);
+        let (authz_silo, db_silo) = LookupPath::new(&opctx, &datastore)
+            .silo_name(&nexus_db_model::Name(
+                rack_init.recovery_silo.identity.name.clone(),
+            ))
+            .fetch()
+            .await
+            .expect("Failed to lookup Silo");
+        assert!(!db_silo.discoverable);
+
+        // Verify that the user exists and has the password (hash) that we
+        // expect.
+        let silo_users = datastore
+            .silo_users_list(
+                &opctx,
+                &authz::SiloUserList::new(authz_silo.clone()),
+                &DataPageParams {
+                    marker: None,
+                    limit: NonZeroU32::new(2).unwrap(),
+                    direction: dropshot::PaginationOrder::Ascending,
+                },
+            )
+            .await
+            .expect("failed to list users");
+        assert_eq!(silo_users.len(), 1);
+        assert_eq!(
+            silo_users[0].external_id,
+            rack_init.recovery_user_id.as_ref()
+        );
+        let authz_silo_user = authz::SiloUser::new(
+            authz_silo,
+            silo_users[0].id(),
+            LookupType::ById(silo_users[0].id()),
+        );
+        let hash = datastore
+            .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
+            .await
+            .expect("Failed to lookup password hash")
+            .expect("Found no password hash");
+        assert_eq!(hash.hash.0, rack_init.recovery_user_password_hash);
+
         // It should also be idempotent.
         let rack2 = datastore
-            .rack_set_initialized(&opctx, RackInit::default())
+            .rack_set_initialized(&opctx, rack_init)
             .await
             .expect("Failed to initialize rack");
         assert_eq!(rack.time_modified(), rack2.time_modified());

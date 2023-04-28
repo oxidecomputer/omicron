@@ -35,7 +35,6 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
-use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
@@ -2099,7 +2098,7 @@ async fn run_user_tests(
     assert_eq!(last_users, existing_users);
 }
 
-async fn verify_silo_dns_name(
+pub async fn verify_silo_dns_name(
     cptestctx: &ControlPlaneTestContext,
     silo_name: &str,
     should_exist: bool,
@@ -2107,7 +2106,8 @@ async fn verify_silo_dns_name(
     // The DNS naming scheme for Silo DNS names is just:
     //     $silo_name.sys.$delegated_name
     // This is determined by RFD 357 and also implemented in Nexus.
-    let dns_name = format!("{}.sys.{}", silo_name, DNS_ZONE_EXTERNAL_TESTING);
+    let dns_name =
+        format!("{}.sys.{}", silo_name, cptestctx.external_dns_zone_name);
 
     // We assume that in the test suite, Nexus's "external" address is
     // localhost.

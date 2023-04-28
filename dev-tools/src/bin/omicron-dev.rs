@@ -370,11 +370,16 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
         cptestctx.external_dns_server.local_address()
     );
     println!(
-        "                                    \
-        (e.g. `dig @{} -p {} SOME_DNS_NAME.{}`)",
+        "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
         cptestctx.external_dns_server.local_address().ip(),
         cptestctx.external_dns_server.local_address().port(),
+        cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
+    );
+    println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
+    println!(
+        "omicron-dev: privileged user name:  {}",
+        cptestctx.user_name.as_ref(),
     );
 
     // Wait for a signal.

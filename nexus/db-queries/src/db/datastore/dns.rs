@@ -578,6 +578,7 @@ impl DataStore {
 /// This object changes all of the zones associated with a particular DNS group
 /// because the assumption right now is that they're equivalent.  (In practice,
 /// we should only ever have one zone in each group right now.)
+#[derive(Clone)]
 pub struct DnsVersionUpdateBuilder {
     dns_group: DnsGroup,
     comment: String,
