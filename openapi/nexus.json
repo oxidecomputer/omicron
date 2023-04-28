@@ -756,7 +756,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Start the process of importing blocks into a disk",
+        "summary": "Start importing blocks into a disk",
+        "description": "Start the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_start",
         "parameters": [
           {
@@ -795,7 +796,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Stop the process of importing blocks into a disk",
+        "summary": "Stop importing blocks into a disk",
+        "description": "Stop the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_stop",
         "parameters": [
           {
@@ -834,7 +836,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Finalize disk when imports are done",
+        "summary": "Confirm disk block import completion",
         "operationId": "disk_finalize_import",
         "parameters": [
           {
@@ -883,7 +885,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Send request to import blocks from URL",
+        "summary": "Request to import blocks from URL",
         "operationId": "disk_import_blocks_from_url",
         "parameters": [
           {
@@ -4211,7 +4213,7 @@
           "system"
         ],
         "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address.",
+        "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -4386,8 +4388,8 @@
         "tags": [
           "system"
         ],
-        "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address.",
+        "summary": "List ranges for the IP pool used for Oxide services",
+        "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {

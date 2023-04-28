@@ -1188,7 +1188,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
 /// List ranges for an IP pool
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for an IP pool. Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1280,9 +1280,10 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services.
+/// List ranges for the IP pool used for Oxide services
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
+/// their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1542,6 +1543,8 @@ async fn disk_metrics_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Start importing blocks into a disk
+///
 /// Start the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1602,6 +1605,8 @@ async fn disk_bulk_write_import(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Stop importing blocks into a disk
+///
 /// Stop the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1631,7 +1636,7 @@ async fn disk_bulk_write_import_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Send request to import blocks from URL
+/// Request to import blocks from URL
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/import",
@@ -1664,7 +1669,7 @@ async fn disk_import_blocks_from_url(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Finalize disk when imports are done
+/// Confirm disk block import completion
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/finalize",
