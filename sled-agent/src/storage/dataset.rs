@@ -32,7 +32,7 @@ impl DatasetName {
     }
 
     pub fn full(&self) -> String {
-        format!("{}/{}", self.pool_name, self.kind.to_string())
+        format!("{}/{}", self.pool_name, self.kind)
     }
 }
 

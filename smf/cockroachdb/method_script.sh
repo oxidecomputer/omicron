@@ -28,9 +28,3 @@ args=(
 )
 
 exec /opt/oxide/cockroachdb/bin/cockroach start-single-node "${args[@]}" &
-
-# TODO: Do this from RSS; I don't think we can make this call locally
-# since there may be multiple instances running...
-
-# /opt/oxide/cockroachdb/bin/cockroach sql --insecure --host "$FULL_ADDRESS" --file /opt/oxide/cockroachdb/sql/dbwipe.sql
-# /opt/oxide/cockroachdb/bin/cockroach sql --insecure --host "$FULL_ADDRESS" --file /opt/oxide/cockroachdb/sql/dbinit.sql

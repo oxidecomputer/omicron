@@ -968,8 +968,12 @@ impl ServiceManager {
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
                 assert_eq!(request.zone.addresses.len(), 1);
-                let listen_addr = &request.zone.addresses[0].to_string();
-                let listen_port = &COCKROACH_PORT.to_string();
+                let address = SocketAddr::new(
+                    IpAddr::V6(request.zone.addresses[0]),
+                    COCKROACH_PORT,
+                );
+                let listen_addr = &address.ip().to_string();
+                let listen_port = &address.port().to_string();
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -990,7 +994,64 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup CRDB profile", err)
                     })?;
-                return Ok(RunningZone::boot(installed_zone).await?);
+                let running_zone = RunningZone::boot(installed_zone).await?;
+
+                // TODO: The following lines are necessary to initialize CRDB
+                // in a single-node environment. They're bad! They're wrong!
+                // We definitely shouldn't be wiping the database every time
+                // we want to boot this zone.
+                //
+                // But they're also necessary to prevent the build from
+                // regressing.
+                //
+                // NOTE: In the (very short-term) future, this will be
+                // replaced by the following:
+                // 1. CRDB will simply "start", rather than "start-single-node".
+                // 2. The Sled Agent will expose an explicit API to "init" the
+                // Cockroach cluster, and populate it with the expected
+                // contents.
+                let format_crdb = || async {
+                    info!(self.inner.log, "Formatting CRDB");
+                    running_zone
+                        .run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                        ])
+                        .map_err(BackoffError::transient)?;
+                    running_zone
+                        .run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                        ])
+                        .map_err(BackoffError::transient)?;
+                    info!(self.inner.log, "Formatting CRDB - Completed");
+                    Ok::<
+                        (),
+                        BackoffError<
+                            illumos_utils::running_zone::RunCommandError,
+                        >,
+                    >(())
+                };
+                let log_failure = |error, _| {
+                    warn!(
+                        self.inner.log, "failed to format CRDB";
+                        "error" => ?error,
+                    );
+                };
+                retry_notify(retry_policy_local(), format_crdb, log_failure)
+                    .await
+                    .expect("expected an infinite retry loop waiting for crdb");
+                return Ok(running_zone);
             }
             ZoneType::Crucible => {
                 let Some(info) = self.inner.sled_info.get() else {
