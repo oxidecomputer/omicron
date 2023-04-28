@@ -828,9 +828,11 @@ impl super::Nexus {
                 // what to do with status codes.
                 error!(self.log, "saw {} from instance_put!", e);
 
-                // this is unfortunate, but sled_agent_client::Error doesn't
-                // implement Copy, and can't be match'ed upon below without this
-                // line.
+                // Convert to the Omicron API error type.
+                //
+                // N.B. The match below assumes that this conversion will turn
+                //      any 400-level error status from sled agent into an
+                //      `Error::InvalidRequest`.
                 let e = e.into();
 
                 match &e {
