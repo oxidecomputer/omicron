@@ -42,10 +42,12 @@ pub struct Params {
 // which of the two participating VMMs is actually running the VM once the
 // migration is over.
 //
-// At the start of the saga, the participating sleds have the following
-// information about the instance's location. (Instance runtime states include
-// other information, like per-Propolis states, that's not relevant here and
-// is ignored.)
+// Only active instances can migrate. While an instance is active on some sled
+// (and isn't migrating), that sled's sled agent maintains the instance's
+// runtime state and sends updated state to Nexus when it changes. At the start
+// of this saga, the participating sled agents and CRDB have the following
+// runtime states (note that some fields, like the actual Propolis state, are
+// not relevant to migration and are omitted here):
 //
 // | Item         | Source | Dest | CRDB |
 // |--------------|--------|------|------|
@@ -66,11 +68,15 @@ declare_saga_actions! {
         + sim_allocate_propolis_ip
     }
 
-    // This step sets the migration ID and destination Propolis ID fields in
-    // CRDB by asking the instance's current sled to paste them into its runtime
-    // state. Sled agent provides the synchronization here: while this operation
-    // is idempotent for any single transition between IDs, sled agent ensures
-    // that if multiple concurrent sagas try to set migration IDs at the same
+    // This step sets the instance's migration ID and destination Propolis ID
+    // fields. Because the instance is active, its current sled agent maintains
+    // the most recent runtime state, so to update it, the saga calls into the
+    // sled and asks it to produce an updated record with the appropriate
+    // migration IDs and a new generation number.
+    //
+    // Sled agent provides the synchronization here: while this operation is
+    // idempotent for any single transition between IDs, sled agent ensures that
+    // if multiple concurrent sagas try to set migration IDs at the same
     // Propolis generation, then only one will win and get to proceed through
     // the saga.
     //
