@@ -157,7 +157,7 @@ impl KeyFile {
         // If we truncate we may leave dirty pages around
         // containing secrets.
         let mut file = tokio::fs::OpenOptions::new()
-            .create(true)
+            .write(true)
             .truncate(true)
             .open(&path.0)
             .await?;
