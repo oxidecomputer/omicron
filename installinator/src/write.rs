@@ -476,7 +476,7 @@ impl WriteTransport for FileTransport {
         tokio::fs::OpenOptions::new()
             .create(create)
             .write(true)
-            .truncate(true)
+            .truncate(create)
             .open(destination)
             .await
             .map_err(|error| WriteError {
