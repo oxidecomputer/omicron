@@ -12,7 +12,7 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
     InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRule, Zpool,
+    ServiceType, SledRole, TimeSync, VpcFirewallRule, ZoneType, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -254,7 +254,6 @@ impl SledAgent {
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
                 lazy_nexus_client: lazy_nexus_client.clone(),
-                underlay_address: *sled_address.ip(),
                 sled_id: request.id,
             })
             .await?;
@@ -518,7 +517,7 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.inner.services.ensure_persistent(requested_services).await?;
+        self.inner.services.ensure_all_services(requested_services).await?;
         Ok(())
     }
 
@@ -540,14 +539,40 @@ impl SledAgent {
     /// Ensures that a filesystem type exists within the zpool.
     pub async fn filesystem_ensure(
         &self,
-        zpool_uuid: Uuid,
+        dataset_id: Uuid,
+        zpool_id: Uuid,
         dataset_kind: DatasetKind,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
-        self.inner
+        // First, ensure the dataset exists
+        let dataset = self
+            .inner
             .storage
-            .upsert_filesystem(zpool_uuid, dataset_kind, address)
+            .upsert_filesystem(dataset_id, zpool_id, dataset_kind.clone())
             .await?;
+        let (zone_type, services) = match dataset_kind {
+            DatasetKind::Clickhouse => {
+                (ZoneType::Clickhouse, vec![ServiceType::Clickhouse])
+            }
+            DatasetKind::CockroachDb => {
+                (ZoneType::CockroachDb, vec![ServiceType::CockroachDb])
+            }
+            DatasetKind::Crucible => {
+                (ZoneType::Crucible, vec![ServiceType::Crucible])
+            }
+        };
+
+        // Next, ensure a zone exists to manage storage for that dataset
+        let request = crate::params::ServiceZoneRequest {
+            id: dataset_id,
+            zone_type,
+            addresses: vec![*address.ip()],
+            dataset: Some(dataset),
+            gz_addresses: vec![],
+            services,
+        };
+        self.inner.services.ensure_storage_service(request).await?;
+
         Ok(())
     }
 

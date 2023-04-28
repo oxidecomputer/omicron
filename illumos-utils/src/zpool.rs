@@ -249,6 +249,7 @@ impl Zpool {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
     External,

@@ -20,7 +20,7 @@
 //! of what other services Nexus wants to have executing on the sled.
 //!
 //! To accomplish this, the following interfaces are exposed:
-//! - [ServiceManager::ensure_persistent] exposes an API to request a set of
+//! - [ServiceManager::ensure_all_services] exposes an API to request a set of
 //! services that should persist beyond reboot.
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
@@ -50,7 +50,10 @@ use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
+use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
+use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -86,7 +89,9 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 // The filename of ServiceManager's internal storage.
-const SERVICE_CONFIG_FILENAME: &str = "service.toml";
+const SERVICES_CONFIG_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
+
 // The filename of a half-completed config, in need of parameters supplied at
 // runtime.
 const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
@@ -194,10 +199,16 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
-/// The default path to service configuration, if one is not
-/// explicitly provided.
-pub fn default_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
+// The default path to service configuration
+fn default_services_config_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join(SERVICES_CONFIG_FILENAME)
+}
+
+// The default path to storage service configuration
+fn default_storage_services_config_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join(STORAGE_SERVICES_CONFIG_FILENAME)
 }
 
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
@@ -211,9 +222,10 @@ pub struct Config {
     /// An optional internet gateway address for external services.
     pub gateway_address: Option<Ipv4Addr>,
 
-    /// The path for the ServiceManager to store information about
-    /// all running services.
-    pub all_svcs_config_path: PathBuf,
+    // The path for the ServiceManager to store information about
+    // all running services.
+    all_svcs_config_path: PathBuf,
+    storage_svcs_config_path: PathBuf,
 }
 
 impl Config {
@@ -227,6 +239,7 @@ impl Config {
             sidecar_revision,
             gateway_address,
             all_svcs_config_path: default_services_config_path(),
+            storage_svcs_config_path: default_storage_services_config_path(),
         }
     }
 }
@@ -249,6 +262,7 @@ impl AllZoneRequests {
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ZoneRequest {
     zone: ServiceZoneRequest,
+    // TODO: Consider collapsing "root" into ServiceZoneRequest
     root: PathBuf,
 }
 
@@ -303,7 +317,10 @@ pub struct ServiceManagerInner {
     time_synced: AtomicBool,
     sidecar_revision: String,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
+    // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
+    // Zones representing services which own datasets
+    dataset_zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -373,6 +390,7 @@ impl ServiceManager {
                 sidecar_revision,
                 switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
+                dataset_zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     underlay_etherstub,
@@ -516,6 +534,16 @@ impl ServiceManager {
     fn services_config_path(&self) -> Result<PathBuf, Error> {
         if let Some(info) = self.inner.sled_info.get() {
             Ok(info.config.all_svcs_config_path.clone())
+        } else {
+            Err(Error::SledAgentNotReady)
+        }
+    }
+
+    // Returns either the path to the explicitly provided config path, or
+    // chooses the default one.
+    fn storage_services_config_path(&self) -> Result<PathBuf, Error> {
+        if let Some(info) = self.inner.sled_info.get() {
+            Ok(info.config.storage_svcs_config_path.clone())
         } else {
             Err(Error::SledAgentNotReady)
         }
@@ -864,6 +892,18 @@ impl ServiceManager {
         let opte_ports = self.opte_ports_needed(&request.zone).await?;
         let limit_priv = Self::privs_needed(&request.zone);
 
+        // If the zone is managing a particular dataset, plumb that
+        // dataset into the zone. Additionally, construct a "unique enough" name
+        // so we can create multiple zones of this type without collision.
+        let (unique_name, datasets) =
+            if let Some(dataset) = &request.zone.dataset {
+                (
+                    Some(dataset.pool().to_string()),
+                    vec![zone::Dataset { name: dataset.full() }],
+                )
+            } else {
+                (None, vec![])
+            };
         let devices: Vec<zone::Device> = device_names
             .iter()
             .map(|d| zone::Device { name: d.to_string() })
@@ -874,11 +914,8 @@ impl ServiceManager {
             &self.inner.underlay_vnic_allocator,
             &request.root,
             &request.zone.zone_type.to_string(),
-            // unique_name=
-            None,
-            // dataset=
-            &[],
-            // filesystems=
+            unique_name.as_deref(),
+            &datasets,
             &filesystems,
             &devices,
             opte_ports,
@@ -893,6 +930,107 @@ impl ServiceManager {
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
         match request.zone.zone_type {
+            ZoneType::Clickhouse => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CLICKHOUSE_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/clickhouse").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup clickhouse profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneType::CockroachDb => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &COCKROACH_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/cockroachdb").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup CRDB profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneType::Crucible => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CRUCIBLE_PORT.to_string();
+
+                let dataset = request
+                    .zone
+                    .dataset
+                    .as_ref()
+                    .expect("Crucible requires dataset");
+                let uuid = &Uuid::new_v4().to_string();
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("dataset", "astring", &dataset.full())
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("uuid", "astring", uuid)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup crucible profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             ZoneType::CruciblePantry => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -1324,9 +1462,6 @@ impl ServiceManager {
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
                     smfh.refresh()?;
                 }
-                ServiceType::CruciblePantry => {
-                    panic!("CruciblePantry is self-assembling now")
-                }
                 ServiceType::BoundaryNtp {
                     ntp_servers,
                     dns_servers,
@@ -1450,6 +1585,12 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::Crucible
+                | ServiceType::CruciblePantry
+                | ServiceType::CockroachDb
+                | ServiceType::Clickhouse => {
+                    panic!("{service} is a service which exists as part of a self-assembling zone")
+                }
             }
 
             debug!(self.inner.log, "enabling service");
@@ -1514,7 +1655,7 @@ impl ServiceManager {
     /// These services will be instantiated by this function, and will be
     /// recorded to a local file to ensure they start automatically on next
     /// boot.
-    pub async fn ensure_persistent(
+    pub async fn ensure_all_services(
         &self,
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
@@ -1577,6 +1718,72 @@ impl ServiceManager {
         .await?;
 
         zone_requests.requests.append(&mut old_zone_requests.requests.clone());
+        let serialized_services = toml::Value::try_from(&zone_requests)
+            .expect("Cannot serialize service list");
+        let services_str =
+            toml::to_string(&serialized_services).map_err(|err| {
+                Error::TomlSerialize { path: config_path.clone(), err }
+            })?;
+        tokio::fs::write(&config_path, services_str)
+            .await
+            .map_err(|err| Error::io_path(&config_path, err))?;
+
+        Ok(())
+    }
+
+    /// Ensures that a storage zone be initialized.
+    ///
+    /// These services will be instantiated by this function, and will be
+    /// recorded to a local file to ensure they start automatically on next
+    /// boot.
+    pub async fn ensure_storage_service(
+        &self,
+        request: ServiceZoneRequest,
+    ) -> Result<(), Error> {
+        let mut existing_zones = self.inner.dataset_zones.lock().await;
+        let config_path = self.storage_services_config_path()?;
+
+        let mut zone_requests: AllZoneRequests = {
+            if config_path.exists() {
+                debug!(self.inner.log, "Reading old storage service requests");
+                toml::from_str(
+                    &tokio::fs::read_to_string(&config_path)
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?,
+                )
+                .map_err(|err| Error::TomlDeserialize {
+                    path: config_path.clone(),
+                    err,
+                })?
+            } else {
+                debug!(self.inner.log, "No old storage service requests");
+                AllZoneRequests::new()
+            }
+        };
+
+        if !zone_requests
+            .requests
+            .iter()
+            .any(|zone_request| zone_request.zone.id == request.id)
+        {
+            // If this is a new request, provision a zone filesystem on the same
+            // disk as the dataset.
+            let dataset = request
+                .dataset
+                .as_ref()
+                .expect("Storage services should have a dataset");
+            let root = dataset
+                .pool()
+                .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
+            zone_requests.requests.push(ZoneRequest { zone: request, root });
+        }
+
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &zone_requests.requests,
+        )
+        .await?;
+
         let serialized_services = toml::Value::try_from(&zone_requests)
             .expect("Cannot serialize service list");
         let services_str =
@@ -1745,6 +1952,7 @@ impl ServiceManager {
             id: Uuid::new_v4(),
             zone_type: ZoneType::Switch,
             addresses,
+            dataset: None,
             gz_addresses: vec![],
             services,
         };
@@ -2099,11 +2307,12 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_persistent(ServiceEnsureBody {
+        mgr.ensure_all_services(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
             }],
@@ -2115,11 +2324,12 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_persistent(ServiceEnsureBody {
+        mgr.ensure_all_services(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
                 gz_addresses: vec![],
                 services: vec![ServiceType::Oximeter],
             }],
@@ -2162,12 +2372,15 @@ mod test {
 
         fn make_config(&self) -> Config {
             let all_svcs_config_path =
-                self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
+                self.config_dir.path().join(SERVICES_CONFIG_FILENAME);
+            let storage_svcs_config_path =
+                self.config_dir.path().join(STORAGE_SERVICES_CONFIG_FILENAME);
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
                 gateway_address: None,
                 all_svcs_config_path,
+                storage_svcs_config_path,
             }
         }
     }
@@ -2190,11 +2403,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
@@ -2239,11 +2448,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
@@ -2291,11 +2496,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
@@ -2331,11 +2532,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
@@ -2380,11 +2577,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
@@ -2422,11 +2615,7 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
-            StorageManager::new(
-                &log,
-                Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
-            )
-            .await,
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();

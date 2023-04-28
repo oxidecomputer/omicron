@@ -206,13 +206,12 @@ pub struct Zpool {
 
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
-    CockroachDb {
-        /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddrV6>,
-    },
+    CockroachDb,
     Crucible,
     Clickhouse,
 }
@@ -221,9 +220,7 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
         match k {
-            CockroachDb { all_addresses } => Self::CockroachDb(
-                all_addresses.iter().map(|a| a.to_string()).collect(),
-            ),
+            CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
         }
@@ -333,6 +330,9 @@ pub enum ServiceType {
     Maghemite {
         mode: String,
     },
+    Clickhouse,
+    CockroachDb,
+    Crucible,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -350,6 +350,9 @@ impl std::fmt::Display for ServiceType {
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
+            ServiceType::Clickhouse => write!(f, "clickhouse"),
+            ServiceType::CockroachDb => write!(f, "cockroachdb"),
+            ServiceType::Crucible => write!(f, "crucible"),
         }
     }
 }
@@ -427,6 +430,9 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
                 AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
             }
             St::Maghemite { mode } => AutoSt::Maghemite { mode },
+            St::Clickhouse => AutoSt::Clickhouse,
+            St::CockroachDb => AutoSt::CockroachDb,
+            St::Crucible => AutoSt::Crucible,
         }
     }
 }
@@ -437,25 +443,31 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ZoneType {
+    Clickhouse,
+    CockroachDb,
+    CruciblePantry,
+    Crucible,
     ExternalDns,
     InternalDns,
     Nexus,
+    Ntp,
     Oximeter,
     Switch,
-    CruciblePantry,
-    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
+            ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::CockroachDb => Self::CockroachDb,
+            ZoneType::Crucible => Self::Crucible,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
             ZoneType::InternalDns => Self::InternalDns,
             ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
+            ZoneType::Ntp => Self::Ntp,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
-            ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -464,13 +476,16 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
+            Clickhouse => "clickhouse",
+            CockroachDb => "cockroachdb",
+            Crucible => "crucible",
+            CruciblePantry => "crucible_pantry",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
             Nexus => "nexus",
+            Ntp => "ntp",
             Oximeter => "oximeter",
             Switch => "switch",
-            CruciblePantry => "crucible_pantry",
-            Ntp => "ntp",
         };
         write!(f, "{name}")
     }
@@ -487,6 +502,9 @@ pub struct ServiceZoneRequest {
     pub zone_type: ZoneType,
     // The addresses on which the service should listen for requests.
     pub addresses: Vec<Ipv6Addr>,
+    // Datasets which should be managed by this service.
+    #[serde(default)]
+    pub dataset: Option<crate::storage::dataset::DatasetName>,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
     //
@@ -511,13 +529,14 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
             id: s.id,
             zone_type: s.zone_type.into(),
             addresses: s.addresses,
+            dataset: s.dataset.map(|d| d.into()),
             gz_addresses: s.gz_addresses,
             services,
         }
     }
 }
 
-/// Used to request that the Sled initialize certain services on initialization.
+/// Used to request that the Sled initialize certain services.
 ///
 /// This may be used to record that certain sleds are responsible for
 /// launching services which may not be associated with a dataset, such

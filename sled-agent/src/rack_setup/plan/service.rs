@@ -296,6 +296,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::ExternalDns,
                     addresses: vec![internal_ip],
+                    dataset: None,
                     gz_addresses: vec![],
                     services: vec![ServiceType::ExternalDns {
                         http_address: SocketAddrV6::new(
@@ -329,6 +330,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::Nexus,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
                     services: vec![ServiceType::Nexus {
                         internal_ip: address,
@@ -354,6 +356,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::Oximeter,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
                     services: vec![ServiceType::Oximeter],
                 })
@@ -373,9 +376,7 @@ impl Plan {
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::CockroachDb {
-                        all_addresses: vec![address],
-                    },
+                    dataset_kind: crate::params::DatasetKind::CockroachDb,
                     address,
                 });
             }
@@ -444,6 +445,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::InternalDns,
                     addresses: vec![dns_addr],
+                    dataset: None,
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
                     services: vec![ServiceType::InternalDns {
                         http_address: SocketAddrV6::new(
@@ -476,6 +478,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::CruciblePantry,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
                     services: vec![ServiceType::CruciblePantry],
                 })
@@ -523,6 +526,7 @@ impl Plan {
                     id,
                     zone_type: ZoneType::Ntp,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
                     services,
                 });

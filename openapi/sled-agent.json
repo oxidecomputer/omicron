@@ -640,13 +640,6 @@
           {
             "type": "object",
             "properties": {
-              "all_addresses": {
-                "description": "The addresses of all nodes within the cluster.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -655,7 +648,6 @@
               }
             },
             "required": [
-              "all_addresses",
               "type"
             ]
           },
@@ -687,6 +679,21 @@
               "type"
             ]
           }
+        ]
+      },
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
         ]
       },
       "DendriteAsic": {
@@ -1738,7 +1745,7 @@
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
+        "description": "Used to request that the Sled initialize certain services.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
         "type": "object",
         "properties": {
           "services": {
@@ -2036,6 +2043,48 @@
               "mode",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -2049,6 +2098,15 @@
               "type": "string",
               "format": "ipv6"
             }
+          },
+          "dataset": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
+              }
+            ]
           },
           "gz_addresses": {
             "default": [],
@@ -2465,13 +2523,16 @@
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "clickhouse",
+          "cockroach_db",
+          "crucible_pantry",
+          "crucible",
           "external_dns",
           "internal_dns",
           "nexus",
+          "ntp",
           "oximeter",
-          "switch",
-          "crucible_pantry",
-          "ntp"
+          "switch"
         ]
       },
       "Zpool": {
@@ -2488,6 +2549,30 @@
         "required": [
           "disk_type",
           "id"
+        ]
+      },
+      "ZpoolKind": {
+        "type": "string",
+        "enum": [
+          "external",
+          "internal"
+        ]
+      },
+      "ZpoolName": {
+        "description": "A wrapper around a zpool name.\n\nThis expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix when reading the structure, and validate that the UUID can be utilized.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZpoolKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       }
     }
