@@ -32,6 +32,7 @@ pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(disk_put)?;
         api.register(filesystem_put)?;
+        api.register(cockroachdb_init)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
@@ -112,6 +113,26 @@ async fn filesystem_put(
     .map_err(|e| Error::from(e))?;
     Ok(HttpResponseUpdatedNoContent())
 }
+
+#[endpoint {
+    method = POST,
+    path = "/cockroachdb",
+}]
+async fn cockroachdb_init(
+    rqctx: RequestContext<SledAgent>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+
+    // TODO: In RSS, launch three CRDB nodes across the U.2s.
+    //
+    // TODO: In the SMF file for cockroach, call "start" instead of
+    // "start-single-node".
+    //
+    // TODO: Access the CRDB zone, run "init", then run "dbinit.sql".
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]

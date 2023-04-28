@@ -995,13 +995,28 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up agents and datasets");
 
+        // TODO: Initialize Cockroachdb?
+//        let initialize_db = || async {
+//
+//        };
+//        let log_failure = |error, _| {
+//            warn!(self.log, "Time is not yet synchronized"; "error" => ?error);
+//        };
+//        retry_notify(
+//            retry_policy_internal_service_aggressive(),
+//            initialize_db,
+//            log_failure,
+//        )
+//        .await
+//        .unwrap();
+
         // Issue service initialization requests.
         //
         // NOTE: This must happen *after* the dataset initialization,
         // to ensure that CockroachDB has been initialized before Nexus
         // starts.
         //
-        // If Nexus was more resilient to concurrent initialization
+        // TODO: If Nexus was more resilient to concurrent initialization
         // of CRDB, this requirement could be relaxed.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
