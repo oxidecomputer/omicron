@@ -53,9 +53,6 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
 
-    #[error("Failed to enable routing: {0}")]
-    EnablingRouting(illumos_utils::ExecutionError),
-
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(illumos_utils::ExecutionError),
 
@@ -284,19 +281,6 @@ impl SledAgent {
             *sled_address.ip(),
             gateway_mac,
         );
-
-        // Ipv6 forwarding must be enabled to route traffic between zones.
-        //
-        // This should be a no-op if already enabled.
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            "/usr/sbin/routeadm",
-            // Needed to access all zones, which are on the underlay.
-            "-e",
-            "ipv6-forwarding",
-            "-u",
-        ]);
-        execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {

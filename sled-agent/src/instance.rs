@@ -797,7 +797,7 @@ impl Instance {
         info!(inner.log, "Created address {} for zone: {}", network, zname);
 
         let gateway = inner.port_manager.underlay_ip();
-        running_zone.add_default_route(*gateway).await?;
+        running_zone.add_default_route(*gateway)?;
 
         // Run Propolis in the Zone.
         let smf_service_name = "svc:/system/illumos/propolis-server";
