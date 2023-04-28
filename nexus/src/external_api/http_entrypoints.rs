@@ -652,7 +652,7 @@ async fn silo_user_view(
 
 // Silo identity providers
 
-/// List a silo's IDPs_name
+/// List a silo's IdP's name
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers",
@@ -689,7 +689,7 @@ async fn silo_identity_provider_list(
 
 // Silo SAML identity providers
 
-/// Create a SAML IDP
+/// Create a SAML IdP
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
@@ -718,7 +718,7 @@ async fn saml_identity_provider_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a SAML IDP
+/// Fetch a SAML IdP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
@@ -1165,7 +1165,7 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the IP pool used for Oxide services.
+/// Fetch the IP pool used for Oxide services
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
@@ -1188,7 +1188,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
 /// List ranges for an IP pool
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for an IP pool. Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1280,9 +1280,10 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services.
+/// List ranges for the IP pool used for Oxide services
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
+/// their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1323,7 +1324,7 @@ async fn ip_pool_service_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool used for Oxide services.
+/// Add a range to an IP pool used for Oxide services
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
@@ -1344,7 +1345,7 @@ async fn ip_pool_service_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool used for Oxide services.
+/// Remove a range from an IP pool used for Oxide services
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
@@ -1542,6 +1543,8 @@ async fn disk_metrics_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Start importing blocks into a disk
+///
 /// Start the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1602,6 +1605,8 @@ async fn disk_bulk_write_import(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Stop importing blocks into a disk
+///
 /// Stop the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1631,7 +1636,7 @@ async fn disk_bulk_write_import_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Send request to import blocks from URL
+/// Request to import blocks from URL
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/import",
@@ -1664,7 +1669,7 @@ async fn disk_import_blocks_from_url(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Finalize disk when imports are done
+/// Confirm disk block import completion
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/finalize",
@@ -2147,7 +2152,7 @@ async fn certificate_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new system-wide x.509 certificate.
+/// Create a new system-wide x.509 certificate
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
 /// external connections.
@@ -2545,6 +2550,8 @@ async fn image_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Promote a project image
+///
 /// Promote a project image to be visible to all projects in the silo
 #[endpoint {
     method = POST,
@@ -3054,7 +3061,7 @@ async fn vpc_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a subnet
+/// List subnets
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets",
@@ -3351,7 +3358,7 @@ async fn vpc_router_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get a router
+/// Fetch a router
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
