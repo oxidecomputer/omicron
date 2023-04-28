@@ -6,6 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 chrono.workspace = true
+futures.workspace = true
 omicron-common.workspace = true
 progenitor.workspace = true
 regress.workspace = true

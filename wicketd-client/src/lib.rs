@@ -39,9 +39,14 @@ progenitor::generate_api!(
         Duration = std::time::Duration,
         ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
         StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
+        ProgressReport = installinator_common::ProgressReport,
+        StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
+        M2Slot = installinator_common::M2Slot,
     }
 );
 
+pub type EventReport = types::EventReportForWicketdEngineSpec;
 pub type ProgressEventKind = types::ProgressEventKindForWicketdEngineSpec;
 pub type StepEventKind = types::StepEventKindForWicketdEngineSpec;
 pub type StepInfoWithMetadata = types::StepInfoWithMetadataForWicketdEngineSpec;

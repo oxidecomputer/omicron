@@ -10,13 +10,13 @@ use dropshot::{
     TypedBody,
 };
 use hyper::{header, Body, StatusCode};
-use installinator_common::ProgressReport;
+use installinator_common::EventReport;
 use omicron_common::update::{ArtifactHashId, ArtifactId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::{context::ServerContext, ProgressReportStatus};
+use crate::{context::ServerContext, EventReportStatus};
 
 type ArtifactServerApiDesc = ApiDescription<ServerContext>;
 
@@ -100,17 +100,17 @@ pub(crate) struct ReportQuery {
 async fn report_progress(
     rqctx: RequestContext<ServerContext>,
     path: Path<ReportQuery>,
-    event: TypedBody<ProgressReport>,
+    report: TypedBody<EventReport>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let update_id = path.into_inner().update_id;
     match rqctx
         .context()
         .artifact_store
-        .report_progress(update_id, event.into_inner())
+        .report_progress(update_id, report.into_inner())
         .await?
     {
-        ProgressReportStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
-        ProgressReportStatus::UnrecognizedUpdateId => {
+        EventReportStatus::Processed => Ok(HttpResponseUpdatedNoContent()),
+        EventReportStatus::UnrecognizedUpdateId => {
             Err(HttpError::for_client_error(
                 None,
                 StatusCode::UNPROCESSABLE_ENTITY,

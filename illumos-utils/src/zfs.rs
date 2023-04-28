@@ -8,8 +8,8 @@ use crate::{execute, PFEXEC};
 use std::fmt;
 use std::path::PathBuf;
 
-pub const ZONE_ZFS_DATASET_MOUNTPOINT: &str = "/zone";
-pub const ZONE_ZFS_DATASET: &str = "rpool/zone";
+pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
+pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
 
 /// Error returned by [`Zfs::list_datasets`].
@@ -42,7 +42,7 @@ enum EnsureFilesystemErrorRaw {
     Output(String),
 }
 
-/// Error returned by [`Zfs::ensure_zoned_filesystem`].
+/// Error returned by [`Zfs::ensure_filesystem`].
 #[derive(thiserror::Error, Debug)]
 #[error(
     "Failed to ensure filesystem '{name}' exists at '{mountpoint:?}': {err}"
@@ -137,15 +137,15 @@ impl Zfs {
     }
 
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
-    pub fn ensure_zoned_filesystem(
+    pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
+        zoned: bool,
         do_format: bool,
     ) -> Result<(), EnsureFilesystemError> {
         // If the dataset exists, we're done.
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-Hpo", "name,type,mountpoint", name]);
-
         // If the list command returns any valid output, validate it.
         if let Ok(output) = execute(cmd) {
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -170,16 +170,11 @@ impl Zfs {
 
         // If it doesn't exist, make it.
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            ZFS,
-            "create",
-            // The filesystem is managed from the Global Zone.
-            "-o",
-            "zoned=on",
-            "-o",
-            &format!("mountpoint={}", mountpoint),
-            name,
-        ]);
+        let cmd = command.args(&[ZFS, "create"]);
+        if zoned {
+            cmd.args(&["-o", "zoned=on"]);
+        }
+        cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
             mountpoint,
@@ -254,19 +249,21 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
-        // For now, avoid erasing any datasets which exist on internal zpools.
-        if pool.kind() == crate::zpool::ZpoolKind::Internal {
-            continue;
-        }
+        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
+            // Avoid erasing crashdump datasets on internal pools
+            if dataset == "crash" && internal {
+                continue;
+            }
+
             datasets.push(format!("{pool}/{dataset}"));
         }
     }
 
-    // Collect all datasets for Oxide zones.
-    for dataset in &Zfs::list_datasets(&ZONE_ZFS_DATASET)? {
-        datasets.push(format!("{}/{dataset}", ZONE_ZFS_DATASET));
+    // Collect all datasets for ramdisk-based Oxide zones.
+    for dataset in &Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)? {
+        datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
     }
 
     Ok(datasets)

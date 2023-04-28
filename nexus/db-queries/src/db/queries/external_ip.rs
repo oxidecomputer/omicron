@@ -25,6 +25,7 @@ use diesel::Column;
 use diesel::Expression;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external;
 use uuid::Uuid;
 
@@ -60,22 +61,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
     error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
 }
 
-// The number of ports available to an instance when doing source NAT. Note
-// that for static NAT, this value isn't used, and all ports are available.
-//
-// NOTE: This must be a power of 2. We're expecting to provide the Tofino with a
-// port mask, e.g., a 16-bit mask such as `0b01...`, where those dots are any 14
-// bits. This signifies the port range `[16384, 32768)`. Such a port mask only
-// works when the port-ranges are limited to powers of 2, not arbitrary ranges.
-//
-// Also NOTE: This is not going to work if we modify this value across different
-// versions of Nexus. Currently, we're considering a port range free simply by
-// checking if the _first_ address in a range is free. However, we'll need to
-// instead to check if a candidate port range has any overlap with an existing
-// port range, which is more complicated. That's deferred until we actually have
-// that situation (which may be as soon as allocating ephemeral IPs).
-const NUM_SOURCE_NAT_PORTS: usize = 1 << 14;
-const MAX_PORT: i32 = u16::MAX as _;
+const MAX_PORT: u16 = u16::MAX;
 
 /// Select the next available IP address and port range for an instance's
 /// external connectivity.
@@ -261,7 +247,7 @@ pub struct NextExternalIp {
 impl NextExternalIp {
     pub fn new(ip: IncompleteExternalIp) -> Self {
         let now = Utc::now();
-        let n_ports_per_chunk = i32::try_from(NUM_SOURCE_NAT_PORTS).unwrap();
+        let n_ports_per_chunk = i32::from(NUM_SOURCE_NAT_PORTS);
         Self {
             ip,
             n_ports_per_chunk,
@@ -626,6 +612,7 @@ impl NextExternalIp {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
+        const MAX_PORT: i32 = self::MAX_PORT as i32;
         if matches!(self.ip.kind(), &IpKind::SNat) {
             out.push_sql(
                 "SELECT candidate_first_port, candidate_first_port + ",
@@ -767,6 +754,7 @@ mod tests {
     use dropshot::test_util::LogContext;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::IpRange;
+    use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -882,7 +870,7 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool("default", range).await;
         for first_port in
-            (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS)
+            (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
             let id = Uuid::new_v4();
             let instance_id = Uuid::new_v4();
@@ -897,11 +885,8 @@ mod tests {
                 .await
                 .expect("Failed to allocate instance external IP address");
             assert_eq!(ip.ip.ip(), range.first_address());
-            assert_eq!(ip.first_port.0, first_port as u16);
-            assert_eq!(
-                ip.last_port.0,
-                (first_port + (super::NUM_SOURCE_NAT_PORTS - 1) as i32) as u16
-            );
+            assert_eq!(ip.first_port.0, first_port);
+            assert_eq!(ip.last_port.0, first_port + (NUM_SOURCE_NAT_PORTS - 1));
         }
 
         // The next allocation should fail, due to IP exhaustion
@@ -954,10 +939,7 @@ mod tests {
             .expect("Failed to allocate Ephemeral IP when there is space");
         assert_eq!(ephemeral_ip.ip.ip(), range.last_address());
         assert_eq!(ephemeral_ip.first_port.0, 0);
-        assert_eq!(
-            ephemeral_ip.last_port.0,
-            u16::try_from(super::MAX_PORT).unwrap()
-        );
+        assert_eq!(ephemeral_ip.last_port.0, super::MAX_PORT);
 
         // At this point, we should be able to allocate neither a new Ephemeral
         // nor any SNAT IPs.
@@ -1029,7 +1011,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
             Ipv4Addr::new(10, 0, 0, 3),
         ];
-        let ports = (0..super::MAX_PORT).step_by(super::NUM_SOURCE_NAT_PORTS);
+        let ports = (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into());
         let mut external_ips = itertools::iproduct!(addresses, ports);
 
         // Allocate two addresses
@@ -1047,10 +1029,9 @@ mod tests {
                 .await
                 .expect("Failed to allocate instance external IP address");
             assert_eq!(ip.ip.ip(), expected_ip);
-            assert_eq!(ip.first_port.0, expected_first_port as u16);
-            let expected_last_port = (expected_first_port
-                + (super::NUM_SOURCE_NAT_PORTS - 1) as i32)
-                as u16;
+            assert_eq!(ip.first_port.0, expected_first_port);
+            let expected_last_port =
+                expected_first_port + (NUM_SOURCE_NAT_PORTS - 1);
             assert_eq!(ip.last_port.0, expected_last_port);
             ips.push(ip);
         }
@@ -1104,10 +1085,9 @@ mod tests {
             .expect("Failed to allocate instance external IP address");
         let (expected_ip, expected_first_port) = external_ips.nth(2).unwrap();
         assert_eq!(ip.ip.ip(), std::net::IpAddr::from(expected_ip));
-        assert_eq!(ip.first_port.0, expected_first_port as u16);
-        let expected_last_port = (expected_first_port
-            + (super::NUM_SOURCE_NAT_PORTS - 1) as i32)
-            as u16;
+        assert_eq!(ip.first_port.0, expected_first_port);
+        let expected_last_port =
+            expected_first_port + (NUM_SOURCE_NAT_PORTS - 1);
         assert_eq!(ip.last_port.0, expected_last_port);
 
         context.success().await;
@@ -1429,10 +1409,7 @@ mod tests {
         assert_eq!(ip.kind, IpKind::SNat);
         assert_eq!(ip.ip.ip(), range.first_address());
         assert_eq!(ip.first_port.0, 0);
-        assert_eq!(
-            usize::from(ip.last_port.0),
-            super::NUM_SOURCE_NAT_PORTS - 1
-        );
+        assert_eq!(ip.last_port.0, NUM_SOURCE_NAT_PORTS - 1);
 
         // Create a new IP, with the _same_ ID, and ensure we get back the same
         // value.

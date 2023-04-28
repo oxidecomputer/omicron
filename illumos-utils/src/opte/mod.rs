@@ -77,4 +77,8 @@ impl Gateway {
                 .expect("IP subnet must have at least 2 addresses"),
         }
     }
+
+    pub fn ip(&self) -> &IpAddr {
+        &self.ip
+    }
 }

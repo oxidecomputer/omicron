@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::Args;
 use futures::StreamExt;
 use installinator_artifact_client::ClientError;
-use installinator_common::ProgressReport;
+use installinator_common::EventReport;
 use ipcc_key_value::{InstallinatorImageId, Ipcc};
 use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use tokio::sync::mpsc;
@@ -127,7 +127,7 @@ impl ArtifactClient {
     pub(crate) async fn report_progress(
         &self,
         update_id: Uuid,
-        report: ProgressReport,
+        report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
             .report_progress(&update_id, &report)

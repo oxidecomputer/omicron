@@ -9,10 +9,10 @@ use ipnetwork::IpNetwork;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
+use std::path::Path;
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::{execute, PFEXEC};
 use omicron_common::address::SLED_PREFIX;
 
@@ -130,6 +130,16 @@ pub struct EnsureGzAddressError {
     extra_note: String,
 }
 
+/// Errors which may be encountered getting addresses.
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get addresses with name {name} in {zone}: {err}")]
+pub struct GetAddressesError {
+    zone: String,
+    name: AddrObject,
+    #[source]
+    err: anyhow::Error,
+}
+
 /// Describes the type of addresses which may be requested from a zone.
 #[derive(Copy, Clone, Debug)]
 // TODO-cleanup: Remove, along with moving to IPv6 addressing everywhere.
@@ -233,6 +243,7 @@ impl Zones {
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
+        zone_root_path: &Path,
         zone_name: &str,
         zone_image: &std::path::Path,
         datasets: &[zone::Dataset],
@@ -269,7 +280,7 @@ impl Zones {
             true,
             zone::CreationOptions::Blank,
         );
-        let path = format!("{}/{}", ZONE_ZFS_DATASET_MOUNTPOINT, zone_name);
+        let path = zone_root_path.join(zone_name);
         cfg.get_global()
             .set_brand("omicron1")
             .set_path(&path)
@@ -465,7 +476,7 @@ impl Zones {
 
     /// Gets the IP address of an interface.
     ///
-    /// This address may optionally be within a zone named `zone`.
+    /// This `addrobj` may optionally be within a zone named `zone`.
     /// If `None` is supplied, the address is queried from the Global Zone.
     #[allow(clippy::needless_lifetimes)]
     fn get_address<'a>(
@@ -488,6 +499,37 @@ impl Zones {
             .lines()
             .find_map(|s| s.parse().ok())
             .ok_or(Error::AddressNotFound { addrobj: addrobj.clone() })
+    }
+
+    /// Gets all IP address of an interface.
+    ///
+    /// This `addrobj` may optionally be within a zone named `zone`.
+    /// If `None` is supplied, the address is queried from the Global Zone.
+    #[allow(clippy::needless_lifetimes)]
+    pub fn get_all_addresses<'a>(
+        zone: Option<&'a str>,
+        addrobj: &AddrObject,
+    ) -> Result<Vec<IpNetwork>, GetAddressesError> {
+        let mut command = std::process::Command::new(PFEXEC);
+
+        let mut args = vec![];
+        if let Some(zone) = zone {
+            args.push(ZLOGIN);
+            args.push(zone);
+        };
+        let addrobj_str = addrobj.to_string();
+        args.extend(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj_str]);
+
+        let cmd = command.args(args);
+        let output = execute(cmd).map_err(|err| GetAddressesError {
+            zone: zone.unwrap_or("global").to_string(),
+            name: addrobj.clone(),
+            err: err.into(),
+        })?;
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|s| s.parse().ok())
+            .collect::<Vec<_>>())
     }
 
     /// Returns Ok(()) if `addrobj` has a corresponding link-local IPv6 address.

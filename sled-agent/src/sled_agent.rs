@@ -15,10 +15,11 @@ use crate::params::{
     SledRole, TimeSync, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
+use illumos_utils::opte::PortManager;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
@@ -89,6 +90,9 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
+
+    #[error(transparent)]
+    ZpoolList(#[from] illumos_utils::zpool::ListError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -189,6 +193,7 @@ impl SledAgent {
         lazy_nexus_client: LazyNexusClient,
         request: SledAgentRequest,
         services: ServiceManager,
+        storage: StorageManager,
     ) -> Result<SledAgent, Error> {
         // Pass the "parent_log" to all subcomponents that want to set their own
         // "component" value.
@@ -221,6 +226,18 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics()?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
+        let (gateway_mac, gateway_address) = match &request.gateway {
+            Some(g) => (Some(g.mac.0), g.address),
+            None => (None, None),
+        };
+
+        // Create the PortManager to manage all the OPTE ports on the sled.
+        let port_manager = PortManager::new(
+            parent_log.new(o!("component" => "PortManager")),
+            *sled_address.ip(),
+            gateway_mac,
+        );
+
         // Ipv6 forwarding must be enabled to route traffic between zones.
         //
         // This should be a no-op if already enabled.
@@ -234,14 +251,13 @@ impl SledAgent {
         ]);
         execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
 
-        let storage = StorageManager::new(
-            &parent_log,
-            request.id,
-            lazy_nexus_client.clone(),
-            etherstub.clone(),
-            *sled_address.ip(),
-        )
-        .await;
+        storage
+            .setup_underlay_access(storage_manager::UnderlayAccess {
+                lazy_nexus_client: lazy_nexus_client.clone(),
+                underlay_address: *sled_address.ip(),
+                sled_id: request.id,
+            })
+            .await?;
         if let Some(pools) = &config.zpools {
             for pool in pools {
                 info!(
@@ -252,18 +268,13 @@ impl SledAgent {
                 storage.upsert_synthetic_disk(pool.clone()).await;
             }
         }
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             lazy_nexus_client.clone(),
             etherstub.clone(),
-            *sled_address.ip(),
-            request.gateway.mac.0,
+            port_manager.clone(),
         )?;
-
-        let svc_config = services::Config::new(
-            config.sidecar_revision.clone(),
-            request.gateway.address,
-        );
 
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
@@ -272,10 +283,15 @@ impl SledAgent {
             ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
         let updates = UpdateManager::new(update_config);
 
+        let svc_config = services::Config::new(
+            request.id,
+            config.sidecar_revision.clone(),
+            gateway_address,
+        );
         services
             .sled_agent_started(
                 svc_config,
-                config.get_link()?,
+                port_manager,
                 *sled_address.ip(),
                 request.rack_id,
             )

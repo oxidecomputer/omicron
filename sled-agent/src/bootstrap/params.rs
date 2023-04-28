@@ -31,7 +31,7 @@ pub struct RackInitializeRequest {
     pub rack_secret_threshold: usize,
 
     /// Internet gateway information.
-    pub gateway: Gateway,
+    pub gateway: Option<Gateway>,
 
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
@@ -75,7 +75,7 @@ pub struct SledAgentRequest {
     //
     // Longer-term, it probably makes sense to store this in CRDB and transfer
     // it to Sled Agent as part of the request to launch Nexus.
-    pub gateway: Gateway,
+    pub gateway: Option<Gateway>,
 
     /// The external NTP servers to use
     pub ntp_servers: Vec<String>,
@@ -172,7 +172,6 @@ mod tests {
     use super::*;
     use crate::bootstrap::trust_quorum::RackSecret;
     use crate::bootstrap::trust_quorum::ShareDistribution;
-    use macaddr::MacAddr6;
     use std::path::PathBuf;
 
     #[test]
@@ -213,10 +212,7 @@ mod tests {
                 Cow::Owned(SledAgentRequest {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
-                    gateway: Gateway {
-                        address: None,
-                        mac: MacAddr6::nil().into(),
-                    },
+                    gateway: None,
                     ntp_servers: vec![String::from("test.pool.example.com")],
                     dns_servers: vec![String::from("1.1.1.1")],
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

@@ -323,7 +323,7 @@ pub async fn login_saml_begin(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Authenticate a user (i.e., log in) via SAML
+/// Authenticate a user via SAML
 #[endpoint {
    method = POST,
    path = "/login/{silo_name}/saml/{provider_name}",
@@ -393,7 +393,7 @@ pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
-/// Authenticate a user (i.e., log in) via username and password
+/// Authenticate a user via username and password
 #[endpoint {
    method = POST,
    path = "/login/{silo_name}/local",

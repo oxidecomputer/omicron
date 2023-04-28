@@ -1436,22 +1436,6 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
-        /* Sagas */
-
-        VerifyEndpoint {
-            url: "/v1/system/sagas",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/sagas/48a1b8c8-fc1c-6fea-9de9-fdeb8dda7823",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
-        },
-
         /* Updates */
 
         VerifyEndpoint {

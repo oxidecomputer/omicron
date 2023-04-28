@@ -7,6 +7,7 @@
 use slog::Logger;
 
 use crate::addrobj::AddrObject;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -14,7 +15,7 @@ pub enum Error {
     InvalidPortIpConfig,
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
-    ReleaseMissingPort(uuid::Uuid, super::params::NetworkInterfaceKind),
+    ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
 }
 
 pub fn initialize_xde_driver(
