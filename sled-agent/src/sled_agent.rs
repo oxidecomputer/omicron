@@ -20,7 +20,6 @@ use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
-use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -48,9 +47,6 @@ use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
-
-    #[error("Failed to enable routing: {0}")]
-    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(illumos_utils::ExecutionError),
@@ -237,19 +233,6 @@ impl SledAgent {
             *sled_address.ip(),
             gateway_mac,
         );
-
-        // Ipv6 forwarding must be enabled to route traffic between zones.
-        //
-        // This should be a no-op if already enabled.
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            "/usr/sbin/routeadm",
-            // Needed to access all zones, which are on the underlay.
-            "-e",
-            "ipv6-forwarding",
-            "-u",
-        ]);
-        execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {

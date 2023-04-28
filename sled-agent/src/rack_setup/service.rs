@@ -85,6 +85,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
@@ -463,18 +464,17 @@ impl ServiceInner {
         &self,
         expectation: PeerExpectation,
         our_bootstrap_address: Ipv6Addr,
-        switch_zone_bootstrap_address: Ipv6Addr,
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        // Ask the switch zone for a list of peers - note that the rack subnet
-        // has not been sent out, and there the switch zone does not have an
-        // underlay address yet, so the bootstrap address is used here.
-        let ddm_admin_client =
-            DdmAdminClient::address(&self.log, switch_zone_bootstrap_address)?;
+        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                let peer_addrs =
-                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                let peer_addrs = ddm_admin_client
+                    .derive_bootstrap_addrs_from_prefixes(&[
+                        BootstrapInterface::GlobalZone,
+                    ])
+                    .await
+                    .map_err(|err| {
                         BackoffError::transient(format!(
                             "Failed getting peers from mg-ddm: {err}"
                         ))
@@ -843,11 +843,12 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
-        let ddm_admin_client = DdmAdminClient::address(
-            &self.log,
-            local_bootstrap_agent.switch_zone_bootstrap_address(),
-        )?;
-        let peer_addrs = ddm_admin_client.peer_addrs().await?;
+        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
+        let peer_addrs = ddm_admin_client
+            .derive_bootstrap_addrs_from_prefixes(&[
+                BootstrapInterface::GlobalZone,
+            ])
+            .await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
             .chain(iter::once(our_bootstrap_address))
@@ -935,11 +936,7 @@ impl ServiceInner {
         };
 
         let addrs = self
-            .wait_for_peers(
-                expectation,
-                local_bootstrap_agent.our_address(),
-                local_bootstrap_agent.switch_zone_bootstrap_address(),
-            )
+            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
             .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
