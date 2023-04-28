@@ -5,9 +5,10 @@
 //! Utilities for managing Zpools.
 
 use crate::{execute, ExecutionError, PFEXEC};
-use serde::{Deserialize, Deserializer};
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -26,6 +27,9 @@ pub enum Error {
 
     #[error(transparent)]
     Parse(#[from] ParseError),
+
+    #[error("No Zpools found")]
+    NoZpools,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -244,7 +248,7 @@ impl Zpool {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
     External,
@@ -256,7 +260,7 @@ pub enum ZpoolKind {
 ///
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
 pub struct ZpoolName {
     id: Uuid,
     kind: ZpoolKind,
@@ -278,6 +282,21 @@ impl ZpoolName {
     pub fn kind(&self) -> ZpoolKind {
         self.kind
     }
+
+    /// Returns a path to a dataset's mountpoint within the zpool.
+    ///
+    /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
+    pub fn dataset_mountpoint(&self, dataset: &str) -> PathBuf {
+        let mut path = PathBuf::new();
+        path.push("/pool");
+        match self.kind {
+            ZpoolKind::External => path.push("ext"),
+            ZpoolKind::Internal => path.push("int"),
+        };
+        path.push(self.id().to_string());
+        path.push(dataset);
+        path
+    }
 }
 
 impl<'de> Deserialize<'de> for ZpoolName {
@@ -287,6 +306,15 @@ impl<'de> Deserialize<'de> for ZpoolName {
     {
         let s = String::deserialize(deserializer)?;
         ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ZpoolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
 }
 

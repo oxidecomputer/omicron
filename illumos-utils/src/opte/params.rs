@@ -4,58 +4,11 @@
 
 use omicron_common::api::external;
 use omicron_common::api::internal::nexus::HostIdentifier;
+use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use uuid::Uuid;
-
-/// The type of network interface
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum NetworkInterfaceKind {
-    /// A vNIC attached to a guest instance
-    Instance { id: Uuid },
-    /// A vNIC associated with an internal service
-    Service { id: Uuid },
-}
-
-/// Information required to construct a virtual network interface
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct NetworkInterface {
-    pub id: Uuid,
-    pub kind: NetworkInterfaceKind,
-    pub name: external::Name,
-    pub ip: IpAddr,
-    pub mac: external::MacAddr,
-    pub subnet: external::IpNet,
-    pub vni: external::Vni,
-    pub primary: bool,
-    pub slot: u8,
-}
-
-/// An IP address and port range used for instance source NAT, i.e., making
-/// outbound network connections from guests or services.
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema)]
-pub struct SourceNatConfig {
-    /// The external address provided to the instance
-    pub ip: IpAddr,
-    /// The first port used for instance NAT, inclusive.
-    pub first_port: u16,
-    /// The last port used for instance NAT, also inclusive.
-    pub last_port: u16,
-}
 
 /// Update firewall rules for a VPC
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

@@ -156,7 +156,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLogAll"
+                  "$ref": "#/components/schemas/EventReportAll"
                 }
               }
             }
@@ -201,7 +201,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLog"
+                  "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
                 }
               }
             }
@@ -292,62 +292,6 @@
           "version"
         ]
       },
-      "CurrentProgress": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "description": "The kind of event this is.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
-                  }
-                ]
-              },
-              "execution_id": {
-                "description": "The execution ID.",
-                "type": "string",
-                "format": "uuid"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "progress_event"
-                ]
-              },
-              "total_elapsed": {
-                "description": "Total time elapsed since the start of execution.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "execution_id",
-              "kind",
-              "total_elapsed"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_progress_event"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          }
-        ]
-      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -384,6 +328,55 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EventReportAll": {
+        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
+        "type": "object",
+        "properties": {
+          "sps": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
+            }
+          }
+        },
+        "required": [
+          "sps"
+        ]
+      },
+      "EventReportForWicketdEngineSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
+            }
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
         ]
       },
       "GetArtifactsResponse": {
@@ -529,6 +522,37 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/ProgressEventKindForGenericSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForWicketdEngineSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
               }
             ]
           },
@@ -2733,46 +2757,6 @@
               "component"
             ]
           }
-        ]
-      },
-      "UpdateLog": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CurrentProgress"
-              }
-            ]
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
-            }
-          }
-        },
-        "required": [
-          "events"
-        ]
-      },
-      "UpdateLogAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/UpdateLog"
-              }
-            }
-          }
-        },
-        "required": [
-          "sps"
         ]
       },
       "UpdateStepId": {

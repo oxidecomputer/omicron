@@ -53,7 +53,6 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -63,7 +62,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -191,9 +189,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sled_view)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
-
-        api.register(saga_list)?;
-        api.register(saga_view)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4200,63 +4195,6 @@ async fn update_deployment_view(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
-
-// Sagas
-
-/// List sagas
-#[endpoint {
-    method = GET,
-    path = "/v1/system/sagas",
-    tags = ["system"],
-}]
-async fn saga_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
-        let view_list = to_list(saga_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            view_list,
-            &|_, saga: &Saga| saga.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Saga requests
-#[derive(Deserialize, JsonSchema)]
-struct SagaPathParam {
-    saga_id: Uuid,
-}
-
-/// Fetch a saga
-#[endpoint {
-    method = GET,
-    path = "/v1/system/sagas/{saga_id}",
-    tags = ["system"],
-}]
-async fn saga_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SagaPathParam>,
-) -> Result<HttpResponseOk<Saga>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
-        Ok(HttpResponseOk(saga))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // Silo users
 
 /// List users

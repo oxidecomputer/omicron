@@ -56,7 +56,6 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
-use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
@@ -69,6 +68,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
@@ -336,9 +336,33 @@ impl ServiceInner {
         service_plan: &ServicePlan,
     ) -> Result<(), SetupServiceError> {
         let log = &self.log;
+        // Start up the internal DNS services
+        futures::future::join_all(service_plan.services.iter().map(
+            |(sled_address, services_request)| async move {
+                let services: Vec<_> = services_request
+                    .services
+                    .iter()
+                    .filter_map(|svc| {
+                        if matches!(svc.zone_type, ZoneType::InternalDns) {
+                            Some(svc.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !services.is_empty() {
+                    self.initialize_services(*sled_address, &services).await?;
+                }
+
+                Ok(())
+            },
+        ))
+        .await
+        .into_iter()
+        .collect::<Result<_, SetupServiceError>>()?;
 
         // Determine the list of DNS servers that are supposed to exist based on
-        // the service plan that has already been deployed.
+        // the service plan that has just been deployed.
         let dns_server_ips =
             // iterate sleds
             service_plan.services.iter().filter_map(
@@ -372,8 +396,8 @@ impl ServiceInner {
                                         InternalDns service for zone with \
                                         type ZoneType::InternalDns, but \
                                         found {} (zone {})",
+                                        addrs.len(),
                                         svc.id,
-                                        addrs.len()
                                     );
                                     None
                                 }
@@ -444,10 +468,8 @@ impl ServiceInner {
         // Ask the switch zone for a list of peers - note that the rack subnet
         // has not been sent out, and there the switch zone does not have an
         // underlay address yet, so the bootstrap address is used here.
-        let ddm_admin_client = DdmAdminClient::address(
-            self.log.clone(),
-            switch_zone_bootstrap_address,
-        )?;
+        let ddm_admin_client =
+            DdmAdminClient::address(&self.log, switch_zone_bootstrap_address)?;
         let addrs = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -645,7 +667,11 @@ impl ServiceInner {
                     // more easily support things running on different ports
                     // (which is useful in dev/test situations).
                     match svc {
-                        ServiceType::Nexus { external_ip, internal_ip: _ } => {
+                        ServiceType::Nexus {
+                            external_ip,
+                            internal_ip: _,
+                            ..
+                        } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
@@ -730,7 +756,8 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::Ntp { .. } => {
+                        ServiceType::BoundaryNtp { .. }
+                        | ServiceType::InternalNtp { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id: zone.id,
                                 sled_id,
@@ -817,7 +844,7 @@ impl ServiceInner {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
         let ddm_admin_client = DdmAdminClient::address(
-            self.log.clone(),
+            &self.log,
             local_bootstrap_agent.switch_zone_bootstrap_address(),
         )?;
         let peer_addrs = ddm_admin_client.peer_addrs().await?;
@@ -991,7 +1018,13 @@ impl ServiceInner {
                 ServicePlan::create(&self.log, &config, &plan.sleds).await?
             };
 
-        // Set up internal DNS and NTP services.
+        // Set up internal DNS services first and write the initial
+        // DNS configuration to the internal DNS servers.
+        self.initialize_dns(&service_plan).await?;
+
+        // Next start up the NTP services.
+        // Note we also specify internal DNS services again because it
+        // can ony be additive.
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
                 let services: Vec<_> = services_request
@@ -1017,9 +1050,6 @@ impl ServiceInner {
         .await
         .into_iter()
         .collect::<Result<_, SetupServiceError>>()?;
-
-        // Write the initial DNS configuration to the internal DNS servers.
-        self.initialize_dns(&service_plan).await?;
 
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;

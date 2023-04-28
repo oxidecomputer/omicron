@@ -1626,6 +1626,7 @@ name = "ddm-admin-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "omicron-common 0.1.0",
  "omicron-zone-package",
  "progenitor",
  "progenitor-client",
@@ -1633,7 +1634,10 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sled-hardware",
  "slog",
+ "thiserror",
+ "tokio",
  "toml 0.7.3",
 ]
 
@@ -1932,6 +1936,7 @@ name = "dpd-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "futures",
  "omicron-zone-package",
  "progenitor",
@@ -1943,6 +1948,7 @@ dependencies = [
  "serde_json",
  "slog",
  "toml 0.7.3",
+ "uuid",
 ]
 
 [[package]]
@@ -3194,6 +3200,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml 0.7.3",
+ "update-engine",
  "uuid",
 ]
 
@@ -3209,6 +3216,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "update-engine",
  "uuid",
 ]
 
@@ -3241,11 +3249,15 @@ dependencies = [
 name = "installinator-common"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "camino",
  "omicron-common 0.1.0",
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
+ "thiserror",
+ "update-engine",
 ]
 
 [[package]]
@@ -3795,6 +3807,7 @@ name = "nexus-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures",
  "omicron-common 0.1.0",
  "progenitor",
  "regress",
@@ -4024,6 +4037,7 @@ dependencies = [
  "base64 0.21.0",
  "chrono",
  "dns-service-client",
+ "futures",
  "newtype_derive",
  "nexus-passwords",
  "omicron-common 0.1.0",
@@ -4033,6 +4047,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "steno",
  "uuid",
 ]
 
@@ -4222,6 +4237,7 @@ dependencies = [
  "http",
  "hyper",
  "ipnetwork",
+ "lazy_static",
  "libc",
  "macaddr",
  "parse-display",
@@ -4534,6 +4550,7 @@ dependencies = [
  "ddm-admin-client",
  "dns-server",
  "dns-service-client",
+ "dpd-client",
  "dropshot",
  "expectorate",
  "flate2",
@@ -4656,12 +4673,14 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 
 [[package]]
 name = "openapi-lint"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#91f0af87bdaed0e41c8b43f4b0d85cc706d6a961"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#c2ac10b65f6a39519c1e7ac808575b679b5ed93c"
 dependencies = [
  "heck 0.4.1",
  "indexmap",
+ "lazy_static",
  "openapiv3",
+ "regex",
 ]
 
 [[package]]
@@ -7077,7 +7096,9 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "macaddr",
  "nexus-client 0.1.0",
+ "omicron-common 0.1.0",
  "omicron-test-utils",
  "schemars",
  "serde",
@@ -8458,12 +8479,14 @@ dependencies = [
  "camino-tempfile",
  "debug-ignore",
  "derive-where",
+ "either",
  "futures",
  "indexmap",
  "indicatif",
  "linear-map",
  "omicron-test-utils",
  "owo-colors",
+ "petgraph",
  "schemars",
  "serde",
  "serde_json",
@@ -8823,9 +8846,9 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "lazy_static",
  "libsw",
  "omicron-common 0.1.0",
+ "once_cell",
  "proptest",
  "reqwest",
  "semver 1.0.17",
@@ -8929,6 +8952,7 @@ name = "wicketd-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "installinator-common",
  "progenitor",
  "regress",
  "reqwest",

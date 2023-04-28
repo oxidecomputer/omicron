@@ -286,7 +286,7 @@ impl Dladm {
     }
 
     /// Returns the MAC address of a physical link.
-    pub fn get_mac(link: PhysicalLink) -> Result<MacAddr, GetMacError> {
+    pub fn get_mac(link: &PhysicalLink) -> Result<MacAddr, GetMacError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[
             DLADM,
@@ -302,7 +302,7 @@ impl Dladm {
             .lines()
             .next()
             .map(|s| s.trim())
-            .ok_or_else(|| GetMacError::NotFound(link))?
+            .ok_or_else(|| GetMacError::NotFound(link.clone()))?
             .to_string();
 
         // Ensure the MAC address is zero-padded, so it may be parsed as a

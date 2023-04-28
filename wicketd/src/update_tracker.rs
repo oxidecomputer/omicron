@@ -10,23 +10,15 @@ use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
 use crate::update_events::ComponentRegistrar;
-use crate::update_events::CurrentProgress;
-use crate::update_events::Event;
-use crate::update_events::ProgressEvent;
-use crate::update_events::ProgressEventKind;
+use crate::update_events::EventBuffer;
+use crate::update_events::EventReport;
 use crate::update_events::SpComponentUpdateStage;
 use crate::update_events::StepContext;
-use crate::update_events::StepEvent;
-use crate::update_events::StepEventKind;
 use crate::update_events::StepHandle;
-use crate::update_events::StepInfo;
-use crate::update_events::StepInfoWithMetadata;
-use crate::update_events::StepOutcome;
 use crate::update_events::StepProgress;
 use crate::update_events::StepResult;
 use crate::update_events::UpdateComponent;
 use crate::update_events::UpdateEngine;
-use crate::update_events::UpdateLog;
 use crate::update_events::UpdateStepId;
 use crate::update_events::UpdateTerminalError;
 use anyhow::anyhow;
@@ -48,10 +40,9 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
-use installinator_common::ProgressReport;
+use installinator_common::InstallinatorSpec;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
-use serde_json::Value;
 use slog::error;
 use slog::info;
 use slog::o;
@@ -69,8 +60,6 @@ use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use update_engine::events::ProgressCounter;
-use update_engine::ExecutionId;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -79,7 +68,7 @@ struct SpUpdateData {
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
-    update_log: Arc<StdMutex<UpdateLog>>,
+    event_buffer: Arc<StdMutex<EventBuffer>>,
 }
 
 #[derive(Debug)]
@@ -184,12 +173,11 @@ impl UpdateTracker {
         };
 
         let spawn_update_driver = || async {
-            let update_log = Arc::default();
+            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
                 self.ipr_update_tracker.register(update_id).await;
 
             let update_cx = UpdateContext {
-                update_log: Arc::clone(&update_log),
                 update_id,
                 sp,
                 mgs_client: self.mgs_client.clone(),
@@ -205,10 +193,11 @@ impl UpdateTracker {
             let task = tokio::spawn(update_driver.run(
                 plan,
                 update_cx,
+                event_buffer.clone(),
                 ipr_start_receiver,
             ));
 
-            SpUpdateData { task, update_log }
+            SpUpdateData { task, event_buffer }
         };
 
         let mut sp_update_data = self.sp_update_data.lock().await;
@@ -251,31 +240,29 @@ impl UpdateTracker {
         UploadTrampolinePhase2ToMgs { status: status_rx, task }
     }
 
-    pub(crate) async fn update_log(
-        &self,
-        sp: SpIdentifier,
-    ) -> crate::update_events::UpdateLog {
+    pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
         let mut sp_update_data = self.sp_update_data.lock().await;
         match sp_update_data.entry(sp) {
-            Entry::Vacant(_) => crate::update_events::UpdateLog::default(),
+            Entry::Vacant(_) => EventReport::default(),
             Entry::Occupied(slot) => {
-                slot.get().update_log.lock().unwrap().clone()
+                slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
     }
 
     /// Clone the current state of the update log for every SP, returning a map
     /// suitable for conversion to JSON.
-    pub(crate) async fn update_log_all(
+    pub(crate) async fn event_report_all(
         &self,
-    ) -> BTreeMap<SpType, BTreeMap<u32, crate::update_events::UpdateLog>> {
+    ) -> BTreeMap<SpType, BTreeMap<u32, EventReport>> {
         let sp_update_data = self.sp_update_data.lock().await;
         let mut converted_logs = BTreeMap::new();
         for (sp, update_data) in &*sp_update_data {
-            let update_log = update_data.update_log.lock().unwrap().clone();
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
             let inner: &mut BTreeMap<_, _> =
                 converted_logs.entry(sp.type_).or_default();
-            inner.insert(sp.slot, update_log);
+            inner.insert(sp.slot, event_report);
         }
         converted_logs
     }
@@ -307,6 +294,7 @@ impl UpdateDriver {
         self,
         plan: UpdatePlan,
         update_cx: UpdateContext,
+        event_buffer: Arc<StdMutex<EventBuffer>>,
         ipr_start_receiver: IprStartReceiver,
     ) {
         let update_cx = &update_cx;
@@ -386,34 +374,10 @@ impl UpdateDriver {
         }
 
         // Spawn a task to accept all events from the executing engine.
-        //
-        // TODO see note in `process_installinator_report()` below: we're racing
-        // it for access to `update_log`. We should be the only one with it, but
-        // for now we share it to allow installinator reports to go into the log
-        // directly.
-        let update_log = Arc::clone(&update_cx.update_log);
         let event_receiving_task = tokio::spawn(async move {
-            // TODO Is this event receiving handler right? Can we end up seeing
-            // `current` set to a progress report for a step that is also
-            // present in the completed `.events` list?
             while let Some(event) = receiver.recv().await {
-                match event {
-                    Event::Step(event) => {
-                        let mut update_log = update_log.lock().unwrap();
-                        update_log.current =
-                            Some(CurrentProgress::WaitingForProgressEvent);
-                        update_log.events.push(event);
-                    }
-                    Event::Progress(event) => {
-                        update_log.lock().unwrap().current =
-                            Some(CurrentProgress::ProgressEvent(event));
-                    }
-                }
+                event_buffer.lock().unwrap().add_event(event);
             }
-
-            // All events received and the engine is complete; we no longer have
-            // a "current" progress.
-            update_log.lock().unwrap().current = None;
         });
 
         // Execute the update engine.
@@ -595,7 +559,7 @@ impl UpdateDriver {
                     let report_receiver =
                         start_handle.into_value(cx.token()).await;
                     update_cx
-                        .process_installinator_reports(report_receiver)
+                        .process_installinator_reports(&cx, report_receiver)
                         .await
                         .map_err(|error| {
                             UpdateTerminalError::RunningInstallinatorFailed {
@@ -903,7 +867,6 @@ impl UpdateDriver {
 }
 
 struct UpdateContext {
-    update_log: Arc<StdMutex<UpdateLog>>,
     update_id: Uuid,
     sp: SpIdentifier,
     mgs_client: gateway_client::Client,
@@ -915,15 +878,11 @@ struct UpdateContext {
 impl UpdateContext {
     async fn process_installinator_reports<'engine>(
         &self,
-        mut ipr_receiver: mpsc::Receiver<ProgressReport>,
+        cx: &StepContext,
+        mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
     ) -> anyhow::Result<()> {
-        // TODO: break up installinator into sections. For now we just
-        // group everything together.
-
         while let Some(report) = ipr_receiver.recv().await {
-            // NOTE: This needs to bubble up errors returned by the
-            // installinator!
-            self.process_installinator_report(report).await;
+            cx.send_nested_report(report).await?;
         }
 
         // The receiver being closed means that the installinator has completed.
@@ -936,7 +895,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<mpsc::Receiver<ProgressReport>> {
+    ) -> anyhow::Result<mpsc::Receiver<EventReport<InstallinatorSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
@@ -1039,284 +998,6 @@ impl UpdateContext {
                     "err" => %err,
                 );
             }
-        }
-    }
-
-    async fn process_installinator_report(&self, mut report: ProgressReport) {
-        use installinator_common::ProgressEventKind as InstallinatorProgressEvent;
-        // XXX This needs to be rewritten once the installinator switches to the
-        // update engine. Note that errors returned by the installinator are not
-        // currently bubbled up!
-
-        fn make_step_meta<S: Into<Cow<'static, str>>>(
-            description: S,
-        ) -> StepInfoWithMetadata {
-            StepInfoWithMetadata {
-                info: StepInfo {
-                    id: UpdateStepId::RunningInstallinator,
-                    component: UpdateComponent::Host,
-                    description: description.into(),
-                    index: 0,                 // TODO?
-                    component_index: 0,       // TODO?
-                    total_component_steps: 0, // TODO?
-                },
-                metadata: None,
-            }
-        }
-
-        // This is a fake execution ID used as a placeholder until the
-        // installinator switches to using the update engine.
-        let execution_id = ExecutionId(
-            "2b1a3f6e-18cc-4b9b-8852-9d31aeb89a39".parse().expect("valid UUID"),
-        );
-
-        // Currently, progress reports have zero or one progress events. Don't
-        // assert that here, in case this version of wicketd is updating a
-        // future installinator which reports multiple progress events.
-        let progress_event: ProgressEvent = if let Some(event) =
-            report.progress_events.drain(..).next()
-        {
-            // TODO replace these with nested update engine events?
-            match event.kind {
-                InstallinatorProgressEvent::DownloadProgress {
-                    attempt,
-                    kind,
-                    peer,
-                    downloaded_bytes,
-                    total_bytes,
-                    elapsed,
-                } => ProgressEvent {
-                    execution_id,
-                    total_elapsed: elapsed,
-                    kind: ProgressEventKind::Progress {
-                        step: make_step_meta(format!(
-                            "installinator downloading {kind:?} from {peer}",
-                        )),
-                        attempt,
-                        metadata: Value::Null,
-                        progress: Some(ProgressCounter {
-                            current: downloaded_bytes,
-                            total: Some(total_bytes),
-                        }),
-                        step_elapsed: elapsed,
-                        attempt_elapsed: elapsed, // TODO
-                    },
-                },
-                InstallinatorProgressEvent::FormatProgress {
-                    attempt,
-                    path,
-                    percentage,
-                    elapsed,
-                } => ProgressEvent {
-                    execution_id,
-                    total_elapsed: elapsed,
-                    kind: ProgressEventKind::Progress {
-                        step: make_step_meta(format!(
-                            "installinator formatting {path}",
-                        )),
-                        attempt,
-                        metadata: Value::Null,
-                        progress: Some(ProgressCounter {
-                            current: percentage as u64,
-                            total: Some(100), // TODO ?
-                        }),
-                        step_elapsed: elapsed,
-                        attempt_elapsed: elapsed, // TODO
-                    },
-                },
-                InstallinatorProgressEvent::WriteProgress {
-                    attempt,
-                    kind,
-                    destination,
-                    written_bytes,
-                    total_bytes,
-                    elapsed,
-                } => ProgressEvent {
-                    execution_id,
-                    total_elapsed: elapsed,
-                    kind: ProgressEventKind::Progress {
-                        step: make_step_meta(format!(
-                            "installinator writing {kind:?} to {destination}"
-                        )),
-                        attempt,
-                        metadata: Value::Null,
-                        progress: Some(ProgressCounter {
-                            current: written_bytes,
-                            total: Some(total_bytes),
-                        }),
-                        step_elapsed: elapsed,
-                        attempt_elapsed: elapsed, // TODO
-                    },
-                },
-            }
-        } else {
-            ProgressEvent {
-                execution_id,
-                total_elapsed: Duration::default(), // TODO
-                kind: ProgressEventKind::Progress {
-                    step: make_step_meta("waiting for installinator"),
-                    attempt: 0, // TODO
-                    metadata: Value::Null,
-                    progress: Some(ProgressCounter { current: 0, total: None }),
-                    step_elapsed: Duration::default(), // TODO
-                    attempt_elapsed: Duration::default(), // TODO
-                },
-            }
-        };
-
-        let events = report.completion_events.into_iter().map(|event| {
-            use installinator_common::CompletionEventKind;
-
-            let kind = match event.kind {
-                CompletionEventKind::DownloadFailed {
-                    attempt,
-                    kind,
-                    peer,
-                    downloaded_bytes: _downloaded_bytes,
-                    elapsed,
-                    message,
-                } => StepEventKind::AttemptRetry {
-                    step: make_step_meta(format!(
-                        "failed to download {kind:?} from {peer}",
-                    )),
-                    next_attempt: attempt + 1,
-                    step_elapsed: elapsed, // TODO
-                    attempt_elapsed: elapsed,
-                    message: message.into(),
-                },
-                CompletionEventKind::DownloadCompleted {
-                    attempt,
-                    kind,
-                    peer,
-                    artifact_size: _size,
-                    elapsed,
-                } => StepEventKind::StepCompleted {
-                    step: make_step_meta(format!(
-                        "download of {kind:?} from {peer} complete"
-                    )),
-                    attempt,
-                    outcome: StepOutcome::Success { metadata: Value::Null },
-                    next_step: make_step_meta("TODO FIXME"), // WRONG
-                    step_elapsed: elapsed,                   // TODO
-                    attempt_elapsed: elapsed,                // TODO
-                },
-                CompletionEventKind::FormatFailed {
-                    attempt,
-                    path,
-                    elapsed,
-                    message,
-                } => StepEventKind::AttemptRetry {
-                    step: make_step_meta(format!("failed to format {path}")),
-                    next_attempt: attempt + 1,
-                    step_elapsed: elapsed, // TODO
-                    attempt_elapsed: elapsed,
-                    message: message.into(),
-                },
-                CompletionEventKind::FormatCompleted {
-                    attempt,
-                    path,
-                    elapsed,
-                } => StepEventKind::StepCompleted {
-                    step: make_step_meta(format!("format of {path} complete")),
-                    attempt,
-                    outcome: StepOutcome::Success { metadata: Value::Null },
-                    next_step: make_step_meta("TODO FIXME"), // WRONG
-                    step_elapsed: elapsed,                   // TODO
-                    attempt_elapsed: elapsed,                // TODO
-                },
-                CompletionEventKind::WriteFailed {
-                    attempt,
-                    kind,
-                    destination,
-                    written_bytes: _written_bytes,
-                    total_bytes: _total_bytes,
-                    elapsed,
-                    message,
-                } => StepEventKind::AttemptRetry {
-                    step: make_step_meta(format!(
-                        "failed to write {kind:?} to {destination}"
-                    )),
-                    next_attempt: attempt + 1,
-                    step_elapsed: elapsed, // TODO
-                    attempt_elapsed: elapsed,
-                    message: message.into(),
-                },
-                CompletionEventKind::WriteCompleted {
-                    attempt,
-                    kind,
-                    destination,
-                    artifact_size: _size,
-                    elapsed,
-                } => StepEventKind::StepCompleted {
-                    step: make_step_meta(format!(
-                        "write of {kind:?} to {destination} complete"
-                    )),
-                    attempt,
-                    outcome: StepOutcome::Success { metadata: Value::Null },
-                    next_step: make_step_meta("TODO FIXME"), // WRONG
-                    step_elapsed: elapsed,                   // TODO
-                    attempt_elapsed: elapsed,                // TODO
-                },
-                CompletionEventKind::MiscError {
-                    operation,
-                    attempt,
-                    data: _data,
-                    elapsed,
-                    message,
-                    is_fatal,
-                } => {
-                    let meta = make_step_meta(format!("error on {operation}"));
-                    if is_fatal {
-                        // TODO us creating this is suspect! but we'll leave it
-                        // for now and remove it soon with better substep
-                        // integration
-                        StepEventKind::ExecutionFailed {
-                            failed_step: meta,
-                            total_attempts: attempt,
-                            step_elapsed: elapsed, // TODO
-                            attempt_elapsed: elapsed,
-                            message,
-                            causes: Vec::new(),
-                        }
-                    } else {
-                        StepEventKind::AttemptRetry {
-                            step: meta,
-                            next_attempt: attempt + 1,
-                            step_elapsed: elapsed, // TODO
-                            attempt_elapsed: elapsed,
-                            message: message.into(),
-                        }
-                    }
-                }
-                CompletionEventKind::Completed => {
-                    StepEventKind::StepCompleted {
-                        step: make_step_meta("installinator complete"),
-                        attempt: 1, // TODO
-                        outcome: StepOutcome::Success { metadata: Value::Null },
-                        next_step: make_step_meta("TODO FIXME"), // WRONG
-                        step_elapsed: Duration::default(),       // TODO
-                        attempt_elapsed: Duration::default(),    // TODO
-                    }
-                }
-            };
-
-            StepEvent {
-                execution_id,
-                event_index: 0,
-                total_elapsed: event.total_elapsed,
-                kind,
-            }
-        });
-
-        // TODO: This races with our task that receives events from the update
-        // engine in `run()` above. Once we integrate installinator sub-steps we
-        // should remove `update_log` from `UpdateContext` altogether, and let
-        // just the event-receiving task hold it.
-        let mut update_log = self.update_log.lock().unwrap();
-        update_log.current =
-            Some(CurrentProgress::ProgressEvent(progress_event));
-        for event in events {
-            update_log.events.push(event);
         }
     }
 

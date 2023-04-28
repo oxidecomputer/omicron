@@ -21,7 +21,7 @@ use crate::{
     StepSpec,
 };
 
-#[derive_where(Debug)]
+#[derive_where(Clone, Debug, PartialEq, Eq)]
 pub enum Event<S: StepSpec> {
     Step(StepEvent<S>),
     Progress(ProgressEvent<S>),
@@ -362,6 +362,30 @@ pub enum StepEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> StepEventKind<S> {
+    /// Returns whether this is a terminal step event.
+    ///
+    /// Terminal events guarantee that there are no further events coming from
+    /// this update engine.
+    ///
+    /// This does not recurse into nested events; those are always non-terminal.
+    pub fn is_terminal(&self) -> StepEventIsTerminal {
+        match self {
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionCompleted { .. } => {
+                StepEventIsTerminal::Terminal { success: true }
+            }
+            StepEventKind::ExecutionFailed { .. } => {
+                StepEventIsTerminal::Terminal { success: false }
+            }
+            StepEventKind::ExecutionStarted { .. }
+            | StepEventKind::ProgressReset { .. }
+            | StepEventKind::AttemptRetry { .. }
+            | StepEventKind::StepCompleted { .. }
+            | StepEventKind::Nested { .. }
+            | StepEventKind::Unknown => StepEventIsTerminal::NonTerminal,
+        }
+    }
+
     /// Returns the priority of the event.
     ///
     /// For more about this, see [`StepEventPriority`].
@@ -657,6 +681,24 @@ impl<S: StepSpec> StepEventKind<S> {
     }
 }
 
+/// Whether a [`StepEvent`] is a terminal event.
+///
+/// Returned by [`StepEventKind::is_terminal`].
+///
+/// The update engine guarantees that after a terminal event is seen, no further
+/// events are seen.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum StepEventIsTerminal {
+    /// This is not a terminal event.
+    NonTerminal,
+
+    /// This is a terminal event.
+    Terminal {
+        /// True if execution completed successfully.
+        success: bool,
+    },
+}
+
 /// The priority of a [`StepEvent`].
 ///
 /// Returned by [`StepEventKind::priority`].
@@ -665,6 +707,10 @@ impl<S: StepSpec> StepEventKind<S> {
 /// related to step successes and failures must be delivered, while events
 /// related to retries can be trimmed down since they are overall less
 /// important.
+///
+/// More precisely, a high-priority event is an event which cannot be dropped if
+/// an [`EventBuffer`](crate::EventBuffer) is to work correctly. Low-priority
+/// events can be dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum StepEventPriority {
     /// A low-priority event.
@@ -1275,6 +1321,98 @@ impl<S: StepSpec> StepProgress<S> {
     /// Creates a new retry message.
     pub fn retry(message: impl Into<Cow<'static, str>>) -> Self {
         Self::Retry { message: message.into() }
+    }
+}
+
+/// A report produced from an [`EventBuffer`](crate::EventBuffer).
+///
+/// Remote reports can be passed into a [`StepContext`](crate::StepContext),
+/// in which case they show up as nested events.
+#[derive_where(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(bound = "", rename_all = "snake_case")]
+#[schemars(rename = "EventReportFor{S}")]
+pub struct EventReport<S: StepSpec> {
+    /// A list of step events.
+    ///
+    /// Step events include success and failure events.
+    pub step_events: Vec<StepEvent<S>>,
+
+    /// A list of progress events, or whether we're currently waiting for a
+    /// progress event.
+    ///
+    /// Currently, this produces one progress event for each top-level and
+    /// nested event in progress.
+    pub progress_events: Vec<ProgressEvent<S>>,
+
+    /// The last event seen.
+    ///
+    /// `last_seen` can be used to retrieve deltas of events.
+    pub last_seen: Option<usize>,
+}
+
+impl<S: StepSpec> EventReport<S> {
+    /// Converts a generic version into self.
+    ///
+    /// This version can be used to convert a generic type into a more concrete
+    /// form.
+    pub fn from_generic<E: AsError>(
+        value: EventReport<GenericSpec<E>>,
+    ) -> Result<Self, ConvertGenericError> {
+        Ok(Self {
+            step_events: value
+                .step_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    StepEvent::from_generic(event).map_err(|error| {
+                        error.parent_array("step_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            progress_events: value
+                .progress_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    ProgressEvent::from_generic(event).map_err(|error| {
+                        error.parent_array("progress_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            last_seen: value.last_seen,
+        })
+    }
+
+    /// Converts self into its generic version.
+    ///
+    /// This version can be used to share data across different kinds of engines.
+    pub fn into_generic<E: AsError>(
+        self,
+    ) -> Result<EventReport<GenericSpec<E>>, ConvertGenericError> {
+        Ok(EventReport {
+            step_events: self
+                .step_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    event.into_generic().map_err(|error| {
+                        error.parent_array("step_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            progress_events: self
+                .progress_events
+                .into_iter()
+                .enumerate()
+                .map(|(index, event)| {
+                    event.into_generic().map_err(|error| {
+                        error.parent_array("progress_events", index)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            last_seen: self.last_seen,
+        })
     }
 }
 
