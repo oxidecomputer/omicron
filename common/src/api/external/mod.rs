@@ -18,9 +18,7 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 pub use dropshot::PaginationOrder;
-use futures::future::ready;
 use futures::stream::BoxStream;
-use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
 use rand::thread_rng;
@@ -492,18 +490,19 @@ impl JsonSchema for RoleName {
     }
 }
 
-/// A count of bytes, typically used either for memory or storage capacity
-///
-/// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
-/// inconvenient to define constructors: a u32 constructor can be infallible, but
-/// an i64 constructor can fail (if the value is negative) and a u64 constructor
-/// can fail (if the value is larger than i64::MAX).  We provide all of these for
-/// consumers' convenience.
-// TODO-cleanup This could benefit from a more complete implementation.
+/// Byte count to express memory or storage capacity.
 //
-// The maximum byte count of i64::MAX comes from the fact that this is stored in
-// the database as an i64.  Constraining it here ensures that we can't fail to
-// serialize the value.
+// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+// inconvenient to define constructors: a u32 constructor can be infallible,
+// but an i64 constructor can fail (if the value is negative) and a u64
+// constructor can fail (if the value is larger than i64::MAX).  We provide
+// all of these for consumers' convenience.
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored
+// in the database as an i64.  Constraining it here ensures that we can't fail
+// to serialize the value.
+//
+// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
@@ -728,17 +727,6 @@ pub enum ResourceType {
     Zpool,
 }
 
-pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
-where
-    T: Into<U>,
-{
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().into())
-        .collect::<Vec<U>>()
-        .await
-}
-
 // IDENTITY METADATA
 
 /// Identity-related metadata that's included in nearly all public API objects
@@ -903,7 +891,7 @@ impl From<&InstanceCpuCount> for i64 {
     }
 }
 
-/// Client view of an [`InstanceRuntimeState`]
+/// The state of an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
@@ -921,7 +909,7 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-/// Client view of an [`Instance`]
+/// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
     // TODO is flattening here the intent in RFD 4?
@@ -944,7 +932,7 @@ pub struct Instance {
 
 // DISKS
 
-/// Client view of a [`Disk`]
+/// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]
@@ -958,7 +946,7 @@ pub struct Disk {
     pub device_path: String,
 }
 
-/// State of a Disk (primarily: attached or not)
+/// State of a Disk
 #[derive(
     Clone,
     Debug,
@@ -1075,77 +1063,6 @@ impl DiskState {
             DiskState::Maintenance => None,
             DiskState::Destroyed => None,
             DiskState::Faulted => None,
-        }
-    }
-}
-
-// Sagas
-//
-// These are currently only intended for observability by developers.  We will
-// eventually want to flesh this out into something more observable for end
-// users.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Saga {
-    pub id: Uuid,
-    pub state: SagaState,
-}
-
-impl From<steno::SagaView> for Saga {
-    fn from(s: steno::SagaView) -> Self {
-        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SagaState {
-    Running,
-    Succeeded,
-    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "error", rename_all = "snake_case")]
-pub enum SagaErrorInfo {
-    ActionFailed { source_error: serde_json::Value },
-    DeserializeFailed { message: String },
-    InjectedError,
-    SerializeFailed { message: String },
-    SubsagaCreateFailed { message: String },
-}
-
-impl From<steno::SagaStateView> for SagaState {
-    fn from(st: steno::SagaStateView) -> Self {
-        match st {
-            steno::SagaStateView::Ready { .. } => SagaState::Running,
-            steno::SagaStateView::Running { .. } => SagaState::Running,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Ok(_), .. },
-                ..
-            } => SagaState::Succeeded,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Err(e), .. },
-                ..
-            } => SagaState::Failed {
-                error_node_name: e.error_node_name,
-                error_info: match e.error_source {
-                    steno::ActionError::ActionFailed { source_error } => {
-                        SagaErrorInfo::ActionFailed { source_error }
-                    }
-                    steno::ActionError::DeserializeFailed { message } => {
-                        SagaErrorInfo::DeserializeFailed { message }
-                    }
-                    steno::ActionError::InjectedError => {
-                        SagaErrorInfo::InjectedError
-                    }
-                    steno::ActionError::SerializeFailed { message } => {
-                        SagaErrorInfo::SerializeFailed { message }
-                    }
-                    steno::ActionError::SubsagaCreateFailed { message } => {
-                        SagaErrorInfo::SubsagaCreateFailed { message }
-                    }
-                },
-            },
         }
     }
 }
@@ -1530,8 +1447,8 @@ pub enum RouteTarget {
 /// destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
-/// `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic
-/// will be forward to the [`RouteTarget`] for that rule.
+/// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
+/// will be forward to the `RouteTarget` for that rule.
 #[derive(
     Clone,
     Debug,
@@ -1555,18 +1472,20 @@ pub enum RouteDestination {
     Subnet(Name),
 }
 
-/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind of a `RouterRoute`
+///
 /// The kind determines certain attributes such as if the route is modifiable
 /// and describes how or where the route was created.
-///
-/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+//
+// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
 #[derive(
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
 #[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
-    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    /// Determines the default destination of traffic, such as whether it goes
+    /// to the internet or not.
     ///
     /// `Destination: An Internet Gateway`
     /// `Modifiable: true`
@@ -1581,22 +1500,22 @@ pub enum RouterRouteKind {
     /// `Destination: A different VPC`
     /// `Modifiable: false`
     VpcPeering,
-    /// Created by a user
-    /// See [`RouteTarget`]
+    /// Created by a user; see `RouteTarget`
     ///
     /// `Destination: User defined`
     /// `Modifiable: true`
     Custom,
 }
 
-///  A route defines a rule that governs where traffic should be sent based on its destination.
+/// A route defines a rule that governs where traffic should be sent based on
+/// its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The VPC Router to which the route belongs.
+    /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
@@ -1725,7 +1644,7 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to
 /// which a firewall rule applies.
 #[derive(
     Clone,
