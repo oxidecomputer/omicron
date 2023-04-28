@@ -298,23 +298,15 @@ async fn sim_clear_migration_ids(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
-    // If this call to clear migration IDs failed, one of the following things
-    // must have happened:
+    // Because the migration never actually started (and thus didn't finish),
+    // the instance should be at the same Propolis generation as it was when
+    // migration IDs were set, which means sled agent should accept a request to
+    // clear them. The only exception is if the instance stopped, but that also
+    // clears its migration IDs; in that case there is no work to do here.
     //
-    // 1. Sled agent's view of the instance changed in a way that invalidated
-    //    this request. Sled agent is expected to push its own state updates on
-    //    these transitions and properly manage migration IDs when they occur.
-    // 2. Nexus failed to contact sled agent entirely.
-    // 3. Nexus talked to sled agent but then failed to reach CRDB when trying
-    //    to write back the instance state with the cleared IDs. (Note that
-    //    when clearing migration IDs, failing to update CRDB because the
-    //    current generation number is too far advanced is not actually treated
-    //    as a failure.)
-    //
-    // In case 1, the instance should already be updated properly (or will be
-    // updated properly soon), and in cases 2 and 3 there's nothing that can
-    // reliably be done (the error may not be transient), so just swallow all
-    // errors here (but warn that they occurred).
+    // Other error cases (e.g. an unreachable sled agent) are handled by this
+    // callee using the standard discipline for handling failed requests to
+    // change an instance's state. Warn for these errors.
     if let Err(e) = osagactx
         .nexus()
         .instance_clear_migration_ids(db_instance.id(), &db_instance)
