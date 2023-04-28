@@ -366,7 +366,7 @@ impl super::Nexus {
                 .instance_refetch(opctx, &authz_instance)
                 .await?)
         } else {
-            Err(Error::unavail(
+            Err(Error::conflict(
                 "instance is already migrating, or underwent an operation that \
                  prevented this migration from proceeding"
             ))
