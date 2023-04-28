@@ -191,7 +191,7 @@ pub struct Bin<T> {
     pub count: u64,
 }
 
-/// A simple type for managing a histogram metric.
+/// Histogram metric
 ///
 /// A histogram maintains the count of any number of samples, over a set of bins. Bins are
 /// specified on construction via their _left_ edges, inclusive. There can't be any "gaps" in the
@@ -199,43 +199,43 @@ pub struct Bin<T> {
 /// the entire range of the support.
 ///
 /// Note that any gaps, unsorted bins, or non-finite values will result in an error.
-///
-/// Example
-/// -------
-/// ```rust
-/// use oximeter::histogram::{BinRange, Histogram};
-///
-/// let edges = [0i64, 10, 20];
-/// let mut hist = Histogram::new(&edges).unwrap();
-/// assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..)
-/// assert_eq!(hist.n_samples(), 0);
-/// hist.sample(4);
-/// hist.sample(100);
-/// assert_eq!(hist.n_samples(), 2);
-///
-/// let data = hist.iter().collect::<Vec<_>>();
-/// assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0`
-/// assert_eq!(data[0].count, 0); // Nothing is in this bin
-///
-/// assert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10`
-/// assert_eq!(data[1].count, 1); // 4 is sampled into this bin
-/// ```
-///
-/// Notes
-/// -----
-///
-/// Histograms may be constructed either from their left bin edges, or from a sequence of ranges.
-/// In either case, the left-most bin may be converted upon construction. In particular, if the
-/// left-most value is not equal to the minimum of the support, a new bin will be added from the
-/// minimum to that provided value. If the left-most value _is_ the support's minimum, because the
-/// provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one
-/// bounded below, `(MIN..0)` in this case.
-///
-/// The short of this is that, most of the time, it shouldn't matter. If one specifies the extremes
-/// of the support as their bins, be aware that the left-most may be converted from a
-/// `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is
-/// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
-/// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
+//
+// Example
+// -------
+// ```rust
+// use oximeter::histogram::{BinRange, Histogram};
+//
+// let edges = [0i64, 10, 20];
+// let mut hist = Histogram::new(&edges).unwrap();
+// assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..)
+// assert_eq!(hist.n_samples(), 0);
+// hist.sample(4);
+// hist.sample(100);
+// assert_eq!(hist.n_samples(), 2);
+//
+// let data = hist.iter().collect::<Vec<_>>();
+// assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0`
+// assert_eq!(data[0].count, 0); // Nothing is in this bin
+//
+// assert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10`
+// assert_eq!(data[1].count, 1); // 4 is sampled into this bin
+// ```
+//
+// Notes
+// -----
+//
+// Histograms may be constructed either from their left bin edges, or from a sequence of ranges.
+// In either case, the left-most bin may be converted upon construction. In particular, if the
+// left-most value is not equal to the minimum of the support, a new bin will be added from the
+// minimum to that provided value. If the left-most value _is_ the support's minimum, because the
+// provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one
+// bounded below, `(MIN..0)` in this case.
+//
+// The short of this is that, most of the time, it shouldn't matter. If one specifies the extremes
+// of the support as their bins, be aware that the left-most may be converted from a
+// `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is
+// _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of
+// those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[schemars(rename = "Histogram{T}")]
 pub struct Histogram<T> {
