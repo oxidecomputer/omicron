@@ -11,6 +11,7 @@ use std::time::Duration;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
+use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 
 const RSS_CONFIG_PATH: &str =
@@ -138,10 +139,13 @@ pub async fn nexus_addr() -> SocketAddr {
             let addr = resolver
                 .lookup_ip(&dns_name)
                 .await
-                .with_context(|| {
-                    format!("resolving {:?} from {}", dns_name, dns_addr)
-                })
-                .map_err(CondCheckError::Failed)?
+                .map_err(|e| match e.kind() {
+                    ResolveErrorKind::NoRecordsFound { .. }
+                    | ResolveErrorKind::Timeout => CondCheckError::NotYet,
+                    _ => CondCheckError::Failed(anyhow::Error::new(e).context(
+                        format!("resolving {:?} from {}", dns_name, dns_addr),
+                    )),
+                })?
                 .iter()
                 .next()
                 .ok_or(CondCheckError::NotYet)?;
