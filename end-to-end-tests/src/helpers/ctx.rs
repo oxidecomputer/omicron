@@ -151,8 +151,8 @@ pub async fn nexus_addr() -> SocketAddr {
                 .ok_or(CondCheckError::NotYet)?;
             Ok(SocketAddr::from((addr, 80)))
         },
-        &Duration::from_millis(50),
-        &Duration::from_secs(15),
+        &Duration::from_secs(1),
+        &Duration::from_secs(300),
     )
     .await
     .unwrap_or_else(|e| panic!("failed to get Nexus addr: {}", e))
