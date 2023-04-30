@@ -231,7 +231,6 @@ impl ServiceInner {
         datasets: &Vec<DatasetEnsureBody>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
-
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
@@ -786,6 +785,54 @@ impl ServiceInner {
         Ok(())
     }
 
+    async fn initialize_cockroach(
+        &self,
+        service_plan: &ServicePlan,
+    ) -> Result<(), SetupServiceError> {
+        // Now that datasets and zones have started for CockroachDB,
+        // perform one-time initialization of the cluster.
+        let sled_address = service_plan
+            .services
+            .iter()
+            .find_map(|(sled_address, sled_request)| {
+                if sled_request.datasets.iter().any(|dataset| {
+                    dataset.dataset_kind
+                        == crate::params::DatasetKind::CockroachDb
+                }) {
+                    Some(sled_address)
+                } else {
+                    None
+                }
+            })
+            .expect("Should not create service plans without CockroachDb");
+        let dur = std::time::Duration::from_secs(60);
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+        let client = SledAgentClient::new_with_client(
+            &format!("http://{}", sled_address),
+            client,
+            self.log.new(o!("SledAgentClient" => sled_address.to_string())),
+        );
+        let initialize_db = || async {
+            client.cockroachdb_init().await.map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "Failed to initialize CockroachDB"; "error" => ?error);
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            initialize_db,
+            log_failure,
+        )
+        .await
+        .unwrap();
+        Ok(())
+    }
+
     // This method has a few distinct phases, identified by files in durable
     // storage:
     //
@@ -995,20 +1042,9 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up agents and datasets");
 
-        // TODO: Initialize Cockroachdb?
-//        let initialize_db = || async {
-//
-//        };
-//        let log_failure = |error, _| {
-//            warn!(self.log, "Time is not yet synchronized"; "error" => ?error);
-//        };
-//        retry_notify(
-//            retry_policy_internal_service_aggressive(),
-//            initialize_db,
-//            log_failure,
-//        )
-//        .await
-//        .unwrap();
+        // Now that datasets and zones have started for CockroachDB,
+        // perform one-time initialization of the cluster.
+        self.initialize_cockroach(&service_plan).await?;
 
         // Issue service initialization requests.
         //

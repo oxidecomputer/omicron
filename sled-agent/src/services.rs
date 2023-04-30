@@ -40,7 +40,9 @@ use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
+use illumos_utils::running_zone::{
+    InstalledZone, RunCommandError, RunningZone,
+};
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
@@ -90,6 +92,12 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Failed to initilize CockroachDb: {err}")]
+    CockroachInit {
+        #[source]
+        err: RunCommandError,
+    },
+
     #[error("Cannot serialize TOML to file {path}: {err}")]
     TomlSerialize { path: PathBuf, err: toml::ser::Error },
 
@@ -1038,12 +1046,26 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
+                // Look up all cockroachdb addresses stored in internal DNS.
+                let all_crdb_addresses = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::Cockroach)
+                    .await?
+                    .into_iter()
+                    .map(|addr| {
+                        SocketAddr::new(IpAddr::V6(addr), COCKROACH_PORT)
+                            .to_string()
+                    })
+                    .collect::<Vec<String>>()
+                    .join(",");
+
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
-                    .add_property("store", "astring", "/data");
+                    .add_property("store", "astring", "/data")
+                    .add_property("join_addrs", "astring", &all_crdb_addresses);
 
                 let profile = ProfileBuilder::new("omicron").add_service(
                     ServiceBuilder::new("oxide/cockroachdb").add_instance(
@@ -1057,64 +1079,7 @@ impl ServiceManager {
                     .map_err(|err| {
                         Error::io("Failed to setup CRDB profile", err)
                     })?;
-                let running_zone = RunningZone::boot(installed_zone).await?;
-
-                // TODO: The following lines are necessary to initialize CRDB
-                // in a single-node environment. They're bad! They're wrong!
-                // We definitely shouldn't be wiping the database every time
-                // we want to boot this zone.
-                //
-                // But they're also necessary to prevent the build from
-                // regressing.
-                //
-                // NOTE: In the (very short-term) future, this will be
-                // replaced by the following:
-                // 1. CRDB will simply "start", rather than "start-single-node".
-                // 2. The Sled Agent will expose an explicit API to "init" the
-                // Cockroach cluster, and populate it with the expected
-                // contents.
-                let format_crdb = || async {
-                    info!(self.inner.log, "Formatting CRDB");
-                    running_zone
-                        .run_cmd(&[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &address.to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                        ])
-                        .map_err(BackoffError::transient)?;
-                    running_zone
-                        .run_cmd(&[
-                            "/opt/oxide/cockroachdb/bin/cockroach",
-                            "sql",
-                            "--insecure",
-                            "--host",
-                            &address.to_string(),
-                            "--file",
-                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                        ])
-                        .map_err(BackoffError::transient)?;
-                    info!(self.inner.log, "Formatting CRDB - Completed");
-                    Ok::<
-                        (),
-                        BackoffError<
-                            illumos_utils::running_zone::RunCommandError,
-                        >,
-                    >(())
-                };
-                let log_failure = |error, _| {
-                    warn!(
-                        self.inner.log, "failed to format CRDB";
-                        "error" => ?error,
-                    );
-                };
-                retry_notify(retry_policy_local(), format_crdb, log_failure)
-                    .await
-                    .expect("expected an infinite retry loop waiting for crdb");
-                return Ok(running_zone);
+                return Ok(RunningZone::boot(installed_zone).await?);
             }
             ZoneType::Crucible => {
                 let Some(info) = self.inner.sled_info.get() else {
@@ -1900,6 +1865,52 @@ impl ServiceManager {
         .await?;
 
         zone_requests.write_to(&self.inner.log, &ledger_path).await?;
+
+        Ok(())
+    }
+
+    pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
+        let log = &self.inner.log;
+        // TODO: Can we confirm this address is okay?
+        let host = &format!("[::1]:{COCKROACH_PORT}");
+        let dataset_zones = self.inner.dataset_zones.lock().await;
+        for zone in dataset_zones.iter() {
+            // TODO: We could probably store the ZoneKind in the running zone to
+            // make this a bit safer.
+            if zone.name().contains("cockroach") {
+                info!(log, "Initializing CRDB Cluster");
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "init",
+                    "--insecure",
+                    "--host",
+                    host,
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                info!(log, "Formatting CRDB");
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "sql",
+                    "--insecure",
+                    "--host",
+                    host,
+                    "--file",
+                    "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                zone.run_cmd(&[
+                    "/opt/oxide/cockroachdb/bin/cockroach",
+                    "sql",
+                    "--insecure",
+                    "--host",
+                    host,
+                    "--file",
+                    "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                ])
+                .map_err(|err| Error::CockroachInit { err })?;
+                info!(log, "Formatting CRDB - Completed");
+            }
+        }
 
         Ok(())
     }

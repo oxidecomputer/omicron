@@ -114,6 +114,12 @@ async fn filesystem_put(
     Ok(HttpResponseUpdatedNoContent())
 }
 
+/// Initializes a CockroachDB cluster, calling:
+///
+/// <https://www.cockroachlabs.com/docs/stable/cockroach-init.html>
+///
+/// and also populating the contents of the filesystem with preliminary
+/// tables.
 #[endpoint {
     method = POST,
     path = "/cockroachdb",
@@ -122,17 +128,9 @@ async fn cockroachdb_init(
     rqctx: RequestContext<SledAgent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let sa = rqctx.context();
-
-    // TODO: In RSS, launch three CRDB nodes across the U.2s.
-    //
-    // TODO: In the SMF file for cockroach, call "start" instead of
-    // "start-single-node".
-    //
-    // TODO: Access the CRDB zone, run "init", then run "dbinit.sql".
-
+    sa.cockroachdb_initialize().await?;
     Ok(HttpResponseUpdatedNoContent())
 }
-
 
 /// Path parameters for Instance requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]

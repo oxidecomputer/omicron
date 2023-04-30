@@ -121,6 +121,31 @@ impl Resolver {
         Ok(*address)
     }
 
+    pub async fn lookup_all_ipv6(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<Vec<Ipv6Addr>, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup_ipv6 srv"; "dns_name" => &name);
+        let response = self.inner.ipv6_lookup(&name).await?;
+        let addresses = response.iter().map(|a| *a).collect::<Vec<_>>();
+        Ok(addresses)
+    }
+
+    pub async fn lookup_ip(
+        &self,
+        srv: crate::ServiceName,
+    ) -> Result<IpAddr, ResolveError> {
+        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
+        debug!(self.log, "lookup srv"; "dns_name" => &name);
+        let response = self.inner.lookup_ip(&name).await?;
+        let address = response
+            .iter()
+            .next()
+            .ok_or_else(|| ResolveError::NotFound(srv))?;
+        Ok(address)
+    }
+
     /// Looks up a single [`SocketAddrV6`] based on the SRV name
     /// Returns an error if the record does not exist.
     pub async fn lookup_socket_v6(
@@ -155,20 +180,6 @@ impl Resolver {
                 ));
             }
         })
-    }
-
-    pub async fn lookup_ip(
-        &self,
-        srv: crate::ServiceName,
-    ) -> Result<IpAddr, ResolveError> {
-        let name = format!("{}.{}", srv.dns_name(), DNS_ZONE);
-        debug!(self.log, "lookup srv"; "dns_name" => &name);
-        let response = self.inner.lookup_ip(&name).await?;
-        let address = response
-            .iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFound(srv))?;
-        Ok(address)
     }
 }
 
