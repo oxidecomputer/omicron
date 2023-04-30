@@ -147,6 +147,10 @@ impl RunningZone {
         format!("{}/root", self.inner.zonepath.display())
     }
 
+    pub fn control_interface(&self) -> AddrObject {
+        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+    }
+
     /// Runs a command within the Zone, return the output.
     pub fn run_cmd<I, S>(&self, args: I) -> Result<String, RunCommandError>
     where

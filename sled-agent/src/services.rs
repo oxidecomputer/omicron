@@ -169,6 +169,9 @@ pub enum Error {
     #[error("Services already configured for this Sled Agent")]
     ServicesAlreadyConfigured,
 
+    #[error("Failed to get address: {0}")]
+    GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
+
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
@@ -1871,13 +1874,18 @@ impl ServiceManager {
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        // TODO: Can we confirm this address is okay?
-        let host = &format!("[::1]:{COCKROACH_PORT}");
         let dataset_zones = self.inner.dataset_zones.lock().await;
         for zone in dataset_zones.iter() {
             // TODO: We could probably store the ZoneKind in the running zone to
-            // make this a bit safer.
-            if zone.name().contains("cockroach") {
+            // make this "comparison to existing zones by name" mechanism a bit
+            // safer.
+            if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
+                let address = Zones::get_address(
+                    Some(zone.name()),
+                    &zone.control_interface(),
+                )?
+                .network();
+                let host = &format!("[{address}]:{COCKROACH_PORT}");
                 info!(log, "Initializing CRDB Cluster");
                 zone.run_cmd(&[
                     "/opt/oxide/cockroachdb/bin/cockroach",
@@ -1909,6 +1917,11 @@ impl ServiceManager {
                 ])
                 .map_err(|err| Error::CockroachInit { err })?;
                 info!(log, "Formatting CRDB - Completed");
+
+                // In the single-sled case, if there are multiple CRDB nodes on
+                // a single device, we'd still only want to send the
+                // initialization requests to a single dataset.
+                return Ok(());
             }
         }
 
