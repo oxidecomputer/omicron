@@ -16,7 +16,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "type")]
 pub enum BootstrapAddressDiscovery {
     /// Ignore all bootstrap addresses except our own.
     OnlyOurs,
