@@ -475,9 +475,11 @@ impl ServiceManager {
 
     pub async fn load_non_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        let services =
-            AllZoneRequests::read_from(log, &self.services_ledger_path()?)
-                .await?;
+        let ledger = self.services_ledger_path()?;
+        if !ledger.exists() {
+            return Ok(());
+        }
+        let services = AllZoneRequests::read_from(log, &ledger).await?;
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Initialize and DNS and NTP services first as they are required
@@ -546,11 +548,11 @@ impl ServiceManager {
 
     pub async fn load_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        let services = AllZoneRequests::read_from(
-            log,
-            &self.storage_services_ledger_path()?,
-        )
-        .await?;
+        let ledger = self.storage_services_ledger_path()?;
+        if !ledger.exists() {
+            return Ok(());
+        }
+        let services = AllZoneRequests::read_from(log, &ledger).await?;
         let mut existing_zones = self.inner.dataset_zones.lock().await;
         self.initialize_services_locked(
             &mut existing_zones,
@@ -569,6 +571,7 @@ impl ServiceManager {
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
     ) -> Result<(), Error> {
+        debug!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
             .sled_info
             .set(SledAgentInfo {

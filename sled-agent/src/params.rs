@@ -577,7 +577,7 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
     }
 }
 
-/// Used to request that the Sled initialize certain services.
+/// Used to request that the Sled initialize a single service.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
@@ -592,7 +592,7 @@ impl From<ServiceZoneService> for sled_agent_client::types::ServiceZoneService {
     }
 }
 
-/// Used to request that the Sled initialize certain services on initialization.
+/// Used to request that the Sled initialize multiple services.
 ///
 /// This may be used to record that certain sleds are responsible for
 /// launching services which may not be associated with a dataset, such
