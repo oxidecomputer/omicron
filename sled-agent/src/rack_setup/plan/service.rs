@@ -43,7 +43,7 @@ const BOUNDARY_NTP_COUNT: usize = 2;
 const NEXUS_COUNT: usize = 1;
 
 // The number of CRDB instances to create from RSS.
-const CRDB_COUNT: usize = 1;
+const CRDB_COUNT: usize = 3;
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Oximeter.
