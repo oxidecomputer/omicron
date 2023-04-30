@@ -88,17 +88,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-// The filename of ServiceManager's internal storage.
-const SERVICES_CONFIG_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
-
-// The filename of a half-completed config, in need of parameters supplied at
-// runtime.
-const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
-// The filename of a completed config, merging the partial config with
-// additional appended parameters known at runtime.
-const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
@@ -199,18 +188,6 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
-// The default path to service configuration
-fn default_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(SERVICES_CONFIG_FILENAME)
-}
-
-// The default path to storage service configuration
-fn default_storage_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(STORAGE_SERVICES_CONFIG_FILENAME)
-}
-
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
@@ -224,8 +201,8 @@ pub struct Config {
 
     // The path for the ServiceManager to store information about
     // all running services.
-    all_svcs_config_path: PathBuf,
-    storage_svcs_config_path: PathBuf,
+    all_svcs_ledger_path: PathBuf,
+    storage_svcs_ledger_path: PathBuf,
 }
 
 impl Config {
@@ -238,11 +215,41 @@ impl Config {
             sled_id,
             sidecar_revision,
             gateway_address,
-            all_svcs_config_path: default_services_config_path(),
-            storage_svcs_config_path: default_storage_services_config_path(),
+            all_svcs_ledger_path: default_services_ledger_path(),
+            storage_svcs_ledger_path: default_storage_services_ledger_path(),
         }
     }
 }
+
+// The filename of ServiceManager's internal storage.
+const SERVICES_CONFIG_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
+
+// The default path to service configuration
+fn default_services_ledger_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join(SERVICES_CONFIG_FILENAME)
+}
+
+// The default path to storage service configuration
+fn default_storage_services_ledger_path() -> PathBuf {
+    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join(STORAGE_SERVICES_CONFIG_FILENAME)
+}
+
+// TODO(ideas):
+// - "ServiceLedger"
+// - Manages the serializable "AllZoneRequests" object
+// - Constructor which reads from config location (kinda like
+// "read_from")
+// - ... Writer which *knows the type* to be serialized, so can direct it to the
+// appropriate output path.
+//
+// - TODO: later: Can also make the path writing safer, by...
+//  - ... TODO: Writing to both M.2s, basically using multiple output paths
+//  - ... TODO: Using a temporary file and renaming it to make the update atomic
+//  - ... TODO: Add a .json EXPECTORATE test for the format of "AllZoneRequests"
+//  - we need to be careful not to break compatibility in the future.
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
@@ -254,6 +261,44 @@ struct AllZoneRequests {
 impl AllZoneRequests {
     fn new() -> Self {
         Self { requests: vec![] }
+    }
+
+    // Reads from `path` as a toml-serialized version of `Self`.
+    async fn read_from(log: &Logger, path: &Path) -> Result<Self, Error> {
+        if path.exists() {
+            debug!(
+                log,
+                "Reading old storage service requests from {}",
+                path.display()
+            );
+            toml::from_str(
+                &tokio::fs::read_to_string(&path)
+                    .await
+                    .map_err(|err| Error::io_path(&path, err))?,
+            )
+            .map_err(|err| Error::TomlDeserialize {
+                path: path.to_path_buf(),
+                err,
+            })
+        } else {
+            debug!(log, "No old storage service requests");
+            Ok(AllZoneRequests::new())
+        }
+    }
+
+    // Writes to `path` as a toml-serialized version of `Self`.
+    async fn write_to(&self, log: &Logger, path: &Path) -> Result<(), Error> {
+        debug!(log, "Writing zone request configuration to {}", path.display());
+        let serialized_services = toml::Value::try_from(&self)
+            .expect("Cannot serialize service list");
+        let services_str =
+            toml::to_string(&serialized_services).map_err(|err| {
+                Error::TomlSerialize { path: path.to_path_buf(), err }
+            })?;
+        tokio::fs::write(&path, services_str)
+            .await
+            .map_err(|err| Error::io_path(&path, err))?;
+        Ok(())
     }
 }
 
@@ -414,6 +459,93 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
+    pub async fn load_non_storage_services(&self) -> Result<(), Error> {
+        let log = &self.inner.log;
+        let services =
+            AllZoneRequests::read_from(log, &self.services_ledger_path()?)
+                .await?;
+        let mut existing_zones = self.inner.zones.lock().await;
+
+        // Initialize and DNS and NTP services first as they are required
+        // for time synchronization, which is a pre-requisite for the other
+        // services.
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services
+                .requests
+                .clone()
+                .into_iter()
+                .filter(|svc| {
+                    matches!(
+                        svc.zone.zone_type,
+                        ZoneType::InternalDns | ZoneType::Ntp
+                    )
+                })
+                .collect(),
+        )
+        .await?;
+
+        drop(existing_zones);
+
+        info!(&self.inner.log, "Waiting for sled time synchronization");
+
+        retry_notify(
+            retry_policy_local(),
+            || async {
+                match self.timesync_get().await {
+                    Ok(TimeSync { sync: true, .. }) => {
+                        info!(&self.inner.log, "Time is synchronized");
+                        Ok(())
+                    }
+                    Ok(ts) => Err(BackoffError::transient(format!(
+                        "No sync {:?}",
+                        ts
+                    ))),
+                    Err(e) => Err(BackoffError::transient(format!(
+                        "Error checking for time synchronization: {}",
+                        e
+                    ))),
+                }
+            },
+            |error, delay| {
+                warn!(
+                    self.inner.log,
+                    "Time not yet synchronised (retrying in {:?})",
+                    delay;
+                    "error" => ?error
+                );
+            },
+        )
+        .await
+        .expect("Expected an infinite retry loop syncing time");
+
+        let mut existing_zones = self.inner.zones.lock().await;
+
+        // Initialize all remaining serivces
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services.requests,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_storage_services(&self) -> Result<(), Error> {
+        let log = &self.inner.log;
+        let services = AllZoneRequests::read_from(
+            log,
+            &self.storage_services_ledger_path()?,
+        )
+        .await?;
+        let mut existing_zones = self.inner.dataset_zones.lock().await;
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services.requests,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Loads services from the services manager, and returns once all requested
     /// services have been started.
     pub async fn sled_agent_started(
@@ -438,88 +570,14 @@ impl ServiceManager {
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
 
-        let config_path = self.services_config_path()?;
-        if config_path.exists() {
-            info!(
-                &self.inner.log,
-                "Sled services found at {}; loading",
-                config_path.to_string_lossy()
-            );
-            let cfg: AllZoneRequests = toml::from_str(
-                &tokio::fs::read_to_string(&config_path)
-                    .await
-                    .map_err(|err| Error::io_path(&config_path, err))?,
-            )
-            .map_err(|err| Error::TomlDeserialize {
-                path: config_path.clone(),
-                err,
-            })?;
-            let mut existing_zones = self.inner.zones.lock().await;
-
-            // Initialize and DNS and NTP services first as they are required
-            // for time synchronization, which is a pre-requisite for the other
-            // services.
-            self.initialize_services_locked(
-                &mut existing_zones,
-                &cfg.requests
-                    .clone()
-                    .into_iter()
-                    .filter(|svc| {
-                        matches!(
-                            svc.zone.zone_type,
-                            ZoneType::InternalDns | ZoneType::Ntp
-                        )
-                    })
-                    .collect(),
-            )
-            .await?;
-
-            drop(existing_zones);
-
-            info!(&self.inner.log, "Waiting for sled time synchronization");
-
-            retry_notify(
-                retry_policy_local(),
-                || async {
-                    match self.timesync_get().await {
-                        Ok(TimeSync { sync: true, .. }) => {
-                            info!(&self.inner.log, "Time is synchronized");
-                            Ok(())
-                        }
-                        Ok(ts) => Err(BackoffError::transient(format!(
-                            "No sync {:?}",
-                            ts
-                        ))),
-                        Err(e) => Err(BackoffError::transient(format!(
-                            "Error checking for time synchronization: {}",
-                            e
-                        ))),
-                    }
-                },
-                |error, delay| {
-                    warn!(
-                        self.inner.log,
-                        "Time not yet synchronised (retrying in {:?})",
-                        delay;
-                        "error" => ?error
-                    );
-                },
-            )
-            .await
-            .expect("Expected an infinite retry loop syncing time");
-
-            let mut existing_zones = self.inner.zones.lock().await;
-
-            // Initialize all remaining serivces
-            self.initialize_services_locked(&mut existing_zones, &cfg.requests)
-                .await?;
-        } else {
-            info!(
-                &self.inner.log,
-                "No sled services found at {}",
-                config_path.to_string_lossy()
-            );
-        }
+        self.load_non_storage_services().await?;
+        // TODO: These will fail if the disks aren't attached.
+        // Should we have a retry loop here? Kinda like we have with the switch
+        // / NTP zone?
+        //
+        // NOTE: We could totally do the same thing with
+        // "load_non_storage_services".
+        self.load_storage_services().await?;
 
         Ok(())
     }
@@ -529,21 +587,21 @@ impl ServiceManager {
         self.inner.sled_mode
     }
 
-    // Returns either the path to the explicitly provided config path, or
+    // Returns either the path to the explicitly provided ledger path, or
     // chooses the default one.
-    fn services_config_path(&self) -> Result<PathBuf, Error> {
+    fn services_ledger_path(&self) -> Result<PathBuf, Error> {
         if let Some(info) = self.inner.sled_info.get() {
-            Ok(info.config.all_svcs_config_path.clone())
+            Ok(info.config.all_svcs_ledger_path.clone())
         } else {
             Err(Error::SledAgentNotReady)
         }
     }
 
-    // Returns either the path to the explicitly provided config path, or
+    // Returns either the path to the explicitly provided ledger path, or
     // chooses the default one.
-    fn storage_services_config_path(&self) -> Result<PathBuf, Error> {
+    fn storage_services_ledger_path(&self) -> Result<PathBuf, Error> {
         if let Some(info) = self.inner.sled_info.get() {
-            Ok(info.config.storage_svcs_config_path.clone())
+            Ok(info.config.storage_svcs_ledger_path.clone())
         } else {
             Err(Error::SledAgentNotReady)
         }
@@ -895,15 +953,14 @@ impl ServiceManager {
         // If the zone is managing a particular dataset, plumb that
         // dataset into the zone. Additionally, construct a "unique enough" name
         // so we can create multiple zones of this type without collision.
-        let (unique_name, datasets) =
-            if let Some(dataset) = &request.zone.dataset {
-                (
-                    Some(dataset.pool().to_string()),
-                    vec![zone::Dataset { name: dataset.full() }],
-                )
-            } else {
-                (None, vec![])
-            };
+        let unique_name = request.zone.zone_name_unique_identifier();
+        let datasets = request
+            .zone
+            .dataset
+            .iter()
+            .map(|d| zone::Dataset { name: d.full() })
+            .collect::<Vec<_>>();
+
         let devices: Vec<zone::Device> = device_names
             .iter()
             .map(|d| zone::Device { name: d.to_string() })
@@ -915,7 +972,7 @@ impl ServiceManager {
             &request.root,
             &request.zone.zone_type.to_string(),
             unique_name.as_deref(),
-            &datasets,
+            datasets.as_slice(),
             &filesystems,
             &devices,
             opte_ports,
@@ -1286,6 +1343,12 @@ impl ServiceManager {
                         "{}/var/svc/manifest/site/nexus",
                         running_zone.root()
                     ));
+                    // The filename of a half-completed config, in need of parameters supplied at
+                    // runtime.
+                    const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+                    // The filename of a completed config, merging the partial config with
+                    // additional appended parameters known at runtime.
+                    const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
                     let partial_config_path =
                         config_dir.join(PARTIAL_CONFIG_FILENAME);
                     let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
@@ -1682,10 +1745,7 @@ impl ServiceManager {
             );
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            let expected_zone_name = InstalledZone::get_zone_name(
-                &req.zone.zone_type.to_string(),
-                None,
-            );
+            let expected_zone_name = req.zone.zone_name();
             if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
                 info!(
                     self.inner.log,
@@ -1721,25 +1781,10 @@ impl ServiceManager {
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
         let mut existing_zones = self.inner.zones.lock().await;
-        let config_path = self.services_config_path()?;
+        let ledger_path = self.services_ledger_path()?;
 
-        let old_zone_requests: AllZoneRequests = {
-            if config_path.exists() {
-                debug!(self.inner.log, "Reading old service requests");
-                toml::from_str(
-                    &tokio::fs::read_to_string(&config_path)
-                        .await
-                        .map_err(|err| Error::io_path(&config_path, err))?,
-                )
-                .map_err(|err| Error::TomlDeserialize {
-                    path: config_path.clone(),
-                    err,
-                })?
-            } else {
-                debug!(self.inner.log, "No old service requests");
-                AllZoneRequests::new()
-            }
-        };
+        let old_zone_requests =
+            AllZoneRequests::read_from(&self.inner.log, &ledger_path).await?;
 
         let new_zone_requests: Vec<ServiceZoneRequest> = {
             let known_set: HashSet<&ServiceZoneRequest> = HashSet::from_iter(
@@ -1747,6 +1792,7 @@ impl ServiceManager {
             );
             let requested_set = HashSet::from_iter(request.services.iter());
 
+            // TODO: We probably want to handle this case.
             if !requested_set.is_superset(&known_set) {
                 // The caller may only request services additively.
                 //
@@ -1779,15 +1825,7 @@ impl ServiceManager {
         .await?;
 
         zone_requests.requests.append(&mut old_zone_requests.requests.clone());
-        let serialized_services = toml::Value::try_from(&zone_requests)
-            .expect("Cannot serialize service list");
-        let services_str =
-            toml::to_string(&serialized_services).map_err(|err| {
-                Error::TomlSerialize { path: config_path.clone(), err }
-            })?;
-        tokio::fs::write(&config_path, services_str)
-            .await
-            .map_err(|err| Error::io_path(&config_path, err))?;
+        zone_requests.write_to(&self.inner.log, &ledger_path).await?;
 
         Ok(())
     }
@@ -1802,25 +1840,10 @@ impl ServiceManager {
         request: ServiceZoneRequest,
     ) -> Result<(), Error> {
         let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let config_path = self.storage_services_config_path()?;
+        let ledger_path = self.storage_services_ledger_path()?;
 
-        let mut zone_requests: AllZoneRequests = {
-            if config_path.exists() {
-                debug!(self.inner.log, "Reading old storage service requests");
-                toml::from_str(
-                    &tokio::fs::read_to_string(&config_path)
-                        .await
-                        .map_err(|err| Error::io_path(&config_path, err))?,
-                )
-                .map_err(|err| Error::TomlDeserialize {
-                    path: config_path.clone(),
-                    err,
-                })?
-            } else {
-                debug!(self.inner.log, "No old storage service requests");
-                AllZoneRequests::new()
-            }
-        };
+        let mut zone_requests =
+            AllZoneRequests::read_from(&self.inner.log, &ledger_path).await?;
 
         if !zone_requests
             .requests
@@ -1845,15 +1868,7 @@ impl ServiceManager {
         )
         .await?;
 
-        let serialized_services = toml::Value::try_from(&zone_requests)
-            .expect("Cannot serialize service list");
-        let services_str =
-            toml::to_string(&serialized_services).map_err(|err| {
-                Error::TomlSerialize { path: config_path.clone(), err }
-            })?;
-        tokio::fs::write(&config_path, services_str)
-            .await
-            .map_err(|err| Error::io_path(&config_path, err))?;
+        zone_requests.write_to(&self.inner.log, &ledger_path).await?;
 
         Ok(())
     }
@@ -2423,25 +2438,20 @@ mod test {
     impl TestConfig {
         async fn new() -> Self {
             let config_dir = tempfile::TempDir::new().unwrap();
-            tokio::fs::File::create(
-                config_dir.path().join(PARTIAL_CONFIG_FILENAME),
-            )
-            .await
-            .unwrap();
             Self { config_dir }
         }
 
         fn make_config(&self) -> Config {
-            let all_svcs_config_path =
+            let all_svcs_ledger_path =
                 self.config_dir.path().join(SERVICES_CONFIG_FILENAME);
-            let storage_svcs_config_path =
+            let storage_svcs_ledger_path =
                 self.config_dir.path().join(STORAGE_SERVICES_CONFIG_FILENAME);
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
                 gateway_address: None,
-                all_svcs_config_path,
-                storage_svcs_config_path,
+                all_svcs_ledger_path,
+                storage_svcs_ledger_path,
             }
         }
     }
@@ -2663,7 +2673,7 @@ mod test {
         // Next, delete the config. This means the service we just created will
         // not be remembered on the next initialization.
         let config = test_config.make_config();
-        std::fs::remove_file(&config.all_svcs_config_path).unwrap();
+        std::fs::remove_file(&config.all_svcs_ledger_path).unwrap();
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(

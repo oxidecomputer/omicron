@@ -574,8 +574,8 @@ impl InstalledZone {
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_name: &str, unique_name: Option<&str>) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_name);
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
         }
@@ -600,7 +600,7 @@ impl InstalledZone {
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_root_path: &Path,
-        zone_name: &str,
+        zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
@@ -613,14 +613,14 @@ impl InstalledZone {
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
-                    zone: zone_name.to_string(),
+                    zone: zone_type.to_string(),
                     err,
                 }
             })?;
 
-        let full_zone_name = Self::get_zone_name(zone_name, unique_name);
+        let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_name));
+            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()

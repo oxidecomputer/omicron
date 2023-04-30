@@ -518,6 +518,21 @@ pub struct ServiceZoneRequest {
     pub services: Vec<ServiceType>,
 }
 
+impl ServiceZoneRequest {
+    // The full name of the zone, if it was to be created as a zone.
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            &self.zone_type.to_string(),
+            self.zone_name_unique_identifier().as_deref(),
+        )
+    }
+
+    // The name of a unique identifier for the zone, if one is necessary.
+    pub fn zone_name_unique_identifier(&self) -> Option<String> {
+        self.dataset.as_ref().map(|d| d.pool().to_string())
+    }
+}
+
 impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
     fn from(s: ServiceZoneRequest) -> Self {
         let mut services = Vec::new();
