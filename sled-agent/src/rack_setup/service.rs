@@ -56,6 +56,7 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
@@ -93,9 +94,6 @@ use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-
-// The minimum number of sleds to initialize the rack.
-const MINIMUM_SLED_COUNT: usize = 1;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -215,24 +213,6 @@ impl RackSetupService {
 fn rss_completed_marker_path() -> PathBuf {
     std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
         .join("rss-plan-completed.marker")
-}
-
-// Describes the options when awaiting for peers.
-enum PeerExpectation {
-    // Await a set of peers that matches this group of IPv6 addresses exactly.
-    //
-    // TODO: We currently don't deal with the case where:
-    //
-    // - RSS boots, sees some sleds, comes up with a plan.
-    // - RSS reboots, sees a *different* set of sleds, and needs
-    // to adjust the plan.
-    //
-    // This case is fairly tricky because some sleds may have
-    // already received requests to initialize - modifying the
-    // allocated subnets would be non-trivial.
-    LoadOldPlan(HashSet<Ipv6Addr>),
-    // Await any peers, as long as there are at least enough to make a new plan.
-    CreateNewPlan(usize),
 }
 
 /// The implementation of the Rack Setup Service.
@@ -462,7 +442,7 @@ impl ServiceInner {
     /// can be sent out.
     async fn wait_for_peers(
         &self,
-        expectation: PeerExpectation,
+        expectation: &HashSet<Ipv6Addr>,
         our_bootstrap_address: Ipv6Addr,
     ) -> Result<Vec<Ipv6Addr>, DdmError> {
         let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
@@ -484,31 +464,12 @@ impl ServiceInner {
                     .chain(iter::once(our_bootstrap_address))
                     .collect::<HashSet<_>>();
 
-                match expectation {
-                    PeerExpectation::LoadOldPlan(ref expected) => {
-                        if all_addrs.is_superset(expected) {
-                            Ok(all_addrs.into_iter().collect())
-                        } else {
-                            Err(BackoffError::transient(
-                                concat!(
-                                    "Waiting for a LoadOldPlan set ",
-                                    "of peers not found yet."
-                                )
-                                .to_string(),
-                            ))
-                        }
-                    }
-                    PeerExpectation::CreateNewPlan(wanted_peer_count) => {
-                        if all_addrs.len() >= wanted_peer_count {
-                            Ok(all_addrs.into_iter().collect())
-                        } else {
-                            Err(BackoffError::transient(format!(
-                                "Waiting for {} peers (currently have {})",
-                                wanted_peer_count,
-                                all_addrs.len()
-                            )))
-                        }
-                    }
+                if all_addrs.is_superset(expectation) {
+                    Ok(all_addrs.into_iter().collect())
+                } else {
+                    Err(BackoffError::transient(
+                        "Waiting for a set of peers not found yet".to_string(),
+                    ))
                 }
             },
             |message, duration| {
@@ -936,17 +897,26 @@ impl ServiceInner {
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
-        let maybe_sled_plan = SledPlan::load(&self.log).await?;
-        let expectation = if let Some(plan) = &maybe_sled_plan {
-            PeerExpectation::LoadOldPlan(
-                plan.sleds.keys().map(|a| *a.ip()).collect(),
-            )
-        } else {
-            PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
+        let expected_peers = match &config.bootstrap_discovery {
+            BootstrapAddressDiscovery::OnlyOurs => {
+                HashSet::from([local_bootstrap_agent.our_address()])
+            }
+            BootstrapAddressDiscovery::OnlyThese(peers) => peers.clone(),
         };
+        let maybe_sled_plan = SledPlan::load(&self.log).await?;
+        if let Some(plan) = &maybe_sled_plan {
+            let stored_peers: HashSet<Ipv6Addr> =
+                plan.sleds.keys().map(|a| *a.ip()).collect();
+            if stored_peers != expected_peers {
+                return Err(SetupServiceError::BadConfig("Set of sleds requested does not match those in existing sled plan".to_string()));
+            }
+        }
 
         let addrs = self
-            .wait_for_peers(expectation, local_bootstrap_agent.our_address())
+            .wait_for_peers(
+                &expected_peers,
+                local_bootstrap_agent.our_address(),
+            )
             .await?;
         info!(self.log, "Enough peers exist to enact RSS plan");
 
