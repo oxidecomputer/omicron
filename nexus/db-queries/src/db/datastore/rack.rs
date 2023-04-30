@@ -175,6 +175,7 @@ impl DataStore {
                     let service_db = db::model::Service::new(
                         service.service_id,
                         service.sled_id,
+                        service.zone_id,
                         service.address,
                         service.kind.into(),
                     );
@@ -624,9 +625,11 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
-            service_id: Uuid::new_v4(),
+            service_id: nexus_id,
             sled_id: sled.id(),
+            zone_id: Some(nexus_id),
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
@@ -718,18 +721,22 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
+        let nexus_id1 = Uuid::new_v4();
+        let nexus_id2 = Uuid::new_v4();
         let mut services = vec![
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id1,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id1),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_start),
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id2,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id2),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_end),
@@ -904,9 +911,11 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
-            service_id: Uuid::new_v4(),
+            service_id: nexus_id,
             sled_id: sled.id(),
+            zone_id: Some(nexus_id),
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
@@ -957,19 +966,23 @@ mod test {
 
         // Request two services which happen to be using the same IP address.
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id1 = Uuid::new_v4();
+        let nexus_id2 = Uuid::new_v4();
 
         let services = vec![
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id1,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id1),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id2,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id2),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,

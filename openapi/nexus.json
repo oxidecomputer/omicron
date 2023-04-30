@@ -135,7 +135,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user (i.e., log in) via username and password",
+        "summary": "Authenticate a user via username and password",
         "operationId": "login_local",
         "parameters": [
           {
@@ -232,7 +232,7 @@
         "tags": [
           "login"
         ],
-        "summary": "Authenticate a user (i.e., log in) via SAML",
+        "summary": "Authenticate a user via SAML",
         "operationId": "login_saml",
         "parameters": [
           {
@@ -756,7 +756,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Start the process of importing blocks into a disk",
+        "summary": "Start importing blocks into a disk",
+        "description": "Start the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_start",
         "parameters": [
           {
@@ -795,7 +796,8 @@
         "tags": [
           "disks"
         ],
-        "summary": "Stop the process of importing blocks into a disk",
+        "summary": "Stop importing blocks into a disk",
+        "description": "Stop the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_stop",
         "parameters": [
           {
@@ -834,7 +836,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Finalize disk when imports are done",
+        "summary": "Confirm disk block import completion",
         "operationId": "disk_finalize_import",
         "parameters": [
           {
@@ -883,7 +885,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Send request to import blocks from URL",
+        "summary": "Request to import blocks from URL",
         "operationId": "disk_import_blocks_from_url",
         "parameters": [
           {
@@ -1326,7 +1328,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Promote a project image to be visible to all projects in the silo",
+        "summary": "Promote a project image",
+        "description": "Promote a project image to be visible to all projects in the silo",
         "operationId": "image_promote",
         "parameters": [
           {
@@ -3281,7 +3284,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a new system-wide x.509 certificate.",
+        "summary": "Create a new system-wide x.509 certificate",
         "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
         "operationId": "certificate_create",
         "requestBody": {
@@ -3702,7 +3705,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List a silo's IDPs_name",
+        "summary": "List a silo's IdP's name",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -3909,7 +3912,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a SAML IDP",
+        "summary": "Create a SAML IdP",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -3957,7 +3960,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch a SAML IDP",
+        "summary": "Fetch a SAML IdP",
         "operationId": "saml_identity_provider_view",
         "parameters": [
           {
@@ -4210,7 +4213,7 @@
           "system"
         ],
         "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address.",
+        "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -4358,7 +4361,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Fetch the IP pool used for Oxide services.",
+        "summary": "Fetch the IP pool used for Oxide services",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -4385,8 +4388,8 @@
         "tags": [
           "system"
         ],
-        "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address.",
+        "summary": "List ranges for the IP pool used for Oxide services",
+        "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
@@ -4436,7 +4439,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Add a range to an IP pool used for Oxide services.",
+        "summary": "Add a range to an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -4473,7 +4476,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "summary": "Remove a range from an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -6203,7 +6206,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Get a router",
+        "summary": "Fetch a router",
         "operationId": "vpc_router_view",
         "parameters": [
           {
@@ -6364,7 +6367,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Fetch a subnet",
+        "summary": "List subnets",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {

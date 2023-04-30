@@ -255,12 +255,14 @@ impl Server {
                 kind: NexusTypes::ServiceKind::InternalDns,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
             NexusTypes::ServicePutRequest {
                 address: http_bound.to_string(),
                 kind: NexusTypes::ServiceKind::InternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
         ];
 
@@ -273,6 +275,7 @@ impl Server {
                 kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             });
 
             internal_services_ip_pool_ranges.push(match ip {
@@ -293,6 +296,7 @@ impl Server {
                 kind: NexusTypes::ServiceKind::ExternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             });
         }
 

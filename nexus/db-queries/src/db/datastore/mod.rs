@@ -1099,7 +1099,8 @@ mod test {
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         let kind = ServiceKind::Nexus;
 
-        let service1 = Service::new(service1_id, sled_id, addr, kind);
+        let service1 =
+            Service::new(service1_id, sled_id, Some(service1_id), addr, kind);
         let result =
             datastore.service_upsert(&opctx, service1.clone()).await.unwrap();
         assert_eq!(service1.id(), result.id());
@@ -1108,7 +1109,7 @@ mod test {
 
         let service2_id =
             "fe5b6e3d-dfee-47b4-8719-c54f78912c0b".parse().unwrap();
-        let service2 = Service::new(service2_id, sled_id, addr, kind);
+        let service2 = Service::new(service2_id, sled_id, None, addr, kind);
         let result =
             datastore.service_upsert(&opctx, service2.clone()).await.unwrap();
         assert_eq!(service2.id(), result.id());
@@ -1117,7 +1118,13 @@ mod test {
 
         let service3_id = Uuid::new_v4();
         let kind = ServiceKind::Oximeter;
-        let service3 = Service::new(service3_id, sled_id, addr, kind);
+        let service3 = Service::new(
+            service3_id,
+            sled_id,
+            Some(Uuid::new_v4()),
+            addr,
+            kind,
+        );
         let result =
             datastore.service_upsert(&opctx, service3.clone()).await.unwrap();
         assert_eq!(service3.id(), result.id());
@@ -1139,9 +1146,11 @@ mod test {
             .unwrap();
         assert_eq!(services[0].id(), service1.id());
         assert_eq!(services[0].sled_id, service1.sled_id);
+        assert_eq!(services[0].zone_id, service1.zone_id);
         assert_eq!(services[0].kind, service1.kind);
         assert_eq!(services[1].id(), service2.id());
         assert_eq!(services[1].sled_id, service2.sled_id);
+        assert_eq!(services[1].zone_id, service2.zone_id);
         assert_eq!(services[1].kind, service2.kind);
         assert_eq!(services.len(), 2);
 
@@ -1160,6 +1169,7 @@ mod test {
             .unwrap();
         assert_eq!(services[0].id(), service3.id());
         assert_eq!(services[0].sled_id, service3.sled_id);
+        assert_eq!(services[0].zone_id, service3.zone_id);
         assert_eq!(services[0].kind, service3.kind);
         assert_eq!(services.len(), 1);
 

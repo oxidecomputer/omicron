@@ -2123,7 +2123,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServiceType"
+              "$ref": "#/components/schemas/ServiceZoneService"
             }
           },
           "zone_type": {
@@ -2135,6 +2135,22 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "ServiceZoneService": {
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ServiceType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "details",
+          "id"
         ]
       },
       "SetVirtualNetworkInterfaceHost": {

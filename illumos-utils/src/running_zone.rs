@@ -356,11 +356,11 @@ impl RunningZone {
         }
     }
 
-    pub async fn add_default_route(
+    pub fn add_default_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -371,15 +371,33 @@ impl RunningZone {
         Ok(())
     }
 
-    pub async fn add_default_route4(
+    pub fn add_default_route4(
         &self,
         gateway: Ipv4Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "default",
             &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub fn add_bootstrap_route(
+        &self,
+        bootstrap_prefix: u16,
+        gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd([
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            &format!("{bootstrap_prefix:x}::/16"),
+            &gz_bootstrap_addr.to_string(),
+            "-ifp",
+            zone_vnic_name,
         ])?;
         Ok(())
     }
@@ -635,9 +653,9 @@ impl InstalledZone {
             &zone_root_path,
             &full_zone_name,
             &zone_image_path,
-            &datasets,
-            &filesystems,
-            &devices,
+            datasets,
+            filesystems,
+            devices,
             net_device_names,
             limit_priv,
         )

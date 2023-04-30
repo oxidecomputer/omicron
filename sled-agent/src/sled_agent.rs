@@ -12,7 +12,7 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
     InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    ServiceType, SledRole, TimeSync, VpcFirewallRule, ZoneType, Zpool,
+    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -20,7 +20,6 @@ use crate::updates::{ConfigUpdates, UpdateManager};
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
-use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -48,9 +47,6 @@ use illumos_utils::{dladm::MockDladm as Dladm, zone::MockZones as Zones};
 pub enum Error {
     #[error("Configuration error: {0}")]
     Config(#[from] crate::config::ConfigError),
-
-    #[error("Failed to enable routing: {0}")]
-    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Failed to acquire etherstub: {0}")]
     Etherstub(illumos_utils::ExecutionError),
@@ -237,19 +233,6 @@ impl SledAgent {
             *sled_address.ip(),
             gateway_mac,
         );
-
-        // Ipv6 forwarding must be enabled to route traffic between zones.
-        //
-        // This should be a no-op if already enabled.
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[
-            "/usr/sbin/routeadm",
-            // Needed to access all zones, which are on the underlay.
-            "-e",
-            "ipv6-forwarding",
-            "-u",
-        ]);
-        execute(cmd).map_err(|e| Error::EnablingRouting(e))?;
 
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
@@ -550,22 +533,23 @@ impl SledAgent {
             .storage
             .upsert_filesystem(dataset_id, zpool_id, dataset_kind.clone())
             .await?;
-        let (zone_type, services) = match dataset_kind {
-            DatasetKind::Clickhouse => {
-                (ZoneType::Clickhouse, vec![ServiceType::Clickhouse])
-            }
-            DatasetKind::CockroachDb => {
-                (ZoneType::CockroachDb, vec![ServiceType::CockroachDb])
-            }
-            DatasetKind::Crucible => {
-                (ZoneType::Crucible, vec![ServiceType::Crucible])
-            }
-        };
+
+        // NOTE: We use the "dataset_id" as the "service_id" here.
+        //
+        // Since datasets are tightly coupled with their own services - e.g.,
+        // from the perspective of Nexus, provisioning a dataset implies the
+        // sled should start a service - this is ID re-use is reasonable.
+        //
+        // If Nexus ever wants sleds to provision datasets independently of
+        // launching services, this ID type overlap should be reconsidered.
+        let service_type = dataset_kind.service_type();
+        let services =
+            vec![ServiceZoneService { id: dataset_id, details: service_type }];
 
         // Next, ensure a zone exists to manage storage for that dataset
         let request = crate::params::ServiceZoneRequest {
             id: dataset_id,
-            zone_type,
+            zone_type: dataset_kind.zone_type(),
             addresses: vec![*address.ip()],
             dataset: Some(dataset),
             gz_addresses: vec![],

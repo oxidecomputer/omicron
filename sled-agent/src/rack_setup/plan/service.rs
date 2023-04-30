@@ -6,7 +6,8 @@
 
 use crate::bootstrap::params::SledAgentRequest;
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use dns_service_client::types::DnsConfigParams;
@@ -298,15 +299,18 @@ impl Plan {
                     addresses: vec![internal_ip],
                     dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::ExternalDns {
-                        http_address: SocketAddrV6::new(
-                            internal_ip,
-                            http_port,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddr::new(external_ip, dns_port),
-                        nic,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::ExternalDns {
+                            http_address: SocketAddrV6::new(
+                                internal_ip,
+                                http_port,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddr::new(external_ip, dns_port),
+                            nic,
+                        },
                     }],
                 })
             }
@@ -332,10 +336,13 @@ impl Plan {
                     addresses: vec![address],
                     dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Nexus {
-                        internal_ip: address,
-                        external_ip,
-                        nic,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Nexus {
+                            internal_ip: address,
+                            external_ip,
+                            nic,
+                        },
                     }],
                 })
             }
@@ -358,7 +365,10 @@ impl Plan {
                     addresses: vec![address],
                     dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Oximeter],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Oximeter,
+                    }],
                 })
             }
 
@@ -447,16 +457,19 @@ impl Plan {
                     addresses: vec![dns_addr],
                     dataset: None,
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    services: vec![ServiceType::InternalDns {
-                        http_address: SocketAddrV6::new(
-                            dns_addr,
-                            DNS_HTTP_PORT,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddrV6::new(
-                            dns_addr, DNS_PORT, 0, 0,
-                        ),
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::InternalDns {
+                            http_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_HTTP_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     }],
                 });
             }
@@ -480,7 +493,10 @@ impl Plan {
                     addresses: vec![address],
                     dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::CruciblePantry],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::CruciblePantry,
+                    }],
                 })
             }
 
@@ -498,21 +514,27 @@ impl Plan {
                     let (nic, snat_cfg) = svc_port_builder
                         .next_snat(id, &mut services_ip_pool)?;
                     (
-                        vec![ServiceType::BoundaryNtp {
-                            ntp_servers: config.ntp_servers.clone(),
-                            dns_servers: config.dns_servers.clone(),
-                            domain: None,
-                            nic,
-                            snat_cfg,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::BoundaryNtp {
+                                ntp_servers: config.ntp_servers.clone(),
+                                dns_servers: config.dns_servers.clone(),
+                                domain: None,
+                                nic,
+                                snat_cfg,
+                            },
                         }],
                         ServiceName::BoundaryNtp,
                     )
                 } else {
                     (
-                        vec![ServiceType::InternalNtp {
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::InternalNtp {
+                                ntp_servers: boundary_ntp_servers.clone(),
+                                dns_servers: rack_dns_servers.clone(),
+                                domain: None,
+                            },
                         }],
                         ServiceName::InternalNtp,
                     )

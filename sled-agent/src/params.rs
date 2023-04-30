@@ -216,6 +216,30 @@ pub enum DatasetKind {
     Clickhouse,
 }
 
+impl DatasetKind {
+    /// Returns the type of the zone which manages this dataset.
+    pub fn zone_type(&self) -> ZoneType {
+        match *self {
+            DatasetKind::CockroachDb => ZoneType::CockroachDb,
+            DatasetKind::Crucible => ZoneType::Crucible,
+            DatasetKind::Clickhouse => ZoneType::Clickhouse,
+        }
+    }
+
+    /// Returns the service type which runs in the zone managing this dataset.
+    ///
+    /// NOTE: This interface is only viable because datasets run a single
+    /// service in their zone. If that precondition is no longer true, this
+    /// interface should be re-visited.
+    pub fn service_type(&self) -> ServiceType {
+        match *self {
+            DatasetKind::CockroachDb => ServiceType::CockroachDb,
+            DatasetKind::Crucible => ServiceType::Crucible,
+            DatasetKind::Clickhouse => ServiceType::Clickhouse,
+        }
+    }
+}
+
 impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
@@ -515,7 +539,7 @@ pub struct ServiceZoneRequest {
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
-    pub services: Vec<ServiceType>,
+    pub services: Vec<ServiceZoneService>,
 }
 
 impl ServiceZoneRequest {
@@ -552,6 +576,21 @@ impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
 }
 
 /// Used to request that the Sled initialize certain services.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct ServiceZoneService {
+    pub id: Uuid,
+    pub details: ServiceType,
+}
+
+impl From<ServiceZoneService> for sled_agent_client::types::ServiceZoneService {
+    fn from(s: ServiceZoneService) -> Self {
+        Self { id: s.id, details: s.details.into() }
+    }
+}
+
+/// Used to request that the Sled initialize certain services on initialization.
 ///
 /// This may be used to record that certain sleds are responsible for
 /// launching services which may not be associated with a dataset, such
