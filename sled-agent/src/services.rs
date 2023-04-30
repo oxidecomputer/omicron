@@ -1886,7 +1886,10 @@ impl ServiceManager {
                 )?
                 .ip();
                 let host = &format!("[{address}]:{COCKROACH_PORT}");
-                info!(log, "Initializing CRDB Cluster - sending request to {host}");
+                info!(
+                    log,
+                    "Initializing CRDB Cluster - sending request to {host}"
+                );
                 zone.run_cmd(&[
                     "/opt/oxide/cockroachdb/bin/cockroach",
                     "init",
