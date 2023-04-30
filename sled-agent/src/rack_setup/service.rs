@@ -438,56 +438,6 @@ impl ServiceInner {
         Ok(())
     }
 
-    /// Waits for sufficient neighbors to exist so the initial set of requests
-    /// can be sent out.
-    async fn wait_for_peers(
-        &self,
-        expectation: &HashSet<Ipv6Addr>,
-        our_bootstrap_address: Ipv6Addr,
-    ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let addrs = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            || async {
-                let peer_addrs = ddm_admin_client
-                    .derive_bootstrap_addrs_from_prefixes(&[
-                        BootstrapInterface::GlobalZone,
-                    ])
-                    .await
-                    .map_err(|err| {
-                        BackoffError::transient(format!(
-                            "Failed getting peers from mg-ddm: {err}"
-                        ))
-                    })?;
-
-                let all_addrs = peer_addrs
-                    .chain(iter::once(our_bootstrap_address))
-                    .collect::<HashSet<_>>();
-
-                if all_addrs.is_superset(expectation) {
-                    Ok(all_addrs.into_iter().collect())
-                } else {
-                    Err(BackoffError::transient(
-                        "Waiting for a set of peers not found yet".to_string(),
-                    ))
-                }
-            },
-            |message, duration| {
-                info!(
-                    self.log,
-                    "{} (will retry after {:?})", message, duration
-                );
-            },
-        )
-        // `retry_policy_internal_service_aggressive()` retries indefinitely on
-        // transient errors (the only kind we produce), allowing us to
-        // `.unwrap()` without panicking
-        .await
-        .unwrap();
-
-        Ok(addrs)
-    }
-
     async fn sled_timesync(
         &self,
         sled_address: &SocketAddrV6,
@@ -897,7 +847,7 @@ impl ServiceInner {
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
-        let expected_peers = match &config.bootstrap_discovery {
+        let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
                 HashSet::from([local_bootstrap_agent.our_address()])
             }
@@ -907,18 +857,15 @@ impl ServiceInner {
         if let Some(plan) = &maybe_sled_plan {
             let stored_peers: HashSet<Ipv6Addr> =
                 plan.sleds.keys().map(|a| *a.ip()).collect();
-            if stored_peers != expected_peers {
+            if stored_peers != bootstrap_addrs {
                 return Err(SetupServiceError::BadConfig("Set of sleds requested does not match those in existing sled plan".to_string()));
             }
         }
-
-        let addrs = self
-            .wait_for_peers(
-                &expected_peers,
-                local_bootstrap_agent.our_address(),
-            )
-            .await?;
-        info!(self.log, "Enough peers exist to enact RSS plan");
+        if bootstrap_addrs.is_empty() {
+            return Err(SetupServiceError::BadConfig(
+                "Must request at least one peer".to_string(),
+            ));
+        }
 
         // If we created a plan, reuse it. Otherwise, create a new plan.
         //
@@ -931,7 +878,7 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, config, addrs).await?
+            SledPlan::create(&self.log, config, bootstrap_addrs).await?
         };
         let config = &plan.config;
 

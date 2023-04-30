@@ -13,7 +13,7 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -119,7 +119,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        bootstrap_addrs: Vec<Ipv6Addr>,
+        bootstrap_addrs: HashSet<Ipv6Addr>,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
 
