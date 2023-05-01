@@ -17,6 +17,10 @@ pin_project! {
     /// calling (1) `flush()` or (2) `shutdown()` will write any
     /// buffered-but-not-yet-written data to the underlying buffer regardless of
     /// its length.
+    ///
+    /// When `BlockSizeWriter` is dropped, any buffered data its holding will be
+    /// discarded. It is critical to manually call `BlockSizeWriter:flush()`
+    /// or `BlockSizeWriter::shutdown()` prior to dropping to avoid data loss.
     pub(crate) struct BlockSizeWriter<W> {
         #[pin]
         inner: W,
