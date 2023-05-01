@@ -178,10 +178,7 @@ impl HardwareMonitor {
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
-        // TODO: The coupling between the storage and service manager is growing
-        // pretty tight; we should consider merging them together.
-        let storage_manager =
-            StorageManager::new(&log, underlay_etherstub.clone()).await;
+        let storage_manager = StorageManager::new(&log).await;
 
         let service_manager = ServiceManager::new(
             log.clone(),

@@ -12,7 +12,7 @@ use crate::params::{
     DatasetKind, DiskStateRequested, InstanceHardware,
     InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRule, Zpool,
+    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -241,7 +241,6 @@ impl SledAgent {
         storage
             .setup_underlay_access(storage_manager::UnderlayAccess {
                 lazy_nexus_client: lazy_nexus_client.clone(),
-                underlay_address: *sled_address.ip(),
                 sled_id: request.id,
             })
             .await?;
@@ -505,7 +504,7 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
-        self.inner.services.ensure_persistent(requested_services).await?;
+        self.inner.services.ensure_all_services(requested_services).await?;
         Ok(())
     }
 
@@ -527,14 +526,41 @@ impl SledAgent {
     /// Ensures that a filesystem type exists within the zpool.
     pub async fn filesystem_ensure(
         &self,
-        zpool_uuid: Uuid,
+        dataset_id: Uuid,
+        zpool_id: Uuid,
         dataset_kind: DatasetKind,
         address: SocketAddrV6,
     ) -> Result<(), Error> {
-        self.inner
+        // First, ensure the dataset exists
+        let dataset = self
+            .inner
             .storage
-            .upsert_filesystem(zpool_uuid, dataset_kind, address)
+            .upsert_filesystem(dataset_id, zpool_id, dataset_kind.clone())
             .await?;
+
+        // NOTE: We use the "dataset_id" as the "service_id" here.
+        //
+        // Since datasets are tightly coupled with their own services - e.g.,
+        // from the perspective of Nexus, provisioning a dataset implies the
+        // sled should start a service - this is ID re-use is reasonable.
+        //
+        // If Nexus ever wants sleds to provision datasets independently of
+        // launching services, this ID type overlap should be reconsidered.
+        let service_type = dataset_kind.service_type();
+        let services =
+            vec![ServiceZoneService { id: dataset_id, details: service_type }];
+
+        // Next, ensure a zone exists to manage storage for that dataset
+        let request = crate::params::ServiceZoneRequest {
+            id: dataset_id,
+            zone_type: dataset_kind.zone_type(),
+            addresses: vec![*address.ip()],
+            dataset: Some(dataset),
+            gz_addresses: vec![],
+            services,
+        };
+        self.inner.services.ensure_storage_service(request).await?;
+
         Ok(())
     }
 
