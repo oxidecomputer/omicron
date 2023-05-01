@@ -473,12 +473,10 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
-                        let mut file =
-                            self.load_key_for_disk(&log, &disk).await;
-                        // TODO(AJS): load keys
+                        let file = self.load_key_for_disk(&log, &disk).await;
                         self.inner.storage.upsert_disk(disk).await;
-                        if let Some(file) = file {
-                            file.zero();
+                        if let Some(mut file) = file {
+                            let _ = file.zero().await;
                         }
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
