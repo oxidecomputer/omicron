@@ -239,11 +239,9 @@ impl StorageResources {
         disks
             .values()
             .filter_map(|disk| {
-                if let DiskWrapper::Real { disk, .. } = disk {
-                    if disk.variant() == variant {
-                        return Some(disk.zpool_name().clone());
-                    }
-                };
+                if disk.variant() == variant {
+                    return Some(disk.zpool_name().clone());
+                }
                 None
             })
             .collect()
