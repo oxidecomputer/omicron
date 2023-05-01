@@ -563,7 +563,8 @@ impl ServiceManager {
             .expect("Sled Agent should only start once");
 
         self.load_non_storage_services().await?;
-        // TODO: These will fail if the disks aren't attached.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+        // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
         //
