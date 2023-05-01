@@ -325,7 +325,15 @@ impl SledAgent {
         instance_id: Uuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         let instance =
-            self.instances.sim_get_cloned_object(&instance_id).await?;
+            match self.instances.sim_get_cloned_object(&instance_id).await {
+                Ok(instance) => instance,
+                Err(Error::ObjectNotFound { .. }) => {
+                    return Ok(InstanceUnregisterResponse {
+                        updated_runtime: None,
+                    })
+                }
+                Err(e) => return Err(e),
+            };
 
         self.detach_disks_from_instance(instance_id).await?;
         Ok(InstanceUnregisterResponse {

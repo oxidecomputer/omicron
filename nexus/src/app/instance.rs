@@ -35,6 +35,8 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use sled_agent_client::types::InstanceMigrationSourceParams;
+use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
 use sled_agent_client::types::InstanceStateRequested;
 use sled_agent_client::types::SourceNatConfig;
@@ -50,6 +52,11 @@ use tokio_tungstenite::WebSocketStream;
 use uuid::Uuid;
 
 const MAX_KEYS_PER_INSTANCE: u32 = 8;
+
+pub(crate) enum WriteBackUpdatedInstance {
+    WriteBack,
+    Drop,
+}
 
 impl super::Nexus {
     pub fn instance_lookup<'a>(
@@ -267,13 +274,29 @@ impl super::Nexus {
         instance_lookup: &lookup::Instance<'_>,
         params: params::InstanceMigrate,
     ) -> UpdateResult<db::model::Instance> {
-        let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_instance, db_instance) =
+            instance_lookup.fetch_for(authz::Action::Modify).await?;
+
+        if db_instance.runtime().state.0 != InstanceState::Running {
+            return Err(Error::invalid_request(
+                "instance must be running before it can migrate",
+            ));
+        }
+
+        if db_instance.runtime().sled_id == params.dst_sled_id {
+            return Err(Error::invalid_request(
+                "instance is already running on destination sled",
+            ));
+        }
+
+        if db_instance.runtime().migration_id.is_some() {
+            return Err(Error::unavail("instance is already migrating"));
+        }
 
         // Kick off the migration saga
         let saga_params = sagas::instance_migrate::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            instance_id: authz_instance.id(),
+            instance: db_instance,
             migrate_params: params,
         };
         self.execute_saga::<sagas::instance_migrate::SagaInstanceMigrate>(
@@ -287,39 +310,107 @@ impl super::Nexus {
         self.db_datastore.instance_refetch(opctx, &authz_instance).await
     }
 
-    /// Idempotently place the instance in a 'Migrating' state.
-    pub async fn instance_start_migrate(
+    /// Attempts to set the migration IDs for the supplied instance via the
+    /// sled specified in `db_instance`.
+    ///
+    /// The caller is assumed to have fetched the current instance record from
+    /// the DB and verified that the record has no migration IDs.
+    ///
+    /// Returns `Ok` and the updated instance record if this call successfully
+    /// updated the instance with the sled agent and that update was
+    /// successfully reflected into CRDB. Returns `Err` with an appropriate
+    /// error otherwise.
+    ///
+    /// # Panics
+    ///
+    /// Asserts that `db_instance` has no migration ID or destination Propolis
+    /// ID set.
+    pub async fn instance_set_migration_ids(
         &self,
-        _opctx: &OpContext,
-        _instance_id: Uuid,
-        _migration_id: Uuid,
-        _dst_propolis_id: Uuid,
+        opctx: &OpContext,
+        instance_id: Uuid,
+        db_instance: &db::model::Instance,
+        migration_params: InstanceMigrationSourceParams,
     ) -> UpdateResult<db::model::Instance> {
-        todo!("Migration endpoint not yet implemented in sled agent");
+        assert!(db_instance.runtime().migration_id.is_none());
+        assert!(db_instance.runtime().dst_propolis_id.is_none());
 
-        /*
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(instance_id)
-                .fetch()
-                .await
-                .unwrap();
-        let requested = InstanceRuntimeStateRequested {
-            run_state: InstanceStateRequested::Migrating,
-            migration_params: Some(InstanceRuntimeStateMigrateParams {
-                migration_id,
-                dst_propolis_id,
-            }),
-        };
-        self.instance_set_runtime(
-            opctx,
-            &authz_instance,
-            &db_instance,
-            requested,
-        )
-        .await?;
-        self.db_datastore.instance_refetch(opctx, &authz_instance).await
-        */
+        let (.., authz_instance) = LookupPath::new(opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::Modify)
+            .await?;
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let instance_put_result = sa
+            .instance_put_migration_ids(
+                &instance_id,
+                &InstancePutMigrationIdsBody {
+                    old_runtime: db_instance.runtime().clone().into(),
+                    migration_params: Some(migration_params),
+                },
+            )
+            .await
+            .map(|res| Some(res.into_inner()));
+
+        // Write the updated instance runtime state back to CRDB. If this
+        // outright fails, this operation fails. If the operation nominally
+        // succeeds but nothing was updated, this action is outdated and the
+        // caller should not proceed with migration.
+        let updated = self
+            .handle_instance_put_result(&db_instance, instance_put_result)
+            .await?;
+
+        if updated {
+            Ok(self
+                .db_datastore
+                .instance_refetch(opctx, &authz_instance)
+                .await?)
+        } else {
+            Err(Error::conflict(
+                "instance is already migrating, or underwent an operation that \
+                 prevented this migration from proceeding"
+            ))
+        }
+    }
+
+    /// Attempts to clear the migration IDs for the supplied instance via the
+    /// sled specified in `db_instance`.
+    ///
+    /// The supplied instance record must contain valid migration IDs.
+    ///
+    /// Returns `Ok` if sled agent accepted the request to clear migration IDs
+    /// and the resulting attempt to write instance runtime state back to CRDB
+    /// succeeded. This routine returns `Ok` even if the update was not actually
+    /// applied (due to a separate generation number change).
+    ///
+    /// # Panics
+    ///
+    /// Asserts that `db_instance` has a migration ID and destination Propolis
+    /// ID set.
+    pub async fn instance_clear_migration_ids(
+        &self,
+        instance_id: Uuid,
+        db_instance: &db::model::Instance,
+    ) -> Result<(), Error> {
+        assert!(db_instance.runtime().migration_id.is_some());
+        assert!(db_instance.runtime().dst_propolis_id.is_some());
+
+        let sa = self.instance_sled(&db_instance).await?;
+        let instance_put_result = sa
+            .instance_put_migration_ids(
+                &instance_id,
+                &InstancePutMigrationIdsBody {
+                    old_runtime: db_instance.runtime().clone().into(),
+                    migration_params: None,
+                },
+            )
+            .await
+            .map(|res| Some(res.into_inner()));
+
+        self.handle_instance_put_result(&db_instance, instance_put_result)
+            .await?;
+
+        Ok(())
     }
 
     /// Reboot the specified instance.
@@ -402,6 +493,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: &authz::Instance,
         db_instance: &db::model::Instance,
+        write_back: WriteBackUpdatedInstance,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         let sa = self.instance_sled(&db_instance).await?;
@@ -409,7 +501,17 @@ impl super::Nexus {
             .instance_unregister(&db_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime);
-        self.handle_instance_put_result(db_instance, result).await.map(|_| ())
+
+        match write_back {
+            WriteBackUpdatedInstance::WriteBack => self
+                .handle_instance_put_result(db_instance, result)
+                .await
+                .map(|_| ()),
+            WriteBackUpdatedInstance::Drop => {
+                result?;
+                Ok(())
+            }
+        }
     }
 
     /// Returns the SledAgentClient for the host where this Instance is running.
@@ -726,9 +828,11 @@ impl super::Nexus {
                 // what to do with status codes.
                 error!(self.log, "saw {} from instance_put!", e);
 
-                // this is unfortunate, but sled_agent_client::Error doesn't
-                // implement Copy, and can't be match'ed upon below without this
-                // line.
+                // Convert to the Omicron API error type.
+                //
+                // N.B. The match below assumes that this conversion will turn
+                //      any 400-level error status from sled agent into an
+                //      `Error::InvalidRequest`.
                 let e = e.into();
 
                 match &e {
@@ -887,6 +991,10 @@ impl super::Nexus {
         new_runtime_state: &nexus::InstanceRuntimeState,
     ) -> Result<(), Error> {
         let log = &self.log;
+
+        slog::debug!(log, "received new runtime state from sled agent";
+                     "instance_id" => %id,
+                     "runtime_state" => ?new_runtime_state);
 
         let result = self
             .db_datastore
