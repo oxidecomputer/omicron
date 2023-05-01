@@ -307,7 +307,7 @@ termios = "0.3"
 test-strategy = "0.2.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.27"
+tokio = "1.28"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.12"
 tokio-tungstenite = "0.18"
@@ -323,7 +323,7 @@ tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui = "0.19.0"
 update-engine = { path = "update-engine" }
-uuid = { version = "1.3.1", features = ["serde", "v4"] }
+uuid = { version = "1.3.2", features = ["serde", "v4"] }
 usdt = "0.3"
 vsss-rs = { version = "2.7", default-features = false, features = ["std"] }
 walkdir = "2.3"
