@@ -61,8 +61,6 @@ _exit_trap() {
 		banner "${z/oxz_/}"
 		pfexec svcs -xv -z "$z"
 		pfexec ptree -z "$z"
-		pfexec svcs -z "$z" -p
-		pfexec zlogin "$z" uptime
 		pfexec zlogin "$z" ipadm
 		pfexec zlogin "$z" netstat -rncva
 		pfexec zlogin "$z" netstat -anu
@@ -72,17 +70,6 @@ _exit_trap() {
 	exit $status
 }
 trap _exit_trap EXIT
-
-# Before we get too far, report the current status of zones and ZFS pools.
-zoneadm list -cv
-for z in $(zoneadm list -n); do
-	banner "${z/oxz_/}"
-	pfexec svcs -zp "$z"
-	pfexec zlogin "$z" uptime
-done
-zpool status
-zpool status -P
-zpool status -PL
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
