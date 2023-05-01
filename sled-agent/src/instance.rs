@@ -729,8 +729,8 @@ impl Instance {
             }
 
             return Err(Error::Transition(
-                omicron_common::api::external::Error::InvalidRequest {
-                    message: format!(
+                omicron_common::api::external::Error::Conflict {
+                    internal_message: format!(
                         "wrong Propolis ID generation: expected {}, got {}",
                         inner.state.current().propolis_gen,
                         old_runtime.propolis_gen

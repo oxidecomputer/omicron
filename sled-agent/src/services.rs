@@ -216,8 +216,8 @@ impl Config {
 }
 
 // The filename of the ledger, within the provided directory.
-const SERVICES_CONFIG_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
+const SERVICES_LEDGER_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
@@ -411,7 +411,7 @@ impl ServiceManager {
 
     async fn all_service_ledgers(&self) -> Vec<PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(SERVICES_CONFIG_FILENAME)];
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
         self.inner
             .storage
@@ -419,13 +419,13 @@ impl ServiceManager {
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(SERVICES_CONFIG_FILENAME))
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
             .collect()
     }
 
     async fn all_storage_service_ledgers(&self) -> Vec<PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(STORAGE_SERVICES_CONFIG_FILENAME)];
+            return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
         }
 
         self.inner
@@ -434,7 +434,7 @@ impl ServiceManager {
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter()
-            .map(|p| p.join(STORAGE_SERVICES_CONFIG_FILENAME))
+            .map(|p| p.join(STORAGE_SERVICES_LEDGER_FILENAME))
             .collect()
     }
 
@@ -561,7 +561,8 @@ impl ServiceManager {
             .expect("Sled Agent should only start once");
 
         self.load_non_storage_services().await?;
-        // TODO: These will fail if the disks aren't attached.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+        // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
         //
@@ -1336,13 +1337,13 @@ impl ServiceManager {
                     ));
                     // The filename of a half-completed config, in need of parameters supplied at
                     // runtime.
-                    const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+                    const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
                     // The filename of a completed config, merging the partial config with
                     // additional appended parameters known at runtime.
-                    const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
+                    const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
                     let partial_config_path =
-                        config_dir.join(PARTIAL_CONFIG_FILENAME);
-                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
+                        config_dir.join(PARTIAL_LEDGER_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
@@ -2710,10 +2711,10 @@ mod test {
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
-        // Next, delete the config. This means the service we just created will
+        // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
         std::fs::remove_file(
-            test_config.config_dir.path().join(SERVICES_CONFIG_FILENAME),
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
         )
         .unwrap();
 
