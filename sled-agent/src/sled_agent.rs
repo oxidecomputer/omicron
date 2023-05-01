@@ -119,10 +119,14 @@ impl From<Error> for dropshot::HttpError {
                                 }
                             }
                         }
-
+                        crate::instance::Error::Transition(omicron_error) => {
+                            // Preserve the status associated with the wrapped
+                            // Omicron error so that Nexus will see it in the
+                            // Progenitor client error it gets back.
+                            HttpError::from(omicron_error)
+                        }
                         e => HttpError::for_internal_error(e.to_string()),
                     },
-
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }

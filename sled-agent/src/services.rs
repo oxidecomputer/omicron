@@ -222,34 +222,20 @@ impl Config {
 }
 
 // The filename of ServiceManager's internal storage.
-const SERVICES_CONFIG_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
+const SERVICES_LEDGER_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
 
 // The default path to service configuration
 fn default_services_ledger_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(SERVICES_CONFIG_FILENAME)
+        .join(SERVICES_LEDGER_FILENAME)
 }
 
 // The default path to storage service configuration
 fn default_storage_services_ledger_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(STORAGE_SERVICES_CONFIG_FILENAME)
+        .join(STORAGE_SERVICES_LEDGER_FILENAME)
 }
-
-// TODO(ideas):
-// - "ServiceLedger"
-// - Manages the serializable "AllZoneRequests" object
-// - Constructor which reads from config location (kinda like
-// "read_from")
-// - ... Writer which *knows the type* to be serialized, so can direct it to the
-// appropriate output path.
-//
-// - TODO: later: Can also make the path writing safer, by...
-//  - ... TODO: Writing to both M.2s, basically using multiple output paths
-//  - ... TODO: Using a temporary file and renaming it to make the update atomic
-//  - ... TODO: Add a .json EXPECTORATE test for the format of "AllZoneRequests"
-//  - we need to be careful not to break compatibility in the future.
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
@@ -577,7 +563,8 @@ impl ServiceManager {
             .expect("Sled Agent should only start once");
 
         self.load_non_storage_services().await?;
-        // TODO: These will fail if the disks aren't attached.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+        // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
         //
@@ -1372,13 +1359,13 @@ impl ServiceManager {
                     ));
                     // The filename of a half-completed config, in need of parameters supplied at
                     // runtime.
-                    const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+                    const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
                     // The filename of a completed config, merging the partial config with
                     // additional appended parameters known at runtime.
-                    const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
+                    const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
                     let partial_config_path =
-                        config_dir.join(PARTIAL_CONFIG_FILENAME);
-                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
+                        config_dir.join(PARTIAL_LEDGER_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
@@ -2487,9 +2474,9 @@ mod test {
 
         fn make_config(&self) -> Config {
             let all_svcs_ledger_path =
-                self.config_dir.path().join(SERVICES_CONFIG_FILENAME);
+                self.config_dir.path().join(SERVICES_LEDGER_FILENAME);
             let storage_svcs_ledger_path =
-                self.config_dir.path().join(STORAGE_SERVICES_CONFIG_FILENAME);
+                self.config_dir.path().join(STORAGE_SERVICES_LEDGER_FILENAME);
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
