@@ -21,7 +21,6 @@ use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
 use illumos_utils::zfs::Keypath;
-use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -35,6 +34,7 @@ use omicron_common::backoff::{
 use sled_hardware::underlay;
 use sled_hardware::DiskVariant;
 use sled_hardware::HardwareManager;
+use sled_hardware::UnparsedDisk;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
@@ -362,23 +362,31 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
+    async fn load_key_for_disk(
+        &self,
+        log: &Logger,
+        disk: &UnparsedDisk,
+    ) -> Option<KeyFile> {
+        if disk.variant() == DiskVariant::U2 {
+            let keypath: Keypath = disk.identity().into();
+            info!(log, "Loading key into {keypath}");
+            match KeyFile::create(keypath.clone(), log).await {
+                Ok(file) => Some(file),
+                Err(e) => {
+                    // TODO(AJS): What do we actually want to do here?
+                    error!(log, "Error creating keyfile: {}: {}", keypath, e);
+                    panic!("keyfile creation error");
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     async fn load_keys_for_disks(&self, log: &Logger) -> Vec<KeyFile> {
         let mut files = vec![];
-        for disk in self.inner.hardware.disks() {
-            if disk.variant() == DiskVariant::U2 {
-                let keypath: Keypath = disk.identity().into();
-                info!(log, "Loading key into {keypath}");
-                let file = match KeyFile::create(keypath.clone(), log).await {
-                    Ok(file) => file,
-                    Err(e) => {
-                        // TODO(AJS): What do we actually want to do here?
-                        error!(
-                            log,
-                            "Error creating keyfile: {}: {}", keypath, e
-                        );
-                        panic!("keyfile creation error");
-                    }
-                };
+        for disk in self.inner.hardware.disks().iter() {
+            if let Some(file) = self.load_key_for_disk(log, disk).await {
                 files.push(file);
             }
         }
@@ -462,8 +470,13 @@ impl SledAgent {
                         }
                     }
                     HardwareUpdate::DiskAdded(disk) => {
+                        let mut file =
+                            self.load_key_for_disk(&log, &disk).await;
                         // TODO(AJS): load keys
                         self.inner.storage.upsert_disk(disk).await;
+                        if let Some(file) = file {
+                            file.zero();
+                        }
                     }
                     HardwareUpdate::DiskRemoved(disk) => {
                         self.inner.storage.delete_disk(disk).await;
