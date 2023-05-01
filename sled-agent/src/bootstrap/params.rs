@@ -21,7 +21,7 @@ pub enum BootstrapAddressDiscovery {
     /// Ignore all bootstrap addresses except our own.
     OnlyOurs,
     /// Ignore all bootstrap addresses except the following.
-    OnlyThese(HashSet<Ipv6Addr>),
+    OnlyThese { addrs: HashSet<Ipv6Addr> },
 }
 
 /// Configuration for the "rack setup service".
