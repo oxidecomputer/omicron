@@ -237,20 +237,6 @@ fn default_storage_services_ledger_path() -> PathBuf {
         .join(STORAGE_SERVICES_CONFIG_FILENAME)
 }
 
-// TODO(ideas):
-// - "ServiceLedger"
-// - Manages the serializable "AllZoneRequests" object
-// - Constructor which reads from config location (kinda like
-// "read_from")
-// - ... Writer which *knows the type* to be serialized, so can direct it to the
-// appropriate output path.
-//
-// - TODO: later: Can also make the path writing safer, by...
-//  - ... TODO: Writing to both M.2s, basically using multiple output paths
-//  - ... TODO: Using a temporary file and renaming it to make the update atomic
-//  - ... TODO: Add a .json EXPECTORATE test for the format of "AllZoneRequests"
-//  - we need to be careful not to break compatibility in the future.
-
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
