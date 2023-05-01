@@ -851,7 +851,7 @@ impl ServiceInner {
             BootstrapAddressDiscovery::OnlyOurs => {
                 HashSet::from([local_bootstrap_agent.our_address()])
             }
-            BootstrapAddressDiscovery::OnlyThese(peers) => peers.clone(),
+            BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
         let maybe_sled_plan = SledPlan::load(&self.log).await?;
         if let Some(plan) = &maybe_sled_plan {
