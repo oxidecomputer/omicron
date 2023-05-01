@@ -168,31 +168,61 @@ async fn get_base_url() -> String {
 }
 
 async fn build_authenticated_client() -> Result<oxide_client::Client> {
-    let reqwest_login_client = reqwest::ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60))
-        .build()?;
-
-    let base_url = get_base_url().await;
-    let oxide_login_client =
-        Client::new_with_client(&base_url, reqwest_login_client);
-
     let config = rss_config()?;
+    let base_url = get_base_url().await;
     let silo_name = config.recovery_silo.silo_name.as_str();
-    let username =
+    let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
             anyhow!("parsing configured recovery user name: {:?}", s)
         })?;
     // See the comment in the config file.
-    let password = "oxide".parse().unwrap();
+    let password: oxide_client::types::Password = "oxide".parse().unwrap();
 
-    let response = oxide_login_client
-        .login_local()
-        .silo_name(silo_name)
-        .body(UsernamePasswordCredentials { username, password })
-        .send()
-        .await
-        .context("logging in")?;
+    let reqwest_login_client = reqwest::ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
+        .build()?;
+    let oxide_login_client =
+        Client::new_with_client(&base_url, reqwest_login_client);
+
+    // By the time we get here, we generally would have successfully resolved
+    // Nexus's external IP address from the external DNS server.  So we'd
+    // expect Nexus to be up.  But that's not necessarily true: external DNS can
+    // be set up during rack initialization, before Nexus has opened its
+    // external listening socket.  This is arguably a bug, advertising a service
+    // before it's ready, but a pretty niche corner case (rack initialization)
+    // and anyway DNS is always best-effort.  The point is: let's retry a little
+    // while if we can't immediately connect.
+    let response = wait_for_condition(
+        || async {
+            oxide_login_client
+                .login_local()
+                .silo_name(silo_name)
+                .body(UsernamePasswordCredentials {
+                    username: username.clone(),
+                    password: password.clone(),
+                })
+                .send()
+                .await
+                .map_err(|e| match e {
+                    oxide_client::Error::CommunicationError(_) => {
+                        CondCheckError::NotYet
+                    }
+                    oxide_client::Error::InvalidRequest(_)
+                    | oxide_client::Error::ErrorResponse(_)
+                    | oxide_client::Error::InvalidResponsePayload(_)
+                    | oxide_client::Error::UnexpectedResponse(_) => {
+                        CondCheckError::Failed(
+                            anyhow::Error::new(e).context("logging in"),
+                        )
+                    }
+                })
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .context("logging in")?;
 
     let session_cookie = response
         .headers()
