@@ -225,6 +225,15 @@ impl StorageResources {
         self.all_zpools(DiskVariant::M2).await
     }
 
+    /// Returns all mountpoints within all M.2s for a particular dataset.
+    pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<PathBuf> {
+        let m2_zpools = self.all_m2_zpools().await;
+        m2_zpools
+            .iter()
+            .map(|zpool| zpool.dataset_mountpoint(dataset))
+            .collect()
+    }
+
     pub async fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
         let disks = self.disks.lock().await;
         disks
