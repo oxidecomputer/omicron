@@ -222,19 +222,19 @@ impl Config {
 }
 
 // The filename of ServiceManager's internal storage.
-const SERVICES_CONFIG_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_CONFIG_FILENAME: &str = "storage-services.toml";
+const SERVICES_LEDGER_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
 
 // The default path to service configuration
 fn default_services_ledger_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(SERVICES_CONFIG_FILENAME)
+        .join(SERVICES_LEDGER_FILENAME)
 }
 
 // The default path to storage service configuration
 fn default_storage_services_ledger_path() -> PathBuf {
     Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(STORAGE_SERVICES_CONFIG_FILENAME)
+        .join(STORAGE_SERVICES_LEDGER_FILENAME)
 }
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
@@ -1358,13 +1358,13 @@ impl ServiceManager {
                     ));
                     // The filename of a half-completed config, in need of parameters supplied at
                     // runtime.
-                    const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
+                    const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
                     // The filename of a completed config, merging the partial config with
                     // additional appended parameters known at runtime.
-                    const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
+                    const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
                     let partial_config_path =
-                        config_dir.join(PARTIAL_CONFIG_FILENAME);
-                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
+                        config_dir.join(PARTIAL_LEDGER_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
                         .map_err(|err| Error::io_path(&config_path, err))?;
@@ -2473,9 +2473,9 @@ mod test {
 
         fn make_config(&self) -> Config {
             let all_svcs_ledger_path =
-                self.config_dir.path().join(SERVICES_CONFIG_FILENAME);
+                self.config_dir.path().join(SERVICES_LEDGER_FILENAME);
             let storage_svcs_ledger_path =
-                self.config_dir.path().join(STORAGE_SERVICES_CONFIG_FILENAME);
+                self.config_dir.path().join(STORAGE_SERVICES_LEDGER_FILENAME);
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
