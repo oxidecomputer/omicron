@@ -16,7 +16,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// Input Key Material
 ///
 /// This should never be used directly, and always wrapped in a `Secret<Ikm>`
-/// upon construction.
+/// upon construction. We sparate the two types, because a Secret must contain `Zeroizable` data,
+/// and a `Box<[u8; 32]` is not zeroizable on its own.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Ikm(pub Box<[u8; 32]>);
 
@@ -115,7 +116,7 @@ impl<S: SecretRetriever> KeyManager<S> {
         // Unwrap is safe because we know our buffer is large enough to hold the output key
         prk.expand_multi_info(
             &[
-                b"U2-zfs-",
+                b"U.2-zfs-",
                 disk_id.vendor.as_bytes(),
                 disk_id.model.as_bytes(),
                 disk_id.serial.as_bytes(),
@@ -133,8 +134,11 @@ impl<S: SecretRetriever> KeyManager<S> {
     }
 
     /// Clear the PRKs
+    ///
+    /// TODO(AJS): From what I can tell, the internal PRKs inside
+    /// Hkdf instances are not zeroized, and so will remain in memory
+    /// after drop. We should fix this one way or another.
     pub fn clear(&mut self) {
-        // PRKs should be zeroized on drop
         self.prks = BTreeMap::new();
     }
 
@@ -175,17 +179,17 @@ pub trait SecretRetriever {
     ///
     /// If the requested epoch is not the latest one, then return the secret for
     /// the latest epoch, along with the secret for the requested epoch so that
-    /// the key can be rotated. Note that is is not necessary for the latest
-    /// epoch to be exactly 1 greater than the requested epoch. Multiple epochs
-    /// can pass, without a reconfiguration taking place due to a node being
-    /// temporarily offline.
+    /// the key can be rotated. Note that it is not necessary for the latest
+    /// epoch to be exactly 1 epoch greater than the requested epoch. Multiple
+    /// epochs can pass, without a reconfiguration taking place due to a node
+    /// being temporarily offline.
     ///
     /// Return an error if its not possible to recover the old secret given the
     /// latest secret.
     ///
     /// TODO(AJS): Ensure that we store the epoch of the actual key protecting
-    /// data in a ZFS property for each drive. This will allow us to retrieve the correct
-    /// keys for rotation and as needed.
+    /// data in a ZFS property for each drive. This will allow us to retrieve
+    /// the correct keys when needed.
 
     async fn get(
         &self,
