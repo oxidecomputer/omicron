@@ -96,9 +96,9 @@ impl WriteDestination {
                     info!(
                         log, "found target M.2 disk";
                         "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
+                        "path" => disk.devfs_path().as_str(),
                         "slot" => disk.slot(),
-                        "boot_image_path" => path.display(),
+                        "boot_image_path" => path.as_str(),
                         "zpool" => %disk.zpool_name(),
                     );
 
@@ -106,8 +106,7 @@ impl WriteDestination {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
                                 create_host_phase_2: false,
-                                host_phase_2: Utf8PathBuf::try_from(path)
-                                    .context("non-UTF8 drive path")?,
+                                host_phase_2: path,
                                 // TODO-completeness Fix this once we know how
                                 // to write the control plane image to this
                                 // disk's zpool.
@@ -118,9 +117,9 @@ impl WriteDestination {
                             warn!(
                                 log, "skipping duplicate M.2 drive entry";
                                 "identity" => ?disk.identity(),
-                                "path" => disk.devfs_path().display(),
+                                "path" => disk.devfs_path().as_str(),
                                 "slot" => disk.slot(),
-                                "boot_image_path" => path.display(),
+                                "boot_image_path" => path.as_str(),
                                 "zpool" => %disk.zpool_name(),
                             );
                             continue;
@@ -131,7 +130,7 @@ impl WriteDestination {
                     warn!(
                         log, "found M.2 disk but failed to find boot image path";
                         "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
+                        "path" => disk.devfs_path().as_str(),
                         "slot" => disk.slot(),
                         "boot_image_path_err" => %err,
                         "zpool" => %disk.zpool_name(),

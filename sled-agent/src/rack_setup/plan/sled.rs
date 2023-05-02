@@ -10,17 +10,18 @@ use crate::bootstrap::{
     trust_quorum::{RackSecret, ShareDistribution},
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
-fn rss_sled_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-sled-plan.toml")
+fn rss_sled_plan_path() -> Utf8PathBuf {
+    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("rss-sled-plan.toml")
 }
 
 pub fn generate_rack_secret<'a>(
@@ -75,7 +76,7 @@ pub enum PlanError {
     },
 
     #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to split rack secret: {0:?}")]
     SplitRackSecret(vsss_rs::Error),

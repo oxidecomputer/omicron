@@ -34,6 +34,7 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageManager;
+use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use illumos_utils::addrobj::AddrObject;
@@ -81,7 +82,6 @@ use std::collections::HashSet;
 use std::iter;
 use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -95,10 +95,10 @@ use uuid::Uuid;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize { path: PathBuf, err: toml::ser::Error },
+    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
 
     #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: PathBuf, err: toml::de::Error },
+    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -182,8 +182,8 @@ impl Error {
     fn io(message: &str, err: std::io::Error) -> Self {
         Self::Io { message: message.to_string(), err }
     }
-    fn io_path(path: &Path, err: std::io::Error) -> Self {
-        Self::Io { message: format!("Error accessing {}", path.display()), err }
+    fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {path}"), err }
     }
 }
 
@@ -251,7 +251,7 @@ impl Ledgerable for AllZoneRequests {
 struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
-    root: PathBuf,
+    root: Utf8PathBuf,
 }
 
 struct Task {
@@ -321,7 +321,7 @@ pub struct ServiceManagerInner {
     // need this interface to provision Zone filesystems on explicit U.2s,
     // rather than simply placing them on the ramdisk.
     storage: StorageManager,
-    ledger_directory_override: OnceCell<PathBuf>,
+    ledger_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -403,7 +403,7 @@ impl ServiceManager {
     }
 
     #[cfg(test)]
-    async fn override_ledger_directory(&self, path: PathBuf) {
+    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
     }
 
@@ -411,7 +411,7 @@ impl ServiceManager {
         self.inner.switch_zone_bootstrap_address
     }
 
-    async fn all_service_ledgers(&self) -> Vec<PathBuf> {
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(SERVICES_LEDGER_FILENAME)];
         }
@@ -425,7 +425,7 @@ impl ServiceManager {
             .collect()
     }
 
-    async fn all_storage_service_ledgers(&self) -> Vec<PathBuf> {
+    async fn all_storage_service_ledgers(&self) -> Vec<Utf8PathBuf> {
         if let Some(dir) = self.inner.ledger_directory_override.get() {
             return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
         }
@@ -614,7 +614,7 @@ impl ServiceManager {
         }
 
         for dev in &devices {
-            if !Path::new(dev).exists() {
+            if !Utf8Path::new(dev).exists() {
                 return Err(Error::MissingDevice { device: dev.to_string() });
             }
         }
@@ -869,7 +869,7 @@ impl ServiceManager {
         let service = DnsClient {};
         let smfh = SmfHelper::new(&running_zone, &service);
 
-        let etc = PathBuf::from(running_zone.root()).join("etc");
+        let etc = Utf8PathBuf::from(running_zone.root()).join("etc");
         let resolv_conf = etc.join("resolv.conf");
         let nsswitch_conf = etc.join("nsswitch.conf");
         let nsswitch_dns = etc.join("nsswitch.dns");
@@ -887,7 +887,7 @@ impl ServiceManager {
                 config.push_str(&format!("nameserver {s}\n"));
             }
 
-            debug!(self.inner.log, "creating {}", resolv_conf.display());
+            debug!(self.inner.log, "creating {resolv_conf}");
             tokio::fs::write(&resolv_conf, config)
                 .await
                 .map_err(|err| Error::io_path(&resolv_conf, err))?;
@@ -1333,7 +1333,7 @@ impl ServiceManager {
                     };
 
                     // Copy the partial config file to the expected location.
-                    let config_dir = PathBuf::from(format!(
+                    let config_dir = Utf8PathBuf::from(format!(
                         "{}/var/svc/manifest/site/nexus",
                         running_zone.root()
                     ));
@@ -1829,7 +1829,7 @@ impl ServiceManager {
 
         let mut zone_requests = AllZoneRequests::default();
         for zone in new_zone_requests.into_iter() {
-            let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
             zone_requests.requests.push(ZoneRequest { zone, root });
         }
 
@@ -2285,7 +2285,7 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
         *sled_zone =
@@ -2466,12 +2466,12 @@ mod test {
     }
 
     struct TestConfig {
-        config_dir: tempfile::TempDir,
+        config_dir: camino_tempfile::Utf8TempDir,
     }
 
     impl TestConfig {
         async fn new() -> Self {
-            let config_dir = tempfile::TempDir::new().unwrap();
+            let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
             Self { config_dir }
         }
 

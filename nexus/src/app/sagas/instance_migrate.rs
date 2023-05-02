@@ -475,6 +475,7 @@ mod tests {
         app::{saga::create_saga_dag, sagas::instance_create},
         Nexus, TestInterfaces as _,
     };
+    use camino::Utf8Path;
 
     use dropshot::test_util::ClientTestContext;
     use http::{method::Method, StatusCode};
@@ -518,7 +519,7 @@ mod tests {
                 cptestctx.server.get_http_server_internal_address().await;
 
             info!(&cptestctx.logctx.log, "Adding simulated sled"; "sled_id" => %sa_id);
-            let update_dir = std::path::Path::new("/should/be/unused");
+            let update_dir = Utf8Path::new("/should/be/unused");
             let sa = start_sled_agent(
                 log,
                 addr,

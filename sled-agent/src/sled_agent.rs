@@ -17,6 +17,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
+use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
@@ -34,7 +35,6 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -265,8 +265,9 @@ impl SledAgent {
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
-        let update_config =
-            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
+        let update_config = ConfigUpdates {
+            zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
+        };
         let updates = UpdateManager::new(update_config);
 
         let svc_config = services::Config::new(

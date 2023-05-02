@@ -5,6 +5,7 @@
 //! Interfaces for working with sled agent configuration
 
 use crate::updates::ConfigUpdates;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -14,7 +15,6 @@ use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
-use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -69,13 +69,13 @@ pub struct Config {
 pub enum ConfigError {
     #[error("Failed to read config from {path}: {err}")]
     Io {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
     #[error("Failed to parse config from {path}: {err}")]
     Parse {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::de::Error,
     },
@@ -86,7 +86,7 @@ pub enum ConfigError {
 }
 
 impl Config {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
@@ -124,7 +124,7 @@ mod test {
     fn test_smf_configs() {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
-        let smf = PathBuf::from(manifest).join("../smf/sled-agent");
+        let smf = Utf8PathBuf::from(manifest).join("../smf/sled-agent");
 
         let mut configs_seen = 0;
         for variant in std::fs::read_dir(smf).unwrap() {
@@ -133,11 +133,11 @@ mod test {
                 for entry in std::fs::read_dir(variant.path()).unwrap() {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
-                        Config::from_file(entry.path()).unwrap_or_else(|_| {
-                            panic!(
-                                "Failed to parse config {}",
-                                entry.path().display()
-                            )
+                        let path = entry.path();
+                        let utf8_path: &Utf8Path =
+                            path.as_path().try_into().unwrap();
+                        Config::from_file(&utf8_path).unwrap_or_else(|_| {
+                            panic!("Failed to parse config {utf8_path}")
                         });
                         configs_seen += 1;
                     }
