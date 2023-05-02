@@ -6,12 +6,10 @@
 
 use super::trust_quorum::SerializableShareDistribution;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
-use omicron_common::api::external::MacAddr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_with::serde_as;
 use std::borrow::Cow;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
 /// Configuration for the "rack setup service".
@@ -30,9 +28,6 @@ pub struct RackInitializeRequest {
     /// this is the typical case for single-server test/development.
     pub rack_secret_threshold: usize,
 
-    /// Internet gateway information.
-    pub gateway: Option<Gateway>,
-
     /// The external NTP server addresses.
     pub ntp_servers: Vec<String>,
 
@@ -45,20 +40,6 @@ pub struct RackInitializeRequest {
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
 }
 
-/// Information about the internet gateway used for externally-facing services.
-#[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
-pub struct Gateway {
-    /// IP address of the Internet gateway, which is particularly
-    /// relevant for external-facing services (such as Nexus).
-    pub address: Option<Ipv4Addr>,
-
-    /// MAC address of the internet gateway above. This is used to provide
-    /// external connectivity into guests, by allowing OPTE to forward traffic
-    /// destined for the broader network to the gateway.
-    pub mac: MacAddr,
-}
-
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SledAgentRequest {
@@ -67,15 +48,6 @@ pub struct SledAgentRequest {
 
     /// Uuid of the rack to which this sled agent belongs.
     pub rack_id: Uuid,
-
-    /// Information about internet gateway to use
-    // NOTE: This information is currently being configured and sent from RSS,
-    // but it contains dynamic information that could plausibly change during
-    // the duration of the sled's lifetime.
-    //
-    // Longer-term, it probably makes sense to store this in CRDB and transfer
-    // it to Sled Agent as part of the request to launch Nexus.
-    pub gateway: Option<Gateway>,
 
     /// The external NTP servers to use
     pub ntp_servers: Vec<String>,
@@ -192,16 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_gateway() {
-        let _: Gateway = toml::from_str(
-            r#"
-            mac = "18:c0:4d:d:a0:2a"
-        "#,
-        )
-        .unwrap();
-    }
-
-    #[test]
     fn json_serialization_round_trips() {
         let secret = RackSecret::new();
         let (mut shares, verifier) = secret.split(2, 4).unwrap();
@@ -212,7 +174,6 @@ mod tests {
                 Cow::Owned(SledAgentRequest {
                     id: Uuid::new_v4(),
                     rack_id: Uuid::new_v4(),
-                    gateway: None,
                     ntp_servers: vec![String::from("test.pool.example.com")],
                     dns_servers: vec![String::from("1.1.1.1")],
                     subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
