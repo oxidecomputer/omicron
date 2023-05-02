@@ -1,12 +1,12 @@
 use crate::helpers::generate_name;
 use anyhow::{Context as _, Result};
+use camino::Utf8Path;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use reqwest::Url;
 use std::net::SocketAddr;
-use std::path::Path;
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -86,7 +86,7 @@ pub fn nexus_addr() -> SocketAddr {
 
     // If we can find config-rss.toml, grab the second address from the
     // configured services IP pool.
-    let rss_config_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let rss_config_path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../smf/sled-agent/non-gimlet/config-rss.toml");
     if rss_config_path.exists() {
         if let Ok(config) = SetupServiceConfig::from_file(rss_config_path) {
