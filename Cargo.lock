@@ -3999,6 +3999,7 @@ dependencies = [
  "hyper",
  "internal-dns",
  "nexus-db-queries",
+ "nexus-passwords",
  "nexus-test-interface",
  "nexus-types",
  "omicron-common 0.1.0",

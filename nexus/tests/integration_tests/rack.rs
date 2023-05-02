@@ -11,6 +11,7 @@ use nexus_test_utils_macros::nexus_test;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::views::Rack;
 use omicron_nexus::TestInterfaces;
+use nexus_test_utils::TEST_SUITE_PASSWORD;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -60,7 +61,7 @@ async fn test_rack_initialization(cptestctx: &ControlPlaneTestContext) {
     // login.
     let login_url = format!("/login/{}/local", cptestctx.silo_name);
     let username = cptestctx.user_name.clone();
-    let password: params::Password = "oxide".parse().unwrap();
+    let password: params::Password = TEST_SUITE_PASSWORD.parse().unwrap();
     let _ = RequestBuilder::new(&client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
         .expect_status(Some(StatusCode::SEE_OTHER))

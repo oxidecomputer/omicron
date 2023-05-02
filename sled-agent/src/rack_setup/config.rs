@@ -61,8 +61,8 @@ mod test {
             recovery_silo: RecoverySiloConfig {
                 silo_name: "test-silo".parse().unwrap(),
                 user_name: "dummy".parse().unwrap(),
-                // This is the hash for the password "oxide".  It doesn't
-                // matter; it's just a dummy value here.
+                // This is a hash for the password "oxide".  It doesn't matter,
+                // though; it's not used.
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
                     RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/\
                     ek3GL0el/oProgTwWpHJZ8lsQQoY"

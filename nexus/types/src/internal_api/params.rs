@@ -264,6 +264,12 @@ pub struct RecoverySiloConfig {
 #[serde(try_from = "String")]
 pub struct PasswordHash(nexus_passwords::PasswordHashString);
 
+impl From<nexus_passwords::PasswordHashString> for PasswordHash {
+    fn from(value: nexus_passwords::PasswordHashString) -> Self {
+        PasswordHash(value)
+    }
+}
+
 impl From<PasswordHash> for nexus_passwords::PasswordHashString {
     fn from(value: PasswordHash) -> Self {
         value.0

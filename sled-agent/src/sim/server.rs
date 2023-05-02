@@ -299,9 +299,14 @@ impl Server {
         let recovery_silo = NexusTypes::RecoverySiloConfig {
             silo_name: "demo-silo".parse().unwrap(),
             user_name: "demo-privileged".parse().unwrap(),
-            // The demo setup's password is "oxide".  This is obviously only
-            // intended for transient deployments in development with no
-            // sensitive data.
+            // The following is a hash for the password "oxide".  This is
+            // (obviously) only intended for transient deployments in
+            // development with no sensitive data or resources.  You can change
+            // this value to any other supported hash.  The only thing that
+            // needs to be changed with this hash are the instructions given to
+            // individuals running this program who then want to log in as this
+            // user.  For more on what's supported, see the API docs for this
+            // type and the specific constraints in the nexus-passwords crate.
             user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
             RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
                 .parse()
