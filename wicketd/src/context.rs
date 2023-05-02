@@ -7,6 +7,7 @@
 use crate::artifacts::WicketdArtifactStore;
 use crate::update_tracker::UpdateTracker;
 use crate::MgsHandle;
+use sled_hardware::Baseboard;
 
 /// Shared state used by API handlers
 pub struct ServerContext {
@@ -14,4 +15,5 @@ pub struct ServerContext {
     pub mgs_client: gateway_client::Client,
     pub(crate) artifact_store: WicketdArtifactStore,
     pub(crate) update_tracker: UpdateTracker,
+    pub(crate) baseboard: Option<Baseboard>,
 }
