@@ -254,6 +254,11 @@ mod tests {
         let key = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
         assert_eq!(key.epoch, epoch);
 
+        // Key derivation is deterministic based on disk_id and loaded secrets
+        let key2 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+        assert_eq!(key.epoch, key2.epoch);
+        assert_eq!(key.key.expose_secret().0, key2.key.expose_secret().0);
+
         // There is no secret for epoch 1
         let epoch = 1;
         assert!(km.disk_encryption_key(epoch, &disk_id).await.is_err());
@@ -281,5 +286,25 @@ mod tests {
         assert_eq!(key1.epoch, epoch);
         assert_eq!(key2.epoch, epoch);
         assert_ne!(key1.key.expose_secret().0, key2.key.expose_secret().0);
+    }
+
+    #[tokio::test]
+    async fn different_ikm_produces_different_keys() {
+        let mut retriever = TestSecretRetriever::new();
+        retriever.insert(1, [1u8; 32]);
+
+        let mut km = KeyManager::new(retriever);
+        km.load_latest_secret().await.unwrap();
+        let disk_id = DiskIdentity {
+            vendor: "a".to_string(),
+            model: "b".to_string(),
+            serial: "c".to_string(),
+        };
+        let epoch = 0;
+        let key0 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+
+        let epoch = 1;
+        let key1 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+        assert_ne!(key0.key.expose_secret().0, key1.key.expose_secret().0);
     }
 }
