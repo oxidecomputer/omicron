@@ -113,6 +113,49 @@
       }
     },
     "schemas": {
+      "BootstrapAddressDiscovery": {
+        "oneOf": [
+          {
+            "description": "Ignore all bootstrap addresses except our own.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "only_ours"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Ignore all bootstrap addresses except the following.",
+            "type": "object",
+            "properties": {
+              "addrs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ipv6"
+                },
+                "uniqueItems": true
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "only_these"
+                ]
+              }
+            },
+            "required": [
+              "addrs",
+              "type"
+            ]
+          }
+        ]
+      },
       "Component": {
         "type": "object",
         "properties": {
@@ -207,6 +250,14 @@
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
         "properties": {
+          "bootstrap_discovery": {
+            "description": "Describes how bootstrap addresses should be collected during RSS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BootstrapAddressDiscovery"
+              }
+            ]
+          },
           "dns_servers": {
             "description": "The external DNS server addresses.",
             "type": "array",
@@ -240,6 +291,7 @@
           }
         },
         "required": [
+          "bootstrap_discovery",
           "dns_servers",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
