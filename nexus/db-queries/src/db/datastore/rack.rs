@@ -658,8 +658,6 @@ mod test {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
     }
 
-    /// returns a
-
     #[tokio::test]
     async fn rack_set_initialized_empty() {
         let logctx = dev::test_setup_log("rack_set_initialized_empty");
