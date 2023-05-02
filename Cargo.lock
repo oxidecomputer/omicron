@@ -3411,6 +3411,7 @@ dependencies = [
  "sha3",
  "sled-hardware",
  "thiserror",
+ "tokio",
  "zeroize",
 ]
 

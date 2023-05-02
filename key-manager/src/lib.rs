@@ -34,15 +34,6 @@ impl VersionedIkm {
     }
 }
 
-/// A derived PRK for a given rack reconfiguration epoch
-struct VersionedPrk {
-    pub epoch: u64,
-
-    /// The wrapper around a pseudo-random key(PRK) created via HKDF-Extract.
-    /// This key is used to derive application level keys via HKDF-Expand
-    pub prk: Hkdf<Sha3_256>,
-}
-
 /// An error returned by the [`KeyManager`]
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -110,7 +101,7 @@ impl<S: SecretRetriever> KeyManager<S> {
     pub async fn disk_encryption_key(
         &mut self,
         epoch: u64,
-        disk_id: DiskIdentity,
+        disk_id: &DiskIdentity,
     ) -> Result<VersionedAes256GcmDiskEncryptionKey, Error> {
         let prk = if let Some(prk) = self.prks.get(&epoch) {
             prk
@@ -134,6 +125,11 @@ impl<S: SecretRetriever> KeyManager<S> {
         .unwrap();
 
         Ok(VersionedAes256GcmDiskEncryptionKey { epoch, key: Secret::new(key) })
+    }
+
+    /// Return the epochs for all secrets which are loaded
+    pub fn loaded_secrets(&self) -> Vec<u64> {
+        self.prks.keys().copied().collect()
     }
 
     /// Clear the PRKs
@@ -197,7 +193,7 @@ pub trait SecretRetriever {
     ) -> Result<SecretState, SecretRetrieverError>;
 }
 
-//#[cfg(tests)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
@@ -243,5 +239,47 @@ mod tests {
                 Ok(SecretState::Current(ikm))
             }
         }
+    }
+
+    #[tokio::test]
+    async fn disk_encryption_key_epoch_0() {
+        let mut km = KeyManager::new(TestSecretRetriever::new());
+        km.load_latest_secret().await.unwrap();
+        let disk_id = DiskIdentity {
+            vendor: "a".to_string(),
+            model: "b".to_string(),
+            serial: "c".to_string(),
+        };
+        let epoch = 0;
+        let key = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+        assert_eq!(key.epoch, epoch);
+
+        // There is no secret for epoch 1
+        let epoch = 1;
+        assert!(km.disk_encryption_key(epoch, &disk_id).await.is_err());
+        assert_eq!(vec![0], km.loaded_secrets());
+    }
+
+    #[tokio::test]
+    async fn different_disks_produce_different_keys() {
+        let mut km = KeyManager::new(TestSecretRetriever::new());
+        km.load_latest_secret().await.unwrap();
+        let id_1 = DiskIdentity {
+            vendor: "a".to_string(),
+            model: "b".to_string(),
+            serial: "c".to_string(),
+        };
+        let id_2 = DiskIdentity {
+            vendor: "a".to_string(),
+            model: "b".to_string(),
+            serial: "d".to_string(),
+        };
+
+        let epoch = 0;
+        let key1 = km.disk_encryption_key(epoch, &id_1).await.unwrap();
+        let key2 = km.disk_encryption_key(epoch, &id_2).await.unwrap();
+        assert_eq!(key1.epoch, epoch);
+        assert_eq!(key2.epoch, epoch);
+        assert_ne!(key1.key.expose_secret().0, key2.key.expose_secret().0);
     }
 }
