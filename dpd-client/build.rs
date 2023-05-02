@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         })?
     };
 
-    let content = progenitor::Generator::new(
+    let code = progenitor::Generator::new(
         progenitor::GenerationSettings::new()
             .with_inner_type(quote!(ClientState))
             .with_pre_hook(quote! {
@@ -86,9 +86,13 @@ fn main() -> Result<()> {
                 }
             }),
     )
-    .generate_text(&spec)
+    .generate_tokens(&spec)
     .with_context(|| {
         format!("failed to generate progenitor client from {local_path}")
+    })?;
+
+    let content = rustfmt_wrapper::rustfmt(code).with_context(|| {
+        format!("rustfmt failed on progenitor code from {local_path}")
     })?;
 
     let out_file =
