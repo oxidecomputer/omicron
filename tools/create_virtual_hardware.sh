@@ -138,21 +138,7 @@ function enable_softnpu {
     success "softnpu started"
 }
 
-function ensure_ext_ip_hack_disabled {
-    grep "ext_ip_hack = 1;" /kernel/drv/xde.conf && {
-       sed -i 's/ext_ip_hack = 1;/ext_ip_hack = 0;/g' /kernel/drv/xde.conf
-       update_drv xde
-    }
-
-    grep "ext_ip_hack = 0;" /kernel/drv/xde.conf || {
-        echo "failed to disable ext_ip_hack"
-        exit 1
-    }
-    success "ext_ip_hack disabled"
-}
-
 ensure_run_as_root
-ensure_ext_ip_hack_disabled
 ensure_zpools
 ensure_simulated_chelsios "$PHYSICAL_LINK"
 ensure_softnpu_zone
