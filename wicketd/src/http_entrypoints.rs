@@ -199,26 +199,49 @@ async fn post_start_update(
             .next(),
         GetInventoryResponse::Unavailable => None,
     };
+    let Some(sp_state) = sp_state else {
+        return Err(HttpError::for_bad_request(
+            None,
+            "cannot update target sled (no inventory state present)"
+                .into(),
+        ));
+    };
 
-    match sp_state {
-        Some(sp_state) => {
-            // If we have the state of the SP, are we allowed to update it?
-            if !rqctx.can_update_target_sp(target, &sp_state) {
+    // If we have the state of the SP, are we allowed to update it? We
+    // refuse to try to update our own sled.
+    match &rqctx.baseboard {
+        Some(baseboard) => {
+            if baseboard.identifier() == sp_state.serial_number
+                && baseboard.model() == sp_state.model
+                && baseboard.revision() == i64::from(sp_state.revision)
+            {
                 return Err(HttpError::for_bad_request(
                     None,
-                    "sleds cannot update themselves".into(),
+                    "cannot update sled where wicketd is running".into(),
                 ));
             }
         }
         None => {
-            return Err(HttpError::for_bad_request(
-                None,
-                "cannot update target sled (no inventory state present?)"
-                    .into(),
-            ));
+            // We don't know our own baseboard, which is a very
+            // questionable state to be in! For now, we will hard-code
+            // the possibly locations where we could be running:
+            // scrimlets can only be in cubbies 14 or 16, so we refuse
+            // to update either of those.
+            let target_is_scrimlet =
+                matches!((target.type_, target.slot), (SpType::Sled, 14 | 16));
+            if target_is_scrimlet {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "wicketd does not know its own baseboard details: \
+                     refusing to update either scrimlet"
+                        .into(),
+                ));
+            }
         }
     }
 
+    // All pre-flight update checks look OK: start the update.
+    //
     // Generate an ID for this update; the update tracker will send it to the
     // sled as part of the InstallinatorImageId, and installinator will send it
     // back to our artifact server with its progress reports.

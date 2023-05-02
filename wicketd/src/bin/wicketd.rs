@@ -85,9 +85,15 @@ async fn do_run() -> Result<(), CmdError> {
             mgs_address,
             baseboard,
         } => {
-            let baseboard = baseboard
-                .map(sled_hardware::Baseboard::from)
-                .unwrap_or_else(sled_hardware::Baseboard::unknown);
+            let mut baseboard = baseboard.map(sled_hardware::Baseboard::from);
+
+            // TODO-correctness `Baseboard::unknown()` is slated for removal
+            // after some refactoring in sled-agent, at which point we'll need a
+            // different way for sled-agent to tell us it doesn't know our
+            // baseboard.
+            if baseboard == Some(sled_hardware::Baseboard::unknown()) {
+                baseboard = None;
+            }
 
             let config = Config::from_file(&config_file_path).map_err(|e| {
                 CmdError::Failure(format!(

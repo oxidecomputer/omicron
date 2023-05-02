@@ -44,7 +44,7 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
-    pub baseboard: Baseboard,
+    pub baseboard: Option<Baseboard>,
 }
 
 pub struct Server {
