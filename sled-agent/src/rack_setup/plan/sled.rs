@@ -141,7 +141,6 @@ impl Plan {
                 SledAgentRequest {
                     id: Uuid::new_v4(),
                     subnet,
-                    gateway: config.gateway.clone(),
                     ntp_servers: config.ntp_servers.clone(),
                     dns_servers: config.dns_servers.clone(),
                     rack_id,
