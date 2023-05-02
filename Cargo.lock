@@ -3401,6 +3401,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "key-manager"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "hkdf",
+ "secrecy",
+ "sha3",
+ "sled-hardware",
+ "zeroize",
+]
+
+[[package]]
 name = "kstat-macro"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=1698c8b807670d5145f1b1ff5c50268470e0e50c#1698c8b807670d5145f1b1ff5c50268470e0e50c"
@@ -6637,6 +6650,15 @@ dependencies = [
  "generic-array",
  "pkcs8",
  "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "secrecy"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bd1c54ea06cfd2f6b63219704de0b9b4f72dcc2b8fdef820be6cd799780e91e"
+dependencies = [
  "zeroize",
 ]
 
