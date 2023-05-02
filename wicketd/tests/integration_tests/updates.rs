@@ -18,7 +18,13 @@ use omicron_common::{
 };
 use uuid::Uuid;
 use wicketd::RunningUpdateState;
-use wicketd_client::{types::UpdateComponent, StepEventKind};
+use wicketd_client::{
+    types::{
+        GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
+        UpdateComponent,
+    },
+    StepEventKind,
+};
 
 #[tokio::test]
 async fn test_updates() {
@@ -69,17 +75,46 @@ async fn test_updates() {
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter().collect();
     assert_eq!(expected_kinds, kinds, "all expected kinds present");
 
+    let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
+
+    // Ensure wicketd knows our target_sp (which is simulated) is online and
+    // available to update.
+    let resp = wicketd_testctx
+        .wicketd_client
+        .get_inventory(&GetInventoryParams { force_refresh: vec![target_sp] })
+        .await
+        .expect("failed to get inventory");
+    match resp.into_inner() {
+        GetInventoryResponse::Response { inventory, .. } => {
+            let mut found = false;
+            for sp in &inventory.sps {
+                if sp.id == target_sp {
+                    assert!(sp.state.is_some(), "no state for target SP");
+                    found = true;
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "did not find SP {target_sp:?} in inventory {inventory:?}"
+            );
+        }
+        GetInventoryResponse::Unavailable => {
+            panic!("wicketd inventory is unavailable")
+        }
+    }
+
     // Now, try starting the update on SP 0.
     wicketd_testctx
         .wicketd_client
-        .post_start_update(wicketd_client::types::SpType::Sled, 0)
+        .post_start_update(target_sp.type_, target_sp.slot)
         .await
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(wicketd_client::types::SpType::Sled, 0)
+            .get_update_sp(target_sp.type_, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();

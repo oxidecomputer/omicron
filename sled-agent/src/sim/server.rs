@@ -96,7 +96,7 @@ impl Server {
                         sa_address: sa_address.to_string(),
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
-                            identifier: String::from("Unknown"),
+                            identifier: format!("Simulated sled {}", config.id),
                             model: String::from("Unknown"),
                             revision: 0,
                         },
