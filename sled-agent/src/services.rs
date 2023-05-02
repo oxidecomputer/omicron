@@ -80,7 +80,7 @@ use slog::Logger;
 use std::collections::HashSet;
 use std::iter;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -209,9 +209,6 @@ pub struct Config {
     /// Identifies the revision of the sidecar to be used.
     pub sidecar_revision: String,
 
-    /// An optional internet gateway address for external services.
-    pub gateway_address: Option<Ipv4Addr>,
-
     // The path for the ServiceManager to store information about
     // all running services.
     all_svcs_ledger_path: PathBuf,
@@ -219,15 +216,10 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn new(
-        sled_id: Uuid,
-        sidecar_revision: String,
-        gateway_address: Option<Ipv4Addr>,
-    ) -> Self {
+    pub fn new(sled_id: Uuid, sidecar_revision: String) -> Self {
         Self {
             sled_id,
             sidecar_revision,
-            gateway_address,
             all_svcs_ledger_path: default_services_ledger_path(),
             storage_svcs_ledger_path: default_storage_services_ledger_path(),
         }
@@ -2379,7 +2371,6 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use macaddr::MacAddr6;
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -2519,7 +2510,6 @@ mod test {
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
-                gateway_address: None,
                 all_svcs_ledger_path,
                 storage_svcs_ledger_path,
             }
@@ -2553,7 +2543,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2599,7 +2588,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2648,7 +2636,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2685,7 +2672,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2730,7 +2716,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2769,7 +2754,6 @@ mod test {
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),

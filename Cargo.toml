@@ -159,7 +159,7 @@ dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main",
 either = "1.8.1"
 expectorate = "1.0.7"
 fatfs = "0.3.6"
-flate2 = "1.0.25"
+flate2 = "1.0.26"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
@@ -213,7 +213,7 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.8.3"
 oxide-client = { path = "oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "1698c8b807670d5145f1b1ff5c50268470e0e50c", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "3f92917953d4e2d2ee2792ce530cace2bd055127", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -221,7 +221,7 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "1698c8b807670d5145f1b1ff5c50268470e0e50c" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "3f92917953d4e2d2ee2792ce530cace2bd055127" }
 oso = "0.26"
 owo-colors = "3.5.0"
 oximeter = { path = "oximeter/oximeter" }
