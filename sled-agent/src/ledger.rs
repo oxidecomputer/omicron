@@ -281,7 +281,7 @@ mod test {
         drop(ledger);
 
         // Let's write again, but only using one of the two config dirs.
-        let mut ledger = Ledger::<Data>::new(&log, config_paths[..=1].to_vec())
+        let mut ledger = Ledger::<Data>::new(&log, config_paths[..1].to_vec())
             .await
             .expect("Failed to create ledger");
         ledger.data_mut().contents = "even newer contents".to_string();
