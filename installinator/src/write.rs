@@ -23,7 +23,7 @@ use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::{block_size_writer::BlockSizeWriter, hardware::Hardware};
+use crate::{block_size_writer::BlockSizeBufWriter, hardware::Hardware};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -527,7 +527,7 @@ struct BlockDeviceTransport;
 
 #[async_trait]
 impl WriteTransport for BlockDeviceTransport {
-    type W = BlockSizeWriter<tokio::fs::File>;
+    type W = BlockSizeBufWriter<tokio::fs::File>;
 
     async fn make_writer(
         &mut self,
@@ -580,7 +580,7 @@ impl WriteTransport for BlockDeviceTransport {
             });
         }
 
-        Ok(BlockSizeWriter::with_block_size(block_size as usize, f))
+        Ok(BlockSizeBufWriter::with_block_size(block_size as usize, f))
     }
 }
 

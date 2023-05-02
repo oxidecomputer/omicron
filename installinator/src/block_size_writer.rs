@@ -11,17 +11,18 @@ use std::task::Poll;
 use tokio::io::AsyncWrite;
 
 pin_project! {
-    /// `BlockSizeWriter` is analogous to a tokio's `BufWriter`, except it
+    /// `BlockSizeBufWriter` is analogous to a tokio's `BufWriter`, except it
     /// guarantees that writes made to the underlying writer are always
     /// _exactly_ the requested block size, with two exceptions: explicitly
     /// calling (1) `flush()` or (2) `shutdown()` will write any
     /// buffered-but-not-yet-written data to the underlying buffer regardless of
     /// its length.
     ///
-    /// When `BlockSizeWriter` is dropped, any buffered data it's holding will
-    /// be discarded. It is critical to manually call `BlockSizeWriter:flush()`
-    /// or `BlockSizeWriter::shutdown()` prior to dropping to avoid data loss.
-    pub(crate) struct BlockSizeWriter<W> {
+    /// When `BlockSizeBufWriter` is dropped, any buffered data it's holding
+    /// will be discarded. It is critical to manually call
+    /// `BlockSizeBufWriter:flush()` or `BlockSizeBufWriter::shutdown()` prior
+    /// to dropping to avoid data loss.
+    pub(crate) struct BlockSizeBufWriter<W> {
         #[pin]
         inner: W,
         buf: Vec<u8>,
@@ -29,7 +30,7 @@ pin_project! {
     }
 }
 
-impl<W: AsyncWrite> BlockSizeWriter<W> {
+impl<W: AsyncWrite> BlockSizeBufWriter<W> {
     pub(crate) fn with_block_size(block_size: usize, inner: W) -> Self {
         Self { inner, buf: Vec::with_capacity(block_size), block_size }
     }
@@ -73,7 +74,7 @@ impl<W: AsyncWrite> BlockSizeWriter<W> {
     }
 }
 
-impl<W: AsyncWrite> AsyncWrite for BlockSizeWriter<W> {
+impl<W: AsyncWrite> AsyncWrite for BlockSizeBufWriter<W> {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -187,7 +188,7 @@ mod tests {
         // Construct our block writer.
         let inner = InnerWriter::default();
         let mut block_writer =
-            BlockSizeWriter::with_block_size(block_size, inner);
+            BlockSizeBufWriter::with_block_size(block_size, inner);
         let mut expected_data = Vec::new();
 
         // Feed all chunks into it.
