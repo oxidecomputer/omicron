@@ -345,7 +345,6 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
-    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -413,7 +412,6 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            Some(MacAddr6::from([0u8; 6])),
         );
         let im = InstanceManager::new(
             log.clone(),
@@ -529,7 +527,6 @@ mod test {
             std::net::Ipv6Addr::new(
                 0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             ),
-            Some(MacAddr6::from([0u8; 6])),
         );
         let im = InstanceManager::new(
             log.clone(),
