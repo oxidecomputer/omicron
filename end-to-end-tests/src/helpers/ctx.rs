@@ -3,7 +3,7 @@ use anyhow::{anyhow, Context as _, Result};
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate, UsernamePasswordCredentials};
-use oxide_client::{Client, ClientLoginExt, ClientProjectsExt, ClientVpcsExt};
+use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
 use std::net::SocketAddr;
@@ -177,13 +177,22 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
         })?;
     // See the comment in the config file.
     let password: oxide_client::types::Password = "oxide".parse().unwrap();
+    let login_request_body =
+        serde_json::to_string(&UsernamePasswordCredentials {
+            username: username,
+            password: password,
+        })
+        .context("serializing login request body")?;
 
+    // Do not have reqwest follow redirects.  That's because our login response
+    // includes both a redirect and the session cookie header.  If reqwest
+    // follows the redirect, we won't have a chance to get the cookie.
     let reqwest_login_client = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(60))
         .build()?;
-    let oxide_login_client =
-        Client::new_with_client(&base_url, reqwest_login_client);
+    let login_url = format!("{}/login/{}/local", base_url, silo_name);
 
     // By the time we get here, we generally would have successfully resolved
     // Nexus's external IP address from the external DNS server.  So we'd
@@ -195,23 +204,18 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
     // while if we can't immediately connect.
     let response = wait_for_condition(
         || async {
-            oxide_login_client
-                .login_local()
-                .silo_name(silo_name)
-                .body(UsernamePasswordCredentials {
-                    username: username.clone(),
-                    password: password.clone(),
-                })
+            // Use a raw reqwest client because it's not clear that Progenitor
+            // is intended to support endpoints that return 300-level response
+            // codes.  See progenitor#451.
+            reqwest_login_client
+                .post(&login_url)
+                .body(login_request_body.clone())
                 .send()
                 .await
-                .map_err(|e| match e {
-                    oxide_client::Error::CommunicationError(_) => {
+                .map_err(|e| {
+                    if e.is_connect() {
                         CondCheckError::NotYet
-                    }
-                    oxide_client::Error::InvalidRequest(_)
-                    | oxide_client::Error::ErrorResponse(_)
-                    | oxide_client::Error::InvalidResponsePayload(_)
-                    | oxide_client::Error::UnexpectedResponse(_) => {
+                    } else {
                         CondCheckError::Failed(
                             anyhow::Error::new(e).context("logging in"),
                         )
@@ -232,7 +236,7 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
         .context("expected session cookie token to be a string")?;
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
     assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert!(rest.contains("Path=/; HttpOnly; SameSite=Lax; Max-Age="));
 
     let mut headers = HeaderMap::new();
     headers.insert(

@@ -2124,6 +2124,7 @@ dependencies = [
  "reqwest",
  "russh",
  "russh-keys",
+ "serde_json",
  "tokio",
  "toml 0.7.3",
  "trust-dns-resolver",
