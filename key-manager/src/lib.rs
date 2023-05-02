@@ -44,12 +44,17 @@ struct VersionedPrk {
 }
 
 /// An error returned by the [`KeyManager`]
-pub enum KeyManagerError {
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Secret not loaded for {epoch}")]
     SecretNotLoaded { epoch: u64 },
+
+    #[error("Failed to retreive secret: {0}")]
+    SecretRetreival(#[from] SecretRetrieverError),
 }
 
 /// Derived Disk Encryption key
-#[derive(Zeroize, ZeroizeOnDrop)]
+#[derive(Zeroize, ZeroizeOnDrop, Default)]
 pub struct Aes256GcmDiskEncryptionKey(pub Box<[u8; 32]>);
 
 pub struct VersionedAes256GcmDiskEncryptionKey {
@@ -83,14 +88,14 @@ impl<S: SecretRetriever> KeyManager<S> {
     }
 
     /// Load latest version of the input key material into the key manager.
-    async fn load_latest_secret(&mut self) -> Result<(), S::Error> {
+    pub async fn load_latest_secret(&mut self) -> Result<(), Error> {
         let ikm = self.secret_retriever.get_latest().await?;
         self.insert_prk(ikm);
         Ok(())
     }
 
     /// Load input key material for the given epoch into the key manager.
-    async fn load_secret(&mut self, epoch: u64) -> Result<(), S::Error> {
+    pub async fn load_secret(&mut self, epoch: u64) -> Result<(), Error> {
         match self.secret_retriever.get(epoch).await? {
             SecretState::Current(ikm) => self.insert_prk(ikm),
             SecretState::Reconfiguration { old, new } => {
@@ -101,25 +106,46 @@ impl<S: SecretRetriever> KeyManager<S> {
         Ok(())
     }
 
+    /// Derive an encryption key for the given [`sled_hardware::DiskIdentity`]
+    pub async fn disk_encryption_key(
+        &mut self,
+        epoch: u64,
+        disk_id: DiskIdentity,
+    ) -> Result<VersionedAes256GcmDiskEncryptionKey, Error> {
+        let prk = if let Some(prk) = self.prks.get(&epoch) {
+            prk
+        } else {
+            self.load_secret(epoch).await?;
+            self.prks.get(&epoch).unwrap()
+        };
+
+        let mut key = Aes256GcmDiskEncryptionKey::default();
+
+        // Unwrap is safe because we know our buffer is large enough to hold the output key
+        prk.expand_multi_info(
+            &[
+                b"U2-zfs-",
+                disk_id.vendor.as_bytes(),
+                disk_id.model.as_bytes(),
+                disk_id.serial.as_bytes(),
+            ],
+            key.0.as_mut(),
+        )
+        .unwrap();
+
+        Ok(VersionedAes256GcmDiskEncryptionKey { epoch, key: Secret::new(key) })
+    }
+
+    /// Clear the PRKs
+    pub fn clear(&mut self) {
+        // PRKs should be zeroized on drop
+        self.prks = BTreeMap::new();
+    }
+
     fn insert_prk(&mut self, ikm: VersionedIkm) {
         let prk =
             Hkdf::new(Some(&ikm.salt), ikm.ikm.expose_secret().0.as_ref());
         self.prks.insert(ikm.epoch, prk);
-    }
-
-    /// Derive an encryption key for the given [`sled_hardware::DiskIdentity`]
-    fn disk_encryption_key(
-        &self,
-        epoch: u64,
-        disk_id: DiskIdentity,
-    ) -> Result<VersionedAes256GcmDiskEncryptionKey, KeyManagerError> {
-        unimplemented!()
-    }
-
-    /// Clear the PRKs
-    fn clear(&mut self) {
-        // PRKs should be zeroized on drop
-        self.prks = BTreeMap::new();
     }
 }
 
@@ -132,18 +158,22 @@ pub enum SecretState {
     Reconfiguration { old: VersionedIkm, new: VersionedIkm },
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum SecretRetrieverError {
+    #[error("Secret does not exist for {0}")]
+    NoSuchEpoch(u64),
+}
+
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
 /// Extract.
 #[async_trait]
 pub trait SecretRetriever {
-    type Error;
-
     /// Return the latest secret
     ////
     /// This is useful when a new entity is being encrypted and there is no need
     /// for a reconfiguration. When an entity is already encrypted, and needs to
     /// be decrypted, the user should instead call the [`SecretRetriever::get`].
-    async fn get_latest(&self) -> Result<VersionedIkm, Self::Error>;
+    async fn get_latest(&self) -> Result<VersionedIkm, SecretRetrieverError>;
 
     /// Get the secret for the given epoch
     ///
@@ -161,7 +191,10 @@ pub trait SecretRetriever {
     /// data in a ZFS property for each drive. This will allow us to retrieve the correct
     /// keys for rotation and as needed.
 
-    async fn get(&self, epoch: u64) -> Result<SecretState, Self::Error>;
+    async fn get(
+        &self,
+        epoch: u64,
+    ) -> Result<SecretState, SecretRetrieverError>;
 }
 
 //#[cfg(tests)]
@@ -185,17 +218,23 @@ mod tests {
 
     #[async_trait]
     impl SecretRetriever for TestSecretRetriever {
-        type Error = ();
-
-        async fn get_latest(&self) -> Result<VersionedIkm, Self::Error> {
+        async fn get_latest(
+            &self,
+        ) -> Result<VersionedIkm, SecretRetrieverError> {
             let salt = [0u8; 32];
             let (epoch, bytes) = self.ikms.last_key_value().unwrap();
             Ok(VersionedIkm::new(*epoch, salt, bytes))
         }
 
-        async fn get(&self, epoch: u64) -> Result<SecretState, Self::Error> {
+        async fn get(
+            &self,
+            epoch: u64,
+        ) -> Result<SecretState, SecretRetrieverError> {
             let salt = [0u8; 32];
-            let bytes = self.ikms.get(&epoch).ok_or(())?;
+            let bytes = self
+                .ikms
+                .get(&epoch)
+                .ok_or(SecretRetrieverError::NoSuchEpoch(epoch))?;
             let ikm = VersionedIkm::new(epoch, salt, bytes);
             let latest = self.get_latest().await.unwrap();
             if ikm.epoch != latest.epoch {

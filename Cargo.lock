@@ -3410,6 +3410,7 @@ dependencies = [
  "secrecy",
  "sha3",
  "sled-hardware",
+ "thiserror",
  "zeroize",
 ]
 
