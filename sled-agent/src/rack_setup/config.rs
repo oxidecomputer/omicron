@@ -40,7 +40,6 @@ impl SetupServiceConfig {
 mod test {
     use super::*;
     use crate::bootstrap::params::BootstrapAddressDiscovery;
-    use crate::bootstrap::params::Gateway;
     use omicron_common::address::IpRange;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -50,10 +49,6 @@ mod test {
             rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             rack_secret_threshold: 0,
-            gateway: Some(Gateway {
-                address: None,
-                mac: macaddr::MacAddr6::nil().into(),
-            }),
             ntp_servers: vec![String::from("test.pool.example.com")],
             dns_servers: vec![String::from("1.1.1.1")],
             internal_services_ip_pool_ranges: vec![IpRange::from(IpAddr::V4(

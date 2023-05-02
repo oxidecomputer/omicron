@@ -226,16 +226,10 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics()?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
-        let (gateway_mac, gateway_address) = match &request.gateway {
-            Some(g) => (Some(g.mac.0), g.address),
-            None => (None, None),
-        };
-
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
-            gateway_mac,
         );
 
         storage
@@ -270,11 +264,8 @@ impl SledAgent {
         };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.id,
-            config.sidecar_revision.clone(),
-            gateway_address,
-        );
+        let svc_config =
+            services::Config::new(request.id, config.sidecar_revision.clone());
         services
             .sled_agent_started(
                 svc_config,
