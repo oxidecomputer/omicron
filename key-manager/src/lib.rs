@@ -291,6 +291,8 @@ mod tests {
     #[tokio::test]
     async fn different_ikm_produces_different_keys() {
         let mut retriever = TestSecretRetriever::new();
+
+        // Load a distinct secret (IKM) for epoch 1
         retriever.insert(1, [1u8; 32]);
 
         let mut km = KeyManager::new(retriever);
@@ -306,5 +308,35 @@ mod tests {
         let epoch = 1;
         let key1 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
         assert_ne!(key0.key.expose_secret().0, key1.key.expose_secret().0);
+    }
+
+    #[tokio::test]
+    async fn loading_key_for_old_epoch_loads_latest_epoch() {
+        let mut retriever = TestSecretRetriever::new();
+
+        // Load a distinct secret (IKM) for epoch 1
+        retriever.insert(1, [1u8; 32]);
+
+        let mut km = KeyManager::new(retriever);
+
+        let disk_id = DiskIdentity {
+            vendor: "a".to_string(),
+            model: "b".to_string(),
+            serial: "c".to_string(),
+        };
+        let epoch = 0;
+
+        assert_eq!(0, km.loaded_secrets().len());
+
+        // This will load secrets if they are not already loaded.
+        // Note that we never called `km.load_latest_secret()`
+        let _ = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+        assert_eq!(2, km.loaded_secrets().len());
+
+        // Loading just the latest secret will not load any other secrets
+        km.clear();
+        let epoch = 1;
+        let _ = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
+        assert_eq!(1, km.loaded_secrets().len());
     }
 }
