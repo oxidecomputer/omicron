@@ -6,9 +6,7 @@
 
 set -o pipefail
 set -o xtrace
-set -o errtrace
-
-trap 'failure ${LINENO} "$BASH_COMMAND"' ERR
+set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 ARG0="$(basename ${BASH_SOURCE[0]})"
