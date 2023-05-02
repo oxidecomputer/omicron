@@ -73,7 +73,7 @@ pub enum SledMode {
 }
 
 /// Describes properties that should uniquely identify a Gimlet.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Baseboard {
     identifier: String,
     model: String,

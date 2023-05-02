@@ -199,6 +199,7 @@ impl fmt::Display for ServiceKind {
 pub struct ServicePutRequest {
     pub service_id: Uuid,
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
 
     /// Address on which a service is responding to requests.
     pub address: SocketAddrV6,

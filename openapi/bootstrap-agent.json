@@ -147,29 +147,6 @@
           "request_id"
         ]
       },
-      "Gateway": {
-        "description": "Information about the internet gateway used for externally-facing services.",
-        "type": "object",
-        "properties": {
-          "address": {
-            "nullable": true,
-            "description": "IP address of the Internet gateway, which is particularly relevant for external-facing services (such as Nexus).",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "mac": {
-            "description": "MAC address of the internet gateway above. This is used to provide external connectivity into guests, by allowing OPTE to forward traffic destined for the broader network to the gateway.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MacAddr"
-              }
-            ]
-          }
-        },
-        "required": [
-          "mac"
-        ]
-      },
       "IpRange": {
         "oneOf": [
           {
@@ -226,15 +203,6 @@
           "last"
         ]
       },
-      "MacAddr": {
-        "example": "ff:ff:ff:ff:ff:ff",
-        "title": "A MAC address",
-        "description": "A Media Access Control address, in EUI-48 format",
-        "type": "string",
-        "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
-        "minLength": 5,
-        "maxLength": 17
-      },
       "Name": {
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string"
@@ -257,15 +225,6 @@
           "external_dns_zone_name": {
             "description": "DNS name for the DNS zone delegated to the rack for external DNS",
             "type": "string"
-          },
-          "gateway": {
-            "nullable": true,
-            "description": "Internet gateway information.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Gateway"
-              }
-            ]
           },
           "internal_services_ip_pool_ranges": {
             "description": "Ranges of the service IP pool which may be used for internal services.",

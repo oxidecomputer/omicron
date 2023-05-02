@@ -24,22 +24,6 @@ external_dns_zone_name = "oxide.test"
 first = "192.168.1.20"
 last = "192.168.1.22"
 
-[gateway]
-
-# IP address of Internet gateway
-#
-# NOTE: In the lab, use "172.20.15.225"
-# address = "192.168.1.1"
-
-# MAC address of the internet gateway in the local network, i.e., of the above
-# IP address.
-#
-# NOTE: This is currently configured for the lab. Developers should override
-# this with whatever value they wish to provide inbound connectivity to guests
-# in their local network, using the current workaround methods in OPTE. See
-# how-to-run.adoc for details on how to determine the value for your network.
-mac = "00:0d:b9:54:fe:e4"
-
 # Configuration for the initial Silo, user, and password.
 [recovery_silo]
 silo_name = "recovery"

@@ -231,11 +231,27 @@ pub async fn test_setup_with_config<N: NexusServer>(
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_service_internal = ServicePutRequest {
+    let dns_server_dns_address_internal = match sled_agent
+        .dns_server
+        .local_address()
+    {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => *addr,
+    };
+    let dns_server_zone = Uuid::new_v4();
+    let dns_service_config = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
         address: dns_server_address_internal,
         kind: ServiceKind::InternalDnsConfig,
+    };
+    let dns_service_dns = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
+        address: dns_server_dns_address_internal,
+        kind: ServiceKind::InternalDns,
     };
     let dns_server_address_external = match external_dns_config_server
         .local_addr()
@@ -246,12 +262,14 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let dns_service_external = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
         address: dns_server_address_external,
         kind: ServiceKind::ExternalDnsConfig,
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
         address: SocketAddrV6::new(
             match nexus_internal_addr.ip() {
                 IpAddr::V4(addr) => addr.to_ipv6_mapped(),
@@ -284,10 +302,16 @@ pub async fn test_setup_with_config<N: NexusServer>(
         user_name: user_name.clone(),
         user_password_hash,
     };
+
     let server = N::start(
         nexus_internal,
         &config,
-        vec![dns_service_internal, dns_service_external, nexus_service],
+        vec![
+            dns_service_config,
+            dns_service_dns,
+            dns_service_external,
+            nexus_service,
+        ],
         &external_dns_zone_name,
         recovery_silo,
     )
