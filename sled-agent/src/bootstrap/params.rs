@@ -9,8 +9,18 @@ use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum BootstrapAddressDiscovery {
+    /// Ignore all bootstrap addresses except our own.
+    OnlyOurs,
+    /// Ignore all bootstrap addresses except the following.
+    OnlyThese { addrs: HashSet<Ipv6Addr> },
+}
 
 /// Configuration for the "rack setup service".
 ///
@@ -21,6 +31,9 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
+
+    /// Describes how bootstrap addresses should be collected during RSS.
+    pub bootstrap_discovery: BootstrapAddressDiscovery,
 
     /// The minimum number of sleds required to unlock the rack secret.
     ///

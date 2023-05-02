@@ -6,6 +6,9 @@
 #              |...............| <- This /56 is the Rack Subnet
 rack_subnet = "fd00:1122:3344:0100::"
 
+# Only include "our own sled" in the bootstrap network
+bootstrap_discovery.type = "only_ours"
+
 # The number of sleds required to unlock the rack secret.
 #
 # For values less than 2, no rack secret will be generated.
