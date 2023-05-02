@@ -54,7 +54,7 @@ pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
 /// This is only used by the test suite and `omicron-dev run-all` (the latter of
 /// which uses the test suite setup code for most of its operation).   These are
 /// both transient deployments with no sensitive data.
-pub const TEST_SUITE_PASSWORD: &str = "oxide-test-suite-password";
+pub const TEST_SUITE_PASSWORD: &str = "oxide";
 
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
