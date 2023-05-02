@@ -420,11 +420,11 @@ impl crate::smf_helper::Service for ServiceType {
 /// started autonomously by sled-agent) into a
 /// `sled_agent_client::types::ServiceType` to be sent to a remote sled-agent.
 #[derive(Debug, Clone, Copy, Error)]
-#[error("This service may not be requested externally")]
-pub struct InternalServiceOnlyError;
+#[error("This service may only be started autonomously by sled-agent")]
+pub struct AutonomousServiceOnlyError;
 
 impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
-    type Error = InternalServiceOnlyError;
+    type Error = AutonomousServiceOnlyError;
 
     fn try_from(s: ServiceType) -> Result<Self, Self::Error> {
         use sled_agent_client::types::ServiceType as AutoSt;
@@ -472,7 +472,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
-            | St::Maghemite { .. } => Err(InternalServiceOnlyError),
+            | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
 }
@@ -576,7 +576,7 @@ impl ServiceZoneRequest {
 impl TryFrom<ServiceZoneRequest>
     for sled_agent_client::types::ServiceZoneRequest
 {
-    type Error = InternalServiceOnlyError;
+    type Error = AutonomousServiceOnlyError;
 
     fn try_from(s: ServiceZoneRequest) -> Result<Self, Self::Error> {
         let mut services = Vec::with_capacity(s.services.len());
@@ -607,7 +607,7 @@ pub struct ServiceZoneService {
 impl TryFrom<ServiceZoneService>
     for sled_agent_client::types::ServiceZoneService
 {
-    type Error = InternalServiceOnlyError;
+    type Error = AutonomousServiceOnlyError;
 
     fn try_from(s: ServiceZoneService) -> Result<Self, Self::Error> {
         let details = s.details.try_into()?;

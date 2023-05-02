@@ -60,7 +60,7 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
 use crate::params::{
-    DatasetEnsureBody, InternalServiceOnlyError, ServiceType,
+    AutonomousServiceOnlyError, DatasetEnsureBody, ServiceType,
     ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
@@ -308,7 +308,7 @@ impl ServiceInner {
         let services = services
             .iter()
             .map(|s| s.clone().try_into())
-            .collect::<Result<Vec<_>, InternalServiceOnlyError>>()
+            .collect::<Result<Vec<_>, AutonomousServiceOnlyError>>()
             .map_err(|err| {
                 SetupServiceError::SledInitialization(err.to_string())
             })?;
