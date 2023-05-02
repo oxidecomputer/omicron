@@ -72,7 +72,9 @@ use omicron_common::nexus_config::{
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
-use sled_hardware::underlay::{self, BOOTSTRAP_PREFIX};
+use sled_hardware::underlay;
+use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
 use std::collections::HashSet;
@@ -1458,7 +1460,7 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Wicketd => {
+                ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
 
                     smfh.setprop(
@@ -1493,6 +1495,15 @@ impl ServiceManager {
                     smfh.setprop(
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
+                    )?;
+                    smfh.setprop(
+                        "config/baseboard-identifier",
+                        baseboard.identifier(),
+                    )?;
+                    smfh.setprop("config/baseboard-model", baseboard.model())?;
+                    smfh.setprop(
+                        "config/baseboard-revision",
+                        baseboard.revision(),
                     )?;
                     smfh.refresh()?;
                 }
@@ -1985,6 +1996,7 @@ impl ServiceManager {
     pub async fn activate_switch(
         &self,
         switch_zone_ip: Option<Ipv6Addr>,
+        baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
         let mut filesystems: Vec<zone::Fs> = vec![];
@@ -2004,7 +2016,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
@@ -2026,7 +2038,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }

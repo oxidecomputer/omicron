@@ -150,6 +150,7 @@ async fn post_start_update(
     target: Path<SpIdentifier>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
+    let target = target.into_inner();
 
     // Do we have a plan with which we can apply updates (i.e., has a valid TUF
     // repository been uploaded)?
@@ -165,13 +166,88 @@ async fn post_start_update(
         )
     })?;
 
+    // Can we update the target SP? We refuse to update if:
+    //
+    // 1. We haven't pulled its state in our inventory (most likely cause: the
+    //    cubby is empty; less likely cause: the SP is misbehaving, which will
+    //    make updating it very unlikely to work anyway)
+    // 2. We have pulled its state but our hardware manager says we can't update
+    //    it (most likely cause: the target is the sled we're currently running
+    //    on; less likely cause: our hardware manager failed to get our local
+    //    identifying information, and it refuses to update this target out of
+    //    an abundance of caution).
+    //
+    // First, get our most-recently-cached inventory view.
+    let inventory = match rqctx.mgs_handle.get_inventory(Vec::new()).await {
+        Ok(inventory) => inventory,
+        Err(GetInventoryError::ShutdownInProgress) => {
+            return Err(HttpError::for_unavail(
+                None,
+                "Server is shutting down".into(),
+            ));
+        }
+        // We didn't specify any SP ids to refresh, so this error is impossible.
+        Err(GetInventoryError::InvalidSpIdentifier) => unreachable!(),
+    };
+
+    // Next, do we have the state of the target SP?
+    let sp_state = match inventory {
+        GetInventoryResponse::Response { inventory, .. } => inventory
+            .sps
+            .into_iter()
+            .filter_map(|sp| if sp.id == target { sp.state } else { None })
+            .next(),
+        GetInventoryResponse::Unavailable => None,
+    };
+    let Some(sp_state) = sp_state else {
+        return Err(HttpError::for_bad_request(
+            None,
+            "cannot update target sled (no inventory state present)"
+                .into(),
+        ));
+    };
+
+    // If we have the state of the SP, are we allowed to update it? We
+    // refuse to try to update our own sled.
+    match &rqctx.baseboard {
+        Some(baseboard) => {
+            if baseboard.identifier() == sp_state.serial_number
+                && baseboard.model() == sp_state.model
+                && baseboard.revision() == i64::from(sp_state.revision)
+            {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "cannot update sled where wicketd is running".into(),
+                ));
+            }
+        }
+        None => {
+            // We don't know our own baseboard, which is a very
+            // questionable state to be in! For now, we will hard-code
+            // the possibly locations where we could be running:
+            // scrimlets can only be in cubbies 14 or 16, so we refuse
+            // to update either of those.
+            let target_is_scrimlet =
+                matches!((target.type_, target.slot), (SpType::Sled, 14 | 16));
+            if target_is_scrimlet {
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "wicketd does not know its own baseboard details: \
+                     refusing to update either scrimlet"
+                        .into(),
+                ));
+            }
+        }
+    }
+
+    // All pre-flight update checks look OK: start the update.
+    //
     // Generate an ID for this update; the update tracker will send it to the
     // sled as part of the InstallinatorImageId, and installinator will send it
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target.into_inner(), plan, update_id).await
-    {
+    match rqctx.update_tracker.start(target, plan, update_id).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }

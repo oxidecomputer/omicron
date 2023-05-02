@@ -70,8 +70,8 @@ function retry
   attempts="${RETRY_ATTEMPTS}"
   # Always try at least once
   attempts=$((attempts < 1 ? 1 : attempts))
-  retry_rc=0
   for i in $(seq 1 $attempts); do
+    retry_rc=0
     "$@" || retry_rc=$?;
     if [[ "$retry_rc" -eq 0 ]]; then
       return
