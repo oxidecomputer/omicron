@@ -119,10 +119,14 @@ impl From<Error> for dropshot::HttpError {
                                 }
                             }
                         }
-
+                        crate::instance::Error::Transition(omicron_error) => {
+                            // Preserve the status associated with the wrapped
+                            // Omicron error so that Nexus will see it in the
+                            // Progenitor client error it gets back.
+                            HttpError::from(omicron_error)
+                        }
                         e => HttpError::for_internal_error(e.to_string()),
                     },
-
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
@@ -324,9 +328,13 @@ impl SledAgent {
         let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
 
         if scrimlet {
+            let baseboard = self.inner.hardware.baseboard();
             let switch_zone_ip = Some(self.inner.switch_zone_ip());
-            if let Err(e) =
-                self.inner.services.activate_switch(switch_zone_ip).await
+            if let Err(e) = self
+                .inner
+                .services
+                .activate_switch(switch_zone_ip, baseboard)
+                .await
             {
                 warn!(log, "Failed to activate switch: {e}");
             }
@@ -364,11 +372,12 @@ impl SledAgent {
                         self.notify_nexus_about_self(&log);
                     }
                     HardwareUpdate::TofinoLoaded => {
+                        let baseboard = self.inner.hardware.baseboard();
                         let switch_zone_ip = Some(self.inner.switch_zone_ip());
                         if let Err(e) = self
                             .inner
                             .services
-                            .activate_switch(switch_zone_ip)
+                            .activate_switch(switch_zone_ip, baseboard)
                             .await
                         {
                             warn!(log, "Failed to activate switch: {e}");

@@ -61,7 +61,8 @@ use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, TimeSync, ZoneType,
+    AutonomousServiceOnlyError, DatasetEnsureBody, ServiceType,
+    ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
@@ -283,15 +284,20 @@ impl ServiceInner {
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
+        let services = services
+            .iter()
+            .map(|s| s.clone().try_into())
+            .collect::<Result<Vec<_>, AutonomousServiceOnlyError>>()
+            .map_err(|err| {
+                SetupServiceError::SledInitialization(err.to_string())
+            })?;
+
         info!(self.log, "sending service requests...");
         let services_put = || async {
             info!(self.log, "initializing sled services: {:?}", services);
             client
                 .services_put(&SledAgentTypes::ServiceEnsureBody {
-                    services: services
-                        .iter()
-                        .map(|s| s.clone().into())
-                        .collect(),
+                    services: services.clone(),
                 })
                 .await
                 .map_err(BackoffError::transient)?;

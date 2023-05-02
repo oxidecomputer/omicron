@@ -714,14 +714,6 @@
           "pool_name"
         ]
       },
-      "DendriteAsic": {
-        "type": "string",
-        "enum": [
-          "tofino_asic",
-          "tofino_stub",
-          "soft_npu"
-        ]
-      },
       "DiskEnsureBody": {
         "description": "Sent from to a sled agent to establish the runtime state of a Disk",
         "type": "object",
@@ -1890,70 +1882,6 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "management_gateway_service"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "wicketd"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "asic": {
-                "$ref": "#/components/schemas/DendriteAsic"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dendrite"
-                ]
-              }
-            },
-            "required": [
-              "asic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "pkt_source": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tfport"
-                ]
-              }
-            },
-            "required": [
-              "pkt_source",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
                   "crucible_pantry"
                 ]
               }
@@ -2041,24 +1969,6 @@
             "required": [
               "dns_servers",
               "ntp_servers",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "mode": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "maghemite"
-                ]
-              }
-            },
-            "required": [
-              "mode",
               "type"
             ]
           },
