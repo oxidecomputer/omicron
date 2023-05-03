@@ -146,8 +146,8 @@ impl RunningZone {
     }
 
     /// Returns the filesystem path to the zone's root
-    pub fn root(&self) -> String {
-        format!("{}/root", self.inner.zonepath)
+    pub fn root(&self) -> Utf8PathBuf {
+        self.inner.zonepath.join("root")
     }
 
     /// Runs a command within the Zone, return the output.
@@ -641,7 +641,7 @@ impl InstalledZone {
 
         let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            Utf8PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_type));
+            Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()

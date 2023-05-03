@@ -219,23 +219,19 @@ impl UpdateManager {
         let mut components = vec![];
 
         let dir = &self.config.zone_artifact_path;
-        for entry in std::fs::read_dir(dir).map_err(|err| io_err(dir, err))? {
+        for entry in dir.read_dir_utf8().map_err(|err| io_err(dir, err))? {
             let entry = entry.map_err(|err| io_err(dir, err))?;
             let file_type =
                 entry.file_type().map_err(|err| io_err(dir, err))?;
-            let path: Utf8PathBuf = entry.path().try_into()?;
+            let path = entry.path();
 
-            if file_type.is_file()
-                && entry.file_name().to_string_lossy().ends_with(".tar.gz")
-            {
+            if file_type.is_file() && entry.file_name().ends_with(".tar.gz") {
                 // Zone Images are currently identified as individual components.
                 //
                 // This logic may be tweaked in the future, depending on how we
                 // bundle together zones.
                 components.push(self.component_get_zone_version(&path).await?);
-            } else if file_type.is_dir()
-                && entry.file_name().to_string_lossy() == "sled-agent"
-            {
+            } else if file_type.is_dir() && entry.file_name() == "sled-agent" {
                 // Sled Agent is the only non-zone file recognized as a component.
                 let version_path = path.join("VERSION");
                 let version = tokio::fs::read_to_string(&version_path)
