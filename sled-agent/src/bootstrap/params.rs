@@ -51,7 +51,15 @@ pub struct RackInitializeRequest {
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
     // we want to configure multiple pools.
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+
+    /// DNS name for the DNS zone delegated to the rack for external DNS
+    pub external_dns_zone_name: String,
+
+    /// Configuration of the Recovery Silo (the initial Silo)
+    pub recovery_silo: RecoverySiloConfig,
 }
+
+pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -167,13 +175,15 @@ mod tests {
 
         let path =
             manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
-        let contents = std::fs::read_to_string(path).unwrap();
-        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
 
         let path = manifest
             .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
-        let contents = std::fs::read_to_string(path).unwrap();
-        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
     }
 
     #[test]

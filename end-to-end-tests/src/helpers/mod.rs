@@ -17,8 +17,8 @@ pub fn generate_name(prefix: &str) -> Result<Name> {
 /// iliana's environment and the lab, the last octet is 20; in my environment
 /// the DHCP range is 100-249, and in the buildomat lab environment the network
 /// is currently private.)
-pub fn get_system_ip_pool() -> Result<(Ipv4Addr, Ipv4Addr)> {
-    let nexus_addr = match nexus_addr().ip() {
+pub async fn get_system_ip_pool() -> Result<(Ipv4Addr, Ipv4Addr)> {
+    let nexus_addr = match nexus_addr().await?.ip() {
         IpAddr::V4(addr) => addr.octets(),
         IpAddr::V6(_) => bail!("not sure what to do about IPv6 here"),
     };

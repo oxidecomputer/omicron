@@ -181,7 +181,7 @@ impl InstallOpts {
         let progress_handle = progress_reporter.start();
         let discovery = &self.discover_opts.mechanism;
 
-        let engine = UpdateEngine::new(&log, event_sender);
+        let engine = UpdateEngine::new(log, event_sender);
 
         let host_phase_2_id = ArtifactHashId {
             // TODO: currently we're assuming that wicketd will unpack the host
@@ -197,7 +197,7 @@ impl InstallOpts {
                 "Downloading artifact",
                 |cx| async move {
                     let host_phase_2_artifact =
-                        fetch_artifact(&cx, &host_phase_2_id, discovery, &log)
+                        fetch_artifact(&cx, &host_phase_2_id, discovery, log)
                             .await?;
 
                     let address = host_phase_2_artifact.addr;
@@ -222,7 +222,7 @@ impl InstallOpts {
                 "Downloading artifact",
                 |cx| async move {
                     let control_plane_artifact =
-                        fetch_artifact(&cx, &control_plane_id, discovery, &log)
+                        fetch_artifact(&cx, &control_plane_id, discovery, log)
                             .await?;
 
                     let address = control_plane_artifact.addr;
@@ -235,21 +235,26 @@ impl InstallOpts {
             )
             .register();
 
-        let destination = if self.install_on_gimlet {
-            WriteDestination::from_hardware(&log)?
-        } else {
-            // clap ensures `self.destination` is not `None` if
-            // `install_on_gimlet` is false.
-            let destination = self.destination.as_ref().unwrap();
-            WriteDestination::in_directory(destination)?
-        };
-
         engine
             .new_step(
                 InstallinatorComponent::Both,
                 InstallinatorStepId::Write,
                 "Writing host and control plane artifacts",
                 |cx| async move {
+                    let destination = if self.install_on_gimlet {
+                        let log = log.clone();
+                        tokio::task::spawn_blocking(move || {
+                            WriteDestination::from_hardware(&log)
+                        })
+                        .await
+                        .unwrap()?
+                    } else {
+                        // clap ensures `self.destination` is not `None` if
+                        // `install_on_gimlet` is false.
+                        let destination = self.destination.as_ref().unwrap();
+                        WriteDestination::in_directory(destination)?
+                    };
+
                     let host_phase_2_artifact =
                         host_phase_2_artifact.into_value(cx.token()).await;
                     let control_plane_artifact =
@@ -265,7 +270,7 @@ impl InstallOpts {
 
                     // TODO: verify artifact was correctly written out to disk.
 
-                    let write_output = writer.write(&cx, &log).await;
+                    let write_output = writer.write(&cx, log).await;
                     let slots_not_written = write_output.slots_not_written();
 
                     let metadata = InstallinatorCompletionMetadata::Write {
