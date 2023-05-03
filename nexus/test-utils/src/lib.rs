@@ -49,6 +49,13 @@ pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
 
+/// Password for the user created by the test suite
+///
+/// This is only used by the test suite and `omicron-dev run-all` (the latter of
+/// which uses the test suite setup code for most of its operation).   These are
+/// both transient deployments with no sensitive data.
+pub const TEST_SUITE_PASSWORD: &str = "oxide";
+
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
@@ -224,11 +231,27 @@ pub async fn test_setup_with_config<N: NexusServer>(
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_service_internal = ServicePutRequest {
+    let dns_server_dns_address_internal = match sled_agent
+        .dns_server
+        .local_address()
+    {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => *addr,
+    };
+    let dns_server_zone = Uuid::new_v4();
+    let dns_service_config = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
         address: dns_server_address_internal,
         kind: ServiceKind::InternalDnsConfig,
+    };
+    let dns_service_dns = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
+        address: dns_server_dns_address_internal,
+        kind: ServiceKind::InternalDns,
     };
     let dns_server_address_external = match external_dns_config_server
         .local_addr()
@@ -239,12 +262,14 @@ pub async fn test_setup_with_config<N: NexusServer>(
     let dns_service_external = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
         address: dns_server_address_external,
         kind: ServiceKind::ExternalDnsConfig,
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
         address: SocketAddrV6::new(
             match nexus_internal_addr.ip() {
                 IpAddr::V4(addr) => addr.to_ipv6_mapped(),
@@ -266,22 +291,27 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
     let silo_name: Name = "test-suite-silo".parse().unwrap();
     let user_name = UserId::try_from("test-privileged".to_string()).unwrap();
+    let user_password_hash = nexus_passwords::Hasher::default()
+        .create_password(
+            &nexus_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
+        )
+        .unwrap()
+        .into();
     let recovery_silo = RecoverySiloConfig {
         silo_name: silo_name.clone(),
         user_name: user_name.clone(),
-        // The test suite's password is "oxide".  This password is only used by
-        // the test suite (and `omicron-dev run-all`) in transient deployments
-        // with no sensitive data.
-        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-            RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
-            .to_string()
-            .try_into()
-            .unwrap(),
+        user_password_hash,
     };
+
     let server = N::start(
         nexus_internal,
         &config,
-        vec![dns_service_internal, dns_service_external, nexus_service],
+        vec![
+            dns_service_config,
+            dns_service_dns,
+            dns_service_external,
+            nexus_service,
+        ],
         &external_dns_zone_name,
         recovery_silo,
     )

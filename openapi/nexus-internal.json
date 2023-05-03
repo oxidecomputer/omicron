@@ -2774,6 +2774,11 @@
           "sled_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "zone_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [

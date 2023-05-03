@@ -55,7 +55,7 @@ pub static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
 
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        std::fs::create_dir_all(&dir)
+        std::fs::create_dir_all(dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
         // `in_directory()` is only used for testing (e.g., on
@@ -74,7 +74,7 @@ impl WriteDestination {
     }
 
     pub(crate) fn from_hardware(log: &Logger) -> Result<Self> {
-        let hardware = Hardware::scan(log)?;
+        let hardware = Hardware::scan(&log)?;
 
         // We want the `,raw`-suffixed path to the boot image partition, as that
         // allows us file-like access via the character device.

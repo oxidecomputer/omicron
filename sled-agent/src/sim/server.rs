@@ -96,7 +96,7 @@ impl Server {
                         sa_address: sa_address.to_string(),
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
-                            identifier: String::from("Unknown"),
+                            identifier: format!("Simulated sled {}", config.id),
                             model: String::from("Unknown"),
                             revision: 0,
                         },
@@ -255,12 +255,14 @@ impl Server {
                 kind: NexusTypes::ServiceKind::InternalDns,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
             NexusTypes::ServicePutRequest {
                 address: http_bound.to_string(),
                 kind: NexusTypes::ServiceKind::InternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             },
         ];
 
@@ -273,6 +275,7 @@ impl Server {
                 kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             });
 
             internal_services_ip_pool_ranges.push(match ip {
@@ -293,15 +296,21 @@ impl Server {
                 kind: NexusTypes::ServiceKind::ExternalDnsConfig,
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
+                zone_id: Some(Uuid::new_v4()),
             });
         }
 
         let recovery_silo = NexusTypes::RecoverySiloConfig {
             silo_name: "demo-silo".parse().unwrap(),
             user_name: "demo-privileged".parse().unwrap(),
-            // The demo setup's password is "oxide".  This is obviously only
-            // intended for transient deployments in development with no
-            // sensitive data.
+            // The following is a hash for the password "oxide".  This is
+            // (obviously) only intended for transient deployments in
+            // development with no sensitive data or resources.  You can change
+            // this value to any other supported hash.  The only thing that
+            // needs to be changed with this hash are the instructions given to
+            // individuals running this program who then want to log in as this
+            // user.  For more on what's supported, see the API docs for this
+            // type and the specific constraints in the nexus-passwords crate.
             user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
             RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
                 .parse()

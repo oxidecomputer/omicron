@@ -82,17 +82,17 @@ impl super::Nexus {
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        // Silo group creation happens as Nexus's "external authn" context,
-        // not the user's context here.  The user may not have permission to
-        // create arbitrary groups in the Silo, but we allow them to create
-        // this one in this case.
-        let external_authn_opctx = self.opctx_external_authn();
+        // Silo creation involves several operations that ordinary users cannot
+        // generally do, like reading and modifying the fleet-wide external DNS
+        // config.  Nexus assumes its own identity to do these operations in
+        // this (very specific) context.
+        let nexus_opctx = self.opctx_external_authn();
         let datastore = self.datastore();
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
         let dns_records: Vec<DnsRecord> = datastore
-            .nexus_external_addresses(external_authn_opctx)
+            .nexus_external_addresses(nexus_opctx)
             .await?
             .into_iter()
             .map(|addr| match addr {
@@ -110,12 +110,7 @@ impl super::Nexus {
         dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
 
         let silo = datastore
-            .silo_create(
-                &opctx,
-                &external_authn_opctx,
-                new_silo_params,
-                dns_update,
-            )
+            .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);

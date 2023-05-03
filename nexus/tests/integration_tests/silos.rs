@@ -49,6 +49,32 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
 
+    // Verify that we cannot create a name with the same name as the recovery
+    // Silo that was created during rack initialization.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/v1/system/silos",
+            &params::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: cptestctx.silo_name.clone(),
+                    description: "a silo".to_string(),
+                },
+                discoverable: false,
+                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                admin_group_name: None,
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.message, "already exists: silo \"test-suite-silo\"");
+
     // Create two silos: one discoverable, one not
     create_silo(
         &client,

@@ -356,11 +356,11 @@ impl RunningZone {
         }
     }
 
-    pub async fn add_default_route(
+    pub fn add_default_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -371,15 +371,33 @@ impl RunningZone {
         Ok(())
     }
 
-    pub async fn add_default_route4(
+    pub fn add_default_route4(
         &self,
         gateway: Ipv4Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "default",
             &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub fn add_bootstrap_route(
+        &self,
+        bootstrap_prefix: u16,
+        gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd([
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            &format!("{bootstrap_prefix:x}::/16"),
+            &gz_bootstrap_addr.to_string(),
+            "-ifp",
+            zone_vnic_name,
         ])?;
         Ok(())
     }
@@ -574,8 +592,8 @@ impl InstalledZone {
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_name: &str, unique_name: Option<&str>) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_name);
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
         }
@@ -600,7 +618,7 @@ impl InstalledZone {
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_root_path: &Path,
-        zone_name: &str,
+        zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
@@ -613,14 +631,14 @@ impl InstalledZone {
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
-                    zone: zone_name.to_string(),
+                    zone: zone_type.to_string(),
                     err,
                 }
             })?;
 
-        let full_zone_name = Self::get_zone_name(zone_name, unique_name);
+        let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_name));
+            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
@@ -635,9 +653,9 @@ impl InstalledZone {
             &zone_root_path,
             &full_zone_name,
             &zone_image_path,
-            &datasets,
-            &filesystems,
-            &devices,
+            datasets,
+            filesystems,
+            devices,
             net_device_names,
             limit_priv,
         )

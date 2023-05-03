@@ -68,8 +68,12 @@ impl HardwareMonitorWorker {
                     match update {
                         Ok(update) => match update {
                             sled_hardware::HardwareUpdate::TofinoLoaded => {
+                                let baseboard = self.hardware.baseboard();
                                 let switch_zone_ip = None;
-                                if let Err(e) = self.services.activate_switch(switch_zone_ip).await {
+                                if let Err(e) = self.services.activate_switch(
+                                    switch_zone_ip,
+                                    baseboard,
+                                ).await {
                                     warn!(self.log, "Failed to activate switch: {e}");
                                 }
                             }
@@ -107,8 +111,10 @@ impl HardwareMonitorWorker {
     async fn full_hardware_scan(&self) {
         info!(self.log, "Performing full hardware scan");
         if self.hardware.is_scrimlet_driver_loaded() {
+            let baseboard = self.hardware.baseboard();
             let switch_zone_ip = None;
-            if let Err(e) = self.services.activate_switch(switch_zone_ip).await
+            if let Err(e) =
+                self.services.activate_switch(switch_zone_ip, baseboard).await
             {
                 warn!(self.log, "Failed to activate switch: {e}");
             }
@@ -138,6 +144,7 @@ impl HardwareMonitor {
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
@@ -177,13 +184,11 @@ impl HardwareMonitor {
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
-        // TODO: The coupling between the storage and service manager is growing
-        // pretty tight; we should consider merging them together.
-        let storage_manager =
-            StorageManager::new(&log, underlay_etherstub.clone()).await;
+        let storage_manager = StorageManager::new(&log).await;
 
         let service_manager = ServiceManager::new(
             log.clone(),
+            global_zone_bootstrap_link_local_address,
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,

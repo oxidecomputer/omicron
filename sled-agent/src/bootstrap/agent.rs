@@ -26,25 +26,26 @@ use crate::storage_manager::StorageManager;
 use crate::updates::UpdateManager;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
+use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, GetMacError};
 use illumos_utils::zfs::{
     self, Mountpoint, Zfs, ZONE_ZFS_RAMDISK_DATASET,
     ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
 };
 use illumos_utils::zone::Zones;
+use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
-use sled_hardware::underlay::bootstrap_ip;
+use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -62,6 +63,9 @@ pub enum BootstrapError {
 
     #[error("Error cleaning up old state: {0}")]
     Cleanup(anyhow::Error),
+
+    #[error("Failed to enable routing: {0}")]
+    EnablingRouting(illumos_utils::ExecutionError),
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -83,6 +87,9 @@ pub enum BootstrapError {
 
     #[error("Failed to initialize bootstrap address: {err}")]
     BootstrapAddress { err: illumos_utils::zone::EnsureGzAddressError },
+
+    #[error("Failed to get bootstrap address: {err}")]
+    GetBootstrapAddress { err: illumos_utils::zone::GetAddressError },
 
     #[error("RSS is already executing, and should not run concurrently")]
     ConcurrentRSSAccess,
@@ -191,7 +198,7 @@ pub struct Agent {
     sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
 
-    switch_zone_bootstrap_address: Ipv6Addr,
+    global_zone_bootstrap_link_local_address: Ipv6Addr,
 }
 
 fn get_sled_agent_request_path() -> PathBuf {
@@ -265,8 +272,7 @@ impl Agent {
             "component" => "BootstrapAgent",
         ));
         let link = config.link.clone();
-        let ip = bootstrap_ip(&link, 1)?;
-        let switch_zone_bootstrap_address = bootstrap_ip(&link, 2)?;
+        let ip = BootstrapInterface::GlobalZone.ip(&link)?;
 
         // We expect this directory to exist - ensure that it does, before any
         // subsequent operations which may write configs here.
@@ -303,6 +309,24 @@ impl Agent {
         )
         .map_err(|err| BootstrapError::BootstrapAddress { err })?;
 
+        let global_zone_bootstrap_link_local_address = Zones::get_address(
+            None,
+            // AddrObject::link_local() can only fail if the interface name is
+            // malformed, but we just got it from `Dladm`, so we know it's
+            // valid.
+            &AddrObject::link_local(&bootstrap_etherstub_vnic.0).unwrap(),
+        )
+        .map_err(|err| BootstrapError::GetBootstrapAddress { err })?;
+
+        // Convert the `IpNetwork` down to just the IP address.
+        let global_zone_bootstrap_link_local_address =
+            match global_zone_bootstrap_link_local_address.ip() {
+                IpAddr::V4(_) => {
+                    unreachable!("link local bootstrap address must be ipv6")
+                }
+                IpAddr::V6(addr) => addr,
+            };
+
         // Start trying to notify ddmd of our bootstrap address so it can
         // advertise it to other sleds.
         let ddmd_client = DdmAdminClient::localhost(&log)?;
@@ -331,6 +355,21 @@ impl Agent {
         // This means all VNICs, zones, etc.
         cleanup_all_old_global_state(&log).await?;
 
+        // Ipv6 forwarding must be enabled to route traffic between zones,
+        // including the switch zone which we may launch below if we find we're
+        // actually running on a scrimlet.
+        //
+        // This should be a no-op if already enabled.
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[
+            "/usr/sbin/routeadm",
+            // Needed to access all zones, which are on the underlay.
+            "-e",
+            "ipv6-forwarding",
+            "-u",
+        ]);
+        execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
+
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
@@ -346,7 +385,7 @@ impl Agent {
             sled_config,
             sp,
             ddmd_client,
-            switch_zone_bootstrap_address,
+            global_zone_bootstrap_link_local_address,
         };
 
         let hardware_monitor = agent.start_hardware_monitor().await?;
@@ -388,10 +427,12 @@ impl Agent {
         let underlay_etherstub_vnic =
             underlay_etherstub_vnic(&underlay_etherstub)?;
         let bootstrap_etherstub = bootstrap_etherstub()?;
-        let switch_zone_bootstrap_address = bootstrap_ip(&self.config.link, 2)?;
+        let switch_zone_bootstrap_address =
+            BootstrapInterface::SwitchZone.ip(&self.config.link)?;
         let hardware_monitor = HardwareMonitor::new(
             &self.log,
             &self.sled_config,
+            self.global_zone_bootstrap_link_local_address,
             underlay_etherstub,
             underlay_etherstub_vnic,
             bootstrap_etherstub,
@@ -421,8 +462,7 @@ impl Agent {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
                 if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone(), request.subnet)
-                        .await?;
+                    self.establish_sled_quorum(share.clone()).await?;
                     *self.share.lock().await = Some(share);
                 }
 
@@ -590,11 +630,8 @@ impl Agent {
     async fn establish_sled_quorum(
         &self,
         share: ShareDistribution,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     ) -> Result<RackSecret, BootstrapError> {
-        // Ask the switch zone's maghemite for peers
-        let ddm_admin_client =
-            DdmAdminClient::switch_zone(&self.log, sled_subnet)?;
+        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
         let rack_secret = retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
@@ -603,7 +640,7 @@ impl Agent {
                     // so we can log if we see any duplicates.
                     let mut addrs = HashSet::new();
                     for addr in ddm_admin_client
-                        .peer_addrs()
+                        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
                         .await
                         .map_err(BootstrapError::DdmError)
                         .map_err(|err| BackoffError::transient(err))?
@@ -735,7 +772,6 @@ impl Agent {
             &self.parent_log,
             request,
             self.ip,
-            self.switch_zone_bootstrap_address,
             self.sp.clone(),
             // TODO-cleanup: Remove this arg once RSS can discover the trust
             // quorum members over the management network.
@@ -757,13 +793,7 @@ impl Agent {
             .try_lock()
             .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
-        RssHandle::run_rss_reset(
-            &self.parent_log,
-            self.ip,
-            self.switch_zone_bootstrap_address,
-            None,
-        )
-        .await?;
+        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
         Ok(())
     }
 
@@ -965,7 +995,6 @@ impl PersistentSledAgentRequest<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use macaddr::MacAddr6;
     use uuid::Uuid;
 
     #[test]
@@ -977,10 +1006,6 @@ mod tests {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
-                gateway: Some(crate::bootstrap::params::Gateway {
-                    address: None,
-                    mac: MacAddr6::nil().into(),
-                }),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),

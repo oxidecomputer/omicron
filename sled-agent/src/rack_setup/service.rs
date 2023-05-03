@@ -56,11 +56,13 @@
 
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
+use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::nexus::d2n_params;
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, TimeSync, ZoneType,
+    AutonomousServiceOnlyError, DatasetEnsureBody, ServiceType,
+    ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
@@ -85,6 +87,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
+use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
@@ -92,9 +95,6 @@ use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::path::PathBuf;
 use thiserror::Error;
-
-// The minimum number of sleds to initialize the rack.
-const MINIMUM_SLED_COUNT: usize = 1;
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -216,24 +216,6 @@ fn rss_completed_marker_path() -> PathBuf {
         .join("rss-plan-completed.marker")
 }
 
-// Describes the options when awaiting for peers.
-enum PeerExpectation {
-    // Await a set of peers that matches this group of IPv6 addresses exactly.
-    //
-    // TODO: We currently don't deal with the case where:
-    //
-    // - RSS boots, sees some sleds, comes up with a plan.
-    // - RSS reboots, sees a *different* set of sleds, and needs
-    // to adjust the plan.
-    //
-    // This case is fairly tricky because some sleds may have
-    // already received requests to initialize - modifying the
-    // allocated subnets would be non-trivial.
-    LoadOldPlan(HashSet<Ipv6Addr>),
-    // Await any peers, as long as there are at least enough to make a new plan.
-    CreateNewPlan(usize),
-}
-
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
     log: Logger,
@@ -303,15 +285,20 @@ impl ServiceInner {
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
+        let services = services
+            .iter()
+            .map(|s| s.clone().try_into())
+            .collect::<Result<Vec<_>, AutonomousServiceOnlyError>>()
+            .map_err(|err| {
+                SetupServiceError::SledInitialization(err.to_string())
+            })?;
+
         info!(self.log, "sending service requests...");
         let services_put = || async {
             info!(self.log, "initializing sled services: {:?}", services);
             client
                 .services_put(&SledAgentTypes::ServiceEnsureBody {
-                    services: services
-                        .iter()
-                        .map(|s| s.clone().into())
-                        .collect(),
+                    services: services.clone(),
                 })
                 .await
                 .map_err(BackoffError::transient)?;
@@ -380,7 +367,7 @@ impl ServiceInner {
                                 // and port that have been assigned to it.
                                 // There should be exactly one.
                                 let addrs = svc.services.iter().filter_map(|s| {
-                                    if let ServiceType::InternalDns { http_address, .. } = s {
+                                    if let ServiceType::InternalDns { http_address, .. } = &s.details {
                                         Some(*http_address)
                                     } else {
                                         None
@@ -455,76 +442,6 @@ impl ServiceInner {
 
         info!(log, "Configured all DNS servers");
         Ok(())
-    }
-
-    /// Waits for sufficient neighbors to exist so the initial set of requests
-    /// can be sent out.
-    async fn wait_for_peers(
-        &self,
-        expectation: PeerExpectation,
-        our_bootstrap_address: Ipv6Addr,
-        switch_zone_bootstrap_address: Ipv6Addr,
-    ) -> Result<Vec<Ipv6Addr>, DdmError> {
-        // Ask the switch zone for a list of peers - note that the rack subnet
-        // has not been sent out, and there the switch zone does not have an
-        // underlay address yet, so the bootstrap address is used here.
-        let ddm_admin_client =
-            DdmAdminClient::address(&self.log, switch_zone_bootstrap_address)?;
-        let addrs = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            || async {
-                let peer_addrs =
-                    ddm_admin_client.peer_addrs().await.map_err(|err| {
-                        BackoffError::transient(format!(
-                            "Failed getting peers from mg-ddm: {err}"
-                        ))
-                    })?;
-
-                let all_addrs = peer_addrs
-                    .chain(iter::once(our_bootstrap_address))
-                    .collect::<HashSet<_>>();
-
-                match expectation {
-                    PeerExpectation::LoadOldPlan(ref expected) => {
-                        if all_addrs.is_superset(expected) {
-                            Ok(all_addrs.into_iter().collect())
-                        } else {
-                            Err(BackoffError::transient(
-                                concat!(
-                                    "Waiting for a LoadOldPlan set ",
-                                    "of peers not found yet."
-                                )
-                                .to_string(),
-                            ))
-                        }
-                    }
-                    PeerExpectation::CreateNewPlan(wanted_peer_count) => {
-                        if all_addrs.len() >= wanted_peer_count {
-                            Ok(all_addrs.into_iter().collect())
-                        } else {
-                            Err(BackoffError::transient(format!(
-                                "Waiting for {} peers (currently have {})",
-                                wanted_peer_count,
-                                all_addrs.len()
-                            )))
-                        }
-                    }
-                }
-            },
-            |message, duration| {
-                info!(
-                    self.log,
-                    "{} (will retry after {:?})", message, duration
-                );
-            },
-        )
-        // `retry_policy_internal_service_aggressive()` retries indefinitely on
-        // transient errors (the only kind we produce), allowing us to
-        // `.unwrap()` without panicking
-        .await
-        .unwrap();
-
-        Ok(addrs)
     }
 
     async fn sled_timesync(
@@ -666,14 +583,17 @@ impl ServiceInner {
                     // the port assumption into multiple places and we can also
                     // more easily support things running on different ports
                     // (which is useful in dev/test situations).
-                    match svc {
+                    let service_id = svc.id;
+                    let zone_id = Some(zone.id);
+                    match &svc.details {
                         ServiceType::Nexus {
                             external_ip,
                             internal_ip: _,
                             ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -689,7 +609,8 @@ impl ServiceInner {
                         }
                         ServiceType::Dendrite { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -703,7 +624,8 @@ impl ServiceInner {
                         }
                         ServiceType::ExternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
@@ -715,14 +637,16 @@ impl ServiceInner {
                             dns_address,
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
                                 kind:
                                     NexusTypes::ServiceKind::InternalDnsConfig,
                             });
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: dns_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
@@ -730,7 +654,8 @@ impl ServiceInner {
                         }
                         ServiceType::Oximeter => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -744,7 +669,8 @@ impl ServiceInner {
                         }
                         ServiceType::CruciblePantry => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -759,7 +685,8 @@ impl ServiceInner {
                         ServiceType::BoundaryNtp { .. }
                         | ServiceType::InternalNtp { .. } => {
                             services.push(NexusTypes::ServicePutRequest {
-                                service_id: zone.id,
+                                service_id,
+                                zone_id,
                                 sled_id,
                                 address: SocketAddrV6::new(
                                     zone.addresses[0],
@@ -771,10 +698,10 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Ntp,
                             });
                         }
-                        _ => {
+                        details => {
                             return Err(SetupServiceError::BadConfig(format!(
                                 "RSS should not request service of type: {}",
-                                svc
+                                details
                             )));
                         }
                     }
@@ -841,11 +768,12 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         // Gather all peer addresses that we can currently see on the bootstrap
         // network.
-        let ddm_admin_client = DdmAdminClient::address(
-            &self.log,
-            local_bootstrap_agent.switch_zone_bootstrap_address(),
-        )?;
-        let peer_addrs = ddm_admin_client.peer_addrs().await?;
+        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
+        let peer_addrs = ddm_admin_client
+            .derive_bootstrap_addrs_from_prefixes(&[
+                BootstrapInterface::GlobalZone,
+            ])
+            .await?;
         let our_bootstrap_address = local_bootstrap_agent.our_address();
         let all_addrs = peer_addrs
             .chain(iter::once(our_bootstrap_address))
@@ -923,23 +851,25 @@ impl ServiceInner {
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
-        let maybe_sled_plan = SledPlan::load(&self.log).await?;
-        let expectation = if let Some(plan) = &maybe_sled_plan {
-            PeerExpectation::LoadOldPlan(
-                plan.sleds.keys().map(|a| *a.ip()).collect(),
-            )
-        } else {
-            PeerExpectation::CreateNewPlan(MINIMUM_SLED_COUNT)
+        let bootstrap_addrs = match &config.bootstrap_discovery {
+            BootstrapAddressDiscovery::OnlyOurs => {
+                HashSet::from([local_bootstrap_agent.our_address()])
+            }
+            BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
-
-        let addrs = self
-            .wait_for_peers(
-                expectation,
-                local_bootstrap_agent.our_address(),
-                local_bootstrap_agent.switch_zone_bootstrap_address(),
-            )
-            .await?;
-        info!(self.log, "Enough peers exist to enact RSS plan");
+        let maybe_sled_plan = SledPlan::load(&self.log).await?;
+        if let Some(plan) = &maybe_sled_plan {
+            let stored_peers: HashSet<Ipv6Addr> =
+                plan.sleds.keys().map(|a| *a.ip()).collect();
+            if stored_peers != bootstrap_addrs {
+                return Err(SetupServiceError::BadConfig("Set of sleds requested does not match those in existing sled plan".to_string()));
+            }
+        }
+        if bootstrap_addrs.is_empty() {
+            return Err(SetupServiceError::BadConfig(
+                "Must request at least one peer".to_string(),
+            ));
+        }
 
         // If we created a plan, reuse it. Otherwise, create a new plan.
         //
@@ -952,7 +882,7 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, config, addrs).await?
+            SledPlan::create(&self.log, config, bootstrap_addrs).await?
         };
         let config = &plan.config;
 

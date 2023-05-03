@@ -39,6 +39,7 @@ gateway-client.workspace = true
 installinator-artifactd.workspace = true
 installinator-common.workspace = true
 omicron-common.workspace = true
+sled-hardware.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 

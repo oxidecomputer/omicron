@@ -199,6 +199,7 @@ impl fmt::Display for ServiceKind {
 pub struct ServicePutRequest {
     pub service_id: Uuid,
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
 
     /// Address on which a service is responding to requests.
     pub address: SocketAddrV6,
@@ -263,6 +264,12 @@ pub struct RecoverySiloConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "String")]
 pub struct PasswordHash(nexus_passwords::PasswordHashString);
+
+impl From<nexus_passwords::PasswordHashString> for PasswordHash {
+    fn from(value: nexus_passwords::PasswordHashString) -> Self {
+        PasswordHash(value)
+    }
+}
 
 impl From<PasswordHash> for nexus_passwords::PasswordHashString {
     fn from(value: PasswordHash) -> Self {
