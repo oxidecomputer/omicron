@@ -31,6 +31,17 @@ macro_rules! path_param {
     };
 }
 
+macro_rules! id_path_param {
+    ($struct:ident, $param:ident, $name:tt) => {
+        #[derive(Serialize, Deserialize, JsonSchema)]
+        pub struct $struct {
+            #[doc = "ID of the "]
+            #[doc = $name]
+            pub $param: Uuid,
+        }
+    };
+}
+
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -46,14 +57,21 @@ path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 
-// Only by ID because groups have an `external_id` instead of a name and
-// therefore don't implement `ObjectIdentity`, which makes lookup by name
-// inconvenient. We should figure this out more generally, as there are several
-// resources like this.
-#[derive(Deserialize, JsonSchema)]
-pub struct GroupPath {
-    /// ID of the group
-    pub group: Uuid,
+id_path_param!(GroupPath, group_id, "group");
+
+// TODO: The hardware resources should be represented by its UUID or a hardware
+// ID that can be used to deterministically generate the UUID.
+id_path_param!(SledPath, sled_id, "sled");
+id_path_param!(SwitchPath, switch_id, "switch");
+
+pub struct SledSelector {
+    /// ID of the sled
+    pub sled: Uuid,
+}
+
+pub struct SwitchSelector {
+    /// ID of the switch
+    pub switch: Uuid,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]

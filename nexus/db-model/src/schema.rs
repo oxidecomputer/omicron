@@ -482,6 +482,21 @@ table! {
 }
 
 table! {
+    switch (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        rack_id -> Uuid,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
+    }
+}
+
+table! {
     service (id) {
         id -> Uuid,
         time_created -> Timestamptz,

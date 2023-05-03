@@ -69,6 +69,7 @@ mod silo_user;
 mod sled;
 mod snapshot;
 mod ssh_key;
+mod switch;
 mod update;
 mod virtual_provisioning_collection;
 mod volume;
