@@ -2552,7 +2552,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=add-data-sent-to-host-phase2-progress#59e782036e7eb6f6cbdb8610ca716f4507d0aa51"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=330443bb043b0e152b8c86f0fac959a1b3d24c48#330443bb043b0e152b8c86f0fac959a1b3d24c48"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2567,7 +2567,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?branch=add-data-sent-to-host-phase2-progress#59e782036e7eb6f6cbdb8610ca716f4507d0aa51"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=330443bb043b0e152b8c86f0fac959a1b3d24c48#330443bb043b0e152b8c86f0fac959a1b3d24c48"
 dependencies = [
  "async-trait",
  "backoff",
