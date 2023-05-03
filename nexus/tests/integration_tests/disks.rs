@@ -4,9 +4,7 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::{
-    query_for_latest_metric, query_for_metrics_until_they_exist,
-};
+use super::metrics::{query_for_latest_metric, query_for_metrics};
 
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
@@ -1349,6 +1347,11 @@ const ALL_METRICS: [&'static str; 6] =
 
 #[nexus_test]
 async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
+    // Record the current start time.  When fetching data points, we never need
+    // to look at times before this timestamp, since all the events we're
+    // interested in happen after this test starts.
+    let test_start_time = Utc::now();
+
     // Normally, Nexus is not registered as a producer for tests.
     // Turn this bit on so we can also test some metrics from Nexus itself.
     cptestctx.server.register_as_producer().await;
@@ -1360,14 +1363,15 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
-    // Whenever we grab this URL, get the surrounding few seconds of metrics.
+    // When grabbing a metric, we look for data points going back to the
+    // start of this test all the way up to the current time.
     let metric_url = |metric: &str| {
         format!(
             "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&project={}",
             DISK_NAME,
             metric,
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
+            test_start_time,
+            Utc::now(),
             PROJECT_NAME,
         )
     };
@@ -1375,8 +1379,8 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let utilization_url = |id: Uuid| {
         format!(
             "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
+            test_start_time,
+            Utc::now(),
             id,
         )
     };
@@ -1400,9 +1404,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
-        let measurements =
-            query_for_metrics_until_they_exist(client, &metric_url(metric))
-                .await;
+        let measurements = query_for_metrics(client, &metric_url(metric)).await;
 
         assert!(!measurements.items.is_empty());
         for item in &measurements.items {
