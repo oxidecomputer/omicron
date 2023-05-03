@@ -4,8 +4,10 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -197,6 +199,7 @@ impl fmt::Display for ServiceKind {
 pub struct ServicePutRequest {
     pub service_id: Uuid,
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
 
     /// Address on which a service is responding to requests.
     pub address: SocketAddrV6,
@@ -227,7 +230,7 @@ impl std::fmt::Debug for Certificate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
@@ -242,12 +245,71 @@ pub struct RackInitializationRequest {
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
     /// delegated DNS name for external DNS
     pub external_dns_zone_name: String,
+    /// configuration for the initial (recovery) Silo
+    pub recovery_silo: RecoverySiloConfig,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
 pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
 pub type Srv = dns_service_client::types::Srv;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RecoverySiloConfig {
+    pub silo_name: Name,
+    pub user_name: UserId,
+    pub user_password_hash: PasswordHash,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(try_from = "String")]
+pub struct PasswordHash(nexus_passwords::PasswordHashString);
+
+impl From<nexus_passwords::PasswordHashString> for PasswordHash {
+    fn from(value: nexus_passwords::PasswordHashString) -> Self {
+        PasswordHash(value)
+    }
+}
+
+impl From<PasswordHash> for nexus_passwords::PasswordHashString {
+    fn from(value: PasswordHash) -> Self {
+        value.0
+    }
+}
+
+impl JsonSchema for PasswordHash {
+    fn schema_name() -> String {
+        "PasswordHash".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A password hash in PHC string format".to_string()),
+                description: Some(
+                    "Password hashes must be in PHC (Password Hashing \
+                    Competition) string format.  Passwords must be hashed \
+                    with Argon2id.  Password hashes may be rejected if the \
+                    parameters appear not to be secure enough."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+impl TryFrom<String> for PasswordHash {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Ok(PasswordHash(nexus_passwords::parse_phc_hash(&value)?))
+    }
+}
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

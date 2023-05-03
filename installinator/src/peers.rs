@@ -21,6 +21,7 @@ use itertools::Itertools;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
+use sled_hardware::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
 use uuid::Uuid;
 
@@ -53,8 +54,15 @@ impl DiscoveryMechanism {
                     DdmAdminClient::localhost(log).map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
                     })?;
-                let addrs =
-                    ddm_admin_client.peer_addrs().await.map_err(|err| {
+                // We want to find both sled-agent (global zone) and wicketd
+                // (switch zone) peers.
+                let addrs = ddm_admin_client
+                    .derive_bootstrap_addrs_from_prefixes(&[
+                        BootstrapInterface::GlobalZone,
+                        BootstrapInterface::SwitchZone,
+                    ])
+                    .await
+                    .map_err(|err| {
                         DiscoverPeersError::Retry(anyhow::anyhow!(err))
                     })?;
                 addrs

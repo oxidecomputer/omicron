@@ -16,9 +16,13 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
+use tokio::sync::oneshot;
 use uuid::Uuid;
 use wicket_common::update_events::{StepEventKind, UpdateComponent};
-use wicketd::RunningUpdateState;
+use wicketd::{RunningUpdateState, StartUpdateError};
+use wicketd_client::types::{
+    GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
+};
 
 #[tokio::test]
 async fn test_updates() {
@@ -69,17 +73,46 @@ async fn test_updates() {
     let expected_kinds: BTreeSet<_> = KnownArtifactKind::iter().collect();
     assert_eq!(expected_kinds, kinds, "all expected kinds present");
 
+    let target_sp = SpIdentifier { type_: SpType::Sled, slot: 0 };
+
+    // Ensure wicketd knows our target_sp (which is simulated) is online and
+    // available to update.
+    let resp = wicketd_testctx
+        .wicketd_client
+        .get_inventory(&GetInventoryParams { force_refresh: vec![target_sp] })
+        .await
+        .expect("failed to get inventory");
+    match resp.into_inner() {
+        GetInventoryResponse::Response { inventory, .. } => {
+            let mut found = false;
+            for sp in &inventory.sps {
+                if sp.id == target_sp {
+                    assert!(sp.state.is_some(), "no state for target SP");
+                    found = true;
+                    break;
+                }
+            }
+            assert!(
+                found,
+                "did not find SP {target_sp:?} in inventory {inventory:?}"
+            );
+        }
+        GetInventoryResponse::Unavailable => {
+            panic!("wicketd inventory is unavailable")
+        }
+    }
+
     // Now, try starting the update on SP 0.
     wicketd_testctx
         .wicketd_client
-        .post_start_update(wicketd_client::types::SpType::Sled, 0)
+        .post_start_update(target_sp.type_, target_sp.slot)
         .await
         .expect("update started successfully");
 
     let terminal_event = 'outer: loop {
         let event_report = wicketd_testctx
             .wicketd_client
-            .get_update_sp(wicketd_client::types::SpType::Sled, 0)
+            .get_update_sp(target_sp.type_, target_sp.slot)
             .await
             .expect("get_update_sp successful")
             .into_inner();
@@ -220,4 +253,108 @@ async fn test_installinator_fetch() {
     }
 
     wicketd_testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_update_races() {
+    let gateway = gateway_setup::test_setup(
+        "test_artifact_upload_while_updating",
+        SpPort::One,
+    )
+    .await;
+    let wicketd_testctx = WicketdTestContext::setup(gateway).await;
+    let log = wicketd_testctx.log();
+
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
+    let archive_path = temp_dir.path().join("archive.zip");
+
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        "../tufaceous/manifests/fake.toml",
+        archive_path.as_str(),
+    ])
+    .expect("args parsed correctly");
+
+    args.exec(log).expect("assemble command completed successfully");
+
+    // Read the archive and upload it to the server.
+    let zip_bytes =
+        fs_err::read(&archive_path).expect("archive read correctly");
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes.clone())
+        .await
+        .expect("bytes read and archived");
+
+    // Now start an update.
+    let sp = gateway_client::types::SpIdentifier {
+        slot: 0,
+        type_: gateway_client::types::SpType::Sled,
+    };
+
+    let (sender, receiver) = oneshot::channel();
+    wicketd_testctx
+        .server
+        .update_tracker
+        .start_fake_update(sp, receiver)
+        .await
+        .expect("start_fake_update successful");
+
+    // An update is now running. Try uploading the repository again -- this time
+    // it should fail.
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes.clone())
+        .await
+        .expect_err("failed because update is currently running");
+
+    // Also try starting another fake update, which should fail -- we don't let
+    // updates be started in the middle of other updates.
+    {
+        let (_, receiver) = oneshot::channel();
+        let err = wicketd_testctx
+            .server
+            .update_tracker
+            .start_fake_update(sp, receiver)
+            .await
+            .expect_err("start_fake_update failed while update is running");
+        assert_eq!(err, StartUpdateError::UpdateInProgress(sp));
+    }
+
+    // Unblock the update, letting it run to completion.
+    sender.send(()).expect("receiver kept open by update engine");
+
+    // Ensure that the event buffer indicates completion.
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    let last_event =
+        event_buffer.step_events.last().expect("at least one event");
+    assert!(
+        matches!(last_event.kind, StepEventKind::ExecutionCompleted { .. }),
+        "last event is execution completed: {last_event:#?}"
+    );
+
+    // Try uploading the repository again -- since no updates are running, this
+    // should succeed.
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes)
+        .await
+        .expect("no updates currently running");
+
+    // Now that a new repository is uploaded, the event buffer should be wiped
+    // clean.
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        event_buffer.step_events.is_empty(),
+        "event buffer is empty: {event_buffer:#?}"
+    );
 }

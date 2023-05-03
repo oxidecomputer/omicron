@@ -6,6 +6,7 @@
 
 use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
+use crate::storage_manager::StorageManager;
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
 use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
@@ -33,6 +34,7 @@ struct HardwareMonitorWorker {
     exit_rx: oneshot::Receiver<()>,
     hardware: HardwareManager,
     services: ServiceManager,
+    storage: StorageManager,
 }
 
 impl HardwareMonitorWorker {
@@ -41,11 +43,14 @@ impl HardwareMonitorWorker {
         exit_rx: oneshot::Receiver<()>,
         hardware: HardwareManager,
         services: ServiceManager,
+        storage: StorageManager,
     ) -> Self {
-        Self { log, exit_rx, hardware, services }
+        Self { log, exit_rx, hardware, services, storage }
     }
 
-    async fn run(mut self) -> Result<(HardwareManager, ServiceManager), Error> {
+    async fn run(
+        mut self,
+    ) -> Result<(HardwareManager, ServiceManager, StorageManager), Error> {
         // Start monitoring the hardware for changes
         let mut hardware_updates = self.hardware.monitor();
 
@@ -58,13 +63,17 @@ impl HardwareMonitorWorker {
             use tokio::sync::broadcast::error::RecvError;
 
             tokio::select! {
-                _ = &mut self.exit_rx => return Ok((self.hardware, self.services)),
+                _ = &mut self.exit_rx => return Ok((self.hardware, self.services, self.storage)),
                 update = hardware_updates.recv() => {
                     match update {
                         Ok(update) => match update {
                             sled_hardware::HardwareUpdate::TofinoLoaded => {
+                                let baseboard = self.hardware.baseboard();
                                 let switch_zone_ip = None;
-                                if let Err(e) = self.services.activate_switch(switch_zone_ip).await {
+                                if let Err(e) = self.services.activate_switch(
+                                    switch_zone_ip,
+                                    baseboard,
+                                ).await {
                                     warn!(self.log, "Failed to activate switch: {e}");
                                 }
                             }
@@ -72,6 +81,12 @@ impl HardwareMonitorWorker {
                                 if let Err(e) = self.services.deactivate_switch().await {
                                     warn!(self.log, "Failed to deactivate switch: {e}");
                                 }
+                            }
+                            sled_hardware::HardwareUpdate::DiskAdded(disk) => {
+                                self.storage.upsert_disk(disk).await;
+                            }
+                            sled_hardware::HardwareUpdate::DiskRemoved(disk) => {
+                                self.storage.delete_disk(disk).await;
                             }
                             _ => continue,
                         },
@@ -96,8 +111,10 @@ impl HardwareMonitorWorker {
     async fn full_hardware_scan(&self) {
         info!(self.log, "Performing full hardware scan");
         if self.hardware.is_scrimlet_driver_loaded() {
+            let baseboard = self.hardware.baseboard();
             let switch_zone_ip = None;
-            if let Err(e) = self.services.activate_switch(switch_zone_ip).await
+            if let Err(e) =
+                self.services.activate_switch(switch_zone_ip, baseboard).await
             {
                 warn!(self.log, "Failed to activate switch: {e}");
             }
@@ -116,7 +133,9 @@ impl HardwareMonitorWorker {
 // terminate) the switch zone when requested.
 pub(crate) struct HardwareMonitor {
     exit_tx: oneshot::Sender<()>,
-    handle: JoinHandle<Result<(HardwareManager, ServiceManager), Error>>,
+    handle: JoinHandle<
+        Result<(HardwareManager, ServiceManager, StorageManager), Error>,
+    >,
 }
 
 impl HardwareMonitor {
@@ -125,6 +144,7 @@ impl HardwareMonitor {
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
@@ -164,8 +184,11 @@ impl HardwareMonitor {
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
+        let storage_manager = StorageManager::new(&log).await;
+
         let service_manager = ServiceManager::new(
             log.clone(),
+            global_zone_bootstrap_link_local_address,
             underlay_etherstub.clone(),
             underlay_etherstub_vnic.clone(),
             bootstrap_etherstub,
@@ -174,10 +197,11 @@ impl HardwareMonitor {
             sled_config.sidecar_revision.clone(),
             switch_zone_bootstrap_address,
             sled_config.switch_zone_maghemite_links.clone(),
+            storage_manager.clone(),
         )
         .await?;
 
-        Ok(Self::start(log, hardware, service_manager))
+        Ok(Self::start(log, hardware, service_manager, storage_manager))
     }
 
     // Starts a hardware monitoring task
@@ -185,6 +209,7 @@ impl HardwareMonitor {
         log: &Logger,
         hardware: HardwareManager,
         services: ServiceManager,
+        storage: StorageManager,
     ) -> Self {
         let (exit_tx, exit_rx) = oneshot::channel();
         let worker = HardwareMonitorWorker::new(
@@ -192,6 +217,7 @@ impl HardwareMonitor {
             exit_rx,
             hardware,
             services,
+            storage,
         );
         let handle = tokio::spawn(async move { worker.run().await });
 
@@ -201,7 +227,7 @@ impl HardwareMonitor {
     // Stops the task from executing
     pub async fn stop(
         self,
-    ) -> Result<(HardwareManager, ServiceManager), Error> {
+    ) -> Result<(HardwareManager, ServiceManager, StorageManager), Error> {
         let _ = self.exit_tx.send(());
         self.handle.await.expect("Hardware monitor panicked")
     }

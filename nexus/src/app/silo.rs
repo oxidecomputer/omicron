@@ -14,7 +14,7 @@ use crate::external_api::params;
 use crate::external_api::shared;
 use crate::{authn, authz};
 use anyhow::Context;
-use nexus_db_model::UserProvisionType;
+use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_types::internal_api::params::DnsRecord;
@@ -68,7 +68,9 @@ impl super::Nexus {
     /// _within_ the control plane DNS zone (i.e., without that zone's suffix)
     ///
     /// This specific naming scheme is determined under RFD 357.
-    fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
+    pub(crate) fn silo_dns_name(
+        name: &omicron_common::api::external::Name,
+    ) -> String {
         // RFD 4 constrains resource names (including Silo names) to DNS-safe
         // strings, which is why it's safe to directly put the name of the
         // resource into the DNS name rather than doing any kind of escaping.
@@ -80,17 +82,17 @@ impl super::Nexus {
         opctx: &OpContext,
         new_silo_params: params::SiloCreate,
     ) -> CreateResult<db::model::Silo> {
-        // Silo group creation happens as Nexus's "external authn" context,
-        // not the user's context here.  The user may not have permission to
-        // create arbitrary groups in the Silo, but we allow them to create
-        // this one in this case.
-        let external_authn_opctx = self.opctx_external_authn();
+        // Silo creation involves several operations that ordinary users cannot
+        // generally do, like reading and modifying the fleet-wide external DNS
+        // config.  Nexus assumes its own identity to do these operations in
+        // this (very specific) context.
+        let nexus_opctx = self.opctx_external_authn();
         let datastore = self.datastore();
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
         let dns_records: Vec<DnsRecord> = datastore
-            .nexus_external_addresses(external_authn_opctx)
+            .nexus_external_addresses(nexus_opctx)
             .await?
             .into_iter()
             .map(|addr| match addr {
@@ -101,19 +103,14 @@ impl super::Nexus {
 
         let silo_name = &new_silo_params.identity.name;
         let mut dns_update = DnsVersionUpdateBuilder::new(
-            datastore.dns_zone_external(external_authn_opctx).await?,
+            DnsGroup::External,
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
         );
         dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
 
         let silo = datastore
-            .silo_create(
-                &opctx,
-                &external_authn_opctx,
-                new_silo_params,
-                dns_update,
-            )
+            .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
@@ -138,7 +135,7 @@ impl super::Nexus {
         let (.., authz_silo, db_silo) =
             silo_lookup.fetch_for(authz::Action::Delete).await?;
         let mut dns_update = DnsVersionUpdateBuilder::new(
-            datastore.dns_zone_external(opctx).await?,
+            DnsGroup::External,
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),
         );

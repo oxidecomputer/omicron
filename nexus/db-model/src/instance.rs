@@ -98,7 +98,10 @@ impl DatastoreAttachTargetConfig<Disk> for Instance {
     Serialize,
     Deserialize,
 )]
-#[diesel(table_name = instance)]
+// N.B. Setting `treat_none_as_null` is required for these fields to be cleared
+//      properly during live migrations. See the documentation for
+//      `diesel::prelude::AsChangeset`.
+#[diesel(table_name = instance, treat_none_as_null = true)]
 pub struct InstanceRuntimeState {
     /// The instance's current user-visible instance state.
     ///

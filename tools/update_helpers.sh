@@ -17,11 +17,16 @@ bad_target_commit() {
     exit 1
 }
 
+# Get the SHA for a Buildomat artifact.
+#
+# Note the "series" component of the Buildomat public file hierarchy
+# is the optional 4th argument, and defaults to "image".
 function get_sha {
     REPO="$1"
     COMMIT="$2"
     ARTIFACT="$3"
-    curl -fsS "https://buildomat.eng.oxide.computer/public/file/$REPO/image/$COMMIT/$ARTIFACT.sha256.txt"
+    SERIES="${4:-image}"
+    curl -fsS "https://buildomat.eng.oxide.computer/public/file/$REPO/$SERIES/$COMMIT/$ARTIFACT.sha256.txt"
 }
 
 function get_latest_commit_from_gh {

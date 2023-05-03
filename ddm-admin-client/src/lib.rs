@@ -19,13 +19,14 @@ mod inner {
 pub use inner::types;
 pub use inner::Error;
 
+use either::Either;
 use inner::types::Ipv6Prefix;
 use inner::Client as InnerClient;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
+use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::underlay::BOOTSTRAP_MASK;
 use sled_hardware::underlay::BOOTSTRAP_PREFIX;
 use slog::info;
@@ -57,28 +58,6 @@ impl Client {
     /// Creates a new [`Client`] that points to localhost
     pub fn localhost(log: &Logger) -> Result<Self, DdmError> {
         Self::new(log, SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0))
-    }
-
-    /// Creates a new [`Client`] that points to the switch zone in a
-    /// sled subnet.
-    pub fn switch_zone(
-        log: &Logger,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Result<Self, DdmError> {
-        Self::new(
-            log,
-            SocketAddrV6::new(
-                get_switch_zone_address(sled_subnet),
-                DDMD_PORT,
-                0,
-                0,
-            ),
-        )
-    }
-
-    /// Creates a new [`Client`] that points to an IPv6 address
-    pub fn address(log: &Logger, address: Ipv6Addr) -> Result<Self, DdmError> {
-        Self::new(log, SocketAddrV6::new(address, DDMD_PORT, 0, 0))
     }
 
     fn new(log: &Logger, ddmd_addr: SocketAddrV6) -> Result<Self, DdmError> {
@@ -129,27 +108,28 @@ impl Client {
     /// Returns the addresses of connected sleds.
     ///
     /// Note: These sleds have not yet been verified.
-    pub async fn peer_addrs(
+    pub async fn derive_bootstrap_addrs_from_prefixes<'a>(
         &self,
-    ) -> Result<impl Iterator<Item = Ipv6Addr> + '_, DdmError> {
+        interfaces: &'a [BootstrapInterface],
+    ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
         info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
-        Ok(prefixes.into_iter().filter_map(|(_, prefixes)| {
-            // If we receive multiple bootstrap prefixes from one peer, trim it
-            // down to just one. Connections on the bootstrap network are always
-            // authenticated via sprockets, which only needs one address.
-            prefixes.into_iter().find_map(|prefix| {
+        Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
+            prefixes.into_iter().flat_map(|prefix| {
                 let mut segments = prefix.destination.addr.segments();
                 if prefix.destination.len == BOOTSTRAP_MASK
                     && segments[0] == BOOTSTRAP_PREFIX
                 {
-                    // Bootstrap agent IPs always end in ::1; convert the
-                    // `BOOTSTRAP_PREFIX::*/BOOTSTRAP_PREFIX` address we
-                    // received into that specific address.
-                    segments[7] = 1;
-                    Some(Ipv6Addr::from(segments))
+                    Either::Left(interfaces.iter().map(move |interface| {
+                        let id = interface.interface_id();
+                        segments[4] = ((id >> 48) & 0xffff) as u16;
+                        segments[5] = ((id >> 32) & 0xffff) as u16;
+                        segments[6] = ((id >> 16) & 0xffff) as u16;
+                        segments[7] = (id & 0xffff) as u16;
+                        Ipv6Addr::from(segments)
+                    }))
                 } else {
-                    None
+                    Either::Right(std::iter::empty())
                 }
             })
         }))

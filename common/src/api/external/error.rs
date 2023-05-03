@@ -61,6 +61,9 @@ pub enum Error {
 
     #[error("Type version mismatch! {internal_message}")]
     TypeVersionMismatch { internal_message: String },
+
+    #[error("Conflict: {internal_message}")]
+    Conflict { internal_message: String },
 }
 
 /// Indicates how an object was looked up (for an `ObjectNotFound` error)
@@ -118,7 +121,8 @@ impl Error {
             | Error::Forbidden
             | Error::MethodNotAllowed { .. }
             | Error::InternalError { .. }
-            | Error::TypeVersionMismatch { .. } => false,
+            | Error::TypeVersionMismatch { .. }
+            | Error::Conflict { .. } => false,
         }
     }
 
@@ -174,6 +178,18 @@ impl Error {
         Error::TypeVersionMismatch { internal_message: message.to_owned() }
     }
 
+    /// Generates an [`Error::Conflict`] with a specific message.
+    ///
+    /// This is used in cases where a request cannot proceed because the target
+    /// resource is currently in a state that's incompatible with that request,
+    /// but where the request might succeed if it is retried or modified and
+    /// retried. The internal message should provide more information about the
+    /// source of the conflict and possible actions the caller can take to
+    /// resolve it (if any).
+    pub fn conflict(message: &str) -> Error {
+        Error::Conflict { internal_message: message.to_owned() }
+    }
+
     /// Given an [`Error`] with an internal message, return the same error with
     /// `context` prepended to it to provide more context
     ///
@@ -223,6 +239,9 @@ impl Error {
                     ),
                 }
             }
+            Error::Conflict { internal_message } => Error::Conflict {
+                internal_message: format!("{}: {}", context, internal_message),
+            },
         }
     }
 }
@@ -316,6 +335,14 @@ impl From<Error> for HttpError {
 
             Error::TypeVersionMismatch { internal_message } => {
                 HttpError::for_internal_error(internal_message)
+            }
+
+            Error::Conflict { internal_message } => {
+                HttpError::for_client_error(
+                    Some(String::from("Conflict")),
+                    http::StatusCode::CONFLICT,
+                    internal_message,
+                )
             }
         }
     }

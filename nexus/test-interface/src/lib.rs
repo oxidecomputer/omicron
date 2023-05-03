@@ -51,6 +51,7 @@ pub trait NexusServer {
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         external_dns_zone_name: &str,
+        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> Option<SocketAddr>;

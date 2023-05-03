@@ -25,6 +25,8 @@ skip_timesync = true
 # Note that you'll need to create one such zpool for each below, with a
 # different vdev for each.
 zpools = [
+  "oxi_a462a7f7-b628-40fe-80ff-4e4189e2d62b",
+  "oxi_b462a7f7-b628-40fe-80ff-4e4189e2d62b",
   "oxp_d462a7f7-b628-40fe-80ff-4e4189e2d62b",
   "oxp_e4b4dc87-ab46-49fb-a4b4-d361ae214c03",
   "oxp_f4b4dc87-ab46-49fb-a4b4-d361ae214c03",
