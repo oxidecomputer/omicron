@@ -1173,9 +1173,13 @@ async fn sp_host_phase2_progress_get(
     let image_id =
         HostPhase2RecoveryImageId { sha256_hash: ArtifactHash(progress.hash) };
 
+    // `progress` tells us the offset the SP requested and the amount of data we
+    // sent starting at that offset; report the end of that chunk to our caller.
+    let offset = progress.offset.saturating_add(progress.data_sent);
+
     Ok(HttpResponseOk(HostPhase2Progress::Available {
         image_id,
-        offset: progress.offset,
+        offset,
         total_size,
         age: progress.received.elapsed(),
     }))
