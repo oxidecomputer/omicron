@@ -46,15 +46,19 @@ impl<S: StepSpec> Event<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<Event<GenericSpec<E>>, ConvertGenericError> {
-        let ret = match self {
-            Event::Step(event) => Event::Step(event.into_generic()?),
-            Event::Progress(event) => Event::Progress(event.into_generic()?),
-        };
-        Ok(ret)
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> Event<GenericSpec<E>> {
+        match self {
+            Event::Step(event) => Event::Step(event.into_generic()),
+            Event::Progress(event) => Event::Progress(event.into_generic()),
+        }
     }
 }
 
@@ -184,19 +188,21 @@ impl<S: StepSpec> StepEvent<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<StepEvent<GenericSpec<E>>, ConvertGenericError> {
-        Ok(StepEvent {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> StepEvent<GenericSpec<E>> {
+        StepEvent {
             execution_id: self.execution_id,
             event_index: self.event_index,
             total_elapsed: self.total_elapsed,
-            kind: self
-                .kind
-                .into_generic()
-                .map_err(|error| error.parent("kind"))?,
-        })
+            kind: self.kind.into_generic(),
+        }
     }
 }
 
@@ -539,11 +545,16 @@ impl<S: StepSpec> StepEventKind<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<StepEventKind<GenericSpec<E>>, ConvertGenericError> {
-        let ret = match self {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> StepEventKind<GenericSpec<E>> {
+        match self {
             StepEventKind::NoStepsDefined => StepEventKind::NoStepsDefined,
             StepEventKind::ExecutionStarted {
                 steps,
@@ -552,24 +563,13 @@ impl<S: StepSpec> StepEventKind<S> {
             } => StepEventKind::ExecutionStarted {
                 steps: steps
                     .into_iter()
-                    .enumerate()
-                    .map(|(index, step)| {
-                        step.into_generic()
-                            .map_err(|error| error.parent_array("steps", index))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .map(|step| step.into_generic())
+                    .collect(),
                 components: components
                     .into_iter()
-                    .enumerate()
-                    .map(|(index, component)| {
-                        component.into_generic().map_err(|error| {
-                            error.parent_array("components", index)
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                first_step: first_step
-                    .into_generic()
-                    .map_err(|error| error.parent("first_step"))?,
+                    .map(|component| component.into_generic())
+                    .collect(),
+                first_step: first_step.into_generic(),
             },
             StepEventKind::ProgressReset {
                 step,
@@ -579,13 +579,10 @@ impl<S: StepSpec> StepEventKind<S> {
                 attempt_elapsed,
                 message,
             } => StepEventKind::ProgressReset {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
-                metadata: serde_json::to_value(metadata).map_err(|error| {
-                    ConvertGenericError::new("metadata", error)
-                })?,
+                metadata: serde_json::to_value(metadata)
+                    .unwrap_or_else(|_| serde_json::Value::Null),
                 step_elapsed,
                 attempt_elapsed,
                 message,
@@ -597,9 +594,7 @@ impl<S: StepSpec> StepEventKind<S> {
                 attempt_elapsed,
                 message,
             } => StepEventKind::AttemptRetry {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 next_attempt,
                 step_elapsed,
                 attempt_elapsed,
@@ -613,16 +608,10 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
             } => StepEventKind::StepCompleted {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
-                outcome: outcome
-                    .into_generic()
-                    .map_err(|error| error.parent("outcome"))?,
-                next_step: next_step
-                    .into_generic()
-                    .map_err(|error| error.parent("next_step"))?,
+                outcome: outcome.into_generic(),
+                next_step: next_step.into_generic(),
                 step_elapsed,
                 attempt_elapsed,
             },
@@ -633,13 +622,9 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
             } => StepEventKind::ExecutionCompleted {
-                last_step: last_step
-                    .into_generic()
-                    .map_err(|error| error.parent("last_step"))?,
+                last_step: last_step.into_generic(),
                 last_attempt,
-                last_outcome: last_outcome
-                    .into_generic()
-                    .map_err(|error| error.parent("last_outcome"))?,
+                last_outcome: last_outcome.into_generic(),
                 step_elapsed,
                 attempt_elapsed,
             },
@@ -651,9 +636,7 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             } => StepEventKind::ExecutionFailed {
-                failed_step: failed_step
-                    .into_generic()
-                    .map_err(|error| error.parent("failed_step"))?,
+                failed_step: failed_step.into_generic(),
                 total_attempts,
                 step_elapsed,
                 attempt_elapsed,
@@ -667,17 +650,14 @@ impl<S: StepSpec> StepEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
             } => StepEventKind::Nested {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
                 event,
                 step_elapsed,
                 attempt_elapsed,
             },
             StepEventKind::Unknown => StepEventKind::Unknown,
-        };
-        Ok(ret)
+        }
     }
 }
 
@@ -790,34 +770,35 @@ impl<S: StepSpec> StepOutcome<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<StepOutcome<GenericSpec<E>>, ConvertGenericError> {
-        let ret = match self {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> StepOutcome<GenericSpec<E>> {
+        match self {
             StepOutcome::Success { metadata } => StepOutcome::Success {
-                metadata: serde_json::to_value(metadata).map_err(|error| {
-                    ConvertGenericError::new("metadata", error)
-                })?,
+                metadata: serde_json::to_value(metadata)
+                    .unwrap_or_else(|_| serde_json::Value::Null),
             },
             StepOutcome::Warning { metadata, message } => {
                 StepOutcome::Warning {
-                    metadata: serde_json::to_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+                    metadata: serde_json::to_value(metadata)
+                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
                 }
             }
             StepOutcome::Skipped { metadata, message } => {
                 StepOutcome::Skipped {
-                    metadata: serde_json::to_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+                    metadata: serde_json::to_value(metadata)
+                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
                 }
             }
-        };
-        Ok(ret)
+        }
     }
 }
 
@@ -855,18 +836,20 @@ impl<S: StepSpec> ProgressEvent<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<ProgressEvent<GenericSpec<E>>, ConvertGenericError> {
-        Ok(ProgressEvent {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> ProgressEvent<GenericSpec<E>> {
+        ProgressEvent {
             execution_id: self.execution_id,
             total_elapsed: self.total_elapsed,
-            kind: self
-                .kind
-                .into_generic()
-                .map_err(|error| error.parent("kind"))?,
-        })
+            kind: self.kind.into_generic(),
+        }
     }
 }
 
@@ -998,20 +981,23 @@ impl<S: StepSpec> ProgressEventKind<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<ProgressEventKind<GenericSpec<E>>, ConvertGenericError> {
-        let ret = match self {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> ProgressEventKind<GenericSpec<E>> {
+        match self {
             ProgressEventKind::WaitingForProgress {
                 step,
                 attempt,
                 step_elapsed,
                 attempt_elapsed,
             } => ProgressEventKind::WaitingForProgress {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
                 step_elapsed,
                 attempt_elapsed,
@@ -1024,13 +1010,10 @@ impl<S: StepSpec> ProgressEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
             } => ProgressEventKind::Progress {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
-                metadata: serde_json::to_value(metadata).map_err(|error| {
-                    ConvertGenericError::new("metadata", error)
-                })?,
+                metadata: serde_json::to_value(metadata)
+                    .unwrap_or_else(|_| serde_json::Value::Null),
                 progress,
                 step_elapsed,
                 attempt_elapsed,
@@ -1042,17 +1025,14 @@ impl<S: StepSpec> ProgressEventKind<S> {
                 step_elapsed,
                 attempt_elapsed,
             } => ProgressEventKind::Nested {
-                step: step
-                    .into_generic()
-                    .map_err(|error| error.parent("step"))?,
+                step: step.into_generic(),
                 attempt,
                 event,
                 step_elapsed,
                 attempt_elapsed,
             },
             ProgressEventKind::Unknown => todo!(),
-        };
-        Ok(ret)
+        }
     }
 }
 
@@ -1109,21 +1089,25 @@ impl<S: StepSpec> StepInfo<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<StepInfo<GenericSpec<E>>, ConvertGenericError> {
-        Ok(StepInfo {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> StepInfo<GenericSpec<E>> {
+        StepInfo {
             id: serde_json::to_value(self.id)
-                .map_err(|error| ConvertGenericError::new("id", error))?,
-            component: serde_json::to_value(self.component).map_err(
-                |error| ConvertGenericError::new("component", error),
-            )?,
+                .unwrap_or_else(|_| serde_json::Value::Null),
+            component: serde_json::to_value(self.component)
+                .unwrap_or_else(|_| serde_json::Value::Null),
             description: self.description,
             index: self.index,
             component_index: self.component_index,
             total_component_steps: self.total_component_steps,
-        })
+        }
     }
 }
 
@@ -1157,16 +1141,22 @@ impl<S: StepSpec> StepComponentSummary<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
     pub fn into_generic<E: AsError>(
         self,
-    ) -> Result<StepComponentSummary<GenericSpec<E>>, ConvertGenericError> {
-        Ok(StepComponentSummary {
-            component: serde_json::to_value(self.component).map_err(
-                |error| ConvertGenericError::new("component", error),
-            )?,
+    ) -> StepComponentSummary<GenericSpec<E>> {
+        StepComponentSummary {
+            component: serde_json::to_value(self.component)
+                .unwrap_or_else(|_| serde_json::Value::Null),
             total_component_steps: self.total_component_steps,
-        })
+        }
     }
 }
 
@@ -1207,22 +1197,24 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
     pub fn into_generic<E: AsError>(
         self,
-    ) -> Result<StepInfoWithMetadata<GenericSpec<E>>, ConvertGenericError> {
-        Ok(StepInfoWithMetadata {
-            info: StepInfo::into_generic(self.info)
-                .map_err(|error| error.parent("info"))?,
-            metadata: self
-                .metadata
-                .map(|metadata| {
-                    serde_json::to_value(metadata).map_err(|error| {
-                        ConvertGenericError::new("metadata", error)
-                    })
-                })
-                .transpose()?,
-        })
+    ) -> StepInfoWithMetadata<GenericSpec<E>> {
+        StepInfoWithMetadata {
+            info: self.info.into_generic(),
+            metadata: self.metadata.map(|metadata| {
+                serde_json::to_value(metadata)
+                    .unwrap_or_else(|_| serde_json::Value::Null)
+            }),
+        }
     }
 }
 
@@ -1386,33 +1378,28 @@ impl<S: StepSpec> EventReport<S> {
 
     /// Converts self into its generic version.
     ///
-    /// This version can be used to share data across different kinds of engines.
-    pub fn into_generic<E: AsError>(
-        self,
-    ) -> Result<EventReport<GenericSpec<E>>, ConvertGenericError> {
-        Ok(EventReport {
+    /// This version can be used to share data across different kinds of
+    /// engines.
+    ///
+    /// If any of the data in self fails to serialize to a
+    /// [`serde_json::Value`], it will be replaced with
+    /// [`serde_json::Value::Null`]. Since `serde_json::Value` represents
+    /// an arbitrary JSON value, such data would have failed to serialize
+    /// anyway.
+    pub fn into_generic<E: AsError>(self) -> EventReport<GenericSpec<E>> {
+        EventReport {
             step_events: self
                 .step_events
                 .into_iter()
-                .enumerate()
-                .map(|(index, event)| {
-                    event.into_generic().map_err(|error| {
-                        error.parent_array("step_events", index)
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|event| event.into_generic())
+                .collect(),
             progress_events: self
                 .progress_events
                 .into_iter()
-                .enumerate()
-                .map(|(index, event)| {
-                    event.into_generic().map_err(|error| {
-                        error.parent_array("progress_events", index)
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|event| event.into_generic())
+                .collect(),
             last_seen: self.last_seen,
-        })
+        }
     }
 }
 
