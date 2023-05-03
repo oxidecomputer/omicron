@@ -18,6 +18,7 @@ http.workspace = true
 hyper.workspace = true
 internal-dns.workspace = true
 nexus-db-queries.workspace = true
+nexus-passwords.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

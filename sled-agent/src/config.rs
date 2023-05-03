@@ -127,17 +127,15 @@ mod test {
         let smf = Utf8PathBuf::from(manifest).join("../smf/sled-agent");
 
         let mut configs_seen = 0;
-        for variant in std::fs::read_dir(smf).unwrap() {
+        for variant in smf.read_dir_utf8().unwrap() {
             let variant = variant.unwrap();
             if variant.file_type().unwrap().is_dir() {
-                for entry in std::fs::read_dir(variant.path()).unwrap() {
+                for entry in variant.path().read_dir_utf8().unwrap() {
                     let entry = entry.unwrap();
                     if entry.file_name() == "config.toml" {
                         let path = entry.path();
-                        let utf8_path: &Utf8Path =
-                            path.as_path().try_into().unwrap();
-                        Config::from_file(&utf8_path).unwrap_or_else(|_| {
-                            panic!("Failed to parse config {utf8_path}")
+                        Config::from_file(&path).unwrap_or_else(|_| {
+                            panic!("Failed to parse config {path}")
                         });
                         configs_seen += 1;
                     }

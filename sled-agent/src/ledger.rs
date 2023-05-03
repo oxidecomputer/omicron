@@ -24,16 +24,16 @@ pub enum Error {
         err: std::io::Error,
     },
 
-    #[error("Failed to write the ledger to storage")]
-    FailedToWrite,
-
     #[error("Not found in storage")]
     NotFound,
+
+    #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
+    FailedToWrite { failed_paths: Vec<(Utf8PathBuf, Error)> },
 }
 
 impl Error {
     fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
-        Self::Io { message: format!("Error accessing {path}"), err }
+        Self::Io { message: format!("Error accessing {}", path), err }
     }
 }
 
@@ -116,17 +116,19 @@ impl<T: Ledgerable> Ledger<T> {
         // Bump the generation number any time we want to commit the ledger.
         self.ledger.generation_bump();
 
+        let mut failed_paths = vec![];
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write to {path}: {e}");
+                warn!(self.log, "Failed to write to {}: {e}", path);
+                failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
             }
         }
 
         if !one_successful_write {
-            return Err(Error::FailedToWrite);
+            return Err(Error::FailedToWrite { failed_paths });
         }
         Ok(())
     }
@@ -164,7 +166,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     /// Reads from `path` as a toml-serialized version of `Self`.
     async fn read_from(log: &Logger, path: &Utf8Path) -> Result<Self, Error> {
         if path.exists() {
-            debug!(log, "Reading ledger from {path}");
+            debug!(log, "Reading ledger from {}", path);
             toml::from_str(
                 &tokio::fs::read_to_string(&path)
                     .await
@@ -186,7 +188,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
         log: &Logger,
         path: &Utf8Path,
     ) -> Result<(), Error> {
-        debug!(log, "Writing ledger to {path}");
+        debug!(log, "Writing ledger to {}", path);
         let serialized =
             toml::Value::try_from(&self).expect("Cannot serialize ledger");
         let as_str = toml::to_string(&serialized).map_err(|err| {
@@ -392,7 +394,10 @@ mod test {
         );
         assert_eq!(ledger.data(), &Data::default());
         let err = ledger.commit().await.unwrap_err();
-        assert!(matches!(err, Error::FailedToWrite), "Unexpected error: {err}");
+        assert!(
+            matches!(err, Error::FailedToWrite { .. }),
+            "Unexpected error: {err}"
+        );
 
         logctx.cleanup_successful();
     }

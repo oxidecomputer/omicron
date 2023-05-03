@@ -860,7 +860,7 @@ impl ServiceManager {
         let service = DnsClient {};
         let smfh = SmfHelper::new(&running_zone, &service);
 
-        let etc = Utf8PathBuf::from(running_zone.root()).join("etc");
+        let etc = running_zone.root().join("etc");
         let resolv_conf = etc.join("resolv.conf");
         let nsswitch_conf = etc.join("nsswitch.conf");
         let nsswitch_dns = etc.join("nsswitch.dns");
@@ -1918,13 +1918,11 @@ impl ServiceManager {
 
         info!(self.inner.log, "Setting boot time to {:?}", now);
 
-        let files: Vec<String> = zones
+        let files: Vec<Utf8PathBuf> = zones
             .iter()
             .map(|z| z.root())
-            .chain(iter::once("".to_string()))
-            .flat_map(|r| {
-                [format!("{r}/var/adm/utmpx"), format!("{r}/var/adm/wtmpx")]
-            })
+            .chain(iter::once(Utf8PathBuf::from("/")))
+            .flat_map(|r| [r.join("var/adm/utmpx"), r.join("var/adm/wtmpx")])
             .collect();
 
         for file in files {
@@ -1932,7 +1930,7 @@ impl ServiceManager {
             let cmd = command.args(&[
                 "/usr/platform/oxide/bin/tmpx",
                 &format!("{}", now.as_secs()),
-                &file,
+                &file.as_str(),
             ]);
             match execute(cmd) {
                 Err(e) => {
