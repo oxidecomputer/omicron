@@ -204,6 +204,7 @@ pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 # NOTE: this script configures softnpu's "rack network" settings using swadm
 ./tools/scrimlet/softnpu-init.sh
 
+export RUST_BACKTRACE=1
 ./tests/bootstrap
 
 rm ./tests/bootstrap
