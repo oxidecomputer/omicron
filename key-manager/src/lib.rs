@@ -60,10 +60,12 @@ pub struct KeyManager<S: SecretRetriever> {
     // A mechanism for retrieving input key material
     secret_retriever: S,
 
-    /// Pseudo-Random-Keys (PRKs) wrapped in an `Hkdf` structure so that we can
-    /// create keys from them with `HKDF-Expand` (`prk.expand_multi_info`).
+    /// Rack configuration epochs mapped to Pseudo-Random-Keys (PRKs) wrapped
+    /// in an `Hkdf` structure so that we can create keys from them with `HKDF-
+    /// Expand` (`prk.expand_multi_info`).
     ///
-    /// In the common case, we will only have a single PRK for everything.
+    /// In the common case, we will only have a single PRK for everything, mapped
+    /// from the latest epoch.
     ///
     /// If there is an ongoing reconfiguration, we will have at least 2 PRKs. In
     /// some cases of failure while multiple reconfigurations have taken place,
@@ -128,7 +130,7 @@ impl<S: SecretRetriever> KeyManager<S> {
     }
 
     /// Return the epochs for all secrets which are loaded
-    pub fn loaded_secrets(&self) -> Vec<u64> {
+    pub fn loaded_epochs(&self) -> Vec<u64> {
         self.prks.keys().copied().collect()
     }
 
@@ -264,7 +266,7 @@ mod tests {
         // There is no secret for epoch 1
         let epoch = 1;
         assert!(km.disk_encryption_key(epoch, &disk_id).await.is_err());
-        assert_eq!(vec![0], km.loaded_secrets());
+        assert_eq!(vec![0], km.loaded_epochs());
     }
 
     #[tokio::test]
@@ -328,17 +330,17 @@ mod tests {
         };
         let epoch = 0;
 
-        assert_eq!(0, km.loaded_secrets().len());
+        assert_eq!(0, km.loaded_epochs().len());
 
         // This will load secrets if they are not already loaded.
         // Note that we never called `km.load_latest_secret()`
         let _ = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
-        assert_eq!(2, km.loaded_secrets().len());
+        assert_eq!(2, km.loaded_epochs().len());
 
         // Loading just the latest secret will not load any other secrets
         km.clear();
         let epoch = 1;
         let _ = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
-        assert_eq!(1, km.loaded_secrets().len());
+        assert_eq!(1, km.loaded_epochs().len());
     }
 }
