@@ -5,6 +5,7 @@
 //! A crate used to derive keys useful for the Oxide control plane
 
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
 use hkdf::Hkdf;
@@ -20,6 +21,14 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// `Zeroizable` data, and a `Box<[u8; 32]>` is not zeroizable on its own.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Ikm(pub Box<[u8; 32]>);
+
+/// We impl Debug here only to guarantee nobody re-implements this to actually
+/// expose the secret.
+impl Debug for Ikm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Ikm(secret)")
+    }
+}
 
 /// Secret Input Key Material for a given rack reconfiguration epoch
 pub struct VersionedIkm {
