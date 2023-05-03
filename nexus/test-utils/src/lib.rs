@@ -57,6 +57,7 @@ pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
 pub const TEST_SUITE_PASSWORD: &str = "oxide";
 
 pub struct ControlPlaneTestContext<N> {
+    pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: N,
@@ -157,6 +158,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
 ) -> ControlPlaneTestContext<N> {
+    let start_time = chrono::Utc::now();
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
@@ -360,6 +362,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
+        start_time,
         server,
         external_client: testctx_external,
         internal_client: testctx_internal,
