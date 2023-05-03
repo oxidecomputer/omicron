@@ -26,6 +26,7 @@ use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -41,6 +42,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts)?;
+        api.register(get_baseboard)?;
         api.register(post_start_update)?;
         api.register(get_update_all)?;
         api.register(get_update_sp)?;
@@ -138,6 +140,26 @@ async fn get_artifacts(
     let (system_version, artifacts) =
         rqctx.context().artifact_store.system_version_and_artifact_ids();
     Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
+}
+
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct GetBaseboardResponse {
+    pub baseboard: Option<Baseboard>,
+}
+
+/// Report the configured baseboard details
+#[endpoint {
+    method = GET,
+    path = "/baseboard",
+}]
+async fn get_baseboard(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<GetBaseboardResponse>, HttpError> {
+    let rqctx = rqctx.context();
+    Ok(HttpResponseOk(GetBaseboardResponse {
+        baseboard: rqctx.baseboard.clone(),
+    }))
 }
 
 /// An endpoint to start updating a sled.

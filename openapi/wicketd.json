@@ -35,6 +35,30 @@
         }
       }
     },
+    "/baseboard": {
+      "get": {
+        "summary": "Report the configured baseboard details",
+        "operationId": "get_baseboard",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBaseboardResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/ignition/{type}/{slot}/{command}": {
       "post": {
         "summary": "Send an ignition command targeting a specific SP.",
@@ -292,6 +316,75 @@
           "version"
         ]
       },
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "Unknown"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "Gimlet": {
+                "type": "object",
+                "properties": {
+                  "identifier": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "identifier",
+                  "model",
+                  "revision"
+                ]
+              }
+            },
+            "required": [
+              "Gimlet"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "Pc": {
+                "type": "object",
+                "properties": {
+                  "identifier": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "identifier",
+                  "model",
+                  "revision"
+                ]
+              }
+            },
+            "required": [
+              "Pc"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -401,6 +494,19 @@
         "required": [
           "artifacts"
         ]
+      },
+      "GetBaseboardResponse": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          }
+        }
       },
       "GetInventoryParams": {
         "type": "object",
