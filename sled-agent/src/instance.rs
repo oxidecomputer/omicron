@@ -767,7 +767,7 @@ impl Instance {
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
-        let root = std::path::Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let root = camino::Utf8Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let installed_zone = InstalledZone::install(
             &inner.log,
             &inner.vnic_allocator,
