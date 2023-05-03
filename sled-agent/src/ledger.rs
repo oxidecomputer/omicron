@@ -25,7 +25,7 @@ pub enum Error {
     },
 
     #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
-    FailedToAccessStorage { failed_paths: Vec<PathBuf> },
+    FailedToAccessStorage { failed_paths: Vec<(PathBuf, Error)> },
 }
 
 impl Error {
@@ -107,7 +107,7 @@ impl<T: Ledgerable> Ledger<T> {
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
                 warn!(self.log, "Failed to write to {}: {e}", path.display());
-                failed_paths.push(path.to_path_buf());
+                failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
             }
