@@ -3206,6 +3206,7 @@ dependencies = [
  "omicron-test-utils",
  "once_cell",
  "partial-io",
+ "pin-project-lite",
  "progenitor-client",
  "proptest",
  "reqwest",
