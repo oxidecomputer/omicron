@@ -41,7 +41,6 @@ use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::HardwareManager;
@@ -195,7 +194,7 @@ pub struct Agent {
     share: Mutex<Option<ShareDistribution>>,
 
     sled_state: Mutex<SledAgentState>,
-    storage_resources: OnceCell<StorageResources>,
+    storage_resources: StorageResources,
     config: Config,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
@@ -366,14 +365,26 @@ impl Agent {
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
 
+        let hardware_monitor = Self::hardware_monitor(
+            &ba_log,
+            &config.link,
+            &sled_config,
+            global_zone_bootstrap_link_local_address,
+        )
+        .await?;
+
+        let storage_resources = hardware_monitor.storage().clone();
+
         let agent = Agent {
             log: ba_log,
             parent_log: log,
             ip,
             rss_access: Mutex::new(()),
             share: Mutex::new(None),
-            sled_state: Mutex::new(SledAgentState::Before(None)),
-            storage_resources: OnceCell::new(),
+            sled_state: Mutex::new(SledAgentState::Before(Some(
+                hardware_monitor,
+            ))),
+            storage_resources,
             config: config.clone(),
             sled_config,
             sp,
@@ -381,18 +392,7 @@ impl Agent {
             global_zone_bootstrap_link_local_address,
         };
 
-        let hardware_monitor = agent.start_hardware_monitor().await?;
-        // TODO... can I make this less shite?
-        agent
-            .storage_resources
-            .set(hardware_monitor.storage().clone())
-            .map_err(|_| "Failed to set storage")
-            .unwrap();
-        *agent.sled_state.lock().await =
-            SledAgentState::Before(Some(hardware_monitor));
-
-        let paths =
-            sled_config_paths(&agent.storage_resources.get().unwrap()).await;
+        let paths = sled_config_paths(&agent.storage_resources).await;
         let trust_quorum = if let Some(ledger) =
             Ledger::<PersistentSledAgentRequest>::new(&agent.log, paths).await
         {
@@ -416,16 +416,31 @@ impl Agent {
     async fn start_hardware_monitor(
         &self,
     ) -> Result<HardwareMonitor, BootstrapError> {
+        Self::hardware_monitor(
+            &self.log,
+            &self.config.link,
+            &self.sled_config,
+            self.global_zone_bootstrap_link_local_address,
+        )
+        .await
+    }
+
+    async fn hardware_monitor(
+        log: &Logger,
+        link: &illumos_utils::dladm::PhysicalLink,
+        sled_config: &SledConfig,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
+    ) -> Result<HardwareMonitor, BootstrapError> {
         let underlay_etherstub = underlay_etherstub()?;
         let underlay_etherstub_vnic =
             underlay_etherstub_vnic(&underlay_etherstub)?;
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let switch_zone_bootstrap_address =
-            BootstrapInterface::SwitchZone.ip(&self.config.link)?;
+            BootstrapInterface::SwitchZone.ip(&link)?;
         let hardware_monitor = HardwareMonitor::new(
-            &self.log,
-            &self.sled_config,
-            self.global_zone_bootstrap_link_local_address,
+            &log,
+            &sled_config,
+            global_zone_bootstrap_link_local_address,
             underlay_etherstub,
             underlay_etherstub_vnic,
             bootstrap_etherstub,
@@ -537,9 +552,7 @@ impl Agent {
 
                 // Record this request so the sled agent can be automatically
                 // initialized on the next boot.
-                let paths =
-                    sled_config_paths(&self.storage_resources.get().unwrap())
-                        .await;
+                let paths = sled_config_paths(&self.storage_resources).await;
                 let mut ledger = Ledger::new_with(
                     &self.log,
                     paths,
@@ -766,10 +779,7 @@ impl Agent {
                 .as_ref()
                 .map(|sp_config| sp_config.trust_quorum_members.clone())
                 .unwrap_or_default(),
-            self.storage_resources
-                .get()
-                .expect("Should set storage during initialization")
-                .clone(),
+            self.storage_resources.clone(),
         )
         .await?;
         Ok(())
@@ -819,8 +829,6 @@ impl Agent {
     ) -> Result<(), BootstrapError> {
         let config_dirs = self
             .storage_resources
-            .get()
-            .unwrap()
             .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
             .into_iter();
