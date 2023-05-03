@@ -114,7 +114,7 @@ impl DebugHardwareScan {
         // Finding the write destination from the gimlet hardware logs details
         // about what it's doing sufficiently for this subcommand; just create a
         // write destination and then discard it.
-        _ = WriteDestination::from_hardware(log)?;
+        _ = WriteDestination::from_hardware(log).await?;
         Ok(())
     }
 }
@@ -243,11 +243,7 @@ impl InstallOpts {
                 |cx| async move {
                     let destination = if self.install_on_gimlet {
                         let log = log.clone();
-                        tokio::task::spawn_blocking(move || {
-                            WriteDestination::from_hardware(&log)
-                        })
-                        .await
-                        .unwrap()?
+                        WriteDestination::from_hardware(&log).await?
                     } else {
                         // clap ensures `self.destination` is not `None` if
                         // `install_on_gimlet` is false.

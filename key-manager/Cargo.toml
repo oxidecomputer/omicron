@@ -9,7 +9,6 @@ async-trait.workspace = true
 hkdf = "0.12.3"
 secrecy.workspace = true
 sha3.workspace = true
-sled-hardware.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true

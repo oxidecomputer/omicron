@@ -4,14 +4,19 @@
 
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::fstyp::Fstyp;
+use illumos_utils::zfs::EncryptionDetails;
+use illumos_utils::zfs::Keypath;
 use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
+use key_manager::StorageKeyRequester;
 use slog::Logger;
 use slog::{info, warn};
 use uuid::Uuid;
+
+pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 cfg_if::cfg_if! {
     if #[cfg(target_os = "illumos")] {
@@ -41,6 +46,12 @@ pub enum DiskError {
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
     CannotFormatM2NotImplemented,
+    #[error("KeyManager error: {0}")]
+    KeyManager(#[from] key_manager::Error),
+    #[error("Missing StorageKeyRequester when creating U.2 disk")]
+    MissingStorageKeyRequester,
+    #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
+    MissingEpochProperty(String),
 }
 
 /// A partition (or 'slice') of a disk.
@@ -72,6 +83,29 @@ pub struct DiskIdentity {
     pub vendor: String,
     pub serial: String,
     pub model: String,
+}
+
+impl From<DiskIdentity> for key_manager::DiskIdentity {
+    fn from(value: DiskIdentity) -> Self {
+        key_manager::DiskIdentity {
+            vendor: value.vendor,
+            serial: value.serial,
+            model: value.model,
+        }
+    }
+}
+
+impl From<&DiskIdentity> for Keypath {
+    fn from(id: &DiskIdentity) -> Self {
+        let filename = format!(
+            "{}-{}-{}-zfs-aes-256-gcm.key",
+            id.vendor, id.serial, id.model
+        );
+        let mut path = PathBuf::new();
+        path.push(KEYPATH_ROOT);
+        path.push(filename);
+        Keypath(path)
+    }
 }
 
 impl DiskPaths {
@@ -194,6 +228,9 @@ pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
 pub const ZONE_DATASET: &'static str = "zone";
 
+// This is the root dataset for all U.2 drives. Encryption is inherited.
+pub const CRYPT_DATASET: &'static str = "crypt";
+
 const U2_EXPECTED_DATASET_COUNT: usize = 1;
 static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
@@ -222,9 +259,17 @@ static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
 ];
 
 impl Disk {
-    pub fn new(
+    /// Create a new Disk
+    ///
+    /// WARNING: In all cases where a U.2 is a possible `DiskVariant`, a
+    /// `StorageKeyRequester` must be passed so that disk encryption can
+    /// be used. The `StorageManager` for the sled-agent  always has a
+    /// `StorageKeyRequester` available, and so the only place we should pass
+    /// `None` is for the M.2s touched by the Installinator.
+    pub async fn new(
         log: &Logger,
         unparsed_disk: UnparsedDisk,
+        key_requester: Option<&StorageKeyRequester>,
     ) -> Result<Self, DiskError> {
         let paths = &unparsed_disk.paths;
         let variant = unparsed_disk.variant;
@@ -243,7 +288,13 @@ impl Disk {
         )?;
 
         let zpool_name = Self::ensure_zpool_exists(log, variant, &zpool_path)?;
-        Self::ensure_zpool_ready(log, &zpool_name)?;
+        Self::ensure_zpool_ready(
+            log,
+            &zpool_name,
+            &unparsed_disk.identity,
+            key_requester,
+        )
+        .await?;
 
         Ok(Self {
             paths: unparsed_disk.paths,
@@ -256,9 +307,11 @@ impl Disk {
         })
     }
 
-    pub fn ensure_zpool_ready(
+    pub async fn ensure_zpool_ready(
         log: &Logger,
         zpool_name: &ZpoolName,
+        disk_identity: &DiskIdentity,
+        key_requester: Option<&StorageKeyRequester>,
     ) -> Result<(), DiskError> {
         Self::ensure_zpool_imported(log, &zpool_name)?;
         Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
@@ -341,23 +394,83 @@ impl Disk {
 
     // Ensure that the zpool contains all the datasets we would like it to
     // contain.
-    fn ensure_zpool_has_datasets(
+    async fn ensure_zpool_has_datasets(
+        log: &Logger,
         zpool_name: &ZpoolName,
+        disk_identity: &DiskIdentity,
+        key_requester: Option<&StorageKeyRequester>,
     ) -> Result<(), DiskError> {
-        let datasets = match zpool_name.kind().into() {
-            DiskVariant::M2 => M2_EXPECTED_DATASETS.iter(),
-            DiskVariant::U2 => U2_EXPECTED_DATASETS.iter(),
+        let (root, datasets) = match zpool_name.kind().into() {
+            DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
+            DiskVariant::U2 => {
+                (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter())
+            }
         };
+
+        let zoned = false;
+        let do_format = true;
+
+        // Ensure the root encrypted filesystem exists
+        // Datasets below this in the hierarchy will inherit encryption
+        if let Some(dataset) = root {
+            let Some(key_requester) = key_requester else {
+                return Err(DiskError::MissingStorageKeyRequester);
+            };
+            let mountpoint = zpool_name.dataset_mountpoint(dataset);
+            let keypath: Keypath = disk_identity.into();
+
+            let epoch = if let Ok(epoch_str) =
+                Zfs::get_oxide_value(, "epoch")
+            {
+                if let Ok(epoch) = epoch_str.parse::<u64>() {
+                    epoch
+                } else {
+                    return Err(DiskError::MissingEpochProperty(
+                        dataset.to_string(),
+                    ));
+                }
+            } else {
+                key_requester.load_latest_secret().await?
+            };
+
+            let key = key_requester
+                .get_key(epoch, disk_identity.clone().into())
+                .await?;
+
+            let mut keyfile =
+                KeyFile::create(keypath.clone(), key.expose_secret(), log)
+                    .await
+                    .map_err(|error| DiskError::IoError {
+                        path: keypath.0.clone(),
+                        error,
+                    })?;
+
+            let encryption_details = EncryptionDetails { keypath, epoch };
+
+            let result = Zfs::ensure_filesystem(
+                &format!("{}/{}", zpool_name, dataset),
+                Mountpoint::Path(mountpoint),
+                zoned,
+                do_format,
+                Some(encryption_details),
+            );
+
+            keyfile.zero_and_unlink().await.map_err(|error| {
+                DiskError::IoError { path: keyfile.path().0.clone(), error }
+            })?;
+
+            result?;
+        }
+
         for dataset in datasets.into_iter() {
             let mountpoint = zpool_name.dataset_mountpoint(dataset);
-
-            let zoned = false;
-            let do_format = true;
+            let encryption_details = None;
             Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
                 Mountpoint::Path(mountpoint),
                 zoned,
                 do_format,
+                encryption_details,
             )?;
         }
         Ok(())
@@ -412,6 +525,52 @@ impl From<ZpoolKind> for DiskVariant {
             ZpoolKind::External => DiskVariant::U2,
             ZpoolKind::Internal => DiskVariant::M2,
         }
+    }
+}
+
+/// A file that wraps a zfs encryption key.
+///
+/// We put this in a RAM backed filesystem and zero and delete it when we are
+/// done with it. Unfortunately we cannot do this inside `Drop` because there is no
+/// equivalent async drop.
+pub struct KeyFile {
+    path: Keypath,
+    file: File,
+    log: Logger,
+}
+
+impl KeyFile {
+    pub async fn create(
+        path: Keypath,
+        key: &[u8; 32],
+        log: &Logger,
+    ) -> std::io::Result<KeyFile> {
+        // TODO: fix this to not truncate
+        // We want to overwrite any existing contents.
+        // If we truncate we may leave dirty pages around
+        // containing secrets.
+        let mut file = tokio::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&path.0)
+            .await?;
+        file.write_all(key).await?;
+        Ok(KeyFile { path, file, log: log.clone() })
+    }
+
+    // It'd be nice to `impl Drop for `KeyFile` and then call `zero`
+    // from within the drop handler, but async `Drop` isn't supported.
+    pub async fn zero_and_unlink(&mut self) -> std::io::Result<()> {
+        let zeroes = [0u8; 32];
+        let _ = self.file.seek(SeekFrom::Start(0)).await?;
+        self.file.write_all(&zeroes).await?;
+        info!(self.log, "Zeroed keyfile {}", self.path);
+        remove_file(&self.path().0).await?;
+        Ok(())
+    }
+
+    pub fn path(&self) -> &Keypath {
+        &self.path
     }
 }
 
