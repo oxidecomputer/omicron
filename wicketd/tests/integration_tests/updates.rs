@@ -22,7 +22,7 @@ use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::{
     types::{
         GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
-        StepEventKindForWicketdEngineSpec, UpdateComponent,
+        UpdateComponent,
     },
     StepEventKind,
 };
@@ -337,10 +337,7 @@ async fn test_update_races() {
     let last_event =
         event_buffer.step_events.last().expect("at least one event");
     assert!(
-        matches!(
-            last_event.data,
-            StepEventKindForWicketdEngineSpec::ExecutionCompleted { .. }
-        ),
+        matches!(last_event.data, StepEventKind::ExecutionCompleted { .. }),
         "last event is execution completed: {last_event:#?}"
     );
 
