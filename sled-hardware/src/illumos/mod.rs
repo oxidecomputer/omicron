@@ -40,6 +40,9 @@ enum Error {
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
 
+    #[error("Invalid value for boot-storage-unit property: {0}")]
+    InvalidBootStorageUnitValue(i64),
+
     #[error("Unrecognized slot for device {slot}")]
     UnrecognizedSlot { slot: i64 },
 
@@ -78,6 +81,25 @@ impl TofinoSnapshot {
     }
 }
 
+// Which BSU (i.e., host flash rom) slot did we boot from?
+#[derive(Debug, Clone, Copy)]
+enum BootStorageUnit {
+    A,
+    B,
+}
+
+impl TryFrom<i64> for BootStorageUnit {
+    type Error = Error;
+
+    fn try_from(raw: i64) -> Result<Self, Self::Error> {
+        match raw {
+            0x41 => Ok(Self::A),
+            0x42 => Ok(Self::B),
+            _ => Err(Error::InvalidBootStorageUnitValue(raw)),
+        }
+    }
+}
+
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
@@ -104,13 +126,20 @@ impl HardwareSnapshot {
 
         let properties = find_properties(
             &root,
-            ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+            [
+                "baseboard-identifier",
+                "baseboard-model",
+                "baseboard-revision",
+                "boot-storage-unit",
+            ],
         )?;
         let baseboard = Baseboard::new(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             i64_from_property(&properties[2])?,
         );
+        let boot_storage_unit =
+            BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
@@ -121,7 +150,7 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node)?;
+            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -240,6 +269,14 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
         0x00..=0x09 => Some(DiskVariant::U2),
         0x11..=0x12 => Some(DiskVariant::M2),
         _ => None,
+    }
+}
+
+fn slot_is_boot_disk(slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
+    match (boot_storage_unit, slot) {
+        // See reference for these values in `slot_to_disk_variant` above.
+        (BootStorageUnit::A, 0x11) | (BootStorageUnit::B, 0x12) => true,
+        _ => false,
     }
 }
 
@@ -380,6 +417,7 @@ fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
     node: Node<'_>,
+    boot_storage_unit: BootStorageUnit,
 ) -> Result<(), Error> {
     let Some(driver_name) = node.driver_name() else {
         return Ok(());
@@ -451,6 +489,7 @@ fn poll_blkdev_node(
         slot,
         variant,
         device_id,
+        slot_is_boot_disk(slot, boot_storage_unit),
     );
     disks.insert(disk);
     Ok(())

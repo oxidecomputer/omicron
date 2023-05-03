@@ -12,9 +12,11 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServicePutRequest;
-use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
 use omicron_sled_agent::sim;
@@ -47,6 +49,13 @@ pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
 
+/// Password for the user created by the test suite
+///
+/// This is only used by the test suite and `omicron-dev run-all` (the latter of
+/// which uses the test suite setup code for most of its operation).   These are
+/// both transient deployments with no sensitive data.
+pub const TEST_SUITE_PASSWORD: &str = "oxide";
+
 pub struct ControlPlaneTestContext<N> {
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
@@ -64,6 +73,8 @@ pub struct ControlPlaneTestContext<N> {
     pub external_dns_config_server:
         dropshot::HttpServer<dns_server::http_server::Context>,
     pub external_dns_resolver: trust_dns_resolver::TokioAsyncResolver,
+    pub silo_name: Name,
+    pub user_name: UserId,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -278,6 +289,19 @@ pub async fn test_setup_with_config<N: NexusServer>(
     };
     let external_dns_zone_name =
         internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
+    let silo_name: Name = "test-suite-silo".parse().unwrap();
+    let user_name = UserId::try_from("test-privileged".to_string()).unwrap();
+    let user_password_hash = nexus_passwords::Hasher::default()
+        .create_password(
+            &nexus_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
+        )
+        .unwrap()
+        .into();
+    let recovery_silo = RecoverySiloConfig {
+        silo_name: silo_name.clone(),
+        user_name: user_name.clone(),
+        user_password_hash,
+    };
 
     let server = N::start(
         nexus_internal,
@@ -289,6 +313,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
             nexus_service,
         ],
         &external_dns_zone_name,
+        recovery_silo,
     )
     .await;
 
@@ -350,6 +375,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
         external_dns_server,
         external_dns_config_server,
         external_dns_resolver,
+        silo_name,
+        user_name,
     }
 }
 

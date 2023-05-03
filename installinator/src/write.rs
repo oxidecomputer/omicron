@@ -4,7 +4,8 @@
 
 use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
-    fmt,
+    fmt, io,
+    os::fd::AsRawFd,
     time::Duration,
 };
 
@@ -13,15 +14,16 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
+use illumos_utils::dkio::MediaInfoExtended;
 use installinator_common::{
-    M2Slot, StepContext, StepHandle, StepProgress, StepResult, UpdateEngine,
+    M2Slot, StepContext, StepProgress, StepResult, UpdateEngine,
     WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::hardware::Hardware;
+use crate::{block_size_writer::BlockSizeBufWriter, hardware::Hardware};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -41,6 +43,7 @@ struct ArtifactDestination {
 #[derive(Clone, Debug)]
 pub(crate) struct WriteDestination {
     drives: BTreeMap<M2Slot, ArtifactDestination>,
+    is_host_phase_2_block_device: bool,
 }
 
 /// The name of the host phase 2 image written to disk.
@@ -55,7 +58,7 @@ pub static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
 
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        std::fs::create_dir_all(&dir)
+        std::fs::create_dir_all(dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
         // `in_directory()` is only used for testing (e.g., on
@@ -70,7 +73,7 @@ impl WriteDestination {
             },
         );
 
-        Ok(Self { drives })
+        Ok(Self { drives, is_host_phase_2_block_device: false })
     }
 
     pub(crate) fn from_hardware(log: &Logger) -> Result<Self> {
@@ -93,6 +96,8 @@ impl WriteDestination {
 
             match disk.boot_image_devfs_path(raw_devfs_path) {
                 Ok(path) => {
+                    let path = Utf8PathBuf::try_from(path)
+                        .context("non-UTF8 drive path")?;
                     info!(
                         log, "found target M.2 disk";
                         "identity" => ?disk.identity(),
@@ -141,7 +146,7 @@ impl WriteDestination {
 
         ensure!(!drives.is_empty(), "no valid M.2 target drives found");
 
-        Ok(Self { drives })
+        Ok(Self { drives, is_host_phase_2_block_device: true })
     }
 }
 
@@ -162,6 +167,7 @@ enum DriveWriteProgress {
 
 pub(crate) struct ArtifactWriter<'a> {
     drives: BTreeMap<M2Slot, (ArtifactDestination, DriveWriteProgress)>,
+    is_host_phase_2_block_device: bool,
     artifacts: ArtifactsToWrite<'a>,
 }
 
@@ -180,6 +186,8 @@ impl<'a> ArtifactWriter<'a> {
             .collect();
         Self {
             drives,
+            is_host_phase_2_block_device: destination
+                .is_host_phase_2_block_device,
             artifacts: ArtifactsToWrite {
                 host_phase_2_id,
                 host_phase_2_data,
@@ -194,15 +202,34 @@ impl<'a> ArtifactWriter<'a> {
         cx: &StepContext,
         log: &Logger,
     ) -> WriteOutput {
-        let mut transport = FileTransport;
-        self.write_with_transport(cx, log, &mut transport).await
+        let mut control_plane_transport = FileTransport;
+        if self.is_host_phase_2_block_device {
+            let mut host_transport = BlockDeviceTransport;
+            self.write_with_transport(
+                cx,
+                log,
+                &mut host_transport,
+                &mut control_plane_transport,
+            )
+            .await
+        } else {
+            let mut host_transport = FileTransport;
+            self.write_with_transport(
+                cx,
+                log,
+                &mut host_transport,
+                &mut control_plane_transport,
+            )
+            .await
+        }
     }
 
     async fn write_with_transport(
         &mut self,
         cx: &StepContext,
         log: &Logger,
-        transport: &mut impl WriteTransport,
+        host_phase_2_transport: &mut impl WriteTransport,
+        control_plane_transport: &mut impl WriteTransport,
     ) -> WriteOutput {
         let mut done_drives = BTreeSet::new();
 
@@ -226,7 +253,11 @@ impl<'a> ArtifactWriter<'a> {
                 };
                 let res = cx
                     .with_nested_engine(|engine| {
-                        write_cx.register_steps(engine, transport);
+                        write_cx.register_steps(
+                            engine,
+                            host_phase_2_transport,
+                            control_plane_transport,
+                        );
                         Ok(())
                     })
                     .await;
@@ -299,18 +330,23 @@ impl<'a> SlotWriteContext<'a> {
     fn register_steps<'b>(
         &'b self,
         engine: &UpdateEngine<'b, WriteSpec>,
-        transport: &'b mut impl WriteTransport,
+        host_phase_2_transport: &'b mut impl WriteTransport,
+        control_plane_transport: &'b mut impl WriteTransport,
     ) {
         match self.progress {
             DriveWriteProgress::Unstarted
             | DriveWriteProgress::HostPhase2Failed => {
-                let transport_handle =
-                    self.register_host_phase_2_step(engine, transport);
-                self.register_control_plane_step(engine, transport_handle);
+                self.register_host_phase_2_step(engine, host_phase_2_transport);
+                self.register_control_plane_step(
+                    engine,
+                    control_plane_transport,
+                );
             }
             DriveWriteProgress::ControlPlaneFailed => {
-                let transport_handle = StepHandle::ready(transport);
-                self.register_control_plane_step(engine, transport_handle);
+                self.register_control_plane_step(
+                    engine,
+                    control_plane_transport,
+                );
             }
             DriveWriteProgress::Done => {
                 // Don't register any steps -- this is done.
@@ -322,7 +358,7 @@ impl<'a> SlotWriteContext<'a> {
         &'b self,
         engine: &UpdateEngine<'b, WriteSpec>,
         transport: &'b mut WT,
-    ) -> StepHandle<&'b mut WT, WriteSpec> {
+    ) {
         engine
             .new_step(
                 WriteComponent::HostPhase2,
@@ -340,13 +376,13 @@ impl<'a> SlotWriteContext<'a> {
                         .await
                 },
             )
-            .register()
+            .register();
     }
 
-    fn register_control_plane_step<'b>(
+    fn register_control_plane_step<'b, WT: WriteTransport>(
         &'b self,
         engine: &UpdateEngine<'b, WriteSpec>,
-        transport_handle: StepHandle<&'b mut impl WriteTransport, WriteSpec>,
+        transport: &'b mut WT,
     ) {
         engine
             .new_step(
@@ -354,8 +390,6 @@ impl<'a> SlotWriteContext<'a> {
                 WriteStepId::Writing { slot: self.slot },
                 format!("Writing control plane to slot {}", self.slot),
                 move |cx2| async move {
-                    let transport =
-                        transport_handle.into_value(cx2.token()).await;
                     self.artifacts
                         .write_control_plane(
                             &self.log,
@@ -475,7 +509,7 @@ impl WriteTransport for FileTransport {
         tokio::fs::OpenOptions::new()
             .create(create)
             .write(true)
-            .truncate(true)
+            .truncate(create)
             .open(destination)
             .await
             .map_err(|error| WriteError {
@@ -485,6 +519,68 @@ impl WriteTransport for FileTransport {
                 total_bytes,
                 error,
             })
+    }
+}
+
+#[derive(Debug)]
+struct BlockDeviceTransport;
+
+#[async_trait]
+impl WriteTransport for BlockDeviceTransport {
+    type W = BlockSizeBufWriter<tokio::fs::File>;
+
+    async fn make_writer(
+        &mut self,
+        component: WriteComponent,
+        slot: M2Slot,
+        destination: &Utf8Path,
+        total_bytes: u64,
+        create: bool,
+    ) -> Result<Self::W, WriteError> {
+        let f = tokio::fs::OpenOptions::new()
+            .create(create)
+            .write(true)
+            .truncate(create)
+            .open(destination)
+            .await
+            .map_err(|error| WriteError {
+                component,
+                slot,
+                written_bytes: 0,
+                total_bytes,
+                error,
+            })?;
+
+        let media_info =
+            MediaInfoExtended::from_fd(f.as_raw_fd()).map_err(|error| {
+                WriteError {
+                    component,
+                    slot,
+                    written_bytes: 0,
+                    total_bytes,
+                    error,
+                }
+            })?;
+
+        let block_size = u64::from(media_info.logical_block_size);
+
+        // When writing to a block device, we must write a multiple of the block
+        // size. We can assume the image we're given should be
+        // appropriately-sized: return an error here if it is not.
+        if total_bytes % block_size != 0 {
+            return Err(WriteError {
+                component,
+                slot,
+                written_bytes: 0,
+                total_bytes,
+                error: io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("file size ({total_bytes}) is not a multiple of target device block size ({block_size})")
+                ),
+            });
+        }
+
+        Ok(BlockSizeBufWriter::with_block_size(block_size as usize, f))
     }
 }
 
@@ -551,7 +647,7 @@ async fn write_artifact_impl(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::{collections::VecDeque, sync::Arc};
 
     use super::*;
     use crate::test_helpers::{dummy_artifact_hash_id, with_test_runtime};
@@ -576,6 +672,7 @@ mod tests {
     use tempfile::tempdir;
     use test_strategy::proptest;
     use tokio::io::AsyncReadExt;
+    use tokio::sync::Mutex;
     use tokio_stream::wrappers::ReceiverStream;
 
     #[proptest(ProptestConfig { cases: 32, ..ProptestConfig::default() })]
@@ -689,9 +786,13 @@ mod tests {
         // just the host image at the moment.
         let expected_total_attempts = write_ops.total_attempts();
 
-        let mut transport = PartialIoTransport {
-            file_transport: FileTransport,
-            partial_ops: write_ops.ops,
+        let (mut host_transport, mut control_plane_transport) = {
+            let transport = PartialIoTransport {
+                file_transport: FileTransport,
+                partial_ops: write_ops.ops,
+            };
+            let inner = Arc::new(Mutex::new(transport));
+            (SharedTransport(Arc::clone(&inner)), SharedTransport(inner))
         };
 
         let (event_sender, event_receiver) = tokio::sync::mpsc::channel(512);
@@ -714,7 +815,8 @@ mod tests {
                 control_plane: Some(destination_control_plane.clone()),
             },
         );
-        let destination = WriteDestination { drives };
+        let destination =
+            WriteDestination { drives, is_host_phase_2_block_device: false };
 
         let mut writer = ArtifactWriter::new(
             &host_id,
@@ -733,7 +835,12 @@ mod tests {
                 "Writing",
                 |cx| async move {
                     let write_output = writer
-                        .write_with_transport(&cx, &log, &mut transport)
+                        .write_with_transport(
+                            &cx,
+                            &log,
+                            &mut host_transport,
+                            &mut control_plane_transport,
+                        )
                         .await;
                     StepResult::success(
                         (),
@@ -839,6 +946,29 @@ mod tests {
 
         logctx.cleanup_successful();
         Ok(())
+    }
+
+    #[derive(Debug)]
+    struct SharedTransport(Arc<Mutex<PartialIoTransport>>);
+
+    #[async_trait]
+    impl WriteTransport for SharedTransport {
+        type W = PartialAsyncWrite<tokio::fs::File>;
+
+        async fn make_writer(
+            &mut self,
+            component: WriteComponent,
+            slot: M2Slot,
+            destination: &Utf8Path,
+            total_bytes: u64,
+            create: bool,
+        ) -> Result<Self::W, WriteError> {
+            self.0
+                .lock()
+                .await
+                .make_writer(component, slot, destination, total_bytes, create)
+                .await
+        }
     }
 
     #[derive(Debug)]

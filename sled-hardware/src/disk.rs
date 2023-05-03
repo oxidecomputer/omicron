@@ -138,6 +138,7 @@ pub struct UnparsedDisk {
     slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
+    is_boot_disk: bool,
 }
 
 impl UnparsedDisk {
@@ -148,12 +149,14 @@ impl UnparsedDisk {
         slot: i64,
         variant: DiskVariant,
         identity: DiskIdentity,
+        is_boot_disk: bool,
     ) -> Self {
         Self {
             paths: DiskPaths { devfs_path, dev_path },
             slot,
             variant,
             identity,
+            is_boot_disk,
         }
     }
 
@@ -177,6 +180,7 @@ pub struct Disk {
     slot: i64,
     variant: DiskVariant,
     identity: DiskIdentity,
+    is_boot_disk: bool,
     partitions: Vec<Partition>,
 
     // This embeds the assumtion that there is exactly one parsed zpool per
@@ -249,6 +253,7 @@ impl Disk {
             slot: unparsed_disk.slot,
             variant: unparsed_disk.variant,
             identity: unparsed_disk.identity,
+            is_boot_disk: unparsed_disk.is_boot_disk,
             partitions,
             zpool_name,
         })
@@ -337,6 +342,10 @@ impl Disk {
             )?;
         }
         Ok(())
+    }
+
+    pub fn is_boot_disk(&self) -> bool {
+        self.is_boot_disk
     }
 
     pub fn identity(&self) -> &DiskIdentity {

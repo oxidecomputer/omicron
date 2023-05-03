@@ -17,9 +17,26 @@ rack_secret_threshold = 1
 ntp_servers = [ "ntp.eng.oxide.computer" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
+# Delegated external DNS zone name
+external_dns_zone_name = "oxide.test"
+
 # The IP ranges configured as part of the services IP Pool.
 # e.g., Nexus will be configured to use an address from this
 # pool as its external IP.
 [[internal_services_ip_pool_ranges]]
 first = "192.168.1.20"
 last = "192.168.1.22"
+
+# Configuration for the initial Silo, user, and password.
+[recovery_silo]
+silo_name = "recovery"
+user_name = "recovery"
+# The following is a hash for the password "oxide".  This is (obviously) only
+# intended for transient deployments in development with no sensitive data or
+# resources.  You can change this value to any other supported hash.  The only
+# things that need to be changed with this hash are (1) the instructions given
+# to individuals running this program who then want to log in as this user, and
+# (2) the end-to-end tests, which use this password to log in to a
+# newly-initialized rack.  For more on what's supported, see the API docs for
+# this type and the specific constraints in the nexus-passwords crate.
+user_password_hash = "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
