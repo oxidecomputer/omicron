@@ -228,7 +228,7 @@ mod test {
         let log = &logctx.log;
 
         let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
-        let ledger = Ledger::<Data>::new_with(
+        let ledger = Ledger::new_with(
             &log,
             vec![config_dir.path().to_path_buf()],
             Data::default(),
@@ -255,11 +255,8 @@ mod test {
         let config_path = config_dir.path().join("ledger.toml");
 
         // Create the ledger within a configuration directory
-        let mut ledger = Ledger::<Data>::new_with(
-            &log,
-            vec![config_path.clone()],
-            Data::default(),
-        );
+        let mut ledger =
+            Ledger::new_with(&log, vec![config_path.clone()], Data::default());
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
         assert!(config_path.exists());
@@ -291,9 +288,8 @@ mod test {
             .map(|d| d.path().join("ledger.toml"))
             .collect::<Vec<_>>();
 
-        let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
-            .await
-            .expect("Failed to read ledger");
+        let mut ledger =
+            Ledger::new_with(&log, config_paths.clone(), Data::default());
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -337,11 +333,8 @@ mod test {
             .map(|d| d.path().join("ledger.toml"))
             .collect::<Vec<_>>();
 
-        let mut ledger = Ledger::<Data>::new_with(
-            &log,
-            config_paths.clone(),
-            Data::default(),
-        );
+        let mut ledger =
+            Ledger::new_with(&log, config_paths.clone(), Data::default());
         ledger.data_mut().contents = "written to both configs".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -387,11 +380,8 @@ mod test {
         let ledger = Ledger::<Data>::new(&log, config_paths.clone()).await;
         assert!(ledger.is_none());
 
-        let mut ledger = Ledger::<Data>::new_with(
-            &log,
-            config_paths.clone(),
-            Data::default(),
-        );
+        let mut ledger =
+            Ledger::new_with(&log, config_paths.clone(), Data::default());
         assert_eq!(ledger.data(), &Data::default());
         let err = ledger.commit().await.unwrap_err();
         assert!(

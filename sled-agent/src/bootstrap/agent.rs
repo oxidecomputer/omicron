@@ -1003,7 +1003,6 @@ mod tests {
             test_setup_log("persistent_sled_agent_request_serialization");
         let log = &logctx.log;
 
-        // No secret generated if we have <= 1 sled
         let secret = RackSecret::new();
         let (mut shares, verifier) = secret.split(2, 4).unwrap();
 

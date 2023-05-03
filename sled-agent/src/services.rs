@@ -94,11 +94,8 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML to file {path}: {err}")]
+    #[error("Cannot serialize TOML to file: {path}: {err}")]
     TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
-
-    #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
