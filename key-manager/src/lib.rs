@@ -167,9 +167,8 @@ impl<S: SecretRetriever> KeyManager<S> {
     }
 
     fn insert_prk(&mut self, ikm: VersionedIkm) {
-        let prk =
-            Hkdf::new(Some(&ikm.salt), ikm.ikm.expose_secret().0.as_ref());
-        self.prks.insert(ikm.epoch, prk);
+        let prk = Hkdf::new(Some(ikm.salt()), ikm.expose_secret());
+        self.prks.insert(ikm.epoch(), prk);
     }
 }
 
