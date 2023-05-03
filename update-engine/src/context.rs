@@ -67,45 +67,21 @@ impl<S: StepSpec> StepContext<S> {
                 res = Err(NestedError::new(message.clone(), causes.clone()));
             }
 
-            match event.into_generic() {
-                Ok(event) => {
-                    self.payload_sender
-                        .send(StepContextPayload::Nested(Event::Step(event)))
-                        .await
-                        .expect("our code always keeps the receiver open");
-                }
-                Err(error) => {
-                    // All we can really do is log this as a
-                    // warning. This shouldn't happen unless a
-                    // serializer errors out.
-                    slog::warn!(
-                        self.log,
-                        "error serializing nested event: {error}"
-                    );
-                }
-            }
+            self.payload_sender
+                .send(StepContextPayload::Nested(Event::Step(
+                    event.into_generic(),
+                )))
+                .await
+                .expect("our code always keeps the receiver open");
         }
 
         for event in report.progress_events {
-            match event.into_generic() {
-                Ok(event) => {
-                    self.payload_sender
-                        .send(StepContextPayload::Nested(Event::Progress(
-                            event,
-                        )))
-                        .await
-                        .expect("our code always keeps the receiver open");
-                }
-                Err(error) => {
-                    // All we can really do is log this as a
-                    // warning. This shouldn't happen unless a
-                    // serializer errors out.
-                    slog::warn!(
-                        self.log,
-                        "error serializing nested event: {error}"
-                    );
-                }
-            }
+            self.payload_sender
+                .send(StepContextPayload::Nested(Event::Progress(
+                    event.into_generic(),
+                )))
+                .await
+                .expect("our code always keeps the receiver open");
         }
 
         res
@@ -154,21 +130,11 @@ impl<S: StepSpec> StepContext<S> {
                 event = receiver.recv(), if !events_done => {
                     match event {
                         Some(event) => {
-                            match event.into_generic() {
-                                Ok(event) => {
-                                    self.payload_sender.send(
-                                        StepContextPayload::Nested(event)
-                                    )
-                                    .await
-                                    .expect("we always keep the receiver open");
-                                }
-                                Err(error) => {
-                                    // All we can really do is log this as a
-                                    // warning. This shouldn't happen unless a
-                                    // serializer errors out.
-                                    slog::warn!(self.log, "error serializing nested event: {error}");
-                                }
-                            }
+                            self.payload_sender.send(
+                                StepContextPayload::Nested(event.into_generic())
+                            )
+                            .await
+                            .expect("we always keep the receiver open");
                         }
                         None => {
                             events_done = true;

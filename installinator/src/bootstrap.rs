@@ -16,7 +16,7 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use sled_hardware::underlay;
-use sled_hardware::underlay::bootstrap_ip;
+use sled_hardware::underlay::BootstrapInterface;
 use slog::info;
 use slog::Logger;
 
@@ -59,9 +59,10 @@ pub(crate) async fn bootstrap_sled(log: Logger) -> Result<()> {
             .context("failed to ensure bootstrap etherstub vnic existence")?;
 
     // Use the mac address of the first link to derive our bootstrap address.
-    let ip = bootstrap_ip(&links[0], 1).with_context(|| {
-        format!("failed to derive a bootstrap prefix from {:?}", links[0])
-    })?;
+    let ip =
+        BootstrapInterface::GlobalZone.ip(&links[0]).with_context(|| {
+            format!("failed to derive a bootstrap prefix from {:?}", links[0])
+        })?;
 
     Zones::ensure_has_global_zone_v6_address(
         bootstrap_etherstub_vnic,

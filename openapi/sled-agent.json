@@ -550,7 +550,7 @@
     },
     "schemas": {
       "ByteCount": {
-        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
@@ -640,13 +640,6 @@
           {
             "type": "object",
             "properties": {
-              "all_addresses": {
-                "description": "The addresses of all nodes within the cluster.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -655,7 +648,6 @@
               }
             },
             "required": [
-              "all_addresses",
               "type"
             ]
           },
@@ -689,12 +681,19 @@
           }
         ]
       },
-      "DendriteAsic": {
-        "type": "string",
-        "enum": [
-          "tofino_asic",
-          "tofino_stub",
-          "soft_npu"
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
         ]
       },
       "DiskEnsureBody": {
@@ -783,7 +782,7 @@
         ]
       },
       "DiskState": {
-        "description": "State of a Disk (primarily: attached or not)",
+        "description": "State of a Disk",
         "oneOf": [
           {
             "description": "Disk is being initialized",
@@ -1738,7 +1737,7 @@
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
+        "description": "Used to request that the Sled initialize multiple services.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
         "type": "object",
         "properties": {
           "services": {
@@ -1865,70 +1864,6 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "management_gateway_service"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "wicketd"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "asic": {
-                "$ref": "#/components/schemas/DendriteAsic"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dendrite"
-                ]
-              }
-            },
-            "required": [
-              "asic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "pkt_source": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tfport"
-                ]
-              }
-            },
-            "required": [
-              "pkt_source",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
                   "crucible_pantry"
                 ]
               }
@@ -2022,18 +1957,42 @@
           {
             "type": "object",
             "properties": {
-              "mode": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
-                  "maghemite"
+                  "clickhouse"
                 ]
               }
             },
             "required": [
-              "mode",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
               "type"
             ]
           }
@@ -2050,6 +2009,15 @@
               "format": "ipv6"
             }
           },
+          "dataset": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
+              }
+            ]
+          },
           "gz_addresses": {
             "default": [],
             "type": "array",
@@ -2065,7 +2033,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServiceType"
+              "$ref": "#/components/schemas/ServiceZoneService"
             }
           },
           "zone_type": {
@@ -2077,6 +2045,23 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "ServiceZoneService": {
+        "description": "Used to request that the Sled initialize a single service.",
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ServiceType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "details",
+          "id"
         ]
       },
       "SetVirtualNetworkInterfaceHost": {
@@ -2465,13 +2450,16 @@
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "clickhouse",
+          "cockroach_db",
+          "crucible_pantry",
+          "crucible",
           "external_dns",
           "internal_dns",
           "nexus",
+          "ntp",
           "oximeter",
-          "switch",
-          "crucible_pantry",
-          "ntp"
+          "switch"
         ]
       },
       "Zpool": {
@@ -2488,6 +2476,30 @@
         "required": [
           "disk_type",
           "id"
+        ]
+      },
+      "ZpoolKind": {
+        "type": "string",
+        "enum": [
+          "external",
+          "internal"
+        ]
+      },
+      "ZpoolName": {
+        "description": "A wrapper around a zpool name.\n\nThis expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix when reading the structure, and validate that the UUID can be utilized.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZpoolKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       }
     }

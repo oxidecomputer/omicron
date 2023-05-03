@@ -9,8 +9,8 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
+use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use slog::info;
@@ -18,7 +18,6 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::PathBuf;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -91,6 +90,9 @@ pub enum GetZoneError {
         err: crate::zone::AdmError,
     },
 
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error("Zone with prefix '{prefix}' not found")]
     NotFound { prefix: String },
 
@@ -144,8 +146,8 @@ impl RunningZone {
     }
 
     /// Returns the filesystem path to the zone's root
-    pub fn root(&self) -> String {
-        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
+    pub fn root(&self) -> Utf8PathBuf {
+        self.inner.zonepath.join("root")
     }
 
     /// Runs a command within the Zone, return the output.
@@ -357,11 +359,11 @@ impl RunningZone {
         }
     }
 
-    pub async fn add_default_route(
+    pub fn add_default_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -372,15 +374,33 @@ impl RunningZone {
         Ok(())
     }
 
-    pub async fn add_default_route4(
+    pub fn add_default_route4(
         &self,
         gateway: Ipv4Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "default",
             &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub fn add_bootstrap_route(
+        &self,
+        bootstrap_prefix: u16,
+        gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd([
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            &format!("{bootstrap_prefix:x}::/16"),
+            &gz_bootstrap_addr.to_string(),
+            "-ifp",
+            zone_vnic_name,
         ])?;
         Ok(())
     }
@@ -459,6 +479,7 @@ impl RunningZone {
             running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
+                zonepath: zone_info.path().to_path_buf().try_into()?,
                 name: zone_name.to_string(),
                 control_vnic,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
@@ -535,7 +556,7 @@ pub enum InstallZoneError {
     #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
     InstallZone {
         zone: String,
-        image_path: PathBuf,
+        image_path: Utf8PathBuf,
         #[source]
         err: crate::zone::AdmError,
     },
@@ -543,6 +564,9 @@ pub enum InstallZoneError {
 
 pub struct InstalledZone {
     log: Logger,
+
+    // Filesystem path of the zone
+    zonepath: Utf8PathBuf,
 
     // Name of the Zone.
     name: String,
@@ -571,8 +595,8 @@ impl InstalledZone {
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_name: &str, unique_name: Option<&str>) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_name);
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
         }
@@ -587,11 +611,17 @@ impl InstalledZone {
         &self.name
     }
 
+    /// Returns the filesystem path to the zonepath
+    pub fn zonepath(&self) -> &Utf8Path {
+        &self.zonepath
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_name: &str,
+        zone_root_path: &Utf8Path,
+        zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
@@ -604,14 +634,14 @@ impl InstalledZone {
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
-                    zone: zone_name.to_string(),
+                    zone: zone_type.to_string(),
                     err,
                 }
             })?;
 
-        let full_zone_name = Self::get_zone_name(zone_name, unique_name);
+        let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_name));
+            Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
@@ -623,11 +653,12 @@ impl InstalledZone {
 
         Zones::install_omicron_zone(
             log,
+            &zone_root_path,
             &full_zone_name,
             &zone_image_path,
-            &datasets,
-            &filesystems,
-            &devices,
+            datasets,
+            filesystems,
+            devices,
             net_device_names,
             limit_priv,
         )
@@ -640,6 +671,7 @@ impl InstalledZone {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
+            zonepath: zone_root_path.join(&full_zone_name),
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

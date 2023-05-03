@@ -5,6 +5,8 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
+use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::NamedUtf8TempFile;
 use futures::{TryFutureExt, TryStreamExt};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::{
@@ -13,8 +15,6 @@ use omicron_common::api::internal::nexus::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
-use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
 use tokio::io::AsyncWriteExt;
 
 #[derive(thiserror::Error, Debug)]
@@ -26,37 +26,40 @@ pub enum Error {
         err: std::io::Error,
     },
 
+    #[error("Utf-8 error converting path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error(
         "sled-agent only supports applying zones, found artifact ID {}/{} with kind {}",
         .0.name, .0.version, .0.kind
     )]
     UnsupportedKind(UpdateArtifactId),
 
-    #[error("Version not found in artifact {}", .0.display())]
-    VersionNotFound(PathBuf),
+    #[error("Version not found in artifact {}", 0)]
+    VersionNotFound(Utf8PathBuf),
 
     #[error("Cannot parse json: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("Malformed version in artifact {path}: {why}", path = path.display())]
-    VersionMalformed { path: PathBuf, why: String },
+    #[error("Malformed version in artifact {path}: {why}")]
+    VersionMalformed { path: Utf8PathBuf, why: String },
 
-    #[error("Cannot parse semver in {path}: {err}", path = path.display())]
-    Semver { path: PathBuf, err: semver::Error },
+    #[error("Cannot parse semver in {path}: {err}")]
+    Semver { path: Utf8PathBuf, err: semver::Error },
 
     #[error("Failed request to Nexus: {0}")]
     Response(nexus_client::Error<nexus_client::types::Error>),
 }
 
-fn default_zone_artifact_path() -> PathBuf {
-    PathBuf::from("/opt/oxide")
+fn default_zone_artifact_path() -> Utf8PathBuf {
+    Utf8PathBuf::from("/opt/oxide")
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ConfigUpdates {
     // Path where zone artifacts are stored.
     #[serde(default = "default_zone_artifact_path")]
-    pub zone_artifact_path: PathBuf,
+    pub zone_artifact_path: Utf8PathBuf,
 }
 
 impl Default for ConfigUpdates {
@@ -72,15 +75,15 @@ pub struct Component {
 }
 
 // Helper functions for returning errors
-fn version_malformed_err(path: &Path, key: &str) -> Error {
+fn version_malformed_err(path: &Utf8Path, key: &str) -> Error {
     Error::VersionMalformed {
         path: path.to_path_buf(),
         why: format!("Missing '{key}'"),
     }
 }
 
-fn io_err(path: &Path, err: std::io::Error) -> Error {
-    Error::Io { message: format!("Cannot access {}", path.display()), err }
+fn io_err(path: &Utf8Path, err: std::io::Error) -> Error {
+    Error::Io { message: format!("Cannot access {path}"), err }
 }
 
 pub struct UpdateManager {
@@ -111,7 +114,7 @@ impl UpdateManager {
                 // We download the file to a temporary file. We then rename it to
                 // "<artifact-name>" after it has successfully downloaded, to
                 // signify that it is ready for usage.
-                let (file, temp_path) = NamedTempFile::new_in(&directory)
+                let (file, temp_path) = NamedUtf8TempFile::new_in(&directory)
                     .map_err(|err| Error::Io {
                         message: "create temp file".to_string(),
                         err,
@@ -169,7 +172,7 @@ impl UpdateManager {
     // Gets the component version information from a single zone artifact.
     async fn component_get_zone_version(
         &self,
-        path: &Path,
+        path: &Utf8Path,
     ) -> Result<Component, Error> {
         // Decode the zone image
         let file =
@@ -183,7 +186,7 @@ impl UpdateManager {
         for entry in entries {
             let mut entry = entry.map_err(|err| io_err(path, err))?;
             let entry_path = entry.path().map_err(|err| io_err(path, err))?;
-            if entry_path == Path::new("oxide.json") {
+            if entry_path == Utf8Path::new("oxide.json") {
                 let mut contents = String::new();
                 entry
                     .read_to_string(&mut contents)
@@ -216,26 +219,21 @@ impl UpdateManager {
         let mut components = vec![];
 
         let dir = &self.config.zone_artifact_path;
-        for entry in std::fs::read_dir(dir).map_err(|err| io_err(dir, err))? {
+        for entry in dir.read_dir_utf8().map_err(|err| io_err(dir, err))? {
             let entry = entry.map_err(|err| io_err(dir, err))?;
             let file_type =
                 entry.file_type().map_err(|err| io_err(dir, err))?;
+            let path = entry.path();
 
-            if file_type.is_file()
-                && entry.file_name().to_string_lossy().ends_with(".tar.gz")
-            {
+            if file_type.is_file() && entry.file_name().ends_with(".tar.gz") {
                 // Zone Images are currently identified as individual components.
                 //
                 // This logic may be tweaked in the future, depending on how we
                 // bundle together zones.
-                components.push(
-                    self.component_get_zone_version(&entry.path()).await?,
-                );
-            } else if file_type.is_dir()
-                && entry.file_name().to_string_lossy() == "sled-agent"
-            {
+                components.push(self.component_get_zone_version(&path).await?);
+            } else if file_type.is_dir() && entry.file_name() == "sled-agent" {
                 // Sled Agent is the only non-zone file recognized as a component.
-                let version_path = entry.path().join("VERSION");
+                let version_path = path.join("VERSION");
                 let version = tokio::fs::read_to_string(&version_path)
                     .await
                     .map_err(|err| io_err(&version_path, err))?;
@@ -280,7 +278,8 @@ mod test {
             kind: KnownArtifactKind::ControlPlane,
         };
 
-        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tempdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
         let expected_path = tempdir.path().join(expected_name);
 
         // Remove the file if it already exists.
@@ -320,7 +319,8 @@ mod test {
 
     #[tokio::test]
     async fn test_query_no_components() {
-        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tempdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
         let config =
             ConfigUpdates { zone_artifact_path: tempdir.path().to_path_buf() };
         let um = UpdateManager::new(config);
@@ -331,7 +331,8 @@ mod test {
 
     #[tokio::test]
     async fn test_query_zone_version() {
-        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tempdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
 
         // Construct something that looks like a zone image in the tempdir.
         let zone_path = tempdir.path().join("test-pkg.tar.gz");
@@ -340,14 +341,14 @@ mod test {
         let mut archive = Builder::new(gzw);
         archive.mode(tar::HeaderMode::Deterministic);
 
-        let mut json = tempfile::NamedTempFile::new().unwrap();
+        let mut json = NamedUtf8TempFile::new().unwrap();
         json.write_all(
             &r#"{"v":"1","t":"layer","pkg":"test-pkg","version":"2.0.0"}"#
                 .as_bytes(),
         )
         .unwrap();
         archive.append_path_with_name(json.path(), "oxide.json").unwrap();
-        let mut other_data = tempfile::NamedTempFile::new().unwrap();
+        let mut other_data = NamedUtf8TempFile::new().unwrap();
         other_data
             .write_all("lets throw in another file for good measure".as_bytes())
             .unwrap();
@@ -373,7 +374,8 @@ mod test {
 
     #[tokio::test]
     async fn test_query_sled_agent_version() {
-        let tempdir = tempfile::tempdir().expect("Failed to make tempdir");
+        let tempdir =
+            camino_tempfile::tempdir().expect("Failed to make tempdir");
 
         // Construct something that looks like the sled agent.
         let sled_agent_dir = tempdir.path().join("sled-agent");

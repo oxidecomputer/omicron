@@ -20,11 +20,15 @@ pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
 pub use inventory::{RackV1Inventory, SpInventory};
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
+use sled_hardware::Baseboard;
 
 use dropshot::{ConfigDropshot, HttpServer};
 use slog::{debug, error, o, Drain};
-use std::net::{SocketAddr, SocketAddrV6};
-use update_tracker::UpdateTracker;
+use std::{
+    net::{SocketAddr, SocketAddrV6},
+    sync::Arc,
+};
+pub use update_tracker::{StartUpdateError, UpdateTracker};
 
 /// Run the OpenAPI generator for the API; which emits the OpenAPI spec
 /// to stdout.
@@ -43,12 +47,14 @@ pub struct Args {
     pub address: SocketAddrV6,
     pub artifact_address: SocketAddrV6,
     pub mgs_address: SocketAddrV6,
+    pub baseboard: Option<Baseboard>,
 }
 
 pub struct Server {
     pub wicketd_server: HttpServer<ServerContext>,
     pub artifact_server: HttpServer<installinator_artifactd::ServerContext>,
     pub artifact_store: WicketdArtifactStore,
+    pub update_tracker: Arc<UpdateTracker>,
     pub ipr_update_tracker: IprUpdateTracker,
 }
 
@@ -84,11 +90,12 @@ impl Server {
             crate::installinator_progress::new(&log);
 
         let store = WicketdArtifactStore::new(&log);
-        let update_tracker = UpdateTracker::new(
+        let update_tracker = Arc::new(UpdateTracker::new(
             args.mgs_address,
             &log,
+            store.clone(),
             ipr_update_tracker.clone(),
-        );
+        ));
 
         let wicketd_server = {
             let log = log.new(o!("component" => "dropshot (wicketd)"));
@@ -99,8 +106,8 @@ impl Server {
                 ServerContext {
                     mgs_handle,
                     mgs_client,
-                    artifact_store: store.clone(),
-                    update_tracker,
+                    update_tracker: update_tracker.clone(),
+                    baseboard: args.baseboard,
                 },
                 &log,
             )
@@ -124,6 +131,7 @@ impl Server {
             wicketd_server,
             artifact_server,
             artifact_store: store,
+            update_tracker,
             ipr_update_tracker,
         })
     }

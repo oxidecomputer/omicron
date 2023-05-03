@@ -5,6 +5,7 @@
 //! Interface to a (simulated or real) SP / RoT.
 
 use crate::config::ConfigError;
+use camino::Utf8Path;
 use illumos_utils::dladm::CreateVnicError;
 use illumos_utils::zone::EnsureGzAddressError;
 use serde::Deserialize;
@@ -17,7 +18,6 @@ use sprockets_host::Ed25519PublicKey;
 use sprockets_host::RotManagerHandle;
 use sprockets_host::Session;
 use std::net::Ipv6Addr;
-use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::AsyncRead;
@@ -35,7 +35,7 @@ pub struct SimSpConfig {
 }
 
 impl SimSpConfig {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;

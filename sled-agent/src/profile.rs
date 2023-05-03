@@ -31,9 +31,8 @@ impl ProfileBuilder {
         info!(log, "Profile for {}:\n{}", installed_zone.name(), self);
 
         let profile_path = format!(
-            "{zone_mountpoint}/{zone}/root/var/svc/profile/site.xml",
-            zone_mountpoint = illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT,
-            zone = installed_zone.name(),
+            "{zonepath}/root/var/svc/profile/site.xml",
+            zonepath = installed_zone.zonepath()
         );
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;

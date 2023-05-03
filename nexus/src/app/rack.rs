@@ -13,7 +13,11 @@ use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
+use nexus_types::external_api::params::SiloCreate;
+use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -21,6 +25,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -138,6 +143,37 @@ impl super::Nexus {
             HashMap::new(),
         );
 
+        let silo_name = &request.recovery_silo.silo_name;
+        let dns_records = request
+            .services
+            .iter()
+            .filter_map(|s| match &s.kind {
+                nexus_types::internal_api::params::ServiceKind::Nexus {
+                    external_address,
+                } => Some(match external_address {
+                    IpAddr::V4(addr) => DnsRecord::A(*addr),
+                    IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+                }),
+                _ => None,
+            })
+            .collect();
+        let mut dns_update = DnsVersionUpdateBuilder::new(
+            DnsGroup::External,
+            format!("create silo: {:?}", silo_name),
+            self.id.to_string(),
+        );
+        dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
+
+        let recovery_silo = SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: request.recovery_silo.silo_name,
+                description: "built-in recovery Silo".to_string(),
+            },
+            discoverable: false,
+            identity_mode: SiloIdentityMode::LocalOnly,
+            admin_group_name: None,
+        };
+
         self.db_datastore
             .rack_set_initialized(
                 opctx,
@@ -149,6 +185,13 @@ impl super::Nexus {
                     certificates,
                     internal_dns,
                     external_dns,
+                    recovery_silo,
+                    recovery_user_id: request.recovery_silo.user_name,
+                    recovery_user_password_hash: request
+                        .recovery_silo
+                        .user_password_hash
+                        .into(),
+                    dns_update,
                 },
             )
             .await?;

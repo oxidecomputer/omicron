@@ -21,8 +21,10 @@ use crate::db::model::IdentityType;
 use crate::db::model::RoleAssignment;
 use crate::db::model::RoleBuiltin;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::PoolError;
 use diesel::prelude::*;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::DataPageParams;
@@ -194,6 +196,28 @@ impl DataStore {
         opctx: &OpContext,
         authz_resource: &T,
     ) -> ListResultVec<db::model::RoleAssignment> {
+        self.role_assignment_fetch_visible_conn(
+            opctx,
+            authz_resource,
+            self.pool_authorized(opctx).await?,
+        )
+        .await
+    }
+
+    pub async fn role_assignment_fetch_visible_conn<
+        T: authz::ApiResourceWithRoles + AuthorizedResource + Clone,
+        ConnErr,
+    >(
+        &self,
+        opctx: &OpContext,
+        authz_resource: &T,
+        conn: &(impl async_bb8_diesel::AsyncConnection<DbConnection, ConnErr>
+              + Sync),
+    ) -> ListResultVec<db::model::RoleAssignment>
+    where
+        ConnErr: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnErr>,
+    {
         opctx.authorize(authz::Action::ReadPolicy, authz_resource).await?;
         let resource_type = authz_resource.resource_type();
         let resource_id = authz_resource.resource_id();
@@ -205,9 +229,11 @@ impl DataStore {
             .order(dsl::role_name.asc())
             .then_order_by(dsl::identity_id.asc())
             .select(RoleAssignment::as_select())
-            .load_async::<RoleAssignment>(self.pool_authorized(opctx).await?)
+            .load_async::<RoleAssignment>(conn)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| {
+                public_error_from_diesel_pool(e.into(), ErrorHandler::Server)
+            })
     }
 
     /// Removes all existing externally-visble role assignments on

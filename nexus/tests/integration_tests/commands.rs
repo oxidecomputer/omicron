@@ -119,7 +119,7 @@ fn test_nexus_openapi() {
     assert!(spec.paths.paths.get("/v1/projects").is_some());
 
     // Check for lint errors.
-    let errors = openapi_lint::validate(&spec);
+    let errors = openapi_lint::validate_external(&spec);
     assert!(errors.is_empty(), "{}", errors.join("\n\n"));
 
     // Construct a string that helps us identify the organization of tags and

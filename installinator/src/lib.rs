@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifact;
+mod block_size_writer;
 mod bootstrap;
 mod dispatch;
 mod errors;

@@ -10,8 +10,10 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::Baseboard;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use thiserror::Error;
 use uuid::Uuid;
 
 pub use illumos_utils::opte::params::VpcFirewallRule;
@@ -206,24 +208,45 @@ pub struct Zpool {
 
 /// The type of a dataset, and an auxiliary information necessary
 /// to successfully launch a zone managing the associated data.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DatasetKind {
-    CockroachDb {
-        /// The addresses of all nodes within the cluster.
-        all_addresses: Vec<SocketAddrV6>,
-    },
+    CockroachDb,
     Crucible,
     Clickhouse,
+}
+
+impl DatasetKind {
+    /// Returns the type of the zone which manages this dataset.
+    pub fn zone_type(&self) -> ZoneType {
+        match *self {
+            DatasetKind::CockroachDb => ZoneType::CockroachDb,
+            DatasetKind::Crucible => ZoneType::Crucible,
+            DatasetKind::Clickhouse => ZoneType::Clickhouse,
+        }
+    }
+
+    /// Returns the service type which runs in the zone managing this dataset.
+    ///
+    /// NOTE: This interface is only viable because datasets run a single
+    /// service in their zone. If that precondition is no longer true, this
+    /// interface should be re-visited.
+    pub fn service_type(&self) -> ServiceType {
+        match *self {
+            DatasetKind::CockroachDb => ServiceType::CockroachDb,
+            DatasetKind::Crucible => ServiceType::Crucible,
+            DatasetKind::Clickhouse => ServiceType::Clickhouse,
+        }
+    }
 }
 
 impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
         match k {
-            CockroachDb { all_addresses } => Self::CockroachDb(
-                all_addresses.iter().map(|a| a.to_string()).collect(),
-            ),
+            CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
         }
@@ -307,13 +330,29 @@ pub enum ServiceType {
         dns_address: SocketAddrV6,
     },
     Oximeter,
+    // We should never receive external requests to start wicketd, MGS,
+    // dendrite, tfport, or maghemite: these are all services running in the
+    // global zone or switch zone that we start autonomously. We tag them with
+    // `serde(skip)` both to omit them from our OpenAPI definition and to avoid
+    // needing their contained types to implement `JsonSchema + Deserialize +
+    // Serialize`.
+    #[serde(skip)]
     ManagementGatewayService,
-    Wicketd,
+    #[serde(skip)]
+    Wicketd {
+        baseboard: Baseboard,
+    },
+    #[serde(skip)]
     Dendrite {
         asic: DendriteAsic,
     },
+    #[serde(skip)]
     Tfport {
         pkt_source: String,
+    },
+    #[serde(skip)]
+    Maghemite {
+        mode: String,
     },
     CruciblePantry,
     BoundaryNtp {
@@ -330,9 +369,9 @@ pub enum ServiceType {
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
-    Maghemite {
-        mode: String,
-    },
+    Clickhouse,
+    CockroachDb,
+    Crucible,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -343,13 +382,16 @@ impl std::fmt::Display for ServiceType {
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
-            ServiceType::Wicketd => write!(f, "wicketd"),
+            ServiceType::Wicketd { .. } => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible/pantry"),
             ServiceType::BoundaryNtp { .. }
             | ServiceType::InternalNtp { .. } => write!(f, "ntp"),
             ServiceType::Maghemite { .. } => write!(f, "mg-ddm"),
+            ServiceType::Clickhouse => write!(f, "clickhouse"),
+            ServiceType::CockroachDb => write!(f, "cockroachdb"),
+            ServiceType::Crucible => write!(f, "crucible"),
         }
     }
 }
@@ -374,59 +416,63 @@ impl crate::smf_helper::Service for ServiceType {
     }
 }
 
-impl From<ServiceType> for sled_agent_client::types::ServiceType {
-    fn from(s: ServiceType) -> Self {
+/// Error returned by attempting to convert an internal service (i.e., a service
+/// started autonomously by sled-agent) into a
+/// `sled_agent_client::types::ServiceType` to be sent to a remote sled-agent.
+#[derive(Debug, Clone, Copy, Error)]
+#[error("This service may only be started autonomously by sled-agent")]
+pub struct AutonomousServiceOnlyError;
+
+impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceType) -> Result<Self, Self::Error> {
         use sled_agent_client::types::ServiceType as AutoSt;
         use ServiceType as St;
 
         match s {
             St::Nexus { internal_ip, external_ip, nic } => {
-                AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() }
+                Ok(AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() })
             }
             St::ExternalDns { http_address, dns_address, nic } => {
-                AutoSt::ExternalDns {
+                Ok(AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
                     nic: nic.into(),
-                }
+                })
             }
             St::InternalDns { http_address, dns_address } => {
-                AutoSt::InternalDns {
+                Ok(AutoSt::InternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
-                }
+                })
             }
-            St::Oximeter => AutoSt::Oximeter,
-            St::ManagementGatewayService => AutoSt::ManagementGatewayService,
-            St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => {
-                use sled_agent_client::types::DendriteAsic as AutoAsic;
-                let asic = match asic {
-                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
-                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
-                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
-                };
-                AutoSt::Dendrite { asic }
-            }
-            St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
-            St::CruciblePantry => AutoSt::CruciblePantry,
+            St::Oximeter => Ok(AutoSt::Oximeter),
+            St::CruciblePantry => Ok(AutoSt::CruciblePantry),
             St::BoundaryNtp {
                 ntp_servers,
                 dns_servers,
                 domain,
                 nic,
                 snat_cfg,
-            } => AutoSt::BoundaryNtp {
+            } => Ok(AutoSt::BoundaryNtp {
                 ntp_servers,
                 dns_servers,
                 domain,
                 nic: nic.into(),
                 snat_cfg: snat_cfg.into(),
-            },
+            }),
             St::InternalNtp { ntp_servers, dns_servers, domain } => {
-                AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
+                Ok(AutoSt::InternalNtp { ntp_servers, dns_servers, domain })
             }
-            St::Maghemite { mode } => AutoSt::Maghemite { mode },
+            St::Clickhouse => Ok(AutoSt::Clickhouse),
+            St::CockroachDb => Ok(AutoSt::CockroachDb),
+            St::Crucible => Ok(AutoSt::Crucible),
+            St::ManagementGatewayService
+            | St::Wicketd { .. }
+            | St::Dendrite { .. }
+            | St::Tfport { .. }
+            | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
 }
@@ -437,25 +483,31 @@ impl From<ServiceType> for sled_agent_client::types::ServiceType {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum ZoneType {
+    Clickhouse,
+    CockroachDb,
+    CruciblePantry,
+    Crucible,
     ExternalDns,
     InternalDns,
     Nexus,
+    Ntp,
     Oximeter,
     Switch,
-    CruciblePantry,
-    Ntp,
 }
 
 impl From<ZoneType> for sled_agent_client::types::ZoneType {
     fn from(zt: ZoneType) -> Self {
         match zt {
+            ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::CockroachDb => Self::CockroachDb,
+            ZoneType::Crucible => Self::Crucible,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
             ZoneType::InternalDns => Self::InternalDns,
             ZoneType::ExternalDns => Self::ExternalDns,
             ZoneType::Nexus => Self::Nexus,
+            ZoneType::Ntp => Self::Ntp,
             ZoneType::Oximeter => Self::Oximeter,
             ZoneType::Switch => Self::Switch,
-            ZoneType::CruciblePantry => Self::CruciblePantry,
-            ZoneType::Ntp => Self::Ntp,
         }
     }
 }
@@ -464,13 +516,16 @@ impl std::fmt::Display for ZoneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use ZoneType::*;
         let name = match self {
+            Clickhouse => "clickhouse",
+            CockroachDb => "cockroachdb",
+            Crucible => "crucible",
+            CruciblePantry => "crucible_pantry",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
             Nexus => "nexus",
+            Ntp => "ntp",
             Oximeter => "oximeter",
             Switch => "switch",
-            CruciblePantry => "crucible_pantry",
-            Ntp => "ntp",
         };
         write!(f, "{name}")
     }
@@ -487,6 +542,9 @@ pub struct ServiceZoneRequest {
     pub zone_type: ZoneType,
     // The addresses on which the service should listen for requests.
     pub addresses: Vec<Ipv6Addr>,
+    // Datasets which should be managed by this service.
+    #[serde(default)]
+    pub dataset: Option<crate::storage::dataset::DatasetName>,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
     //
@@ -497,27 +555,67 @@ pub struct ServiceZoneRequest {
     #[serde(default)]
     pub gz_addresses: Vec<Ipv6Addr>,
     // Services that should be run in the zone
-    pub services: Vec<ServiceType>,
+    pub services: Vec<ServiceZoneService>,
 }
 
-impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
-    fn from(s: ServiceZoneRequest) -> Self {
-        let mut services = Vec::new();
-        for service in s.services {
-            services.push(service.into())
-        }
+impl ServiceZoneRequest {
+    // The full name of the zone, if it was to be created as a zone.
+    pub fn zone_name(&self) -> String {
+        illumos_utils::running_zone::InstalledZone::get_zone_name(
+            &self.zone_type.to_string(),
+            self.zone_name_unique_identifier().as_deref(),
+        )
+    }
 
-        Self {
-            id: s.id,
-            zone_type: s.zone_type.into(),
-            addresses: s.addresses,
-            gz_addresses: s.gz_addresses,
-            services,
-        }
+    // The name of a unique identifier for the zone, if one is necessary.
+    pub fn zone_name_unique_identifier(&self) -> Option<String> {
+        self.dataset.as_ref().map(|d| d.pool().to_string())
     }
 }
 
-/// Used to request that the Sled initialize certain services on initialization.
+impl TryFrom<ServiceZoneRequest>
+    for sled_agent_client::types::ServiceZoneRequest
+{
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceZoneRequest) -> Result<Self, Self::Error> {
+        let mut services = Vec::with_capacity(s.services.len());
+        for service in s.services {
+            services.push(service.try_into()?);
+        }
+
+        Ok(Self {
+            id: s.id,
+            zone_type: s.zone_type.into(),
+            addresses: s.addresses,
+            dataset: s.dataset.map(|d| d.into()),
+            gz_addresses: s.gz_addresses,
+            services,
+        })
+    }
+}
+
+/// Used to request that the Sled initialize a single service.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct ServiceZoneService {
+    pub id: Uuid,
+    pub details: ServiceType,
+}
+
+impl TryFrom<ServiceZoneService>
+    for sled_agent_client::types::ServiceZoneService
+{
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceZoneService) -> Result<Self, Self::Error> {
+        let details = s.details.try_into()?;
+        Ok(Self { id: s.id, details })
+    }
+}
+
+/// Used to request that the Sled initialize multiple services.
 ///
 /// This may be used to record that certain sleds are responsible for
 /// launching services which may not be associated with a dataset, such
