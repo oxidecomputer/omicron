@@ -14,10 +14,14 @@ use trust_dns_resolver::config::{
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 
-const RSS_CONFIG_PATH: &str =
-    "../../../smf/sled-agent/non-gimlet/config-rss.toml";
-const RSS_CONFIG_STR: &str =
-    include_str!("../../../smf/sled-agent/non-gimlet/config-rss.toml");
+const RSS_CONFIG_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../smf/sled-agent/non-gimlet/config-rss.toml"
+);
+const RSS_CONFIG_STR: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../smf/sled-agent/non-gimlet/config-rss.toml"
+));
 
 #[derive(Clone)]
 pub struct Context {
@@ -73,7 +77,7 @@ fn rss_config() -> Result<SetupServiceConfig> {
         .with_context(|| format!("parsing {:?} as TOML", RSS_CONFIG_PATH))
 }
 
-pub async fn nexus_addr() -> SocketAddr {
+pub async fn nexus_addr() -> Result<SocketAddr> {
     // Check $OXIDE_HOST first.
     if let Ok(host) =
         std::env::var("OXIDE_HOST").map_err(anyhow::Error::from).and_then(|s| {
@@ -83,7 +87,7 @@ pub async fn nexus_addr() -> SocketAddr {
                 .parse()?)
         })
     {
-        return host;
+        return Ok(host);
     }
 
     // Otherwise, use the RSS configuration to find the DNS server, silo name,
@@ -91,7 +95,7 @@ pub async fn nexus_addr() -> SocketAddr {
     // external DNS server.
     //
     // First, load the RSS configuration file.
-    let config = rss_config().unwrap();
+    let config = rss_config()?;
 
     // From config-rss.toml, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
@@ -106,8 +110,7 @@ pub async fn nexus_addr() -> SocketAddr {
                 pool in {}",
                 RSS_CONFIG_PATH,
             )
-        })
-        .unwrap();
+        })?;
     let dns_addr = SocketAddr::from((dns_ip, 53));
 
     // Resolve the DNS name of the recovery Silo that ought to have been created
@@ -131,8 +134,7 @@ pub async fn nexus_addr() -> SocketAddr {
 
     let resolver =
         TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .context("failed to create resolver")
-            .unwrap();
+            .context("failed to create resolver")?;
 
     wait_for_condition::<_, anyhow::Error, _, _>(
         || async {
@@ -155,21 +157,16 @@ pub async fn nexus_addr() -> SocketAddr {
         &Duration::from_secs(300),
     )
     .await
-    .unwrap_or_else(|e| panic!("failed to get Nexus addr: {}", e))
+    .context("failed to get Nexus addr")
 }
 
-async fn get_base_url() -> String {
-    // Check $OXIDE_HOST first.
-    if let Ok(host) = std::env::var("OXIDE_HOST") {
-        return host;
-    }
-
-    format!("http://{}", nexus_addr().await)
+async fn get_base_url() -> Result<String> {
+    Ok(format!("http://{}", nexus_addr().await?))
 }
 
 async fn build_authenticated_client() -> Result<oxide_client::Client> {
     let config = rss_config()?;
-    let base_url = get_base_url().await;
+    let base_url = get_base_url().await?;
     let silo_name = config.recovery_silo.silo_name.as_str();
     let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
