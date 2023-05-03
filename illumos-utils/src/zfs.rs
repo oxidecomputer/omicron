@@ -5,8 +5,8 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
+use camino::Utf8PathBuf;
 use std::fmt;
-use std::path::PathBuf;
 
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
@@ -92,14 +92,14 @@ pub struct Zfs {}
 pub enum Mountpoint {
     #[allow(dead_code)]
     Legacy,
-    Path(PathBuf),
+    Path(Utf8PathBuf),
 }
 
 impl fmt::Display for Mountpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Mountpoint::Legacy => write!(f, "legacy"),
-            Mountpoint::Path(p) => write!(f, "{}", p.display()),
+            Mountpoint::Path(p) => write!(f, "{p}"),
         }
     }
 }

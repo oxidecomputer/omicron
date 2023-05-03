@@ -10,6 +10,7 @@ use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
+use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
 use slog::info;
@@ -17,7 +18,6 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::{Path, PathBuf};
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -90,6 +90,9 @@ pub enum GetZoneError {
         err: crate::zone::AdmError,
     },
 
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error("Zone with prefix '{prefix}' not found")]
     NotFound { prefix: String },
 
@@ -143,8 +146,8 @@ impl RunningZone {
     }
 
     /// Returns the filesystem path to the zone's root
-    pub fn root(&self) -> String {
-        format!("{}/root", self.inner.zonepath.display())
+    pub fn root(&self) -> Utf8PathBuf {
+        self.inner.zonepath.join("root")
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -480,7 +483,7 @@ impl RunningZone {
             running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
-                zonepath: zone_info.path().into(),
+                zonepath: zone_info.path().to_path_buf().try_into()?,
                 name: zone_name.to_string(),
                 control_vnic,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
@@ -557,7 +560,7 @@ pub enum InstallZoneError {
     #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
     InstallZone {
         zone: String,
-        image_path: PathBuf,
+        image_path: Utf8PathBuf,
         #[source]
         err: crate::zone::AdmError,
     },
@@ -567,7 +570,7 @@ pub struct InstalledZone {
     log: Logger,
 
     // Filesystem path of the zone
-    zonepath: PathBuf,
+    zonepath: Utf8PathBuf,
 
     // Name of the Zone.
     name: String,
@@ -613,7 +616,7 @@ impl InstalledZone {
     }
 
     /// Returns the filesystem path to the zonepath
-    pub fn zonepath(&self) -> &Path {
+    pub fn zonepath(&self) -> &Utf8Path {
         &self.zonepath
     }
 
@@ -621,7 +624,7 @@ impl InstalledZone {
     pub async fn install(
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_root_path: &Path,
+        zone_root_path: &Utf8Path,
         zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
@@ -642,7 +645,7 @@ impl InstalledZone {
 
         let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_type));
+            Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()

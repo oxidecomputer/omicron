@@ -70,6 +70,7 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
+use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
@@ -93,7 +94,6 @@ use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::path::PathBuf;
 use thiserror::Error;
 
 /// Describes errors which may occur while operating the setup service.
@@ -211,8 +211,8 @@ impl RackSetupService {
     }
 }
 
-fn rss_completed_marker_path() -> PathBuf {
-    std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
+fn rss_completed_marker_path() -> Utf8PathBuf {
+    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
         .join("rss-plan-completed.marker")
 }
 
@@ -736,10 +736,8 @@ impl ServiceInner {
             // the need for unencrypted communication.
             certs: vec![],
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
-            // TODO This eventually needs to come from the person setting up the
-            // system.
-            external_dns_zone_name:
-                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
+            external_dns_zone_name: config.external_dns_zone_name.clone(),
+            recovery_silo: config.recovery_silo.clone(),
         };
 
         let notify_nexus = || async {

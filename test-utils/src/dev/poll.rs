@@ -11,7 +11,7 @@ use thiserror::Error;
 
 /// Result of one attempt to check a condition (see [`wait_for_condition()`])
 #[derive(Debug, Error)]
-pub enum CondCheckError<E: std::error::Error + 'static> {
+pub enum CondCheckError<E> {
     /// the condition we're waiting for is not true
     #[error("poll condition not yet ready")]
     NotYet,
@@ -21,11 +21,11 @@ pub enum CondCheckError<E: std::error::Error + 'static> {
 
 /// Result of [`wait_for_condition()`]
 #[derive(Debug, Error)]
-pub enum Error<E: std::error::Error + 'static> {
+pub enum Error<E> {
     /// operation timed out before succeeding or failing permanently
     #[error("timed out after {0:?}")]
     TimedOut(Duration),
-    #[error("non-retryable error while polling on condition")]
+    #[error("non-retryable error while polling on condition: {0:#}")]
     PermanentError(E),
 }
 
@@ -69,7 +69,6 @@ pub async fn wait_for_condition<O, E, Func, Fut>(
 where
     Func: FnMut() -> Fut,
     Fut: Future<Output = Result<O, CondCheckError<E>>>,
-    E: std::error::Error + 'static,
 {
     let poll_start = Instant::now();
     loop {
