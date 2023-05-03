@@ -246,6 +246,14 @@
           "last"
         ]
       },
+      "Name": {
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "type": "string"
+      },
+      "PasswordHash": {
+        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+        "type": "string"
+      },
       "RackInitializeRequest": {
         "description": "Configuration for the \"rack setup service\".\n\nThe Rack Setup Service should be responsible for one-time setup actions, such as CockroachDB placement and initialization.  Without operator intervention, however, these actions need a way to be automated in our deployment.",
         "type": "object",
@@ -264,6 +272,10 @@
             "items": {
               "type": "string"
             }
+          },
+          "external_dns_zone_name": {
+            "description": "DNS name for the DNS zone delegated to the rack for external DNS",
+            "type": "string"
           },
           "internal_services_ip_pool_ranges": {
             "description": "Ranges of the service IP pool which may be used for internal services.",
@@ -288,20 +300,53 @@
           "rack_subnet": {
             "type": "string",
             "format": "ipv6"
+          },
+          "recovery_silo": {
+            "description": "Configuration of the Recovery Silo (the initial Silo)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecoverySiloConfig"
+              }
+            ]
           }
         },
         "required": [
           "bootstrap_discovery",
           "dns_servers",
+          "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
           "rack_secret_threshold",
-          "rack_subnet"
+          "rack_subnet",
+          "recovery_silo"
+        ]
+      },
+      "RecoverySiloConfig": {
+        "type": "object",
+        "properties": {
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "user_name": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "user_password_hash": {
+            "$ref": "#/components/schemas/PasswordHash"
+          }
+        },
+        "required": [
+          "silo_name",
+          "user_name",
+          "user_password_hash"
         ]
       },
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "UserId": {
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "type": "string"
       }
     }
   }
