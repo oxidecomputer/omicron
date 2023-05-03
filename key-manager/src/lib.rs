@@ -20,27 +20,31 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// upon construction. We sparate the two types, because a `Secret` must contain
 /// `Zeroizable` data, and a `Box<[u8; 32]>` is not zeroizable on its own.
 #[derive(Zeroize, ZeroizeOnDrop)]
-pub struct Ikm(pub Box<[u8; 32]>);
-
-/// We impl Debug here only to guarantee nobody re-implements this to actually
-/// expose the secret.
-impl Debug for Ikm {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Ikm(secret)")
-    }
-}
+struct Ikm(Box<[u8; 32]>);
 
 /// Secret Input Key Material for a given rack reconfiguration epoch
 pub struct VersionedIkm {
-    pub epoch: u64,
-    pub salt: [u8; 32],
-    pub ikm: Secret<Ikm>,
+    epoch: u64,
+    salt: [u8; 32],
+    ikm: Secret<Ikm>,
 }
 
 impl VersionedIkm {
     pub fn new(epoch: u64, salt: [u8; 32], data: &[u8; 32]) -> VersionedIkm {
         let ikm = Secret::new(Ikm(Box::new(*data)));
         VersionedIkm { epoch, salt, ikm }
+    }
+
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn salt(&self) -> &[u8; 32] {
+        &self.salt
+    }
+
+    pub fn expose_secret(&self) -> &[u8; 32] {
+        &self.ikm.expose_secret().0
     }
 }
 
@@ -56,11 +60,21 @@ pub enum Error {
 
 /// Derived Disk Encryption key
 #[derive(Zeroize, ZeroizeOnDrop, Default)]
-pub struct Aes256GcmDiskEncryptionKey(pub Box<[u8; 32]>);
+struct Aes256GcmDiskEncryptionKey(Box<[u8; 32]>);
 
 pub struct VersionedAes256GcmDiskEncryptionKey {
-    pub epoch: u64,
-    pub key: Secret<Aes256GcmDiskEncryptionKey>,
+    epoch: u64,
+    key: Secret<Aes256GcmDiskEncryptionKey>,
+}
+
+impl VersionedAes256GcmDiskEncryptionKey {
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub fn expose_secret(&self) -> &[u8; 32] {
+        &self.key.expose_secret().0
+    }
 }
 
 /// The main mechanism used to derive keys from a shared secret for the Oxide
@@ -246,7 +260,7 @@ mod tests {
                 .ok_or(SecretRetrieverError::NoSuchEpoch(epoch))?;
             let ikm = VersionedIkm::new(epoch, salt, bytes);
             let latest = self.get_latest().await.unwrap();
-            if ikm.epoch != latest.epoch {
+            if ikm.epoch() != latest.epoch() {
                 Ok(SecretState::Reconfiguration { old: ikm, new: latest })
             } else {
                 Ok(SecretState::Current(ikm))
@@ -269,8 +283,8 @@ mod tests {
 
         // Key derivation is deterministic based on disk_id and loaded secrets
         let key2 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
-        assert_eq!(key.epoch, key2.epoch);
-        assert_eq!(key.key.expose_secret().0, key2.key.expose_secret().0);
+        assert_eq!(key.epoch(), key2.epoch());
+        assert_eq!(key.expose_secret(), key2.expose_secret());
 
         // There is no secret for epoch 1
         let epoch = 1;
@@ -298,7 +312,7 @@ mod tests {
         let key2 = km.disk_encryption_key(epoch, &id_2).await.unwrap();
         assert_eq!(key1.epoch, epoch);
         assert_eq!(key2.epoch, epoch);
-        assert_ne!(key1.key.expose_secret().0, key2.key.expose_secret().0);
+        assert_ne!(key1.expose_secret(), key2.expose_secret());
     }
 
     #[tokio::test]
@@ -320,7 +334,7 @@ mod tests {
 
         let epoch = 1;
         let key1 = km.disk_encryption_key(epoch, &disk_id).await.unwrap();
-        assert_ne!(key0.key.expose_secret().0, key1.key.expose_secret().0);
+        assert_ne!(key0.expose_secret(), key1.expose_secret());
     }
 
     #[tokio::test]
