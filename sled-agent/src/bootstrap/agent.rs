@@ -19,12 +19,13 @@ use super::trust_quorum::{
 };
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
+use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
@@ -74,11 +75,11 @@ pub enum BootstrapError {
     #[error("Error monitoring hardware: {0}")]
     Hardware(#[from] crate::bootstrap::hardware::Error),
 
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
+
     #[error("Error managing sled agent: {0}")]
     SledError(String),
-
-    #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -203,10 +204,7 @@ pub struct Agent {
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 }
 
-fn get_sled_agent_request_path() -> Utf8PathBuf {
-    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("sled-agent-request.toml")
-}
+const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
 
 // Deletes all state which may be left-over from a previous execution of the
 // Sled Agent.
@@ -263,6 +261,15 @@ async fn cleanup_all_old_global_state(
     Ok(())
 }
 
+async fn sled_config_paths(storage: &StorageResources) -> Vec<Utf8PathBuf> {
+    storage
+        .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        .await
+        .into_iter()
+        .map(|p| p.join(SLED_AGENT_REQUEST_FILE))
+        .collect()
+}
+
 impl Agent {
     pub async fn new(
         log: Logger,
@@ -276,24 +283,7 @@ impl Agent {
         let link = config.link.clone();
         let ip = BootstrapInterface::GlobalZone.ip(&link)?;
 
-        // We expect this directory to exist - ensure that it does, before any
-        // subsequent operations which may write configs here.
-        info!(
-            log, "Ensuring config directory exists";
-            "path" => omicron_common::OMICRON_CONFIG_PATH,
-        );
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
-            .await
-            .map_err(|err| BootstrapError::Io {
-                message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
-
         let bootstrap_etherstub = bootstrap_etherstub()?;
-
         let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
             &bootstrap_etherstub,
         )
@@ -401,23 +391,17 @@ impl Agent {
         *agent.sled_state.lock().await =
             SledAgentState::Before(Some(hardware_monitor));
 
-        let request_path = get_sled_agent_request_path();
-        let trust_quorum = if request_path.exists() {
+        let paths =
+            sled_config_paths(&agent.storage_resources.get().unwrap()).await;
+        let trust_quorum = if let Some(ledger) =
+            Ledger::<PersistentSledAgentRequest>::new(&agent.log, paths).await
+        {
             info!(agent.log, "Sled already configured, loading sled agent");
-            let sled_request: PersistentSledAgentRequest = toml::from_str(
-                &tokio::fs::read_to_string(&request_path).await.map_err(
-                    |err| BootstrapError::Io {
-                        message: format!(
-                            "Reading subnet path from {request_path:?}"
-                        ),
-                        err,
-                    },
-                )?,
-            )
-            .map_err(|err| BootstrapError::Toml { path: request_path, err })?;
-
-            let trust_quorum_share =
-                sled_request.trust_quorum_share.map(ShareDistribution::from);
+            let sled_request = ledger.data();
+            let trust_quorum_share = sled_request
+                .trust_quorum_share
+                .clone()
+                .map(ShareDistribution::from);
             agent
                 .request_agent(&sled_request.request, &trust_quorum_share)
                 .await?;
@@ -553,27 +537,20 @@ impl Agent {
 
                 // Record this request so the sled agent can be automatically
                 // initialized on the next boot.
-                //
-                // danger handling: `serialized_request` contains our trust quorum
-                // share; we do not log it and only write it to the designated path.
-                let serialized_request = PersistentSledAgentRequest {
-                    request: Cow::Borrowed(request),
-                    trust_quorum_share: trust_quorum_share
-                        .clone()
-                        .map(Into::into),
-                }
-                .danger_serialize_as_toml()
-                .expect("Cannot serialize request");
-
-                let path = get_sled_agent_request_path();
-                tokio::fs::write(&path, &serialized_request).await.map_err(
-                    |err| BootstrapError::Io {
-                        message: format!(
-                            "Recording Sled Agent request to {path:?}"
-                        ),
-                        err,
+                let paths =
+                    sled_config_paths(&self.storage_resources.get().unwrap())
+                        .await;
+                let mut ledger = Ledger::new_with(
+                    &self.log,
+                    paths,
+                    PersistentSledAgentRequest {
+                        request: Cow::Borrowed(request),
+                        trust_quorum_share: trust_quorum_share
+                            .clone()
+                            .map(Into::into),
                     },
-                )?;
+                );
+                ledger.commit().await?;
 
                 // This is the point-of-no-return, where we're committed to the
                 // sled agent starting.
@@ -840,28 +817,41 @@ impl Agent {
         &self,
         _state: &tokio::sync::MutexGuard<'_, SledAgentState>,
     ) -> Result<(), BootstrapError> {
-        tokio::fs::remove_dir_all(omicron_common::OMICRON_CONFIG_PATH)
+        let config_dirs = self
+            .storage_resources
+            .get()
+            .unwrap()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
             .await
-            .or_else(|err| match err.kind() {
-                std::io::ErrorKind::NotFound => Ok(()),
-                _ => Err(err),
-            })
-            .map_err(|err| BootstrapError::Io {
-                message: format!(
-                    "Deleting {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
-        tokio::fs::create_dir_all(omicron_common::OMICRON_CONFIG_PATH)
-            .await
-            .map_err(|err| BootstrapError::Io {
-                message: format!(
-                    "Creating config directory {}",
-                    omicron_common::OMICRON_CONFIG_PATH
-                ),
-                err,
-            })?;
+            .into_iter();
+
+        for dir in config_dirs {
+            for entry in dir.read_dir_utf8().map_err(|err| {
+                BootstrapError::Io { message: format!("Deleting {dir}"), err }
+            })? {
+                let entry = entry.map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {dir}"),
+                    err,
+                })?;
+
+                let path = entry.path();
+                let file_type =
+                    entry.file_type().map_err(|err| BootstrapError::Io {
+                        message: format!("Deleting {path}"),
+                        err,
+                    })?;
+
+                if file_type.is_dir() {
+                    tokio::fs::remove_dir_all(path).await
+                } else {
+                    tokio::fs::remove_file(path).await
+                }
+                .map_err(|err| BootstrapError::Io {
+                    message: format!("Deleting {path}"),
+                    err,
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -978,40 +968,34 @@ impl Agent {
     }
 }
 
-// We intentionally DO NOT derive `Debug` or `Serialize`; both provide avenues
+// We intentionally DO NOT derive `Debug``; it provides avenues
 // by which we may accidentally log the contents of our trust quorum share.
-#[derive(Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, SledAgentRequest>,
     trust_quorum_share: Option<SerializableShareDistribution>,
 }
 
-impl PersistentSledAgentRequest<'_> {
-    /// On success, the returned string will contain our raw
-    /// `trust_quorum_share`. This method is named `danger_*` to remind the
-    /// caller that they must not log this string.
-    fn danger_serialize_as_toml(&self) -> Result<String, toml::ser::Error> {
-        #[derive(Serialize)]
-        #[serde(remote = "PersistentSledAgentRequest")]
-        struct PersistentSledAgentRequestDef<'a> {
-            request: Cow<'a, SledAgentRequest>,
-            trust_quorum_share: Option<SerializableShareDistribution>,
-        }
-
-        let mut out = String::with_capacity(128);
-        let serializer = toml::Serializer::new(&mut out);
-        PersistentSledAgentRequestDef::serialize(self, serializer)?;
-        Ok(out)
+impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
     }
+    fn generation_bump(&mut self) {}
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use omicron_test_utils::dev::test_setup_log;
     use uuid::Uuid;
 
-    #[test]
-    fn persistent_sled_agent_request_serialization_round_trips() {
+    #[tokio::test]
+    async fn persistent_sled_agent_request_serialization() {
+        let logctx =
+            test_setup_log("persistent_sled_agent_request_serialization");
+        let log = &logctx.log;
+
+        // No secret generated if we have <= 1 sled
         let secret = RackSecret::new();
         let (mut shares, verifier) = secret.split(2, 4).unwrap();
 
@@ -1034,10 +1018,17 @@ mod tests {
             ),
         };
 
-        let serialized = request.danger_serialize_as_toml().unwrap();
-        let deserialized: PersistentSledAgentRequest =
-            toml::from_str(&serialized).unwrap();
+        let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();
+        let paths = vec![tempdir.path().join("test-file")];
 
-        assert!(request == deserialized, "serialization round trip failed");
+        let mut ledger = Ledger::new_with(log, paths.clone(), request.clone());
+        ledger.commit().await.expect("Failed to write to ledger");
+
+        let ledger = Ledger::<PersistentSledAgentRequest>::new(log, paths)
+            .await
+            .expect("Failt to read request");
+
+        assert!(&request == ledger.data(), "serialization round trip failed");
+        logctx.cleanup_successful();
     }
 }

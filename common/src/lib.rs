@@ -48,13 +48,3 @@ macro_rules! generate_logging_api {
         );
     };
 }
-
-/// Location on internal storage where sled-specific information is stored.
-///
-/// This is mostly private to the `omicron-sled-agent` crate, but exists in
-/// common so it may be cleared by the installation tools.
-///
-/// NOTE: Be careful when modifying this path - the installation tools will
-/// **remove the entire directory** to re-install/uninstall the system.
-// #[deprecated]
-pub const OMICRON_CONFIG_PATH: &'static str = "/var/oxide";

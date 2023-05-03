@@ -606,13 +606,6 @@ fn uninstall_all_packages(config: &Config) {
     }
 }
 
-fn uninstall_omicron_config() {
-    // Once all packages have been removed, also remove any locally-stored
-    // configuration.
-    remove_all_unless_already_removed(omicron_common::OMICRON_CONFIG_PATH)
-        .unwrap();
-}
-
 fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     if let Err(e) = std::fs::remove_file(path.as_ref()) {
         match e.kind() {
@@ -671,8 +664,6 @@ async fn do_deactivate(config: &Config) -> Result<()> {
 
 async fn do_uninstall(config: &Config) -> Result<()> {
     do_deactivate(config).await?;
-    info!(config.log, "Uninstalling Omicron configuration");
-    uninstall_omicron_config();
     info!(config.log, "Removing datasets");
     uninstall_all_omicron_datasets(config)?;
     Ok(())
