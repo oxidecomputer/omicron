@@ -111,13 +111,6 @@ fi
 #
 pfexec /sbin/zfs create -o mountpoint=/zone rpool/zone
 
-#
-# The sled agent will ostensibly write things into /var/oxide, so make that a
-# tmpfs as well:
-#
-pfexec mkdir -p /var/oxide
-pfexec mount -F tmpfs -O swap /var/oxide
-
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
@@ -148,10 +141,7 @@ pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
 pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
-# This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
-# before the install.  This doesn't work right now because, above, we made
-# /var/oxide a file system so you can't remove it (EBUSY) like a regular
-# directory.  The lab-netdev target is a ramdisk system that is always cleared
+# The lab-netdev target is a ramdisk system that is always cleared
 # out between runs, so it has not had any state yet that requires
 # uninstallation.
 #
