@@ -2138,6 +2138,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.0",
+ "http",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -2145,7 +2146,9 @@ dependencies = [
  "reqwest",
  "russh",
  "russh-keys",
+ "serde_json",
  "tokio",
+ "toml 0.7.3",
  "trust-dns-resolver",
 ]
 
