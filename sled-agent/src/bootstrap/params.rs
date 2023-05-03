@@ -9,8 +9,18 @@ use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum BootstrapAddressDiscovery {
+    /// Ignore all bootstrap addresses except our own.
+    OnlyOurs,
+    /// Ignore all bootstrap addresses except the following.
+    OnlyThese { addrs: HashSet<Ipv6Addr> },
+}
 
 /// Configuration for the "rack setup service".
 ///
@@ -21,6 +31,9 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
 pub struct RackInitializeRequest {
     pub rack_subnet: Ipv6Addr,
+
+    /// Describes how bootstrap addresses should be collected during RSS.
+    pub bootstrap_discovery: BootstrapAddressDiscovery,
 
     /// The minimum number of sleds required to unlock the rack secret.
     ///
@@ -38,7 +51,15 @@ pub struct RackInitializeRequest {
     // TODO(https://github.com/oxidecomputer/omicron/issues/1530): Eventually,
     // we want to configure multiple pools.
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+
+    /// DNS name for the DNS zone delegated to the rack for external DNS
+    pub external_dns_zone_name: String,
+
+    /// Configuration of the Recovery Silo (the initial Silo)
+    pub recovery_silo: RecoverySiloConfig,
 }
+
+pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -154,13 +175,15 @@ mod tests {
 
         let path =
             manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");
-        let contents = std::fs::read_to_string(path).unwrap();
-        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
 
         let path = manifest
             .join("../smf/sled-agent/gimlet-standalone/config-rss.toml");
-        let contents = std::fs::read_to_string(path).unwrap();
-        let _: RackInitializeRequest = toml::from_str(&contents).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let _: RackInitializeRequest = toml::from_str(&contents)
+            .unwrap_or_else(|e| panic!("failed to parse {:?}: {}", &path, e));
     }
 
     #[test]
