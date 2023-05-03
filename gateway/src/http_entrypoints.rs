@@ -843,20 +843,22 @@ pub struct UpdateAbortBody {
     pub id: Uuid,
 }
 
-/// Reset an SP
+/// Reset an SP component (possibly the SP itself).
 #[endpoint {
     method = POST,
-    path = "/sp/{type}/{slot}/reset",
+    path = "/sp/{type}/{slot}/component/{component}/reset",
 }]
-async fn sp_reset(
+async fn sp_component_reset(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path: Path<PathSp>,
+    path: Path<PathSpComponent>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let component = component_from_str(&component)?;
 
-    sp.reset_prepare()
-        .and_then(|()| sp.reset_trigger())
+    sp.reset_component_prepare(component)
+        .and_then(|()| sp.reset_component_trigger(component))
         .await
         .map_err(SpCommsError::from)?;
 
@@ -1292,7 +1294,7 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_get)?;
         api.register(sp_startup_options_get)?;
         api.register(sp_startup_options_set)?;
-        api.register(sp_reset)?;
+        api.register(sp_component_reset)?;
         api.register(sp_power_state_get)?;
         api.register(sp_power_state_set)?;
         api.register(sp_installinator_image_id_set)?;

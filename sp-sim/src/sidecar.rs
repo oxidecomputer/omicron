@@ -15,6 +15,7 @@ use crate::SimulatedSp;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::future;
+use gateway_messages::ComponentAction;
 use gateway_messages::ignition;
 use gateway_messages::ignition::IgnitionError;
 use gateway_messages::ignition::LinkEvents;
@@ -741,28 +742,32 @@ impl SpHandler for Handler {
         Ok(())
     }
 
-    fn reset_prepare(
+    fn reset_component_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
+        component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "received sys-reset prepare request; not supported by simulated sidecar";
+            &self.log, "received reset prepare request; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
+            "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn reset_trigger(
+    fn reset_component_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<std::convert::Infallible, SpError> {
+        component: SpComponent,
+    ) -> Result<(), SpError> {
         warn!(
             &self.log, "received sys-reset trigger request; not supported by simulated sidecar";
             "sender" => %sender,
             "port" => ?port,
+            "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
@@ -856,6 +861,21 @@ impl SpHandler for Handler {
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_action(
+        &mut self,
+        sender: SocketAddrV6,
+        component: SpComponent,
+        action: ComponentAction,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to perform component action (not supported for sim components)";
+            "sender" => %sender,
+            "component" => ?component,
+            "action" => ?action,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
