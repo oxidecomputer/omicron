@@ -16,12 +16,13 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
+use tokio::sync::oneshot;
 use uuid::Uuid;
-use wicketd::RunningUpdateState;
+use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::{
     types::{
         GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
-        UpdateComponent,
+        StepEventKindForWicketdEngineSpec, UpdateComponent,
     },
     StepEventKind,
 };
@@ -255,4 +256,111 @@ async fn test_installinator_fetch() {
     }
 
     wicketd_testctx.teardown().await;
+}
+
+#[tokio::test]
+async fn test_update_races() {
+    let gateway = gateway_setup::test_setup(
+        "test_artifact_upload_while_updating",
+        SpPort::One,
+    )
+    .await;
+    let wicketd_testctx = WicketdTestContext::setup(gateway).await;
+    let log = wicketd_testctx.log();
+
+    let temp_dir = Utf8TempDir::new().expect("temp dir created");
+    let archive_path = temp_dir.path().join("archive.zip");
+
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        "../tufaceous/manifests/fake.toml",
+        archive_path.as_str(),
+    ])
+    .expect("args parsed correctly");
+
+    args.exec(log).expect("assemble command completed successfully");
+
+    // Read the archive and upload it to the server.
+    let zip_bytes =
+        fs_err::read(&archive_path).expect("archive read correctly");
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes.clone())
+        .await
+        .expect("bytes read and archived");
+
+    // Now start an update.
+    let sp = gateway_client::types::SpIdentifier {
+        slot: 0,
+        type_: gateway_client::types::SpType::Sled,
+    };
+
+    let (sender, receiver) = oneshot::channel();
+    wicketd_testctx
+        .server
+        .update_tracker
+        .start_fake_update(sp, receiver)
+        .await
+        .expect("start_fake_update successful");
+
+    // An update is now running. Try uploading the repository again -- this time
+    // it should fail.
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes.clone())
+        .await
+        .expect_err("failed because update is currently running");
+
+    // Also try starting another fake update, which should fail -- we don't let
+    // updates be started in the middle of other updates.
+    {
+        let (_, receiver) = oneshot::channel();
+        let err = wicketd_testctx
+            .server
+            .update_tracker
+            .start_fake_update(sp, receiver)
+            .await
+            .expect_err("start_fake_update failed while update is running");
+        assert_eq!(err, StartUpdateError::UpdateInProgress(sp));
+    }
+
+    // Unblock the update, letting it run to completion.
+    sender.send(()).expect("receiver kept open by update engine");
+
+    // Ensure that the event buffer indicates completion.
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    let last_event =
+        event_buffer.step_events.last().expect("at least one event");
+    assert!(
+        matches!(
+            last_event.data,
+            StepEventKindForWicketdEngineSpec::ExecutionCompleted { .. }
+        ),
+        "last event is execution completed: {last_event:#?}"
+    );
+
+    // Try uploading the repository again -- since no updates are running, this
+    // should succeed.
+    wicketd_testctx
+        .wicketd_client
+        .put_repository(zip_bytes)
+        .await
+        .expect("no updates currently running");
+
+    // Now that a new repository is uploaded, the event buffer should be wiped
+    // clean.
+    let event_buffer = wicketd_testctx
+        .wicketd_client
+        .get_update_sp(SpType::Sled, 0)
+        .await
+        .expect("received event buffer successfully");
+    assert!(
+        event_buffer.step_events.is_empty(),
+        "event buffer is empty: {event_buffer:#?}"
+    );
 }
