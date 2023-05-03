@@ -108,9 +108,8 @@ async fn put_repository(
 
     // TODO: do we need to return more information with the response?
 
-    rqctx
-        .artifact_store
-        .put_repository(body.into_stream().try_collect().await?)?;
+    let bytes = body.into_stream().try_collect().await?;
+    rqctx.update_tracker.put_repository(bytes).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -136,7 +135,7 @@ async fn get_artifacts(
     rqctx: RequestContext<ServerContext>,
 ) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
     let (system_version, artifacts) =
-        rqctx.context().artifact_store.system_version_and_artifact_ids();
+        rqctx.context().update_tracker.system_version_and_artifact_ids().await;
     Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
 }
 
@@ -151,20 +150,6 @@ async fn post_start_update(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
     let target = target.into_inner();
-
-    // Do we have a plan with which we can apply updates (i.e., has a valid TUF
-    // repository been uploaded)?
-    let plan = rqctx.artifact_store.current_plan().ok_or_else(|| {
-        // TODO-correctness `for_bad_request` is a little questionable because
-        // the problem isn't this request specifically, but that we haven't
-        // gotten request yet with a valid TUF repository. `for_unavail` might
-        // be more accurate, but `for_unavail` doesn't give us away to give the
-        // client a meaningful error.
-        HttpError::for_bad_request(
-            None,
-            "upload a valid TUF repository first".to_string(),
-        )
-    })?;
 
     // Can we update the target SP? We refuse to update if:
     //
@@ -247,7 +232,7 @@ async fn post_start_update(
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target, plan, update_id).await {
+    match rqctx.update_tracker.start(target, update_id).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }

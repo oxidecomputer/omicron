@@ -4,7 +4,8 @@
 
 //! User provided dropshot server context
 
-use crate::artifacts::WicketdArtifactStore;
+use std::sync::Arc;
+
 use crate::update_tracker::UpdateTracker;
 use crate::MgsHandle;
 use sled_hardware::Baseboard;
@@ -13,7 +14,6 @@ use sled_hardware::Baseboard;
 pub struct ServerContext {
     pub mgs_handle: MgsHandle,
     pub mgs_client: gateway_client::Client,
-    pub(crate) artifact_store: WicketdArtifactStore,
-    pub(crate) update_tracker: UpdateTracker,
+    pub(crate) update_tracker: Arc<UpdateTracker>,
     pub(crate) baseboard: Option<Baseboard>,
 }
