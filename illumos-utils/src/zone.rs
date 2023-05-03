@@ -5,12 +5,12 @@
 //! API for interacting with Zones running Propolis.
 
 use anyhow::anyhow;
+use camino::Utf8Path;
 use ipnetwork::IpNetwork;
 use ipnetwork::IpNetworkError;
 use slog::info;
 use slog::Logger;
 use std::net::{IpAddr, Ipv6Addr};
-use std::path::Path;
 
 use crate::addrobj::AddrObject;
 use crate::dladm::{EtherstubVnic, VNIC_PREFIX_BOOTSTRAP, VNIC_PREFIX_CONTROL};
@@ -281,9 +281,9 @@ impl Zones {
     #[allow(clippy::too_many_arguments)]
     pub async fn install_omicron_zone(
         log: &Logger,
-        zone_root_path: &Path,
+        zone_root_path: &Utf8Path,
         zone_name: &str,
-        zone_image: &std::path::Path,
+        zone_image: &Utf8Path,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],

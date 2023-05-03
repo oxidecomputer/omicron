@@ -5,6 +5,7 @@
 //! Integration testing facilities for Nexus
 
 use anyhow::Context;
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
@@ -26,7 +27,6 @@ use slog::o;
 use slog::Logger;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::path::Path;
 use std::time::Duration;
 use trust_dns_resolver::config::NameServerConfig;
 use trust_dns_resolver::config::Protocol;
@@ -63,7 +63,7 @@ pub struct ControlPlaneTestContext<N> {
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
-    pub sled_agent_storage: tempfile::TempDir,
+    pub sled_agent_storage: camino_tempfile::Utf8TempDir,
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
@@ -136,7 +136,7 @@ pub fn load_test_config() -> omicron_common::nexus_config::Config {
     // change the logging level and local IP if they want, and as we add more
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
-    let config_file_path = Path::new("tests/config.test.toml");
+    let config_file_path = Utf8Path::new("tests/config.test.toml");
     let mut config =
         omicron_common::nexus_config::Config::from_file(config_file_path)
             .expect("failed to load config.test.toml");
@@ -193,7 +193,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     // Set up a single sled agent.
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let tempdir = tempfile::tempdir().unwrap();
+    let tempdir = camino_tempfile::tempdir().unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::Server",
@@ -384,7 +384,7 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
-    update_directory: &Path,
+    update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
@@ -549,7 +549,7 @@ pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
 
 pub async fn start_dns_server(
     log: slog::Logger,
-    storage_path: &Path,
+    storage_path: &Utf8Path,
 ) -> Result<
     (
         dns_server::dns_server::ServerHandle,
@@ -560,7 +560,7 @@ pub async fn start_dns_server(
 > {
     let config_store = dns_server::storage::Config {
         keep_old_generations: 3,
-        storage_path: storage_path.to_string_lossy().into_owned().into(),
+        storage_path: storage_path.into(),
     };
     let store = dns_server::storage::Store::new(
         log.new(o!("component" => "DnsStore")),

@@ -5,17 +5,17 @@
 //! Utilities to help reading/writing toml files from/to multiple paths
 
 use async_trait::async_trait;
+use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
 use slog::Logger;
-use std::path::{Path, PathBuf};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize { path: PathBuf, err: toml::ser::Error },
+    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
 
     #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: PathBuf, err: toml::de::Error },
+    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -25,12 +25,12 @@ pub enum Error {
     },
 
     #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
-    FailedToAccessStorage { failed_paths: Vec<(PathBuf, Error)> },
+    FailedToAccessStorage { failed_paths: Vec<(Utf8PathBuf, Error)> },
 }
 
 impl Error {
-    fn io_path(path: &Path, err: std::io::Error) -> Self {
-        Self::Io { message: format!("Error accessing {}", path.display()), err }
+    fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {}", path), err }
     }
 }
 
@@ -54,7 +54,7 @@ impl From<Error> for omicron_common::api::external::Error {
 pub struct Ledger<T> {
     log: Logger,
     ledger: T,
-    paths: Vec<PathBuf>,
+    paths: Vec<Utf8PathBuf>,
 }
 
 impl<T: Ledgerable> Ledger<T> {
@@ -63,7 +63,10 @@ impl<T: Ledgerable> Ledger<T> {
     /// Returns the following, in order:
     /// - The ledger with the highest generation number
     /// - If none exists, returns a default ledger
-    pub async fn new(log: &Logger, paths: Vec<PathBuf>) -> Result<Self, Error> {
+    pub async fn new(
+        log: &Logger,
+        paths: Vec<Utf8PathBuf>,
+    ) -> Result<Self, Error> {
         // Read all the ledgers that we can.
         let mut ledgers = vec![];
         for path in paths.iter() {
@@ -106,7 +109,7 @@ impl<T: Ledgerable> Ledger<T> {
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write to {}: {e}", path.display());
+                warn!(self.log, "Failed to write to {}: {e}", path);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
@@ -123,14 +126,11 @@ impl<T: Ledgerable> Ledger<T> {
     //
     // We accomplish this by first writing to a temporary file, then
     // renaming to the target location.
-    async fn atomic_write(&self, path: &Path) -> Result<(), Error> {
+    async fn atomic_write(&self, path: &Utf8Path) -> Result<(), Error> {
         let mut tmp_path = path.to_path_buf();
         let tmp_filename = format!(
             ".{}.tmp",
-            tmp_path
-                .file_name()
-                .expect("Should have file name")
-                .to_string_lossy()
+            tmp_path.file_name().expect("Should have file name")
         );
         tmp_path.set_file_name(tmp_filename);
 
@@ -155,9 +155,9 @@ pub trait Ledgerable:
     fn generation_bump(&mut self);
 
     /// Reads from `path` as a toml-serialized version of `Self`.
-    async fn read_from(log: &Logger, path: &Path) -> Result<Self, Error> {
+    async fn read_from(log: &Logger, path: &Utf8Path) -> Result<Self, Error> {
         if path.exists() {
-            debug!(log, "Reading ledger from {}", path.display());
+            debug!(log, "Reading ledger from {}", path);
             toml::from_str(
                 &tokio::fs::read_to_string(&path)
                     .await
@@ -168,14 +168,18 @@ pub trait Ledgerable:
                 err,
             })
         } else {
-            debug!(log, "No ledger in {}", path.display());
+            debug!(log, "No ledger in {}", path);
             Ok(Self::default())
         }
     }
 
     /// Writes to `path` as a toml-serialized version of `Self`.
-    async fn write_to(&self, log: &Logger, path: &Path) -> Result<(), Error> {
-        debug!(log, "Writing ledger to {}", path.display());
+    async fn write_to(
+        &self,
+        log: &Logger,
+        path: &Utf8Path,
+    ) -> Result<(), Error> {
+        debug!(log, "Writing ledger to {}", path);
         let serialized =
             toml::Value::try_from(&self).expect("Cannot serialize ledger");
         let as_str = toml::to_string(&serialized).map_err(|err| {
@@ -214,7 +218,7 @@ mod test {
         let logctx = test_setup_log("create_default_ledger");
         let log = &logctx.log;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
+        let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
         let ledger =
             Ledger::<Data>::new(&log, vec![config_dir.path().to_path_buf()])
                 .await
@@ -232,7 +236,7 @@ mod test {
         let logctx = test_setup_log("create_ledger_reads_from_storage");
         let log = &logctx.log;
 
-        let config_dir = tempfile::TempDir::new().unwrap();
+        let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
         let config_path = config_dir.path().join("ledger.toml");
 
         // Create the ledger within a configuration directory
@@ -263,8 +267,8 @@ mod test {
 
         // Create the ledger, initialize contents.
         let config_dirs = vec![
-            tempfile::TempDir::new().unwrap(),
-            tempfile::TempDir::new().unwrap(),
+            camino_tempfile::Utf8TempDir::new().unwrap(),
+            camino_tempfile::Utf8TempDir::new().unwrap(),
         ];
         let config_paths = config_dirs
             .iter()
@@ -309,8 +313,8 @@ mod test {
 
         // Create the ledger, initialize contents.
         let mut config_dirs = vec![
-            tempfile::TempDir::new().unwrap(),
-            tempfile::TempDir::new().unwrap(),
+            camino_tempfile::Utf8TempDir::new().unwrap(),
+            camino_tempfile::Utf8TempDir::new().unwrap(),
         ];
         let config_paths = config_dirs
             .iter()
