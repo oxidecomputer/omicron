@@ -862,7 +862,7 @@ impl ServiceManager {
         let service = DnsClient {};
         let smfh = SmfHelper::new(&running_zone, &service);
 
-        let etc = Utf8PathBuf::from(running_zone.root()).join("etc");
+        let etc = running_zone.root().join("etc");
         let resolv_conf = etc.join("resolv.conf");
         let nsswitch_conf = etc.join("nsswitch.conf");
         let nsswitch_dns = etc.join("nsswitch.dns");

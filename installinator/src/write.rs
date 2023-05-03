@@ -96,8 +96,6 @@ impl WriteDestination {
 
             match disk.boot_image_devfs_path(raw_devfs_path) {
                 Ok(path) => {
-                    let path = Utf8PathBuf::try_from(path)
-                        .context("non-UTF8 drive path")?;
                     info!(
                         log, "found target M.2 disk";
                         "identity" => ?disk.identity(),
