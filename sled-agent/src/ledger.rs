@@ -24,8 +24,8 @@ pub enum Error {
         err: std::io::Error,
     },
 
-    #[error("Failed to write the ledger to storage")]
-    FailedToAccessStorage,
+    #[error("Failed to write the ledger to storage (tried to access: {failed_paths:?})")]
+    FailedToAccessStorage { failed_paths: Vec<PathBuf> },
 }
 
 impl Error {
@@ -102,17 +102,19 @@ impl<T: Ledgerable> Ledger<T> {
         // Bump the generation number any time we want to commit the ledger.
         self.ledger.generation_bump();
 
+        let mut failed_paths = vec![];
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
                 warn!(self.log, "Failed to write to {}: {e}", path.display());
+                failed_paths.push(path.to_path_buf());
             } else {
                 one_successful_write = true;
             }
         }
 
         if !one_successful_write {
-            return Err(Error::FailedToAccessStorage);
+            return Err(Error::FailedToAccessStorage { failed_paths });
         }
         Ok(())
     }
@@ -367,7 +369,7 @@ mod test {
         assert_eq!(ledger.data(), &Data::default());
         let err = ledger.commit().await.unwrap_err();
         assert!(
-            matches!(err, Error::FailedToAccessStorage),
+            matches!(err, Error::FailedToAccessStorage { .. }),
             "Unexpected error: {err}"
         );
 
