@@ -7,6 +7,7 @@
 use crate::nexus::LazyNexusClient;
 use crate::params::DatasetKind;
 use crate::storage::dataset::DatasetName;
+use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
@@ -23,7 +24,6 @@ use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -76,7 +76,7 @@ pub enum Error {
 
     #[error("Failed to parse UUID from {path}: {err}")]
     ParseUuid {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: uuid::Error,
     },
@@ -103,14 +103,14 @@ pub enum Error {
 
     #[error("Failed to serialize toml (intended for {path:?}): {err}")]
     Serialize {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::ser::Error,
     },
 
     #[error("Failed to deserialize toml from {path:?}: {err}")]
     Deserialize {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::de::Error,
     },
@@ -166,7 +166,7 @@ struct UnderlayRequest {
 
 #[derive(PartialEq, Eq, Clone)]
 enum DiskWrapper {
-    Real { disk: Disk, devfs_path: PathBuf },
+    Real { disk: Disk, devfs_path: Utf8PathBuf },
     Synthetic { zpool_name: ZpoolName },
 }
 
@@ -226,7 +226,7 @@ impl StorageResources {
     }
 
     /// Returns all mountpoints within all M.2s for a particular dataset.
-    pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<PathBuf> {
+    pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
         let m2_zpools = self.all_m2_zpools().await;
         m2_zpools
             .iter()
@@ -283,7 +283,7 @@ impl StorageWorker {
         let do_format = true;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
-            Mountpoint::Path(PathBuf::from("/data")),
+            Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
             do_format,
         )?;
