@@ -22,7 +22,7 @@ use crate::config::Config as SledConfig;
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
 use crate::sp::SpHandle;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
 use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
@@ -40,6 +40,7 @@ use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::HardwareManager;
@@ -193,6 +194,7 @@ pub struct Agent {
     share: Mutex<Option<ShareDistribution>>,
 
     sled_state: Mutex<SledAgentState>,
+    storage_resources: OnceCell<StorageResources>,
     config: Config,
     sled_config: SledConfig,
     sp: Option<SpHandle>,
@@ -381,6 +383,7 @@ impl Agent {
             rss_access: Mutex::new(()),
             share: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(None)),
+            storage_resources: OnceCell::new(),
             config: config.clone(),
             sled_config,
             sp,
@@ -389,6 +392,12 @@ impl Agent {
         };
 
         let hardware_monitor = agent.start_hardware_monitor().await?;
+        // TODO... can I make this less shite?
+        agent
+            .storage_resources
+            .set(hardware_monitor.storage().clone())
+            .map_err(|_| "Failed to set storage")
+            .unwrap();
         *agent.sled_state.lock().await =
             SledAgentState::Before(Some(hardware_monitor));
 
@@ -780,6 +789,10 @@ impl Agent {
                 .as_ref()
                 .map(|sp_config| sp_config.trust_quorum_members.clone())
                 .unwrap_or_default(),
+            self.storage_resources
+                .get()
+                .expect("Should set storage during initialization")
+                .clone(),
         )
         .await?;
         Ok(())

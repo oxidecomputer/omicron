@@ -59,6 +59,7 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
 use crate::bootstrap::params::SledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
 use crate::params::{
     AutonomousServiceOnlyError, DatasetEnsureBody, ServiceType,
@@ -70,7 +71,8 @@ use crate::rack_setup::plan::service::{
 use crate::rack_setup::plan::sled::{
     generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
 };
-use camino::{Utf8Path, Utf8PathBuf};
+use crate::storage_manager::StorageResources;
+use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
@@ -105,6 +107,9 @@ pub enum SetupServiceError {
         #[source]
         err: std::io::Error,
     },
+
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Cannot create plan for sled services: {0}")]
     ServicePlan(#[from] ServicePlanError),
@@ -165,6 +170,7 @@ impl RackSetupService {
     pub(crate) fn new(
         log: Logger,
         config: Config,
+        storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
         // TODO-cleanup: We should be collecting the device ID certs of all
         // trust quorum members over the management network. Currently we don't
@@ -175,7 +181,12 @@ impl RackSetupService {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(&config, local_bootstrap_agent, &member_device_id_certs)
+                .run(
+                    &config,
+                    &storage_resources,
+                    local_bootstrap_agent,
+                    &member_device_id_certs,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -211,10 +222,16 @@ impl RackSetupService {
     }
 }
 
-fn rss_completed_marker_path() -> Utf8PathBuf {
-    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-plan-completed.marker")
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct RssCompleteMarker {}
+
+impl Ledgerable for RssCompleteMarker {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
 }
+const RSS_COMPLETED_FILENAME: &str = "rss-plan-completed.marker";
 
 /// The implementation of the Rack Setup Service.
 struct ServiceInner {
@@ -815,16 +832,27 @@ impl ServiceInner {
     async fn run(
         &self,
         config: &Config,
+        storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
         member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
+        let marker_paths: Vec<Utf8PathBuf> = storage_resources
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_COMPLETED_FILENAME))
+            .collect();
+
+        let ledger =
+            Ledger::<RssCompleteMarker>::new(&self.log, marker_paths.clone())
+                .await;
+
         // Check if a previous RSS plan has completed successfully.
         //
         // If it has, the system should be up-and-running.
-        let rss_completed_marker_path = rss_completed_marker_path();
-        if rss_completed_marker_path.exists() {
+        if ledger.is_some() {
             // TODO(https://github.com/oxidecomputer/omicron/issues/724): If the
             // running configuration doesn't match Config, we could try to
             // update things.
@@ -833,7 +861,7 @@ impl ServiceInner {
                 "RSS configuration looks like it has already been applied",
             );
 
-            let sled_plan = SledPlan::load(&self.log)
+            let sled_plan = SledPlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Sled plan should exist if completed marker exists");
             if &sled_plan.config != config {
@@ -841,7 +869,7 @@ impl ServiceInner {
                     "Configuration changed".to_string(),
                 ));
             }
-            let service_plan = ServicePlan::load(&self.log)
+            let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
             self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
@@ -859,7 +887,8 @@ impl ServiceInner {
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
-        let maybe_sled_plan = SledPlan::load(&self.log).await?;
+        let maybe_sled_plan =
+            SledPlan::load(&self.log, storage_resources).await?;
         if let Some(plan) = &maybe_sled_plan {
             let stored_peers: HashSet<Ipv6Addr> =
                 plan.sleds.keys().map(|a| *a.ip()).collect();
@@ -884,7 +913,13 @@ impl ServiceInner {
             plan
         } else {
             info!(self.log, "Creating new allocation plan");
-            SledPlan::create(&self.log, config, bootstrap_addrs).await?
+            SledPlan::create(
+                &self.log,
+                config,
+                &storage_resources,
+                bootstrap_addrs,
+            )
+            .await?
         };
         let config = &plan.config;
 
@@ -941,12 +976,19 @@ impl ServiceInner {
                 get_sled_address(initialization_request.subnet)
             })
             .collect();
-        let service_plan =
-            if let Some(plan) = ServicePlan::load(&self.log).await? {
-                plan
-            } else {
-                ServicePlan::create(&self.log, &config, &plan.sleds).await?
-            };
+        let service_plan = if let Some(plan) =
+            ServicePlan::load(&self.log, storage_resources).await?
+        {
+            plan
+        } else {
+            ServicePlan::create(
+                &self.log,
+                &config,
+                &storage_resources,
+                &plan.sleds,
+            )
+            .await?
+        };
 
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
@@ -1034,12 +1076,12 @@ impl ServiceInner {
         info!(self.log, "Finished setting up services");
 
         // Finally, mark that we've completed executing the plans.
-        tokio::fs::File::create(&rss_completed_marker_path).await.map_err(
-            |err| SetupServiceError::Io {
-                message: format!("creating {rss_completed_marker_path:?}"),
-                err,
-            },
-        )?;
+        let mut ledger = Ledger::<RssCompleteMarker>::new_with(
+            &self.log,
+            marker_paths.clone(),
+            RssCompleteMarker::default(),
+        );
+        ledger.commit().await?;
 
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.

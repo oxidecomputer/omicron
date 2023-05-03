@@ -25,7 +25,10 @@ pub enum Error {
     },
 
     #[error("Failed to write the ledger to storage")]
-    FailedToAccessStorage,
+    FailedToWrite,
+
+    #[error("Not found in storage")]
+    NotFound,
 }
 
 impl Error {
@@ -58,15 +61,27 @@ pub struct Ledger<T> {
 }
 
 impl<T: Ledgerable> Ledger<T> {
+    /// Creates a ledger with a new initial value, ready to be written to
+    /// `paths.`
+    pub fn new_with(log: &Logger, paths: Vec<Utf8PathBuf>, default: T) -> Self {
+        Self { log: log.clone(), ledger: default, paths }
+    }
+
     /// Reads the ledger from any of the provided `paths`.
     ///
     /// Returns the following, in order:
     /// - The ledger with the highest generation number
     /// - If none exists, returns a default ledger
-    pub async fn new(
-        log: &Logger,
-        paths: Vec<Utf8PathBuf>,
-    ) -> Result<Self, Error> {
+    pub async fn new(log: &Logger, paths: Vec<Utf8PathBuf>) -> Option<Self> {
+        // Read the ledgers from storage
+        if let Some(ledger) = Self::read(log, &paths).await {
+            Some(Self { log: log.clone(), ledger, paths })
+        } else {
+            None
+        }
+    }
+
+    async fn read(log: &Logger, paths: &Vec<Utf8PathBuf>) -> Option<T> {
         // Read all the ledgers that we can.
         let mut ledgers = vec![];
         for path in paths.iter() {
@@ -83,11 +98,7 @@ impl<T: Ledgerable> Ledger<T> {
                 prior
             }
         });
-
-        // If we can't read either ledger, start a new one.
-        let ledger = ledger.unwrap_or_else(|| T::default());
-
-        Ok(Self { log: log.clone(), ledger, paths })
+        ledger
     }
 
     pub fn data(&self) -> &T {
@@ -115,7 +126,7 @@ impl<T: Ledgerable> Ledger<T> {
         }
 
         if !one_successful_write {
-            return Err(Error::FailedToAccessStorage);
+            return Err(Error::FailedToWrite);
         }
         Ok(())
     }
@@ -143,9 +154,7 @@ impl<T: Ledgerable> Ledger<T> {
 }
 
 #[async_trait]
-pub trait Ledgerable:
-    Default + DeserializeOwned + Serialize + Send + Sync
-{
+pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     /// Returns true if [Self] is newer than `other`.
     fn is_newer_than(&self, other: &Self) -> bool;
 
@@ -167,7 +176,7 @@ pub trait Ledgerable:
             })
         } else {
             debug!(log, "No ledger in {path}");
-            Ok(Self::default())
+            Err(Error::NotFound)
         }
     }
 
@@ -217,14 +226,20 @@ mod test {
         let log = &logctx.log;
 
         let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
-        let ledger =
-            Ledger::<Data>::new(&log, vec![config_dir.path().to_path_buf()])
-                .await
-                .expect("Failed to create ledger");
+        let ledger = Ledger::<Data>::new_with(
+            &log,
+            vec![config_dir.path().to_path_buf()],
+            Data::default(),
+        );
 
         // Since we haven't previously stored anything, expect to read a default
         // value.
         assert_eq!(ledger.data(), &Data::default());
+
+        let ledger =
+            Ledger::<Data>::new(&log, vec![config_dir.path().to_path_buf()])
+                .await;
+        assert!(ledger.is_none());
 
         logctx.cleanup_successful();
     }
@@ -238,9 +253,11 @@ mod test {
         let config_path = config_dir.path().join("ledger.toml");
 
         // Create the ledger within a configuration directory
-        let mut ledger = Ledger::<Data>::new(&log, vec![config_path.clone()])
-            .await
-            .expect("Failed to create ledger");
+        let mut ledger = Ledger::<Data>::new_with(
+            &log,
+            vec![config_path.clone()],
+            Data::default(),
+        );
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
         assert!(config_path.exists());
@@ -248,9 +265,8 @@ mod test {
         drop(ledger);
 
         // Re-create the ledger, observe the new contents.
-        let ledger = Ledger::<Data>::new(&log, vec![config_path.clone()])
-            .await
-            .expect("Failed to create ledger");
+        let ledger =
+            Ledger::<Data>::new(&log, vec![config_path.clone()]).await.unwrap();
 
         assert_eq!(ledger.data().contents, "new contents");
         assert_eq!(ledger.data().generation, 1);
@@ -275,7 +291,7 @@ mod test {
 
         let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
             .await
-            .expect("Failed to create ledger");
+            .expect("Failed to read ledger");
         ledger.data_mut().contents = "new contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -287,7 +303,7 @@ mod test {
         // Let's write again, but only using one of the two config dirs.
         let mut ledger = Ledger::<Data>::new(&log, config_paths[..1].to_vec())
             .await
-            .expect("Failed to create ledger");
+            .expect("Failed to read ledger");
         ledger.data_mut().contents = "even newer contents".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -296,7 +312,7 @@ mod test {
         // Re-create the ledger (using both config dirs), observe the newest contents.
         let ledger = Ledger::<Data>::new(&log, config_paths.clone())
             .await
-            .expect("Failed to create ledger");
+            .expect("Failed to read ledger");
 
         assert_eq!(ledger.data().contents, "even newer contents");
         assert_eq!(ledger.data().generation, 2);
@@ -319,9 +335,11 @@ mod test {
             .map(|d| d.path().join("ledger.toml"))
             .collect::<Vec<_>>();
 
-        let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
-            .await
-            .expect("Failed to create ledger");
+        let mut ledger = Ledger::<Data>::new_with(
+            &log,
+            config_paths.clone(),
+            Data::default(),
+        );
         ledger.data_mut().contents = "written to both configs".to_string();
         ledger.commit().await.expect("Failed to write ledger");
 
@@ -339,7 +357,7 @@ mod test {
 
         let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
             .await
-            .expect("Failed to create ledger");
+            .expect("Failed to read ledger");
 
         assert_eq!(ledger.data().contents, "written to both configs");
         assert_eq!(ledger.data().generation, 1);
@@ -351,7 +369,7 @@ mod test {
         // We can still parse the ledger from a single path
         let ledger = Ledger::<Data>::new(&log, config_paths.clone())
             .await
-            .expect("Failed to create ledger");
+            .expect("Failed to read ledger");
         assert_eq!(ledger.data().contents, "written to one config");
         assert_eq!(ledger.data().generation, 2);
 
@@ -364,16 +382,17 @@ mod test {
         assert!(!config_paths[0].exists());
         assert!(!config_paths[1].exists());
 
-        let mut ledger = Ledger::<Data>::new(&log, config_paths.clone())
-            .await
-            .expect("Failed to create ledger");
+        let ledger = Ledger::<Data>::new(&log, config_paths.clone()).await;
+        assert!(ledger.is_none());
 
+        let mut ledger = Ledger::<Data>::new_with(
+            &log,
+            config_paths.clone(),
+            Data::default(),
+        );
         assert_eq!(ledger.data(), &Data::default());
         let err = ledger.commit().await.unwrap_err();
-        assert!(
-            matches!(err, Error::FailedToAccessStorage),
-            "Unexpected error: {err}"
-        );
+        assert!(matches!(err, Error::FailedToWrite), "Unexpected error: {err}");
 
         logctx.cleanup_successful();
     }

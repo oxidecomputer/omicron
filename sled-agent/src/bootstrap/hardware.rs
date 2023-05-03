@@ -6,7 +6,7 @@
 
 use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
 use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
@@ -136,6 +136,7 @@ pub(crate) struct HardwareMonitor {
     handle: JoinHandle<
         Result<(HardwareManager, ServiceManager, StorageManager), Error>,
     >,
+    storage_resources: StorageResources,
 }
 
 impl HardwareMonitor {
@@ -212,6 +213,7 @@ impl HardwareMonitor {
         storage: StorageManager,
     ) -> Self {
         let (exit_tx, exit_rx) = oneshot::channel();
+        let storage_resources = storage.resources().clone();
         let worker = HardwareMonitorWorker::new(
             log.clone(),
             exit_rx,
@@ -221,7 +223,11 @@ impl HardwareMonitor {
         );
         let handle = tokio::spawn(async move { worker.run().await });
 
-        Self { exit_tx, handle }
+        Self { exit_tx, handle, storage_resources }
+    }
+
+    pub fn storage(&self) -> &StorageResources {
+        &self.storage_resources
     }
 
     // Stops the task from executing

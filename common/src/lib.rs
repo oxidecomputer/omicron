@@ -56,4 +56,5 @@ macro_rules! generate_logging_api {
 ///
 /// NOTE: Be careful when modifying this path - the installation tools will
 /// **remove the entire directory** to re-install/uninstall the system.
+// #[deprecated]
 pub const OMICRON_CONFIG_PATH: &'static str = "/var/oxide";
