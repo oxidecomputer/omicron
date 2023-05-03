@@ -4333,7 +4333,7 @@ async fn group_list(
 /// Fetch group
 #[endpoint {
     method = GET,
-    path = "/v1/groups/{group}",
+    path = "/v1/groups/{group_id}",
     tags = ["silos"],
 }]
 async fn group_view(

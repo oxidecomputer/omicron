@@ -1078,7 +1078,7 @@
         "x-dropshot-pagination": true
       }
     },
-    "/v1/groups/{group}": {
+    "/v1/groups/{group_id}": {
       "get": {
         "tags": [
           "silos"
@@ -1088,7 +1088,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "group",
+            "name": "group_id",
             "description": "ID of the group",
             "required": true,
             "schema": {
@@ -3605,7 +3605,7 @@
           {
             "in": "path",
             "name": "sled_id",
-            "description": "The sled's unique ID.",
+            "description": "ID of the sled",
             "required": true,
             "schema": {
               "type": "string",
@@ -3644,7 +3644,7 @@
           {
             "in": "path",
             "name": "sled_id",
-            "description": "The sled's unique ID.",
+            "description": "ID of the sled",
             "required": true,
             "schema": {
               "type": "string",
@@ -3698,6 +3698,102 @@
           }
         },
         "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/hardware/switches": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List switches",
+        "operationId": "switch_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": true
+      }
+    },
+    "/v1/system/hardware/switches/{switch_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a switch",
+        "operationId": "switch_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "switch_id",
+            "description": "ID of the switch",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Switch"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/system/identity-providers": {
@@ -6996,7 +7092,7 @@
     },
     "schemas": {
       "Baseboard": {
-        "description": "Properties that should uniquely identify a Sled.",
+        "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
         "properties": {
           "part": {
@@ -11117,6 +11213,63 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SshKey"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Switch": {
+        "description": "An operator's view of a Switch.",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_id": {
+            "description": "The rack to which this Switch is currently attached",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "baseboard",
+          "id",
+          "rack_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SwitchResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Switch"
             }
           },
           "next_page": {

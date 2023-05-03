@@ -87,7 +87,7 @@ current_user_view                        GET      /v1/me
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 group_list                               GET      /v1/groups
-group_view                               GET      /v1/groups/{group}
+group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
@@ -137,6 +137,8 @@ silo_view                                GET      /v1/system/silos/{silo}
 sled_list                                GET      /v1/system/hardware/sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
+switch_list                              GET      /v1/system/hardware/switches
+switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 system_component_version_list            GET      /v1/system/update/components
 system_image_create                      POST     /system/images
 system_image_delete                      DELETE   /system/images/{image_name}
