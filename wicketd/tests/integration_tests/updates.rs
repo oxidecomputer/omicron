@@ -56,15 +56,15 @@ async fn test_updates() {
         .expect("bytes read and archived");
 
     // List out the artifacts in the repository.
-    let artifacts = wicketd_testctx
+    let response = wicketd_testctx
         .wicketd_client
-        .get_artifacts()
+        .get_artifacts_and_event_reports()
         .await
-        .expect("get_artifacts succeeded")
+        .expect("get_artifacts_and_event_reports succeeded")
         .into_inner();
 
     // Ensure that this is a sensible result.
-    let kinds = artifacts
+    let kinds = response
         .artifacts
         .iter()
         .map(|artifact| {
