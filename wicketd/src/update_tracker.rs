@@ -1111,13 +1111,14 @@ impl UpdateContext {
         &self,
         component: &str,
         slot: u16,
-        _persist: bool, // TODO need to pass this through MGS
+        persist: bool,
     ) -> anyhow::Result<()> {
         self.mgs_client
             .sp_component_active_slot_set(
                 self.sp.type_,
                 self.sp.slot,
                 component,
+                persist,
                 &SpComponentFirmwareSlot { slot },
             )
             .await
