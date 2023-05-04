@@ -4,18 +4,21 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::collections::{hash_map, HashMap, VecDeque};
+use std::{
+    collections::{HashMap, VecDeque},
+    time::Duration,
+};
 
 use derive_where::derive_where;
 use either::Either;
-use petgraph::prelude::*;
+use petgraph::{prelude::*, visit::Walker};
 
 use crate::{
     events::{
         Event, EventReport, ProgressEvent, ProgressEventKind, StepEvent,
-        StepEventKind, StepEventPriority,
+        StepEventKind, StepEventPriority, StepInfo, StepOutcome,
     },
-    ExecutionId, StepSpec,
+    ExecutionId, NestedSpec, StepSpec,
 };
 
 /// A receiver for events that provides a pull-based model with periodic
@@ -63,6 +66,9 @@ impl<S: StepSpec> EventBuffer<S> {
         Self { event_store: EventStore::default(), max_low_priority }
     }
 
+    /// The default value for `max_low_priority`, as created by EventBuffer::default().
+    pub const DEFAULT_MAX_LOW_PRIORITY: usize = 8;
+
     /// Adds an [`EventReport`] to the buffer.
     pub fn add_event_report(&mut self, report: EventReport<S>) {
         for event in report.step_events {
@@ -92,6 +98,21 @@ impl<S: StepSpec> EventBuffer<S> {
         self.event_store.handle_step_event(event, self.max_low_priority);
     }
 
+    /// Returns information about each step, as currently tracked by the buffer,
+    /// in order of when the events were first defined.
+    pub fn steps<'a>(&'a self) -> Vec<(StepKey, &'a EventMapValue<S>)> {
+        let mut items: Vec<_> =
+            self.event_store.event_map_value_dfs().collect();
+        items.sort_unstable_by_key(|(_, value)| value.sort_key());
+        items
+    }
+
+    /// Returns information about the given step, as currently tracked by the
+    /// buffer.
+    pub fn get(&self, step_key: &StepKey) -> Option<&EventMapValue<S>> {
+        self.event_store.map.get(step_key)
+    }
+
     /// Generates an [`EventReport`] for this buffer.
     ///
     /// This report can be serialized and sent over the wire.
@@ -112,8 +133,8 @@ impl<S: StepSpec> EventBuffer<S> {
         }
 
         // Sort events.
-        step_events.sort_by(|a, b| a.event_index.cmp(&b.event_index));
-        progress_events.sort_by(|a, b| a.total_elapsed.cmp(&b.total_elapsed));
+        step_events.sort_unstable_by_key(|event| event.event_index);
+        progress_events.sort_unstable_by_key(|event| event.total_elapsed);
         if let Some(last) = step_events.last() {
             // Only update last_seen if there are new step events (otherwise it
             // stays the same).
@@ -142,6 +163,15 @@ impl<S: StepSpec> EventBuffer<S> {
     }
 }
 
+impl<S: StepSpec> Default for EventBuffer<S> {
+    fn default() -> Self {
+        Self {
+            event_store: Default::default(),
+            max_low_priority: Self::DEFAULT_MAX_LOW_PRIORITY,
+        }
+    }
+}
+
 #[derive_where(Clone, Debug, Default)]
 struct EventStore<S: StepSpec> {
     // A tree where edges are from parent event keys to child nested event keys.
@@ -149,11 +179,30 @@ struct EventStore<S: StepSpec> {
     // While petgraph seems like overkill at first, it results in really
     // straightforward algorithms below compared to alternatives like storing
     // trees using Box pointers.
-    event_tree: DiGraphMap<StepKey, ()>,
+    event_tree: DiGraphMap<EventTreeNode, ()>,
+    root_execution_id: Option<ExecutionId>,
     map: HashMap<StepKey, EventMapValue<S>>,
 }
 
 impl<S: StepSpec> EventStore<S> {
+    /// Returns a DFS of event map values.
+    fn event_map_value_dfs(
+        &self,
+    ) -> impl Iterator<Item = (StepKey, &EventMapValue<S>)> + '_ {
+        self.root_execution_id.into_iter().flat_map(|execution_id| {
+            // Construct a DFS.
+            let dfs =
+                Dfs::new(&self.event_tree, EventTreeNode::Root(execution_id));
+            dfs.iter(&self.event_tree).filter_map(|node| {
+                if let EventTreeNode::Step(key) = node {
+                    Some((key, &self.map[&key]))
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
     /// Handles a step event.
     fn handle_step_event(
         &mut self,
@@ -165,65 +214,36 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
-        if let Some(key) = self.recurse_for_step_event(&event, None) {
-            match self.map.entry(key) {
-                hash_map::Entry::Occupied(mut entry) => {
-                    let value = entry.get_mut();
-                    let progress_event = event.progress_event();
-                    if event.kind.priority() == StepEventPriority::High {
-                        value.add_high_priority_step_event(event);
-                    } else {
-                        value.add_low_priority_step_event(
-                            event,
-                            max_low_priority,
-                        );
-                    }
-                    if let Some(progress) = progress_event {
-                        value.set_progress(progress);
-                    }
+        let actions = self.recurse_for_step_event(&event);
+        if let Some(new_execution) = actions.new_execution {
+            self.root_execution_id = Some(new_execution.execution_id);
+            for (new_step_key, new_step, nest_level) in
+                new_execution.steps_to_add
+            {
+                // These are brand new steps so their keys shouldn't exist in the
+                // map. But if they do, don't overwrite them.
+                self.map.entry(new_step_key).or_insert_with(|| {
+                    EventMapValue::new(new_step, event.event_index, nest_level)
+                });
+            }
+        }
+
+        if let Some(key) = actions.progress_key {
+            if let Some(value) = self.map.get_mut(&key) {
+                // Set progress *before* adding the step event so that it can
+                // transition to the running state if it isn't there already.
+                if let Some(current_progress) = event.progress_event() {
+                    value.set_progress(current_progress);
                 }
+            }
+        }
 
-                hash_map::Entry::Vacant(entry) => {
-                    let priority = event.kind.priority();
-                    let progress_event = event.progress_event();
-
-                    match (priority, progress_event) {
-                        (StepEventPriority::High, Some(progress_event)) => {
-                            let value = entry
-                                .insert(EventMapValue::new(progress_event));
-                            value.add_high_priority_step_event(event);
-                        }
-                        (StepEventPriority::High, None) => {
-                            // The only way to reach this branch is with a
-                            // NoStepsDefined event.
-                            entry
-                                .insert(EventMapValue::no_steps_defined(event));
-                        }
-                        (StepEventPriority::Low, Some(progress_event)) => {
-                            let value = entry
-                                .insert(EventMapValue::new(progress_event));
-                            value.add_low_priority_step_event(
-                                event,
-                                max_low_priority,
-                            );
-                        }
-                        (StepEventPriority::Low, None) => {
-                            // This branch is reached if:
-                            //
-                            // * This is a vacant entry, AND
-                            // * this is a low-priority event, AND
-                            // * the event doesn't have any progress associated
-                            //   with it
-                            //
-                            // The only possibility is that this is an unknown
-                            // event, which we already filtered out at the top
-                            // of this function.
-                            debug_assert!(
-                                false,
-                                "This branch cannot be reached"
-                            );
-                        }
-                    }
+        if let Some(key) = actions.step_key {
+            if let Some(value) = self.map.get_mut(&key) {
+                if event.kind.priority() == StepEventPriority::High {
+                    value.add_high_priority_step_event(event);
+                } else {
+                    value.add_low_priority_step_event(event, max_low_priority);
                 }
             }
         }
@@ -235,14 +255,9 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
-        if let Some(key) = self.recurse_for_progress_event(&event, None) {
-            match self.map.entry(key) {
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().set_progress(event);
-                }
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(EventMapValue::new(event));
-                }
+        if let Some(key) = self.recurse_for_progress_event(&event) {
+            if let Some(value) = self.map.get_mut(&key) {
+                value.set_progress(event);
             }
         }
     }
@@ -253,153 +268,353 @@ impl<S: StepSpec> EventStore<S> {
     fn recurse_for_step_event<S2: StepSpec>(
         &mut self,
         event: &StepEvent<S2>,
-        parent_node: Option<StepKey>,
-    ) -> Option<StepKey> {
-        match &event.kind {
-            StepEventKind::ExecutionStarted { first_step, .. } => {
-                // Register the start of progress here.
-                let key =
-                    self.add_node(event.execution_id, first_step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, key, ());
+    ) -> RecurseActions {
+        let mut new_execution = None;
+        let (step_key, progress_key) = match &event.kind {
+            StepEventKind::ExecutionStarted { steps, first_step, .. } => {
+                let root_node = EventTreeNode::Root(event.execution_id);
+                self.add_root_node(event.execution_id);
+                // All nodes are added during the ExecutionStarted phase.
+                let mut steps_to_add = Vec::new();
+                for step in steps {
+                    let step_key = StepKey {
+                        execution_id: event.execution_id,
+                        index: step.index,
+                    };
+                    let step_node = self.add_step_node(step_key);
+                    self.event_tree.add_edge(root_node, step_node, ());
+                    let step_info = step.clone().into_generic();
+                    steps_to_add.push((step_key, step_info, 0));
                 }
-                Some(key)
+                new_execution = Some(NewExecutionAction {
+                    execution_id: event.execution_id,
+                    steps_to_add,
+                });
+
+                // Register the start of progress.
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: first_step.info.index,
+                };
+                (Some(key), Some(key))
             }
-            StepEventKind::StepCompleted { step, next_step, .. } => {
+            StepEventKind::StepCompleted {
+                step,
+                attempt,
+                outcome,
+                next_step,
+                step_elapsed,
+                attempt_elapsed,
+                ..
+            } => {
                 let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
+                let outcome = outcome.clone().into_generic();
+                let info = CompletionInfo {
+                    attempt: *attempt,
+                    outcome,
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                };
                 // Mark this key and all child keys completed.
-                self.mark_event_key_completed(key);
+                self.mark_step_key_completed(key, info);
 
-                // Register the next step in the progress map.
-                let next_key =
-                    self.add_node(event.execution_id, next_step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, next_key, ());
-                }
-                Some(next_key)
+                // Register the next step in the event map.
+                let next_key = StepKey {
+                    execution_id: event.execution_id,
+                    index: next_step.info.index,
+                };
+                (Some(key), Some(next_key))
             }
             StepEventKind::ProgressReset { step, .. }
             | StepEventKind::AttemptRetry { step, .. } => {
-                // Reset progress for the step in the progress map.
+                // Reset progress for the step in the event map.
                 let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
-                Some(key)
+                (Some(key), Some(key))
             }
-            StepEventKind::ExecutionCompleted { last_step: step, .. }
-            | StepEventKind::ExecutionFailed { failed_step: step, .. } => {
+            StepEventKind::ExecutionCompleted {
+                last_step: step,
+                last_attempt,
+                last_outcome,
+                step_elapsed,
+                attempt_elapsed,
+            } => {
                 // This is a terminal event: clear all progress for this
                 // execution ID and any nested events.
-                self.clear_execution_id(event.execution_id);
+
                 let key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
-                Some(key)
+                let outcome = last_outcome.clone().into_generic();
+                let info = CompletionInfo {
+                    attempt: *last_attempt,
+                    outcome,
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                };
+                // Mark this key and all child keys completed.
+                self.mark_execution_id_completed(key, info);
+
+                (Some(key), Some(key))
+            }
+            StepEventKind::ExecutionFailed {
+                failed_step: step,
+                total_attempts,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+                causes,
+            } => {
+                // This is a terminal event: clear all progress for this
+                // execution ID and any nested events.
+
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                };
+                let info = FailureInfo {
+                    total_attempts: *total_attempts,
+                    message: message.clone(),
+                    causes: causes.clone(),
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                };
+                self.mark_step_failed(key, info);
+
+                (Some(key), Some(key))
             }
             StepEventKind::Nested { step, event: nested_event, .. } => {
                 // Recurse and find any nested events.
-                let parent_node = StepKey {
+                let parent_key = StepKey {
                     execution_id: event.execution_id,
                     index: step.info.index,
                 };
-                self.recurse_for_step_event(nested_event, Some(parent_node))
+                let actions = self.recurse_for_step_event(nested_event);
+                if let Some(nested_new_execution) = actions.new_execution {
+                    // Add an edge from the parent node to the new execution's root node.
+                    self.event_tree.add_edge(
+                        EventTreeNode::Step(parent_key),
+                        EventTreeNode::Root(nested_new_execution.execution_id),
+                        (),
+                    );
+                    let mut steps_to_add = Vec::new();
+                    for (new_step_key, new_step, nest_level) in
+                        nested_new_execution.steps_to_add
+                    {
+                        steps_to_add.push((
+                            new_step_key,
+                            new_step,
+                            nest_level + 1,
+                        ));
+                    }
+
+                    new_execution = Some(NewExecutionAction {
+                        execution_id: nested_new_execution.execution_id,
+                        steps_to_add,
+                    });
+                }
+                (actions.step_key, actions.progress_key)
             }
-            StepEventKind::NoStepsDefined | StepEventKind::Unknown => None,
-        }
+            StepEventKind::NoStepsDefined | StepEventKind::Unknown => {
+                (None, None)
+            }
+        };
+
+        RecurseActions { new_execution, step_key, progress_key }
     }
 
     fn recurse_for_progress_event<S2: StepSpec>(
         &mut self,
         event: &ProgressEvent<S2>,
-        parent_node: Option<StepKey>,
     ) -> Option<StepKey> {
         match &event.kind {
             ProgressEventKind::WaitingForProgress { step, .. }
             | ProgressEventKind::Progress { step, .. } => {
-                let key = self.add_node(event.execution_id, step.info.index)?;
-                if let Some(parent_node) = parent_node {
-                    self.event_tree.add_edge(parent_node, key, ());
-                }
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                };
                 Some(key)
             }
-            ProgressEventKind::Nested { step, event: nested_event, .. } => {
-                // Add a node for this event.
-                let parent =
-                    self.add_node(event.execution_id, step.info.index)?;
-
-                // Add nodes for nested events.
-                self.recurse_for_progress_event(nested_event, Some(parent))
+            ProgressEventKind::Nested { event: nested_event, .. } => {
+                self.recurse_for_progress_event(nested_event)
             }
             ProgressEventKind::Unknown => None,
         }
     }
 
-    fn add_node(
-        &mut self,
-        execution_id: ExecutionId,
-        index: usize,
-    ) -> Option<StepKey> {
-        Some(self.event_tree.add_node(StepKey { execution_id, index }))
+    fn add_root_node(&mut self, execution_id: ExecutionId) -> EventTreeNode {
+        self.event_tree.add_node(EventTreeNode::Root(execution_id))
     }
 
-    fn mark_event_key_completed(&mut self, key: StepKey) {
-        // Remove this node and anything reachable from it.
-        let mut dfs = DfsPostOrder::new(&self.event_tree, key);
+    fn add_step_node(&mut self, key: StepKey) -> EventTreeNode {
+        self.event_tree.add_node(EventTreeNode::Step(key))
+    }
+
+    fn mark_step_key_completed(
+        &mut self,
+        root_key: StepKey,
+        info: CompletionInfo,
+    ) {
+        if let Some(value) = self.map.get_mut(&root_key) {
+            // Completion status only applies to the root key.
+            value.mark_completed(Some(info));
+        }
+
+        // Mark anything reachable from this node as completed.
+        let mut dfs =
+            DfsPostOrder::new(&self.event_tree, EventTreeNode::Step(root_key));
         while let Some(key) = dfs.next(&self.event_tree) {
-            if let Some(value) = self.map.get_mut(&key) {
-                value.mark_completed();
+            if let EventTreeNode::Step(key) = key {
+                if key != root_key {
+                    if let Some(value) = self.map.get_mut(&key) {
+                        value.mark_completed(None);
+                    }
+                }
             }
         }
     }
 
-    fn clear_execution_id(&mut self, execution_id: ExecutionId) {
-        let mut dfs = DfsPostOrder::empty(&self.event_tree);
-        // Push all nodes that start with the execution ID into the stack.
-        dfs.stack.extend(
-            self.map.keys().filter(|k| k.execution_id == execution_id).copied(),
+    fn mark_execution_id_completed(
+        &mut self,
+        root_key: StepKey,
+        info: CompletionInfo,
+    ) {
+        if let Some(value) = self.map.get_mut(&root_key) {
+            // Completion status only applies to the root key.
+            value.mark_completed(Some(info));
+        }
+
+        let mut dfs = DfsPostOrder::new(
+            &self.event_tree,
+            EventTreeNode::Root(root_key.execution_id),
         );
         while let Some(key) = dfs.next(&self.event_tree) {
+            if let EventTreeNode::Step(key) = key {
+                if key != root_key {
+                    if let Some(value) = self.map.get_mut(&key) {
+                        value.mark_completed(None);
+                    }
+                }
+            }
+        }
+    }
+
+    fn mark_step_failed(&mut self, root_key: StepKey, info: FailureInfo) {
+        if let Some(value) = self.map.get_mut(&root_key) {
+            // Failure status only applies to the root key.
+            value.mark_failed(Some(info));
+        }
+
+        // Exceptional situation (in normal use, past steps should always show
+        // up): Mark all past steps for this key as completed. The assumption
+        // here is that this is the first step that failed.
+        for index in 0..root_key.index {
+            let key = StepKey { execution_id: root_key.execution_id, index };
             if let Some(value) = self.map.get_mut(&key) {
-                value.mark_completed();
+                value.mark_completed(None);
+            }
+        }
+
+        // Exceptional situation (in normal use, descendant steps should always
+        // show up if they aren't being run): Mark all descendant steps as
+        // failed -- there isn't enough else to go by.
+        let mut dfs =
+            DfsPostOrder::new(&self.event_tree, EventTreeNode::Step(root_key));
+        while let Some(key) = dfs.next(&self.event_tree) {
+            if let EventTreeNode::Step(key) = key {
+                if let Some(value) = self.map.get_mut(&key) {
+                    value.mark_failed(None);
+                }
+            }
+        }
+
+        // Mark all future steps for this execution ID as "will not be run", We
+        // do this last because all non-future steps for this execution ID will
+        // have been covered by the above loops.
+        let mut dfs = DfsPostOrder::new(
+            &self.event_tree,
+            EventTreeNode::Root(root_key.execution_id),
+        );
+        while let Some(key) = dfs.next(&self.event_tree) {
+            if let EventTreeNode::Step(key) = key {
+                if let Some(value) = self.map.get_mut(&key) {
+                    value.mark_will_not_be_run(root_key);
+                }
             }
         }
     }
 }
 
+/// Actions taken by a recursion step.
+#[derive(Clone, Debug)]
+struct RecurseActions {
+    new_execution: Option<NewExecutionAction>,
+    // The key to record this step against.
+    step_key: Option<StepKey>,
+    // The key to record the progress action against.
+    progress_key: Option<StepKey>,
+}
+
+#[derive(Clone, Debug)]
+struct NewExecutionAction {
+    // An execution ID corresponding to a new run, if seen.
+    execution_id: ExecutionId,
+
+    // New steps to add, generated by ExecutionStarted events.
+    // The triple is:
+    // * step key
+    // * step info
+    // * nest level
+    steps_to_add: Vec<(StepKey, StepInfo<NestedSpec>, usize)>,
+}
+
 /// The list of events for a particular key.
 #[derive_where(Clone, Debug)]
-struct EventMapValue<S: StepSpec> {
+pub struct EventMapValue<S: StepSpec> {
+    step_info: StepInfo<NestedSpec>,
+    nest_level: usize,
+    defined_at_event: usize,
     // Invariant: stored in order sorted by event_index.
     high_priority: Vec<StepEvent<S>>,
     step_status: StepStatus<S>,
 }
 
 impl<S: StepSpec> EventMapValue<S> {
-    fn new(progress_event: ProgressEvent<S>) -> Self {
+    fn new(
+        step_info: StepInfo<NestedSpec>,
+        defined_at_event: usize,
+        nest_level: usize,
+    ) -> Self {
         Self {
+            step_info,
+            defined_at_event,
+            nest_level,
             high_priority: Vec::new(),
-            step_status: StepStatus::Running {
-                low_priority: VecDeque::new(),
-                progress_event,
-            },
+            step_status: StepStatus::NotStarted,
         }
     }
 
-    fn no_steps_defined(step_event: StepEvent<S>) -> Self {
-        assert_eq!(
-            step_event.kind,
-            StepEventKind::NoStepsDefined,
-            "this constructor should only be called on NoStepsDefined"
-        );
-        Self {
-            high_priority: vec![step_event],
-            step_status: StepStatus::Completed,
-        }
+    pub fn step_info(&self) -> &StepInfo<NestedSpec> {
+        &self.step_info
+    }
+
+    pub fn nest_level(&self) -> usize {
+        self.nest_level
+    }
+
+    pub fn step_status(&self) -> &StepStatus<S> {
+        &self.step_status
+    }
+
+    fn sort_key(&self) -> impl Ord {
+        (self.defined_at_event, self.step_info.index)
     }
 
     // Returns step events since the provided event index.
@@ -409,7 +624,6 @@ impl<S: StepSpec> EventMapValue<S> {
         &self,
         last_seen: Option<usize>,
     ) -> impl Iterator<Item = &StepEvent<S>> {
-        // partition_point is safe since pred is
         let iter = self
             .high_priority
             .iter()
@@ -442,81 +656,203 @@ impl<S: StepSpec> EventMapValue<S> {
         event: StepEvent<S>,
         max_low_priority: usize,
     ) {
-        if let StepStatus::Running { low_priority, .. } = &mut self.step_status
-        {
-            match low_priority.binary_search_by(|probe| {
-                probe.event_index.cmp(&event.event_index)
-            }) {
-                Ok(_) => {
-                    // This is a duplicate.
+        match &mut self.step_status {
+            StepStatus::NotStarted => {
+                unreachable!(
+                    "we always set progress before adding low-pri step events"
+                );
+            }
+            StepStatus::Running { low_priority, .. } => {
+                match low_priority.binary_search_by(|probe| {
+                    probe.event_index.cmp(&event.event_index)
+                }) {
+                    Ok(_) => {
+                        // This is a duplicate.
+                    }
+                    Err(index) => {
+                        // The index is almost always at the end, so this is
+                        // efficient enough.
+                        low_priority.insert(index, event);
+                    }
                 }
-                Err(index) => {
-                    // The index is almost always at the end, so this is
-                    // efficient enough.
-                    low_priority.insert(index, event);
+
+                // Limit the number of events to the maximum low priority, ejecting
+                // the oldest event(s) if necessary.
+                while low_priority.len() > max_low_priority {
+                    low_priority.pop_front();
                 }
             }
-
-            // Limit the number of events to the maximum low priority, ejecting
-            // the oldest event(s) if necessary.
-            while low_priority.len() > max_low_priority {
-                low_priority.pop_front();
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore low-priority events for terminated steps since they're
+                // likely duplicate events.
             }
         }
     }
 
-    fn mark_completed(&mut self) {
-        self.step_status = StepStatus::Completed;
+    fn mark_completed(&mut self, status: Option<CompletionInfo>) {
+        match self.step_status {
+            StepStatus::NotStarted | StepStatus::Running { .. } => {
+                self.step_status = StepStatus::Completed { info: status };
+            }
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore the status if the step has already been marked
+                // terminated.
+            }
+        }
+    }
+
+    fn mark_failed(&mut self, status: Option<FailureInfo>) {
+        match self.step_status {
+            StepStatus::NotStarted | StepStatus::Running { .. } => {
+                self.step_status = StepStatus::Failed { info: status };
+            }
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore the status if the step has already been marked
+                // terminated.
+            }
+        }
+    }
+
+    fn mark_will_not_be_run(&mut self, step_that_failed: StepKey) {
+        match self.step_status {
+            StepStatus::NotStarted => {
+                self.step_status =
+                    StepStatus::WillNotBeRun { step_that_failed };
+            }
+            StepStatus::Running { .. } => {
+                // This is a weird situation. We should never encounter it in
+                // normal use -- if we do encounter it, just ignore it.
+            }
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore the status if the step has already been marked
+                // terminated.
+            }
+        }
     }
 
     fn set_progress(&mut self, current_progress: ProgressEvent<S>) {
-        if let StepStatus::Running { progress_event, .. } =
-            &mut self.step_status
-        {
-            *progress_event = current_progress;
+        match &mut self.step_status {
+            StepStatus::NotStarted => {
+                self.step_status = StepStatus::Running {
+                    low_priority: VecDeque::new(),
+                    progress_event: current_progress,
+                };
+            }
+            StepStatus::Running { progress_event, .. } => {
+                *progress_event = current_progress;
+            }
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore progress events for completed steps.
+            }
         }
     }
 }
 
 /// The step status as last seen by events.
 #[derive_where(Clone, Debug)]
-enum StepStatus<S: StepSpec> {
+pub enum StepStatus<S: StepSpec> {
+    NotStarted,
+
+    /// The step is currently running.
     Running {
         // Invariant: stored in sorted order by index.
         low_priority: VecDeque<StepEvent<S>>,
         progress_event: ProgressEvent<S>,
     },
-    Completed,
+
+    /// The step has completed execution.
+    Completed {
+        /// Completion information.
+        ///
+        /// This might be unavailable in some cases.
+        info: Option<CompletionInfo>,
+    },
+
+    /// The step has failed.
+    Failed {
+        /// Failure information.
+        info: Option<FailureInfo>,
+    },
+
+    /// The step will not be executed because a prior step failed.
+    WillNotBeRun {
+        /// The step that failed and caused this step to not be run.
+        step_that_failed: StepKey,
+    },
 }
 
 impl<S: StepSpec> StepStatus<S> {
-    #[allow(unused)]
-    fn is_running(&self) -> bool {
+    /// Returns true if this step is currently running.
+    pub fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
     }
 
-    fn low_priority(&self) -> impl Iterator<Item = &StepEvent<S>> {
+    /// Returns low-priority events for this step, if any.
+    ///
+    /// Events are sorted by event index.
+    pub fn low_priority(&self) -> impl Iterator<Item = &StepEvent<S>> {
         match self {
             Self::Running { low_priority, .. } => {
                 Either::Left(low_priority.iter())
             }
-            Self::Completed => Either::Right(std::iter::empty()),
+            Self::NotStarted
+            | Self::Completed { .. }
+            | Self::Failed { .. }
+            | Self::WillNotBeRun { .. } => Either::Right(std::iter::empty()),
         }
     }
 
-    fn progress_event(&self) -> Option<&ProgressEvent<S>> {
+    /// Returns the associated progress event for this step, if any.
+    pub fn progress_event(&self) -> Option<&ProgressEvent<S>> {
         match self {
             Self::Running { progress_event, .. } => Some(progress_event),
-            Self::Completed => None,
+            Self::NotStarted
+            | Self::Completed { .. }
+            | Self::Failed { .. }
+            | Self::WillNotBeRun { .. } => None,
         }
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct CompletionInfo {
+    pub attempt: usize,
+    pub outcome: StepOutcome<NestedSpec>,
+    pub step_elapsed: Duration,
+    pub attempt_elapsed: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub struct FailureInfo {
+    pub total_attempts: usize,
+    pub message: String,
+    pub causes: Vec<String>,
+    pub step_elapsed: Duration,
+    pub attempt_elapsed: Duration,
+}
+
+/// Keys for the event tree.
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
+enum EventTreeNode {
+    Root(ExecutionId),
+    Step(StepKey),
+}
+
 /// A unique identifier for a group of step or progress events.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Ord, PartialOrd)]
-struct StepKey {
-    execution_id: ExecutionId,
-    index: usize,
+pub struct StepKey {
+    pub execution_id: ExecutionId,
+    pub index: usize,
 }
 
 #[cfg(test)]

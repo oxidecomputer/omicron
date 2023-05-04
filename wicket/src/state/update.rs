@@ -3,60 +3,30 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use tui::style::Style;
+use wicket_common::update_events::{
+    EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
+    UpdateStepId,
+};
 
-use crate::ui::defaults::style;
+use crate::{events::EventReportMap, ui::defaults::style};
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
 use slog::{warn, Logger};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Display;
-use wicketd_client::{
-    types::{
-        ArtifactId, EventReportAll, SemverVersion, UpdateComponent,
-        UpdateStepId,
-    },
-    EventReport, ProgressEventKind, StepEventKind,
-};
+use wicketd_client::types::{ArtifactId, SemverVersion};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
-    pub items: BTreeMap<ComponentId, BTreeMap<UpdateComponent, UpdateState>>,
+    pub items: BTreeMap<ComponentId, UpdateItem>,
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
     pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
-    pub event_reports: BTreeMap<ComponentId, EventReport>,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum UpdateState {
-    Waiting,
-    Updated,
-    Updating,
-    Failed,
-}
-
-impl Display for UpdateState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            UpdateState::Waiting => write!(f, "WAITING"),
-            UpdateState::Updated => write!(f, "UPDATED"),
-            UpdateState::Updating => write!(f, "UPDATING"),
-            UpdateState::Failed => write!(f, "FAILED"),
-        }
-    }
-}
-
-impl UpdateState {
-    pub fn style(&self) -> Style {
-        match self {
-            UpdateState::Waiting => style::deselected(),
-            UpdateState::Updated => style::successful_update(),
-            UpdateState::Updating => style::start_update(),
-            UpdateState::Failed => style::failed_update(),
-        }
-    }
+    // The update item currently selected is recorded in
+    // state.rack_state.selected.
+    pub status_view_displayed: bool,
 }
 
 impl RackUpdateState {
@@ -68,54 +38,53 @@ impl RackUpdateState {
                 .map(|id| match id {
                     ComponentId::Sled(_) => (
                         *id,
-                        BTreeMap::from([
-                            (UpdateComponent::Host, UpdateState::Waiting),
-                            (UpdateComponent::Rot, UpdateState::Waiting),
-                            (UpdateComponent::Sp, UpdateState::Waiting),
+                        UpdateItem::new(vec![
+                            UpdateComponent::Rot,
+                            UpdateComponent::Sp,
+                            UpdateComponent::Host,
                         ]),
                     ),
                     ComponentId::Switch(_) => (
                         *id,
-                        BTreeMap::from([
-                            (UpdateComponent::Rot, UpdateState::Waiting),
-                            (UpdateComponent::Sp, UpdateState::Waiting),
+                        UpdateItem::new(vec![
+                            UpdateComponent::Rot,
+                            UpdateComponent::Sp,
                         ]),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
-                        BTreeMap::from([
-                            (UpdateComponent::Rot, UpdateState::Waiting),
-                            (UpdateComponent::Sp, UpdateState::Waiting),
+                        UpdateItem::new(vec![
+                            UpdateComponent::Rot,
+                            UpdateComponent::Sp,
                         ]),
                     ),
                 })
                 .collect(),
             artifacts: vec![],
             artifact_versions: BTreeMap::default(),
-            event_reports: BTreeMap::default(),
+            status_view_displayed: false,
         }
     }
 
-    pub fn update_logs(&mut self, logger: &Logger, reports: EventReportAll) {
-        for (sp_type, logs) in reports.sps {
-            for (i, log) in logs {
-                let Ok(id) = ComponentId::try_from(ParsableComponentId {
-                    sp_type: &sp_type,
-                    i: &i,
-                }) else {
-                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
-                    continue;
-                };
-                self.update_items(&id, &log);
-                self.event_reports.insert(id, log);
+    pub fn item_state(&self, component: ComponentId) -> UpdateItemState {
+        if self.artifacts.is_empty() {
+            UpdateItemState::AwaitingRepository
+        } else {
+            match &self.items[&component].state {
+                UpdateItemStateImpl::NotStarted => UpdateItemState::NotStarted,
+                UpdateItemStateImpl::Running { event_report, .. } => {
+                    UpdateItemState::Running { event_report }
+                }
             }
         }
     }
 
-    pub fn update_artifacts(
+    pub fn update_artifacts_and_reports(
         &mut self,
+        logger: &Logger,
         system_version: Option<SemverVersion>,
         artifacts: Vec<ArtifactId>,
+        reports: EventReportMap,
     ) {
         self.system_version = system_version;
         self.artifacts = artifacts;
@@ -125,26 +94,125 @@ impl RackUpdateState {
                 self.artifact_versions.insert(known, id.version.clone());
             }
         }
-    }
 
-    /// Scan through `log` and update the components status given by `id`
-    pub fn update_items(
-        &mut self,
-        id: &ComponentId,
-        event_report: &EventReport,
-    ) {
-        let items = self.items.get_mut(id).unwrap();
-        if event_report.step_events.is_empty() {
-            // Reset all items to default
-            for (_, state) in items.iter_mut() {
-                *state = UpdateState::Waiting;
+        let mut updated_component_ids = HashSet::new();
+
+        for (sp_type, logs) in reports {
+            for (i, log) in logs {
+                let Ok(id) = ComponentId::try_from(ParsableComponentId {
+                    sp_type: &sp_type,
+                    i: &i,
+                }) else {
+                    warn!(logger, "Invalid ComponentId in EventReport: {} {}", &sp_type, &i);
+                    continue;
+                };
+                let item_state = self.items.get_mut(&id).unwrap();
+                item_state.update(log);
+                updated_component_ids.insert(id);
             }
         }
+
+        // Reset all component IDs that weren't updated.
+        for (id, item_state) in &mut self.items {
+            if !updated_component_ids.contains(id) {
+                item_state.reset();
+            }
+        }
+    }
+}
+
+/// The current status of an updating item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateItemState<'a> {
+    /// The update repository needs to be uploaded.
+    AwaitingRepository,
+
+    /// The update repository has been uploaded but the update hasn't been
+    /// started yet.
+    NotStarted,
+
+    /// The update is running.
+    Running {
+        /// The latest event report.
+        event_report: &'a EventReport,
+    },
+    // TODO: detect other states:
+    // * cannot be updated (e.g. attempting to update the scrimlet wicket is
+    //   currently running on)
+    // * already up to date.
+}
+
+/// Internal state for an individual item inside a `RackUpdateState`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateItem {
+    // A list of all components within this ID.
+    components: Vec<UpdateComponent>,
+    state: UpdateItemStateImpl,
+}
+
+impl UpdateItem {
+    pub fn new(components: Vec<UpdateComponent>) -> Self {
+        Self { components, state: UpdateItemStateImpl::NotStarted }
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self.state, UpdateItemStateImpl::Running { .. })
+    }
+
+    pub fn event_report(&self) -> Option<&EventReport> {
+        match &self.state {
+            UpdateItemStateImpl::NotStarted => None,
+            UpdateItemStateImpl::Running { event_report, .. } => {
+                Some(event_report)
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.state = UpdateItemStateImpl::NotStarted;
+        return;
+    }
+
+    fn update(&mut self, new_event_report: EventReport) {
+        if new_event_report.step_events.is_empty() {
+            self.reset();
+            return;
+        }
+
+        match &mut self.state {
+            state @ UpdateItemStateImpl::NotStarted => {
+                // Transition to the running state.
+                let components = self
+                    .components
+                    .iter()
+                    .copied()
+                    .map(|component| (component, UpdateRunningState::Waiting))
+                    .collect();
+                *state = UpdateItemStateImpl::Running {
+                    components,
+                    event_report: new_event_report,
+                };
+            }
+            UpdateItemStateImpl::Running { event_report, .. } => {
+                *event_report = new_event_report;
+            }
+        }
+
+        let (components, event_report) = match &mut self.state {
+            UpdateItemStateImpl::Running {
+                components, event_report, ..
+            } => (components, &*event_report),
+            UpdateItemStateImpl::NotStarted => {
+                unreachable!(
+                    "above block means it's always in the Running state"
+                )
+            }
+        };
 
         // Mark artifacts as either 'succeeded' or `failed' by looking in
         // the event log.
         for event in &event_report.step_events {
-            match &event.data {
+            match &event.kind {
                 StepEventKind::NoStepsDefined
                 | StepEventKind::ExecutionStarted { .. }
                 | StepEventKind::ProgressReset { .. }
@@ -163,16 +231,16 @@ impl RackUpdateState {
                         _ => None,
                     };
                     update_component_state(
-                        items,
+                        components,
                         updated_component,
-                        UpdateState::Updated,
+                        UpdateRunningState::Updated,
                     );
                 }
                 StepEventKind::ExecutionFailed { failed_step, .. } => {
                     update_component_state(
-                        items,
+                        components,
                         Some(failed_step.info.component),
-                        UpdateState::Failed,
+                        UpdateRunningState::Failed,
                     );
                 }
             }
@@ -180,7 +248,7 @@ impl RackUpdateState {
 
         // Mark any known artifacts as updating
         for progress_event in &event_report.progress_events {
-            let component = match &progress_event.data {
+            let component = match &progress_event.kind {
                 ProgressEventKind::WaitingForProgress { step, .. }
                 | ProgressEventKind::Progress { step, .. }
                 | ProgressEventKind::Nested { step, .. } => {
@@ -188,7 +256,86 @@ impl RackUpdateState {
                 }
                 ProgressEventKind::Unknown => None,
             };
-            update_component_state(items, component, UpdateState::Updating);
+            update_component_state(
+                components,
+                component,
+                UpdateRunningState::Updating,
+            );
+        }
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (UpdateComponent, UpdateState)> + '_ {
+        self.components.iter().map(|component| match &self.state {
+            UpdateItemStateImpl::NotStarted => {
+                (*component, UpdateState::NotStarted)
+            }
+            UpdateItemStateImpl::Running { components, .. } => {
+                (*component, UpdateState::Running(components[component]))
+            }
+        })
+    }
+}
+
+pub enum UpdateState {
+    NotStarted,
+    Running(UpdateRunningState),
+}
+
+impl Display for UpdateState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotStarted => write!(f, "NOT STARTED"),
+            Self::Running(state) => write!(f, "{state}"),
+        }
+    }
+}
+
+impl UpdateState {
+    pub fn style(&self) -> Style {
+        match self {
+            UpdateState::NotStarted => style::deselected(),
+            UpdateState::Running(state) => state.style(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum UpdateItemStateImpl {
+    NotStarted,
+    Running {
+        event_report: EventReport,
+        components: BTreeMap<UpdateComponent, UpdateRunningState>,
+    },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpdateRunningState {
+    Waiting,
+    Updated,
+    Updating,
+    Failed,
+}
+
+impl Display for UpdateRunningState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateRunningState::Waiting => write!(f, "WAITING"),
+            UpdateRunningState::Updated => write!(f, "UPDATED"),
+            UpdateRunningState::Updating => write!(f, "UPDATING"),
+            UpdateRunningState::Failed => write!(f, "FAILED"),
+        }
+    }
+}
+
+impl UpdateRunningState {
+    pub fn style(&self) -> Style {
+        match self {
+            UpdateRunningState::Waiting => style::deselected(),
+            UpdateRunningState::Updated => style::successful_update(),
+            UpdateRunningState::Updating => style::start_update(),
+            UpdateRunningState::Failed => style::failed_update(),
         }
     }
 }
@@ -196,9 +343,9 @@ impl RackUpdateState {
 // For a given Component's artifacts, update it's state
 // to reflect what is currently known from the returned log.
 fn update_component_state(
-    items: &mut BTreeMap<UpdateComponent, UpdateState>,
+    items: &mut BTreeMap<UpdateComponent, UpdateRunningState>,
     component: Option<UpdateComponent>,
-    new_state: UpdateState,
+    new_state: UpdateRunningState,
 ) {
     if let Some(component) = &component {
         if let Some(state) = items.get_mut(component) {

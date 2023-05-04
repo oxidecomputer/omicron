@@ -9172,6 +9172,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
+ "indexmap",
  "libsw",
  "omicron-common 0.1.0",
  "once_cell",
@@ -9194,7 +9195,23 @@ dependencies = [
  "toml 0.7.3",
  "tui",
  "tui-tree-widget",
+ "update-engine",
+ "wicket-common",
  "wicketd-client",
+]
+
+[[package]]
+name = "wicket-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gateway-client",
+ "omicron-common 0.1.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "update-engine",
 ]
 
 [[package]]
@@ -9271,6 +9288,7 @@ dependencies = [
  "tufaceous-lib",
  "update-engine",
  "uuid",
+ "wicket-common",
  "wicketd-client",
 ]
 
@@ -9289,6 +9307,7 @@ dependencies = [
  "slog",
  "update-engine",
  "uuid",
+ "wicket-common",
 ]
 
 [[package]]
