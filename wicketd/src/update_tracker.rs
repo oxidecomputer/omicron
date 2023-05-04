@@ -6,6 +6,8 @@
 
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
+use crate::artifacts::WicketdArtifactStore;
+use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -29,6 +31,7 @@ use buf_list::BufList;
 use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
+use futures::Future;
 use futures::TryStream;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
@@ -57,6 +60,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -90,9 +94,9 @@ struct UploadTrampolinePhase2ToMgs {
 }
 
 #[derive(Debug)]
-pub(crate) struct UpdateTracker {
+pub struct UpdateTracker {
     mgs_client: gateway_client::Client,
-    sp_update_data: Mutex<BTreeMap<SpIdentifier, SpUpdateData>>,
+    sp_update_data: Mutex<UpdateTrackerData>,
 
     // Every sled update via trampoline requires MGS to serve the trampoline
     // phase 2 image to the sled's SP over the management network; however, that
@@ -114,10 +118,11 @@ impl UpdateTracker {
     pub(crate) fn new(
         mgs_addr: SocketAddrV6,
         log: &Logger,
+        artifact_store: WicketdArtifactStore,
         ipr_update_tracker: IprUpdateTracker,
     ) -> Self {
         let log = log.new(o!("component" => "wicketd update planner"));
-        let sp_update_data = Mutex::default();
+        let sp_update_data = Mutex::new(UpdateTrackerData::new(artifact_store));
         let mgs_client = make_mgs_client(log.clone(), mgs_addr);
         let upload_trampoline_phase_2_to_mgs = Mutex::default();
 
@@ -133,46 +138,50 @@ impl UpdateTracker {
     pub(crate) async fn start(
         &self,
         sp: SpIdentifier,
-        plan: UpdatePlan,
         update_id: Uuid,
     ) -> Result<(), StartUpdateError> {
-        // Do we need to upload this plan's trampoline phase 2 to MGS?
-        let upload_trampoline_phase_2_to_mgs = {
-            let mut upload_trampoline_phase_2_to_mgs =
-                self.upload_trampoline_phase_2_to_mgs.lock().await;
+        self.start_impl(sp, |plan| async {
+            // Do we need to upload this plan's trampoline phase 2 to MGS?
+            let upload_trampoline_phase_2_to_mgs = {
+                let mut upload_trampoline_phase_2_to_mgs =
+                    self.upload_trampoline_phase_2_to_mgs.lock().await;
 
-            match upload_trampoline_phase_2_to_mgs.as_mut() {
-                Some(prev) => {
-                    // We've previously started an upload - does it match this
-                    // update's artifact ID? If not, cancel the old task (which
-                    // might still be trying to upload) and start a new one with
-                    // our current image.
-                    //
-                    // TODO-correctness If we still have updates running that
-                    // expect the old image, they're probably going to fail.
-                    // Should we handle that more cleanly or just let them fail?
-                    if prev.status.borrow().id != plan.trampoline_phase_2.id {
-                        // It does _not_ match - we have a new plan with a
-                        // different trampoline image. If the old task is still
-                        // running, cancel it, and start a new one.
-                        prev.task.abort();
-                        *prev =
-                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                match upload_trampoline_phase_2_to_mgs.as_mut() {
+                    Some(prev) => {
+                        // We've previously started an upload - does it match this
+                        // update's artifact ID? If not, cancel the old task (which
+                        // might still be trying to upload) and start a new one with
+                        // our current image.
+                        //
+                        // TODO-correctness If we still have updates running that
+                        // expect the old image, they're probably going to fail.
+                        // Should we handle that more cleanly or just let them fail?
+                        if prev.status.borrow().id != plan.trampoline_phase_2.id
+                        {
+                            // It does _not_ match - we have a new plan with a
+                            // different trampoline image. If the old task is still
+                            // running, cancel it, and start a new one.
+                            prev.task.abort();
+                            *prev = self
+                                .spawn_upload_trampoline_phase_2_to_mgs(&plan);
+                        }
+                    }
+                    None => {
+                        *upload_trampoline_phase_2_to_mgs = Some(
+                            self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
+                        );
                     }
                 }
-                None => {
-                    *upload_trampoline_phase_2_to_mgs = Some(
-                        self.spawn_upload_trampoline_phase_2_to_mgs(&plan),
-                    );
-                }
-            }
 
-            // Both branches above leave `upload_trampoline_phase_2_to_mgs` with
-            // data, so we can unwrap here to clone the `watch` channel.
-            upload_trampoline_phase_2_to_mgs.as_ref().unwrap().status.clone()
-        };
+                // Both branches above leave `upload_trampoline_phase_2_to_mgs` with
+                // data, so we can unwrap here to clone the `watch` channel.
+                upload_trampoline_phase_2_to_mgs
+                    .as_ref()
+                    .unwrap()
+                    .status
+                    .clone()
+            };
 
-        let spawn_update_driver = || async {
             let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
             let ipr_start_receiver =
                 self.ipr_update_tracker.register(update_id).await;
@@ -198,21 +207,95 @@ impl UpdateTracker {
             ));
 
             SpUpdateData { task, event_buffer }
-        };
+        })
+        .await
+    }
 
-        let mut sp_update_data = self.sp_update_data.lock().await;
-        match sp_update_data.entry(sp) {
+    /// Starts a fake update that doesn't perform any steps, but simply waits
+    /// for a oneshot receiver to resolve.
+    #[doc(hidden)]
+    pub async fn start_fake_update(
+        &self,
+        sp: SpIdentifier,
+        oneshot_receiver: oneshot::Receiver<()>,
+    ) -> Result<(), StartUpdateError> {
+        self.start_impl(sp, |_plan| async move {
+            let (sender, mut receiver) = mpsc::channel(128);
+            let event_buffer = Arc::new(StdMutex::new(EventBuffer::new(16)));
+            let event_buffer_2 = event_buffer.clone();
+            let log = self.log.clone();
+
+            let task = tokio::spawn(async move {
+                let engine = UpdateEngine::new(&log, sender);
+
+                // The step component and ID have been chosen arbitrarily here --
+                // they aren't important.
+                engine
+                    .new_step(
+                        UpdateComponent::Host,
+                        UpdateStepId::RunningInstallinator,
+                        "Fake step that waits for receiver to resolve",
+                        move |_cx| async move {
+                            _ = oneshot_receiver.await;
+                            StepResult::success((), Default::default())
+                        },
+                    )
+                    .register();
+
+                // Spawn a task to accept all events from the executing engine.
+                let event_receiving_task = tokio::spawn(async move {
+                    while let Some(event) = receiver.recv().await {
+                        event_buffer_2.lock().unwrap().add_event(event);
+                    }
+                });
+
+                match engine.execute().await {
+                    Ok(_cx) => (),
+                    Err(err) => {
+                        error!(log, "update failed"; "err" => %err);
+                    }
+                }
+
+                // Wait for all events to be received and written to the event
+                // buffer.
+                event_receiving_task
+                    .await
+                    .expect("event receiving task panicked");
+            });
+
+            SpUpdateData { task, event_buffer }
+        })
+        .await
+    }
+
+    async fn start_impl<F, Fut>(
+        &self,
+        sp: SpIdentifier,
+        spawn_update_driver: F,
+    ) -> Result<(), StartUpdateError>
+    where
+        F: FnOnce(UpdatePlan) -> Fut,
+        Fut: Future<Output = SpUpdateData> + Send,
+    {
+        let mut update_data = self.sp_update_data.lock().await;
+
+        let plan = update_data
+            .artifact_store
+            .current_plan()
+            .ok_or_else(|| StartUpdateError::TufRepositoryUnavailable)?;
+
+        match update_data.sp_update_data.entry(sp) {
             // Vacant: this is the first time we've started an update to this
             // sp.
             Entry::Vacant(slot) => {
-                slot.insert(spawn_update_driver().await);
+                slot.insert(spawn_update_driver(plan).await);
                 Ok(())
             }
             // Occupied: we've previously started an update to this sp; only
             // allow this one if that update is no longer running.
             Entry::Occupied(mut slot) => {
                 if slot.get().task.is_finished() {
-                    slot.insert(spawn_update_driver().await);
+                    slot.insert(spawn_update_driver(plan).await);
                     Ok(())
                 } else {
                     Err(StartUpdateError::UpdateInProgress(sp))
@@ -240,36 +323,92 @@ impl UpdateTracker {
         UploadTrampolinePhase2ToMgs { status: status_rx, task }
     }
 
+    /// Updates the repository stored inside the update tracker.
+    pub(crate) async fn put_repository(
+        &self,
+        bytes: BufList,
+    ) -> Result<(), HttpError> {
+        let mut update_data = self.sp_update_data.lock().await;
+        update_data.put_repository(bytes)
+    }
+
+    /// Gets a list of artifacts stored in the update repository.
+    pub(crate) async fn artifacts_and_event_reports(
+        &self,
+    ) -> GetArtifactsAndEventReportsResponse {
+        let update_data = self.sp_update_data.lock().await;
+
+        let (system_version, artifacts) =
+            update_data.artifact_store.system_version_and_artifact_ids();
+
+        let mut event_reports = BTreeMap::new();
+        for (sp, update_data) in &update_data.sp_update_data {
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
+            let inner: &mut BTreeMap<_, _> =
+                event_reports.entry(sp.type_).or_default();
+            inner.insert(sp.slot, event_report);
+        }
+
+        GetArtifactsAndEventReportsResponse {
+            system_version,
+            artifacts,
+            event_reports,
+        }
+    }
+
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
-        let mut sp_update_data = self.sp_update_data.lock().await;
-        match sp_update_data.entry(sp) {
+        let mut update_data = self.sp_update_data.lock().await;
+        match update_data.sp_update_data.entry(sp) {
             Entry::Vacant(_) => EventReport::default(),
             Entry::Occupied(slot) => {
                 slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
     }
+}
 
-    /// Clone the current state of the update log for every SP, returning a map
-    /// suitable for conversion to JSON.
-    pub(crate) async fn event_report_all(
-        &self,
-    ) -> BTreeMap<SpType, BTreeMap<u32, EventReport>> {
-        let sp_update_data = self.sp_update_data.lock().await;
-        let mut converted_logs = BTreeMap::new();
-        for (sp, update_data) in &*sp_update_data {
-            let event_report =
-                update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                converted_logs.entry(sp.type_).or_default();
-            inner.insert(sp.slot, event_report);
+#[derive(Debug)]
+struct UpdateTrackerData {
+    artifact_store: WicketdArtifactStore,
+    sp_update_data: BTreeMap<SpIdentifier, SpUpdateData>,
+}
+
+impl UpdateTrackerData {
+    fn new(artifact_store: WicketdArtifactStore) -> Self {
+        Self { artifact_store, sp_update_data: BTreeMap::new() }
+    }
+
+    fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
+        // Are there any updates currently running? If so, then
+        let running_sps = self
+            .sp_update_data
+            .iter()
+            .filter_map(|(sp_identifier, update_data)| {
+                (!update_data.task.is_finished()).then(|| *sp_identifier)
+            })
+            .collect::<Vec<_>>();
+        if !running_sps.is_empty() {
+            return Err(HttpError::for_bad_request(
+                None,
+                "Updates currently running for {running_sps:?}".to_owned(),
+            ));
         }
-        converted_logs
+
+        // Put the repository into the artifact store.
+        self.artifact_store.put_repository(bytes)?;
+
+        // Reset all running data: a new repository means starting afresh.
+        self.sp_update_data.clear();
+
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, Error)]
-pub(crate) enum StartUpdateError {
+#[derive(Debug, Clone, Error, Eq, PartialEq)]
+pub enum StartUpdateError {
+    #[error("no TUF repository available")]
+    TufRepositoryUnavailable,
     #[error("target is already being updated: {0:?}")]
     UpdateInProgress(SpIdentifier),
 }
@@ -279,7 +418,8 @@ impl StartUpdateError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {
-            StartUpdateError::UpdateInProgress(_) => {
+            StartUpdateError::TufRepositoryUnavailable
+            | StartUpdateError::UpdateInProgress(_) => {
                 HttpError::for_bad_request(None, message)
             }
         }

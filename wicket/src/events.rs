@@ -5,11 +5,16 @@ use crate::{keymap::Cmd, state::ComponentId, State};
 use camino::Utf8PathBuf;
 use humantime::format_rfc3339;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::time::{Duration, SystemTime};
 use wicketd_client::types::{
-    ArtifactId, EventReportAll, IgnitionCommand, RackV1Inventory, SemverVersion,
+    ArtifactId, IgnitionCommand, RackV1Inventory, SemverVersion,
 };
+use wicketd_client::EventReport;
+
+/// Event report type returned by the get_artifacts_and_event_reports API call.
+pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
 
 /// An event that will update state
 ///
@@ -22,13 +27,11 @@ pub enum Event {
     /// An Inventory Update Event
     Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
 
-    /// Event report
-    EventReportAll(EventReportAll),
-
-    /// TUF repo artifacts unpacked by wicketd
-    UpdateArtifacts {
+    /// TUF repo artifacts unpacked by wicketd, and event reports
+    ArtifactsAndEventReports {
         system_version: Option<SemverVersion>,
         artifacts: Vec<ArtifactId>,
+        event_reports: EventReportMap,
     },
 
     /// The tick of a Timer

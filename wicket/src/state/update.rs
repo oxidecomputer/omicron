@@ -4,7 +4,7 @@
 
 use tui::style::Style;
 
-use crate::ui::defaults::style;
+use crate::{events::EventReportMap, ui::defaults::style};
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
@@ -13,10 +13,7 @@ use slog::{warn, Logger};
 use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::{
-    types::{
-        ArtifactId, EventReportAll, SemverVersion, UpdateComponent,
-        UpdateStepId,
-    },
+    types::{ArtifactId, SemverVersion, UpdateComponent, UpdateStepId},
     EventReport, ProgressEventKind, StepEventKind,
 };
 
@@ -96,8 +93,23 @@ impl RackUpdateState {
         }
     }
 
-    pub fn update_logs(&mut self, logger: &Logger, reports: EventReportAll) {
-        for (sp_type, logs) in reports.sps {
+    pub fn update_artifacts_and_reports(
+        &mut self,
+        logger: &Logger,
+        system_version: Option<SemverVersion>,
+        artifacts: Vec<ArtifactId>,
+        reports: EventReportMap,
+    ) {
+        self.system_version = system_version;
+        self.artifacts = artifacts;
+        self.artifact_versions.clear();
+        for id in &mut self.artifacts {
+            if let Ok(known) = id.kind.parse() {
+                self.artifact_versions.insert(known, id.version.clone());
+            }
+        }
+
+        for (sp_type, logs) in reports {
             for (i, log) in logs {
                 let Ok(id) = ComponentId::try_from(ParsableComponentId {
                     sp_type: &sp_type,
@@ -108,21 +120,6 @@ impl RackUpdateState {
                 };
                 self.update_items(&id, &log);
                 self.event_reports.insert(id, log);
-            }
-        }
-    }
-
-    pub fn update_artifacts(
-        &mut self,
-        system_version: Option<SemverVersion>,
-        artifacts: Vec<ArtifactId>,
-    ) {
-        self.system_version = system_version;
-        self.artifacts = artifacts;
-        self.artifact_versions.clear();
-        for id in &mut self.artifacts {
-            if let Ok(known) = id.kind.parse() {
-                self.artifact_versions.insert(known, id.version.clone());
             }
         }
     }
