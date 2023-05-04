@@ -35,7 +35,7 @@ Then install prerequisite software with the following script:
 $ pfexec ./tools/install_prerequisites.sh
 ----
 
-You need to do this once per workspace and potentially again each time you fetch new changes.
+You need to do this step once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
 
 This script expects that you are both attempting to compile code and execute
 it on the same machine. If you'd like to have a different machine for a "builder"
@@ -48,6 +48,8 @@ $ ./tools/install_builder_prerequisites.sh
 # To be invoked on the machine running Omicron
 $ ./tools/install_runner_prerequisites.sh
 ----
+
+Again, if these scripts report any PATH problems, you'll need to correct those before proceeding.
 
 === Make (or unmake) me a Gimlet!
 
