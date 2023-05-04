@@ -23,19 +23,21 @@ guide at xref:how-to-run.adoc[].
 
 == Installing Prerequisites
 
-Prerequisite software may be installed with the following script:
+First, set up your environment to include executables that will be installed shortly:
+
+[source,text]
+----
+$ source env.sh
+----
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ ./tools/install_builder_prerequisites.sh
 ----
 
-Now put these on your PATH with:
-
-[source,text]
-----
-$ source env.sh
-----
+If the script reports any PATH problems, you'll need to correct those before proceeding.
 
 == Running
 
