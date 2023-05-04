@@ -2138,6 +2138,8 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.0",
+ "camino",
+ "http",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -2145,7 +2147,9 @@ dependencies = [
  "reqwest",
  "russh",
  "russh-keys",
+ "serde_json",
  "tokio",
+ "toml 0.7.3",
  "trust-dns-resolver",
 ]
 
@@ -3110,6 +3114,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "camino",
  "cfg-if 1.0.0",
  "futures",
  "ipnetwork",
@@ -4022,6 +4027,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "camino",
+ "camino-tempfile",
  "chrono",
  "crucible-agent-client",
  "dns-server",
@@ -4435,6 +4442,7 @@ dependencies = [
  "authz-macros",
  "base64 0.21.0",
  "bb8",
+ "camino",
  "chrono",
  "clap 4.2.5",
  "cookie",
@@ -4576,6 +4584,8 @@ dependencies = [
  "bincode",
  "bootstrap-agent-client",
  "bytes",
+ "camino",
+ "camino-tempfile",
  "cfg-if 1.0.0",
  "chrono",
  "clap 4.2.5",
@@ -7124,6 +7134,7 @@ name = "sled-hardware"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "cfg-if 1.0.0",
  "futures",
  "illumos-devinfo",

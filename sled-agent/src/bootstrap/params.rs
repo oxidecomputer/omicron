@@ -165,13 +165,13 @@ mod tests {
     use super::*;
     use crate::bootstrap::trust_quorum::RackSecret;
     use crate::bootstrap::trust_quorum::ShareDistribution;
-    use std::path::PathBuf;
+    use camino::Utf8PathBuf;
 
     #[test]
     fn parse_rack_initialization() {
         let manifest = std::env::var("CARGO_MANIFEST_DIR")
             .expect("Cannot access manifest directory");
-        let manifest = PathBuf::from(manifest);
+        let manifest = Utf8PathBuf::from(manifest);
 
         let path =
             manifest.join("../smf/sled-agent/non-gimlet/config-rss.toml");

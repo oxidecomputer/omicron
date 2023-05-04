@@ -32,7 +32,7 @@ impl ProfileBuilder {
 
         let profile_path = format!(
             "{zonepath}/root/var/svc/profile/site.xml",
-            zonepath = installed_zone.zonepath().display()
+            zonepath = installed_zone.zonepath()
         );
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;

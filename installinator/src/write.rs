@@ -96,14 +96,12 @@ impl WriteDestination {
 
             match disk.boot_image_devfs_path(raw_devfs_path) {
                 Ok(path) => {
-                    let path = Utf8PathBuf::try_from(path)
-                        .context("non-UTF8 drive path")?;
                     info!(
                         log, "found target M.2 disk";
                         "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
+                        "path" => disk.devfs_path().as_str(),
                         "slot" => disk.slot(),
-                        "boot_image_path" => %path,
+                        "boot_image_path" => path.as_str(),
                         "zpool" => %disk.zpool_name(),
                     );
 
@@ -122,9 +120,9 @@ impl WriteDestination {
                             warn!(
                                 log, "skipping duplicate M.2 drive entry";
                                 "identity" => ?disk.identity(),
-                                "path" => disk.devfs_path().display(),
+                                "path" => disk.devfs_path().as_str(),
                                 "slot" => disk.slot(),
-                                "boot_image_path" => %path,
+                                "boot_image_path" => path.as_str(),
                                 "zpool" => %disk.zpool_name(),
                             );
                             continue;
@@ -135,7 +133,7 @@ impl WriteDestination {
                     warn!(
                         log, "found M.2 disk but failed to find boot image path";
                         "identity" => ?disk.identity(),
-                        "path" => disk.devfs_path().display(),
+                        "path" => disk.devfs_path().as_str(),
                         "slot" => disk.slot(),
                         "boot_image_path_err" => %err,
                         "zpool" => %disk.zpool_name(),

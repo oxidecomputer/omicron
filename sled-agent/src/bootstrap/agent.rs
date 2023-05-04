@@ -24,6 +24,7 @@ use crate::services::ServiceManager;
 use crate::sp::SpHandle;
 use crate::storage_manager::StorageManager;
 use crate::updates::UpdateManager;
+use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::addrobj::AddrObject;
@@ -46,7 +47,6 @@ use slog::Logger;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -77,7 +77,7 @@ pub enum BootstrapError {
     SledError(String),
 
     #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error(transparent)]
     TrustQuorum(#[from] TrustQuorumError),
@@ -201,8 +201,8 @@ pub struct Agent {
     global_zone_bootstrap_link_local_address: Ipv6Addr,
 }
 
-fn get_sled_agent_request_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
+fn get_sled_agent_request_path() -> Utf8PathBuf {
+    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
         .join("sled-agent-request.toml")
 }
 
@@ -342,7 +342,7 @@ impl Agent {
         let do_format = true;
         Zfs::ensure_filesystem(
             ZONE_ZFS_RAMDISK_DATASET,
-            Mountpoint::Path(std::path::PathBuf::from(
+            Mountpoint::Path(Utf8PathBuf::from(
                 ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT,
             )),
             zoned,
