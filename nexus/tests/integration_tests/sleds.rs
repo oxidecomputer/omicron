@@ -4,6 +4,7 @@
 
 //! Tests for APIs against sled-based endpoints.
 
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::resource_helpers::create_physical_disk;
@@ -50,7 +51,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;
-        let update_directory = std::path::Path::new("/should/not/be/used");
+        let update_directory = Utf8Path::new("/should/not/be/used");
         sas.push(
             start_sled_agent(
                 log,

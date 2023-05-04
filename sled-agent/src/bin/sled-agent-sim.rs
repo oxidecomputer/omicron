@@ -74,8 +74,8 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
-    let tmp =
-        tempfile::tempdir().map_err(|e| CmdError::Failure(e.to_string()))?;
+    let tmp = camino_tempfile::tempdir()
+        .map_err(|e| CmdError::Failure(e.to_string()))?;
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,

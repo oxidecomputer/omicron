@@ -6,6 +6,7 @@
 
 use super::metrics::query_for_latest_metric;
 
+use camino::Utf8Path;
 use chrono::Utc;
 use http::method::Method;
 use http::StatusCode;
@@ -519,8 +520,8 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let metric_url = |metric_type: &str, id: Uuid| {
         format!(
             "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
-            Utc::now() - chrono::Duration::seconds(30),
-            Utc::now() + chrono::Duration::seconds(30),
+            cptestctx.start_time,
+            Utc::now(),
         )
     };
     oximeter.force_collect().await;
@@ -3055,7 +3056,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;
-        let update_directory = std::path::Path::new("/should/not/be/used");
+        let update_directory = Utf8Path::new("/should/not/be/used");
         additional_sleds.push(
             start_sled_agent(
                 log,

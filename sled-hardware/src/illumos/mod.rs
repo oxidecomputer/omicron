@@ -6,6 +6,7 @@ use crate::{
     Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
     SledMode, UnparsedDisk,
 };
+use camino::Utf8PathBuf;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::debug;
 use slog::error;
@@ -14,7 +15,6 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
@@ -35,6 +35,9 @@ enum Error {
     #[error("Device does not appear to be an Oxide Gimlet: {0}")]
     NotAGimlet(String),
 
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
 
@@ -48,7 +51,7 @@ enum Error {
     UnexpectedPropertyType { name: String, ty: String },
 
     #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(PathBuf),
+    NoDevLinks(Utf8PathBuf),
 
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
@@ -300,7 +303,7 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
 
 fn get_dev_path_of_whole_disk(
     node: &Node<'_>,
-) -> Result<Option<PathBuf>, Error> {
+) -> Result<Option<Utf8PathBuf>, Error> {
     let mut wm = node.minors();
     while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
         // "wd" stands for "whole disk"
@@ -336,9 +339,9 @@ fn get_dev_path_of_whole_disk(
             .collect::<Vec<_>>();
 
         if paths.is_empty() {
-            return Err(Error::NoDevLinks(PathBuf::from(devfs_path)));
+            return Err(Error::NoDevLinks(Utf8PathBuf::from(devfs_path)));
         }
-        return Ok(Some(paths[0].path().to_path_buf()));
+        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
     }
     Ok(None)
 }
@@ -482,7 +485,7 @@ fn poll_blkdev_node(
     };
 
     let disk = UnparsedDisk::new(
-        PathBuf::from(&devfs_path),
+        Utf8PathBuf::from(&devfs_path),
         dev_path,
         slot,
         variant,

@@ -63,7 +63,7 @@ ptime -m cargo build --locked --all-targets --verbose
 #
 
 banner test
-ptime -m cargo test --locked --verbose --no-fail-fast
+RUST_BACKTRACE=1 ptime -m cargo test --locked --verbose --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way
