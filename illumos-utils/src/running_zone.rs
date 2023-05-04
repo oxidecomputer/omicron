@@ -616,6 +616,7 @@ impl InstalledZone {
         &self.zonepath
     }
 
+    // TODO: This would benefit from a "builder-pattern" interface.
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
@@ -639,6 +640,10 @@ impl InstalledZone {
                 }
             })?;
 
+        // TODO: This has gotta change.
+        // TODO: Reach into M.2 for the correct pathway.
+        //
+        // TODO: Could *also* look in /opt/oxide? just like a "paths" argument?
         let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
             Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
