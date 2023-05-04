@@ -104,16 +104,23 @@ impl AddArtifact {
                     writer.write_all(chunk)?;
                 }
             }
-            ArtifactSource::Fake { size } => {
-                let known = self.kind.to_known();
-                if known == Some(KnownArtifactKind::Host)
-                    || known == Some(KnownArtifactKind::Trampoline)
-                {
+            ArtifactSource::Fake { size } => match self.kind.to_known() {
+                Some(
+                    KnownArtifactKind::Host | KnownArtifactKind::Trampoline,
+                ) => {
                     write_host_tarball_fake_artifact(*size, writer)?;
-                } else {
+                }
+                Some(
+                    KnownArtifactKind::GimletRot
+                    | KnownArtifactKind::SwitchRot
+                    | KnownArtifactKind::PscRot,
+                ) => {
+                    write_rot_tarball_fake_artifact(*size, writer)?;
+                }
+                _ => {
                     write_generic_fake_artifact(*size, writer)?;
                 }
-            }
+            },
         }
 
         Ok(())
@@ -159,22 +166,74 @@ fn write_host_tarball_fake_artifact<W: Write>(
 
     {
         let header = make_tar_header(
-            PHASE_1_FILE_NAME,
+            HOST_PHASE_1_FILE_NAME,
             phase_1_times * FILLER_TEXT.len(),
         );
         builder
             .append(&header, FillerReader::new(phase_1_times))
-            .with_context(|| format!("error writing `{PHASE_1_FILE_NAME}`"))?;
+            .with_context(|| {
+                format!("error writing `{HOST_PHASE_1_FILE_NAME}`")
+            })?;
     }
 
     {
         let header = make_tar_header(
-            PHASE_2_FILE_NAME,
+            HOST_PHASE_2_FILE_NAME,
             phase_2_times * FILLER_TEXT.len(),
         );
         builder
             .append(&header, FillerReader::new(phase_2_times))
-            .with_context(|| format!("error writing `{PHASE_1_FILE_NAME}`"))?;
+            .with_context(|| {
+                format!("error writing `{HOST_PHASE_2_FILE_NAME}`")
+            })?;
+    }
+
+    let gz_encoder =
+        builder.into_inner().context("error finalizing archive")?;
+    let buf_writer =
+        gz_encoder.finish().context("error finishing gz encoder")?;
+    buf_writer
+        .into_inner()
+        .map_err(|_| anyhow::anyhow!("error flushing archive writer"))?;
+
+    Ok(())
+}
+
+/// Writes a fake artifact that looks like an RoT tarball
+fn write_rot_tarball_fake_artifact<W: Write>(
+    size: u64,
+    writer: &mut W,
+) -> Result<()> {
+    let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+        BufWriter::new(writer),
+        Compression::fast(),
+    ));
+
+    let times = (size as usize) / FILLER_TEXT.len() / 2;
+
+    {
+        let metadata = oxide_metadata::MetadataBuilder::new(
+            oxide_metadata::ArchiveType::Rot,
+        )
+        .build()
+        .context("error building oxide metadata")?;
+        metadata.append_to_tar(&mut builder)?;
+    }
+
+    {
+        let header =
+            make_tar_header(ROT_ARCHIVE_A_FILE_NAME, times * FILLER_TEXT.len());
+        builder.append(&header, FillerReader::new(times)).with_context(
+            || format!("error writing `{ROT_ARCHIVE_A_FILE_NAME}`"),
+        )?;
+    }
+
+    {
+        let header =
+            make_tar_header(ROT_ARCHIVE_B_FILE_NAME, times * FILLER_TEXT.len());
+        builder.append(&header, FillerReader::new(times)).with_context(
+            || format!("error writing `{ROT_ARCHIVE_B_FILE_NAME}`"),
+        )?;
     }
 
     let gz_encoder =
@@ -287,10 +346,10 @@ impl HostPhaseImages {
                     )
                 }
                 oxide_json_found = true;
-            } else if path == Path::new(PHASE_1_FILE_NAME) {
-                phase_1 = Some(read_entry(entry, PHASE_1_FILE_NAME)?);
-            } else if path == Path::new(PHASE_2_FILE_NAME) {
-                phase_2 = Some(read_entry(entry, PHASE_2_FILE_NAME)?);
+            } else if path == Path::new(HOST_PHASE_1_FILE_NAME) {
+                phase_1 = Some(read_entry(entry, HOST_PHASE_1_FILE_NAME)?);
+            } else if path == Path::new(HOST_PHASE_2_FILE_NAME) {
+                phase_2 = Some(read_entry(entry, HOST_PHASE_2_FILE_NAME)?);
             }
 
             if oxide_json_found && phase_1.is_some() && phase_2.is_some() {
@@ -303,10 +362,10 @@ impl HostPhaseImages {
             not_found.push(OXIDE_JSON_FILE_NAME);
         }
         if phase_1.is_none() {
-            not_found.push(PHASE_1_FILE_NAME);
+            not_found.push(HOST_PHASE_1_FILE_NAME);
         }
         if phase_2.is_none() {
-            not_found.push(PHASE_2_FILE_NAME);
+            not_found.push(HOST_PHASE_2_FILE_NAME);
         }
         if !not_found.is_empty() {
             bail!("required files not found: {}", not_found.join(", "))
@@ -332,7 +391,84 @@ fn read_entry<R: io::Read>(
     Ok(buf.into())
 }
 
+/// Represents RoT A/B hubris archives.
+///
+/// RoT artifacts are actually tarballs, with both A and B hubris archives
+/// inside the. This code extracts those archives out of the tarballs.
+#[derive(Clone, Debug)]
+pub struct RotArchives {
+    pub archive_a: Bytes,
+    pub archive_b: Bytes,
+}
+
+impl RotArchives {
+    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+        let uncompressed =
+            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+        let mut archive = tar::Archive::new(uncompressed);
+
+        let mut oxide_json_found = false;
+        let mut archive_a = None;
+        let mut archive_b = None;
+        for entry in archive
+            .entries()
+            .context("error building list of entries from archive")?
+        {
+            let entry = entry.context("error reading entry from archive")?;
+            let path = entry
+                .header()
+                .path()
+                .context("error reading path from archive")?;
+            if path == Path::new(OXIDE_JSON_FILE_NAME) {
+                let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
+                let metadata: oxide_metadata::Metadata =
+                    serde_json::from_slice(&json_bytes).with_context(|| {
+                        format!(
+                            "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
+                        )
+                    })?;
+                if !metadata.is_rot() {
+                    bail!(
+                        "unexpected archive type: expected rot, found {:?}",
+                        metadata.archive_type(),
+                    )
+                }
+                oxide_json_found = true;
+            } else if path == Path::new(ROT_ARCHIVE_A_FILE_NAME) {
+                archive_a = Some(read_entry(entry, ROT_ARCHIVE_A_FILE_NAME)?);
+            } else if path == Path::new(ROT_ARCHIVE_B_FILE_NAME) {
+                archive_b = Some(read_entry(entry, ROT_ARCHIVE_B_FILE_NAME)?);
+            }
+
+            if oxide_json_found && archive_a.is_some() && archive_b.is_some() {
+                break;
+            }
+        }
+
+        let mut not_found = Vec::new();
+        if !oxide_json_found {
+            not_found.push(OXIDE_JSON_FILE_NAME);
+        }
+        if archive_a.is_none() {
+            not_found.push(ROT_ARCHIVE_A_FILE_NAME);
+        }
+        if archive_b.is_none() {
+            not_found.push(ROT_ARCHIVE_B_FILE_NAME);
+        }
+        if !not_found.is_empty() {
+            bail!("required files not found: {}", not_found.join(", "))
+        }
+
+        Ok(Self {
+            archive_a: archive_a.unwrap(),
+            archive_b: archive_b.unwrap(),
+        })
+    }
+}
+
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
-static PHASE_1_FILE_NAME: &str = "image/rom";
-static PHASE_2_FILE_NAME: &str = "image/zfs.img";
+static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
+static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
+static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
+static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
