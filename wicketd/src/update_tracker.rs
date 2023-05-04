@@ -438,21 +438,15 @@ impl UpdateDriver {
             Default::default(),
         );
         sp_registrar
-            .new_step(
-                UpdateStepId::ResettingSp,
-                "Resetting SP",
-                |_cx| async move {
-                    update_cx
-                        .reset_sp_component(
-                            SpComponent::SP_ITSELF.const_as_str(),
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::SpResetFailed { error }
-                        })?;
-                    StepResult::success((), Default::default())
-                },
-            )
+            .new_step(UpdateStepId::ResetSp, "Resetting SP", |_cx| async move {
+                update_cx
+                    .reset_sp_component(SpComponent::SP_ITSELF.const_as_str())
+                    .await
+                    .map_err(|error| UpdateTerminalError::SpResetFailed {
+                        error,
+                    })?;
+                StepResult::success((), Default::default())
+            })
             .register();
 
         if update_cx.sp.type_ == SpType::Sled {

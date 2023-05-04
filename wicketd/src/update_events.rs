@@ -32,7 +32,7 @@ pub enum UpdateStepId {
     SetHostPowerState { state: PowerState },
     InterrogateRot,
     ResetRot,
-    ResettingSp,
+    ResetSp,
     SpComponentUpdate { stage: SpComponentUpdateStage },
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,

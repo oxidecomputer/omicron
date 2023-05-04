@@ -155,12 +155,11 @@ impl RackUpdateState {
 
                 StepEventKind::StepCompleted { step, .. } => {
                     let updated_component = match step.info.id {
-                        UpdateStepId::ResettingSp => Some(UpdateComponent::Sp),
+                        UpdateStepId::ResetRot => Some(UpdateComponent::Rot),
+                        UpdateStepId::ResetSp => Some(UpdateComponent::Sp),
                         UpdateStepId::RunningInstallinator => {
                             Some(UpdateComponent::Host)
                         }
-                        // TODO how do we know when the RoT update is done?
-                        // (Maybe need a `ResettingRot` step id?)
                         _ => None,
                     };
                     update_component_state(

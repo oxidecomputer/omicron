@@ -2813,7 +2813,7 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "reset_sp"
                 ]
               }
             },
