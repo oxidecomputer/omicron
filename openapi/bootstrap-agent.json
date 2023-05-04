@@ -250,7 +250,8 @@
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string"
       },
-      "PasswordHash": {
+      "NewPasswordHash": {
+        "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
         "type": "string"
       },
@@ -331,7 +332,7 @@
             "$ref": "#/components/schemas/UserId"
           },
           "user_password_hash": {
-            "$ref": "#/components/schemas/PasswordHash"
+            "$ref": "#/components/schemas/NewPasswordHash"
           }
         },
         "required": [
