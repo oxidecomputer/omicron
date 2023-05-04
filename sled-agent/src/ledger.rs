@@ -69,9 +69,8 @@ impl<T: Ledgerable> Ledger<T> {
 
     /// Reads the ledger from any of the provided `paths`.
     ///
-    /// Returns the following, in order:
-    /// - The ledger with the highest generation number
-    /// - If none exists, returns a default ledger
+    /// Returns the ledger with the highest generation number if it
+    /// exists, otherwise returns `None`.
     pub async fn new(log: &Logger, paths: Vec<Utf8PathBuf>) -> Option<Self> {
         // Read the ledgers from storage
         if let Some(ledger) = Self::read(log, &paths).await {
