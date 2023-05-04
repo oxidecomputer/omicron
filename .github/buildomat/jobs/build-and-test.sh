@@ -26,10 +26,9 @@ echo "tests will store output in $TEST_TMPDIR" >&2
 mkdir "$TEST_TMPDIR"
 
 #
-# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-# suite.
+# Set up our PATH for the test suite.
 #
-export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin"
+source ./env.sh
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y

@@ -16,6 +16,7 @@ use futures::future;
 use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
+use gateway_messages::ComponentAction;
 use gateway_messages::RotBootState;
 use gateway_messages::RotSlot;
 use gateway_messages::RotUpdateDetails;
@@ -1020,28 +1021,32 @@ impl SpHandler for Handler {
         Ok(())
     }
 
-    fn reset_prepare(
+    fn reset_component_prepare(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
+        component: SpComponent,
     ) -> Result<(), SpError> {
         warn!(
-            &self.log, "received sys-reset prepare request; not supported by simulated gimlet";
+            &self.log, "received reset prepare request; not supported by simulated gimlet";
             "sender" => %sender,
             "port" => ?port,
+            "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn reset_trigger(
+    fn reset_component_trigger(
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<std::convert::Infallible, SpError> {
+        component: SpComponent,
+    ) -> Result<(), SpError> {
         warn!(
-            &self.log, "received sys-reset trigger request; not supported by simulated gimlet";
+            &self.log, "received reset trigger request; not supported by simulated gimlet";
             "sender" => %sender,
             "port" => ?port,
+            "component" => ?component,
         );
         Err(SpError::RequestUnsupportedForSp)
     }
@@ -1135,6 +1140,21 @@ impl SpHandler for Handler {
             "component" => ?component,
             "slot" => slot,
             "persist" => persist,
+        );
+        Err(SpError::RequestUnsupportedForComponent)
+    }
+
+    fn component_action(
+        &mut self,
+        sender: SocketAddrV6,
+        component: SpComponent,
+        action: ComponentAction,
+    ) -> Result<(), SpError> {
+        warn!(
+            &self.log, "asked to perform component action (not supported for sim components)";
+            "sender" => %sender,
+            "component" => ?component,
+            "action" => ?action,
         );
         Err(SpError::RequestUnsupportedForComponent)
     }
