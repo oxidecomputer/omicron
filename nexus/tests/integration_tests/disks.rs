@@ -4,9 +4,7 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::{
-    query_for_latest_metric, query_for_metrics_until_they_exist,
-};
+use super::metrics::{query_for_latest_metric, query_for_metrics};
 
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
@@ -1360,14 +1358,15 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
-    // Whenever we grab this URL, get the surrounding few seconds of metrics.
+    // When grabbing a metric, we look for data points going back to the
+    // start of this test all the way up to the current time.
     let metric_url = |metric: &str| {
         format!(
             "/v1/disks/{}/metrics/{}?start_time={:?}&end_time={:?}&project={}",
             DISK_NAME,
             metric,
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
+            cptestctx.start_time,
+            Utc::now(),
             PROJECT_NAME,
         )
     };
@@ -1375,8 +1374,8 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let utilization_url = |id: Uuid| {
         format!(
             "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}",
-            Utc::now() - chrono::Duration::seconds(10),
-            Utc::now() + chrono::Duration::seconds(10),
+            cptestctx.start_time,
+            Utc::now(),
             id,
         )
     };
@@ -1400,9 +1399,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     oximeter.force_collect().await;
 
     for metric in &ALL_METRICS {
-        let measurements =
-            query_for_metrics_until_they_exist(client, &metric_url(metric))
-                .await;
+        let measurements = query_for_metrics(client, &metric_url(metric)).await;
 
         assert!(!measurements.items.is_empty());
         for item in &measurements.items {
@@ -1442,8 +1439,8 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
         );
         let initial_params = format!(
             "start_time={:?}&end_time={:?}",
-            Utc::now() - chrono::Duration::seconds(2),
-            Utc::now() + chrono::Duration::seconds(2),
+            cptestctx.start_time,
+            Utc::now(),
         );
 
         objects_list_page_authz::<Measurement>(
