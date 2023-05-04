@@ -1495,7 +1495,7 @@ impl ServiceManager {
 
                     let serialized_baseboard =
                         serde_json::to_string_pretty(&baseboard)?;
-                    let serialized_baseboard_path = PathBuf::from(format!(
+                    let serialized_baseboard_path = Utf8PathBuf::from(format!(
                         "{}/opt/oxide/baseboard.json",
                         running_zone.root()
                     ));
