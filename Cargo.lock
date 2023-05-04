@@ -3847,6 +3847,7 @@ dependencies = [
  "chrono",
  "futures",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "progenitor",
  "regress",
  "reqwest",
@@ -4567,6 +4568,9 @@ dependencies = [
  "criterion",
  "rand 0.8.5",
  "rust-argon2",
+ "schemars",
+ "serde",
+ "serde_with",
  "thiserror",
 ]
 

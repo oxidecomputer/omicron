@@ -298,7 +298,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
             &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
         )
         .unwrap()
-        .into();
+        .as_str()
+        .parse()
+        .unwrap();
     let recovery_silo = RecoverySiloConfig {
         silo_name: silo_name.clone(),
         user_name: user_name.clone(),
