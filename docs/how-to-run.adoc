@@ -39,8 +39,8 @@ $ ./tools/install_runner_prerequisites.sh
 
 There will be several binaries that will need to be in your `PATH`. The various
 prerequisites scripts will alert you to where you can find the binaries to add
-them to your `PATH`. You can also reference the file in `tools/setup-path.sh` for
-an example of how to add them to your `PATH`.
+them to your `PATH`. You can also use the file `env.sh` to add them to your
+`PATH`.
 
 === Make (or unmake) me a Gimlet!
 

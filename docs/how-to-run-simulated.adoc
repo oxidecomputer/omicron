@@ -30,6 +30,13 @@ Prerequisite software may be installed with the following script:
 $ ./tools/install_builder_prerequisites.sh
 ----
 
+Now put these on your PATH with:
+
+[source,text]
+----
+$ source env.sh
+----
+
 == Running
 
 To **run Omicron** you need to run four programs:
@@ -40,7 +47,7 @@ the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
 
-The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH and match the versions above.  You can use the `env.sh` file at the root of this repo to do this.
 
 === Quick start
 

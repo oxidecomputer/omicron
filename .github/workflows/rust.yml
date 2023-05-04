@@ -33,7 +33,7 @@ jobs:
     - name: Report cargo version
       run: cargo --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
+      run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Set default target
@@ -55,7 +55,7 @@ jobs:
     - name: Report Clippy version
       run: cargo clippy -- --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
+      run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
@@ -80,7 +80,7 @@ jobs:
     - name: Report cargo version
       run: cargo --version
     - name: Update PATH
-      run: echo "$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin" >> "$GITHUB_PATH"
+      run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
