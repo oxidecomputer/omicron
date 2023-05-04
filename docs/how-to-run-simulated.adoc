@@ -30,8 +30,6 @@ First, set up your environment to include executables that will be installed sho
 $ source env.sh
 ----
 
-(You'll want to do this in the future in every shell where you work in this workspace.)
-
 Then install prerequisite software with the following script:
 
 [source,text]
@@ -39,9 +37,18 @@ Then install prerequisite software with the following script:
 $ ./tools/install_builder_prerequisites.sh
 ----
 
-If the script reports any PATH problems, you'll need to correct those before proceeding.
+You need to do this once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
 
 == Running
+
+To run anything, you'll need to set up your environment as before:
+
+[source,text]
+----
+$ source env.sh
+----
+
+You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
 
 To **run Omicron** you need to run four programs:
 
