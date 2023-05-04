@@ -8,19 +8,14 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use oximeter::types::Datum;
 use oximeter::types::Measurement;
 
-pub async fn query_for_metrics_until_they_exist(
+pub async fn query_for_metrics(
     client: &ClientTestContext,
     path: &str,
 ) -> ResultsPage<Measurement> {
-    loop {
-        let measurements: ResultsPage<Measurement> =
-            objects_list_page_authz(client, path).await;
-
-        if !measurements.items.is_empty() {
-            return measurements;
-        }
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-    }
+    let measurements: ResultsPage<Measurement> =
+        objects_list_page_authz(client, path).await;
+    assert!(!measurements.items.is_empty());
+    measurements
 }
 
 pub async fn query_for_latest_metric(
