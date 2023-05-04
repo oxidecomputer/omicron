@@ -2228,7 +2228,7 @@ mod test {
             revision: 3,
         };
         let uuid1: Uuid = hardware_id.clone().into();
-        let uuid2: Uuid = hardware_id.clone().into();
+        let uuid2: Uuid = hardware_id.into();
 
         // ID generation should be deterministic.
         assert_eq!(uuid1, uuid2);
