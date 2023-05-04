@@ -3887,9 +3887,9 @@ dependencies = [
  "macaddr",
  "newtype_derive",
  "nexus-defaults",
- "nexus-passwords",
  "nexus-types",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "openssl",
  "parse-display",
@@ -3938,12 +3938,12 @@ dependencies = [
  "newtype_derive",
  "nexus-db-model",
  "nexus-defaults",
- "nexus-passwords",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -3999,17 +3999,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-passwords"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "criterion",
- "rand 0.8.5",
- "rust-argon2",
- "thiserror",
-]
-
-[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -4039,10 +4028,10 @@ dependencies = [
  "hyper",
  "internal-dns",
  "nexus-db-queries",
- "nexus-passwords",
  "nexus-test-interface",
  "nexus-types",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oximeter 0.1.0",
@@ -4081,8 +4070,8 @@ dependencies = [
  "dns-service-client",
  "futures",
  "newtype_derive",
- "nexus-passwords",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "openssl",
  "openssl-probe",
  "openssl-sys",
@@ -4476,13 +4465,13 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
- "nexus-passwords",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -4568,6 +4557,17 @@ dependencies = [
  "tokio",
  "toml 0.7.3",
  "walkdir",
+]
+
+[[package]]
+name = "omicron-passwords"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "criterion",
+ "rand 0.8.5",
+ "rust-argon2",
+ "thiserror",
 ]
 
 [[package]]

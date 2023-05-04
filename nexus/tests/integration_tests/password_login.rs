@@ -4,7 +4,7 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{header, method::Method, StatusCode};
-use nexus_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
+use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
@@ -456,7 +456,7 @@ async fn expect_login_success(
     // It's not clear how a successful login could ever take less than the
     // minimum verification time, but we verify it here anyway.  (If we fail
     // here, it's possible that our hash parameters have gotten too weak for the
-    // current hardware.  See the similar test in the nexus_passwords module.)
+    // current hardware.  See the similar test in the omicron_passwords module.)
     if elapsed < MIN_EXPECTED_PASSWORD_VERIFY_TIME {
         panic!(
             "successful login unexpectedly took less time ({:?}) than \

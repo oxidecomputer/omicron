@@ -263,15 +263,15 @@ pub struct RecoverySiloConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(try_from = "String")]
-pub struct PasswordHash(nexus_passwords::PasswordHashString);
+pub struct PasswordHash(omicron_passwords::PasswordHashString);
 
-impl From<nexus_passwords::PasswordHashString> for PasswordHash {
-    fn from(value: nexus_passwords::PasswordHashString) -> Self {
+impl From<omicron_passwords::PasswordHashString> for PasswordHash {
+    fn from(value: omicron_passwords::PasswordHashString) -> Self {
         PasswordHash(value)
     }
 }
 
-impl From<PasswordHash> for nexus_passwords::PasswordHashString {
+impl From<PasswordHash> for omicron_passwords::PasswordHashString {
     fn from(value: PasswordHash) -> Self {
         value.0
     }
@@ -307,7 +307,7 @@ impl JsonSchema for PasswordHash {
 impl TryFrom<String> for PasswordHash {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        Ok(PasswordHash(nexus_passwords::parse_phc_hash(&value)?))
+        Ok(PasswordHash(omicron_passwords::parse_phc_hash(&value)?))
     }
 }
 
