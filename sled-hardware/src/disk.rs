@@ -188,7 +188,6 @@ pub struct Disk {
     zpool_name: ZpoolName,
 }
 
-pub const FACTORY_DATASET: &'static str = "factory";
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
@@ -201,10 +200,8 @@ static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
     ZONE_DATASET,
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 5;
+const M2_EXPECTED_DATASET_COUNT: usize = 4;
 static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
-    // Stores a "factory install" set of software
-    FACTORY_DATASET,
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
