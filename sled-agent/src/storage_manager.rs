@@ -227,12 +227,20 @@ impl StorageResources {
         let disks = self.disks.lock().await;
         disks.iter().find_map(|(id, disk)| {
             match disk {
+                // This is the "real" use-case: if we have real disks, query
+                // their properties to identify if they truly are the boot disk.
                 DiskWrapper::Real { disk, .. } => {
                     if disk.is_boot_disk() {
                         return Some(id.clone());
                     }
                 }
-                _ => (),
+                // This is the "less real" use-case: if we have synthetic disks,
+                // just label the first M.2-looking one as a "boot disk".
+                DiskWrapper::Synthetic { .. } => {
+                    if matches!(disk.variant(), DiskVariant::M2) {
+                        return Some(disk.identity());
+                    }
+                }
             };
             None
         })
