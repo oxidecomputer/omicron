@@ -7,6 +7,7 @@
 use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
+use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -31,7 +32,6 @@ use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
 use installinator_common::InstallinatorSpec;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
 use slog::error;
@@ -333,11 +333,28 @@ impl UpdateTracker {
     }
 
     /// Gets a list of artifacts stored in the update repository.
-    pub(crate) async fn system_version_and_artifact_ids(
+    pub(crate) async fn artifacts_and_event_reports(
         &self,
-    ) -> (Option<SemverVersion>, Vec<ArtifactId>) {
+    ) -> GetArtifactsAndEventReportsResponse {
         let update_data = self.sp_update_data.lock().await;
-        update_data.artifact_store.system_version_and_artifact_ids()
+
+        let (system_version, artifacts) =
+            update_data.artifact_store.system_version_and_artifact_ids();
+
+        let mut event_reports = BTreeMap::new();
+        for (sp, update_data) in &update_data.sp_update_data {
+            let event_report =
+                update_data.event_buffer.lock().unwrap().generate_report();
+            let inner: &mut BTreeMap<_, _> =
+                event_reports.entry(sp.type_).or_default();
+            inner.insert(sp.slot, event_report);
+        }
+
+        GetArtifactsAndEventReportsResponse {
+            system_version,
+            artifacts,
+            event_reports,
+        }
     }
 
     pub(crate) async fn event_report(&self, sp: SpIdentifier) -> EventReport {
@@ -348,23 +365,6 @@ impl UpdateTracker {
                 slot.get().event_buffer.lock().unwrap().generate_report()
             }
         }
-    }
-
-    /// Clone the current state of the update log for every SP, returning a map
-    /// suitable for conversion to JSON.
-    pub(crate) async fn event_report_all(
-        &self,
-    ) -> BTreeMap<SpType, BTreeMap<u32, EventReport>> {
-        let update_data = self.sp_update_data.lock().await;
-        let mut converted_logs = BTreeMap::new();
-        for (sp, update_data) in &update_data.sp_update_data {
-            let event_report =
-                update_data.event_buffer.lock().unwrap().generate_report();
-            let inner: &mut BTreeMap<_, _> =
-                converted_logs.entry(sp.type_).or_default();
-            inner.insert(sp.slot, event_report);
-        }
-        converted_logs
     }
 }
 
