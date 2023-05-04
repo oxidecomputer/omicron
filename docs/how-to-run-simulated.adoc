@@ -50,15 +50,17 @@ $ source env.sh
 
 You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
 
-To **run Omicron** you need to run four programs:
+To **run Omicron** you need to run several programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
+* an `external-dns` server
+* `oximeter`, which collects metrics from control plane components
 
-The easiest way to start the required databases is to use the built-in `omicron-dev` tool.
+You can run these by hand, but it's easier to use `omicron-dev run-all`.  See below for more on both options.
 
 === Quick start
 
