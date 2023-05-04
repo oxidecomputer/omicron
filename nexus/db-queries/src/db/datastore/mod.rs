@@ -278,8 +278,8 @@ mod test {
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
         Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
         Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
-        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
-        UpdateableComponentType, VpcSubnet, Zpool,
+        SledSystemHardware, SshKey, SystemUpdate, UpdateableComponentType,
+        VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -287,6 +287,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external::DataPageParams;
+    use omicron_common::api::external::OxideHardwareIdentifier;
     use omicron_common::api::external::{
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
@@ -298,8 +299,8 @@ mod test {
     use uuid::Uuid;
 
     // Creates a "fake" Sled Baseboard.
-    pub fn sled_baseboard_for_test() -> SledBaseboard {
-        SledBaseboard {
+    pub fn sled_baseboard_for_test() -> OxideHardwareIdentifier {
+        OxideHardwareIdentifier {
             serial_number: Uuid::new_v4().to_string(),
             part_number: String::from("test-part"),
             revision: 1,

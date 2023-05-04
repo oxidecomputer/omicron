@@ -13,7 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion,
+    ObjectIdentity, OxideHardwareIdentifier, RoleName, SemverVersion,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -283,20 +283,13 @@ pub struct Rack {
 
 // SLEDS
 
-/// Properties that should uniquely identify a Sled.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial: String,
-    pub part: String,
-    pub revision: i64,
-}
-
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Sled {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
-    pub baseboard: Baseboard,
+    #[serde(flatten)]
+    pub baseboard: OxideHardwareIdentifier,
     /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
     /// The number of hardware threads which can execute on this sled

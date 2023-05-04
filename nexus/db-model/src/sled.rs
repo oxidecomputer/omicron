@@ -9,19 +9,10 @@ use crate::schema::{physical_disk, service, sled, zpool};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::views, identity::Asset};
+use omicron_common::api::external::OxideHardwareIdentifier;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
-
-/// Baseboard information about a sled.
-///
-/// The combination of these columns may be used as a unique identifier for the
-/// sled.
-pub struct SledBaseboard {
-    pub serial_number: String,
-    pub part_number: String,
-    pub revision: i64,
-}
 
 /// Hardware information about the sled.
 pub struct SledSystemHardware {
@@ -61,7 +52,7 @@ impl Sled {
     pub fn new(
         id: Uuid,
         addr: SocketAddrV6,
-        baseboard: SledBaseboard,
+        baseboard: OxideHardwareIdentifier,
         hardware: SledSystemHardware,
         rack_id: Uuid,
     ) -> Self {
@@ -111,9 +102,9 @@ impl From<Sled> for views::Sled {
         Self {
             identity: sled.identity(),
             rack_id: sled.rack_id,
-            baseboard: views::Baseboard {
-                serial: sled.serial_number,
-                part: sled.part_number,
+            baseboard: OxideHardwareIdentifier {
+                serial_number: sled.serial_number,
+                part_number: sled.part_number,
                 revision: sled.revision,
             },
             usable_hardware_threads: sled.usable_hardware_threads.0,

@@ -163,6 +163,30 @@ impl<'a> TryFrom<&DataPageParams<'a, NameOrId>> for DataPageParams<'a, Uuid> {
     }
 }
 
+/// Unique identifiers associated with Oxide produced hardware like sleds and
+/// switches. Hardware not produced by Oxide (such as NVMe drives) will have
+/// different means of identification.
+//
+// The serialization order is informed by RFD-308 though the format doesn't
+// match exactly to what is described there. Given that we're not preserving
+// the OXV(N) version identifier from the SP we can't predict how the data will
+// change so this looser format will hopefully be more future proof.
+#[derive(Clone, Debug, Deserialize, Display, Serialize, JsonSchema)]
+#[display("{part_number}:{revision}:{serial_number}")]
+pub struct OxideHardwareIdentifier {
+    pub serial_number: String,
+    pub part_number: String,
+    pub revision: i64,
+}
+
+impl From<OxideHardwareIdentifier> for Uuid {
+    fn from(value: OxideHardwareIdentifier) -> Self {
+        let oxide_namespace: Uuid =
+            "6956cc84-b537-41be-8b79-728733703526".parse().unwrap();
+        Uuid::new_v5(&oxide_namespace, value.to_string().as_bytes())
+    }
+}
+
 /// A name used in the API
 ///
 /// Names are generally user-provided unique identifiers, highly constrained as
@@ -2118,8 +2142,10 @@ impl std::fmt::Display for Digest {
 mod test {
     use serde::Deserialize;
     use serde::Serialize;
+    use uuid::Uuid;
 
     use super::IpNet;
+    use super::OxideHardwareIdentifier;
     use super::RouteDestination;
     use super::RouteTarget;
     use super::SemverVersion;
@@ -2192,6 +2218,30 @@ mod test {
         let expected = "{\"version\":\"1.2.3\"}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(serde_json::from_str::<MyStruct>(expected).unwrap(), v);
+    }
+
+    #[test]
+    fn test_hardware_identifier_uuid_generation() {
+        let hardware_id = OxideHardwareIdentifier {
+            serial_number: "BRM34220001".to_string(),
+            part_number: "913-0000018".to_string(),
+            revision: 3,
+        };
+        let uuid1: Uuid = hardware_id.clone().into();
+        let uuid2: Uuid = hardware_id.clone().into();
+
+        // ID generation should be deterministic.
+        assert_eq!(uuid1, uuid2);
+
+        // ID generation should be stable. If this test fails it means that
+        // something has changed with how the UUID is generated, which will
+        // cause older hardware with a stable ID to have a new UUID. Given the
+        // uniqueness constraints on the hardware identifier, this should never
+        // be allowed to happen.
+        assert_eq!(
+            uuid1,
+            "89dde186-0a0d-5d70-a5fc-39eca75a8126".parse().unwrap()
+        );
     }
 
     #[test]

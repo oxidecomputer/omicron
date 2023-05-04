@@ -90,25 +90,20 @@ impl Server {
         let notify_nexus = || async {
             debug!(log, "contacting server nexus");
             (nexus_client
-                .sled_agent_put(
-                    &config.id,
-                    &NexusTypes::SledAgentStartupInfo {
-                        sa_address: sa_address.to_string(),
-                        role: NexusTypes::SledRole::Gimlet,
-                        baseboard: NexusTypes::Baseboard {
-                            identifier: format!("Simulated sled {}", config.id),
-                            model: String::from("Unknown"),
-                            revision: 0,
-                        },
-                        usable_hardware_threads: config
-                            .hardware
-                            .hardware_threads,
-                        usable_physical_ram: NexusTypes::ByteCount::try_from(
-                            config.hardware.physical_ram,
-                        )
-                        .unwrap(),
+                .sled_agent_put(&NexusTypes::SledAgentStartupInfo {
+                    sa_address: sa_address.to_string(),
+                    role: NexusTypes::SledRole::Gimlet,
+                    baseboard: NexusTypes::OxideHardwareIdentifier {
+                        serial_number: format!("Simulated sled {}", config.id),
+                        part_number: String::from("Unknown"),
+                        revision: 0,
                     },
-                )
+                    usable_hardware_threads: config.hardware.hardware_threads,
+                    usable_physical_ram: NexusTypes::ByteCount::try_from(
+                        config.hardware.physical_ram,
+                    )
+                    .unwrap(),
+                })
                 .await)
                 .map_err(BackoffError::transient)
         };

@@ -26,7 +26,6 @@ mock! {
         pub fn baseurl(&self) -> &'static str;
         pub async fn sled_agent_put(
             &self,
-            id: &Uuid,
             info: &SledAgentStartupInfo,
         ) -> Result<()>;
         pub async fn physical_disk_put(

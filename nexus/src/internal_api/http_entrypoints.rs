@@ -73,29 +73,20 @@ pub fn internal_api() -> NexusApiDescription {
     api
 }
 
-/// Path parameters for Sled Agent requests (internal API)
-#[derive(Deserialize, JsonSchema)]
-struct SledAgentPathParam {
-    sled_id: Uuid,
-}
-
 /// Report that the sled agent for the specified sled has come online.
 #[endpoint {
      method = POST,
-     path = "/sled-agents/{sled_id}",
+     path = "/sled-agents",
  }]
 async fn sled_agent_put(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SledAgentPathParam>,
     sled_info: TypedBody<SledAgentStartupInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let info = sled_info.into_inner();
-    let sled_id = &path.sled_id;
     let handler = async {
-        nexus.upsert_sled(*sled_id, info).await?;
+        nexus.upsert_sled(info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

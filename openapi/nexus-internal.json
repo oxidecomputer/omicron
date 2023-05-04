@@ -446,21 +446,10 @@
         }
       }
     },
-    "/sled-agents/{sled_id}": {
+    "/sled-agents": {
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",
         "operationId": "sled_agent_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -582,27 +571,6 @@
       }
     },
     "schemas": {
-      "Baseboard": {
-        "description": "Describes properties that should uniquely identify a Gimlet.",
-        "type": "object",
-        "properties": {
-          "identifier": {
-            "type": "string"
-          },
-          "model": {
-            "type": "string"
-          },
-          "revision": {
-            "type": "integer",
-            "format": "int64"
-          }
-        },
-        "required": [
-          "identifier",
-          "model",
-          "revision"
-        ]
-      },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
         "oneOf": [
@@ -2122,6 +2090,27 @@
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
       },
+      "OxideHardwareIdentifier": {
+        "description": "Unique identifiers associated with Oxide produced hardware like sleds and switches. Hardware not produced by Oxide (such as NVMe drives) will have different means of identification.",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "serial_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "revision",
+          "serial_number"
+        ]
+      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -2796,7 +2785,7 @@
             "description": "Describes the sled's identity",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Baseboard"
+                "$ref": "#/components/schemas/OxideHardwareIdentifier"
               }
             ]
           },

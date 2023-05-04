@@ -19,6 +19,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::OxideHardwareIdentifier;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
@@ -32,9 +33,9 @@ impl super::Nexus {
     // be (for graceful degradation at large scale).
     pub async fn upsert_sled(
         &self,
-        id: Uuid,
         info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
+        let id: Uuid = info.baseboard.clone().into();
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
 
         let is_scrimlet = match info.role {
@@ -45,9 +46,9 @@ impl super::Nexus {
         let sled = db::model::Sled::new(
             id,
             info.sa_address,
-            db::model::SledBaseboard {
-                serial_number: info.baseboard.identifier,
-                part_number: info.baseboard.model,
+            OxideHardwareIdentifier {
+                serial_number: info.baseboard.serial_number,
+                part_number: info.baseboard.part_number,
                 revision: info.baseboard.revision,
             },
             db::model::SledSystemHardware {

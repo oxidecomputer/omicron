@@ -8,6 +8,7 @@ use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::OxideHardwareIdentifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -31,14 +32,6 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub identifier: String,
-    pub model: String,
-    pub revision: i64,
-}
-
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct SledAgentStartupInfo {
@@ -49,7 +42,7 @@ pub struct SledAgentStartupInfo {
     pub role: SledRole,
 
     /// Describes the sled's identity
-    pub baseboard: Baseboard,
+    pub baseboard: OxideHardwareIdentifier,
 
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,

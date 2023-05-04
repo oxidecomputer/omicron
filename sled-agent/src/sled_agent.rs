@@ -410,7 +410,7 @@ impl SledAgent {
         let lazy_nexus_client = self.inner.lazy_nexus_client.clone();
         let sled_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
-        let baseboard = nexus_client::types::Baseboard::from(
+        let baseboard = nexus_client::types::OxideHardwareIdentifier::from(
             self.inner.hardware.baseboard(),
         );
         let usable_hardware_threads =
@@ -445,7 +445,6 @@ impl SledAgent {
                     .map_err(|err| BackoffError::transient(err.to_string()))?;
                 nexus_client
                     .sled_agent_put(
-                        &sled_id,
                         &nexus_client::types::SledAgentStartupInfo {
                             sa_address: sled_address.to_string(),
                             role,
