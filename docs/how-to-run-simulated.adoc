@@ -30,6 +30,8 @@ First, set up your environment to include executables that will be installed sho
 $ source env.sh
 ----
 
+(You'll want to do this in the future in every shell where you work in this workspace.)
+
 Then install prerequisite software with the following script:
 
 [source,text]

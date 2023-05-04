@@ -26,6 +26,8 @@ The steps below will install several executables that will need to be in your
 $ source env.sh
 ----
 
+(You'll want to do this in the future in every shell where you work in this workspace.)
+
 Then install prerequisite software with the following script:
 
 [source,text]
