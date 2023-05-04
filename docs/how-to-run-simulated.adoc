@@ -40,6 +40,8 @@ the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
 
+The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+
 === Quick start
 
 . Run `omicron-dev run-all`.  This will run all of these components with a default configuration that should work in a typical development environment.  The database will be stored in a temporary directory.  Logs for all services will go to a single, unified log file.  The tool will print information about reaching Nexus as well as CockroachDB:
