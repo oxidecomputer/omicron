@@ -34,6 +34,10 @@ jobs:
       run: cargo --version
     - name: Update PATH
       run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Set default target
@@ -56,6 +60,10 @@ jobs:
       run: cargo clippy -- --version
     - name: Update PATH
       run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
@@ -81,6 +89,10 @@ jobs:
       run: cargo --version
     - name: Update PATH
       run: source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
