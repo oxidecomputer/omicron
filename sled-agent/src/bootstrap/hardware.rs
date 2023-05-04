@@ -123,6 +123,10 @@ impl HardwareMonitorWorker {
                 warn!(self.log, "Failed to deactivate switch: {e}");
             }
         }
+
+        self.storage
+            .ensure_using_exactly_these_disks(self.hardware.disks())
+            .await;
     }
 }
 

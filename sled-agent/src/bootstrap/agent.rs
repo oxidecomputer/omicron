@@ -392,6 +392,24 @@ impl Agent {
             global_zone_bootstrap_link_local_address,
         };
 
+        // Wait for at least the M.2 we booted from to show up.
+        //
+        // This gives the bootstrap agent a chance to read locally-stored
+        // configs if any exist.
+        loop {
+            match agent.storage_resources.boot_disk().await {
+                Some(disk) => {
+                    info!(agent.log, "Found boot disk M.2: {disk:?}");
+                    break;
+                }
+                None => {
+                    info!(agent.log, "Waiting for boot disk M.2...");
+                    tokio::time::sleep(core::time::Duration::from_millis(250))
+                        .await;
+                }
+            }
+        }
+
         let paths = sled_config_paths(&agent.storage_resources).await;
         let trust_quorum = if let Some(ledger) =
             Ledger::<PersistentSledAgentRequest>::new(&agent.log, paths).await
