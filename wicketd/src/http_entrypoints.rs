@@ -40,9 +40,8 @@ pub fn api() -> WicketdApiDescription {
     ) -> Result<(), String> {
         api.register(get_inventory)?;
         api.register(put_repository)?;
-        api.register(get_artifacts)?;
+        api.register(get_artifacts_and_event_reports)?;
         api.register(post_start_update)?;
-        api.register(get_update_all)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
         Ok(())
@@ -118,25 +117,26 @@ async fn put_repository(
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct GetArtifactsResponse {
+pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
+    pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
-/// An endpoint used to report all available artifacts.
+/// An endpoint used to report all available artifacts and event reports.
 ///
 /// The order of the returned artifacts is unspecified, and may change between
 /// calls even if the total set of artifacts has not.
 #[endpoint {
     method = GET,
-    path = "/artifacts",
+    path = "/artifacts-and-event-reports",
 }]
-async fn get_artifacts(
+async fn get_artifacts_and_event_reports(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
-    let (system_version, artifacts) =
-        rqctx.context().update_tracker.system_version_and_artifact_ids().await;
-    Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
+) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError> {
+    let response =
+        rqctx.context().update_tracker.artifacts_and_event_reports().await;
+    Ok(HttpResponseOk(response))
 }
 
 /// An endpoint to start updating a sled.
@@ -236,27 +236,6 @@ async fn post_start_update(
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }
-}
-
-/// The response to a `get_update_all` call: the list of all updates (in-flight
-/// or completed) known by wicketd.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct EventReportAll {
-    pub sps: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
-}
-
-/// An endpoint to get the status of all updates being performed or recently
-/// completed on all SPs.
-#[endpoint {
-    method = GET,
-    path = "/update",
-}]
-async fn get_update_all(
-    rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<EventReportAll>, HttpError> {
-    let sps = rqctx.context().update_tracker.event_report_all().await;
-    Ok(HttpResponseOk(EventReportAll { sps }))
 }
 
 /// An endpoint to get the status of any update being performed or recently
