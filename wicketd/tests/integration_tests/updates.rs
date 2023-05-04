@@ -360,4 +360,6 @@ async fn test_update_races() {
         event_buffer.step_events.is_empty(),
         "event buffer is empty: {event_buffer:#?}"
     );
+
+    wicketd_testctx.teardown().await;
 }

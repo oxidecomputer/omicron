@@ -10,6 +10,7 @@ use crate::params::{
     ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use camino::{Utf8Path, Utf8PathBuf};
 use dns_service_client::types::DnsConfigParams;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
@@ -32,7 +33,6 @@ use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
-use std::path::{Path, PathBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -61,8 +61,9 @@ const PANTRY_COUNT: usize = 1;
 // when Nexus provisions external DNS zones.
 const EXTERNAL_DNS_COUNT: usize = 1;
 
-fn rss_service_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-service-plan.toml")
+fn rss_service_plan_path() -> Utf8PathBuf {
+    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
+        .join("rss-service-plan.toml")
 }
 
 /// Describes errors which may occur while generating a plan for services.
@@ -76,7 +77,7 @@ pub enum PlanError {
     },
 
     #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),

@@ -5,15 +5,15 @@
 //! Interfaces for working with RSS config.
 
 use crate::config::ConfigError;
+use camino::Utf8Path;
 use omicron_common::address::{
     get_64_subnet, Ipv6Subnet, AZ_PREFIX, RACK_PREFIX, SLED_PREFIX,
 };
-use std::path::Path;
 
 pub use crate::bootstrap::params::RackInitializeRequest as SetupServiceConfig;
 
 impl SetupServiceConfig {
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, ConfigError> {
         let path = path.as_ref();
         let contents = std::fs::read_to_string(&path)
             .map_err(|err| ConfigError::Io { path: path.into(), err })?;
