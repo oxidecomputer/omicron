@@ -260,45 +260,6 @@ impl std::fmt::Display for DatasetKind {
     }
 }
 
-/// Used to request that the Sled initialize multiple datasets.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct DatasetEnsureBody {
-    pub datasets: Vec<DatasetEnsureRequest>,
-}
-
-/// Used to request a new dataset kind exists within a zpool.
-///
-/// Many dataset types are associated with services that will be
-/// instantiated when the dataset is detected.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct DatasetEnsureRequest {
-    // The UUID of the dataset, as well as the service using it directly.
-    pub id: Uuid,
-    // The name (and UUID) of the Zpool which we are inserting into.
-    pub dataset_name: crate::storage::dataset::DatasetName,
-    // The address on which the zone will listen for requests.
-    pub address: SocketAddrV6,
-    // The addresses in the global zone which should be created, if necessary
-    // to route to the service.
-    #[serde(default)]
-    pub gz_address: Option<Ipv6Addr>,
-}
-
-/*
-impl From<DatasetEnsureRequest>
-    for sled_agent_client::types::DatasetEnsureRequest
-{
-    fn from(p: DatasetEnsureRequest) -> Self {
-        Self {
-            id: p.id,
-            dataset_name: p.dataset_name.into(),
-            address: p.address.to_string(),
-            gz_address: p.gz_address,
-        }
-    }
-}
-*/
-
 /// Describes service-specific parameters.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
