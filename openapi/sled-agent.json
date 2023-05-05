@@ -618,6 +618,12 @@
           "dataset_kind": {
             "$ref": "#/components/schemas/DatasetKind"
           },
+          "gz_address": {
+            "nullable": true,
+            "default": null,
+            "type": "string",
+            "format": "ipv6"
+          },
           "id": {
             "type": "string",
             "format": "uuid"

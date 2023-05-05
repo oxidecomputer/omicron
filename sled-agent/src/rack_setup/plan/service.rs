@@ -284,6 +284,8 @@ impl Plan {
             if idx < EXTERNAL_DNS_COUNT {
                 let internal_ip = addr_alloc.next().expect("Not enough addrs");
                 let http_port = omicron_common::address::DNS_HTTP_PORT;
+                let http_address =
+                    SocketAddrV6::new(internal_ip, http_port, 0, 0);
                 let dns_port = omicron_common::address::DNS_PORT;
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, internal_ip).unwrap();
@@ -309,7 +311,7 @@ impl Plan {
                         dns_address: SocketAddr::new(external_ip, dns_port),
                         nic,
                     },
-                    address: internal_ip,
+                    address: http_address,
                     gz_address: None,
                 });
             }
@@ -375,9 +377,10 @@ impl Plan {
             // zpools described from the underlying config file.
             if idx < CRDB_COUNT {
                 let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
+                let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::COCKROACH_PORT;
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let address = SocketAddrV6::new(ip, port, 0, 0);
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
@@ -393,9 +396,10 @@ impl Plan {
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < CLICKHOUSE_COUNT {
                 let id = Uuid::new_v4();
-                let address = addr_alloc.next().expect("Not enough addrs");
+                let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CLICKHOUSE_PORT;
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let address = SocketAddrV6::new(ip, port, 0, 0);
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
@@ -412,14 +416,16 @@ impl Plan {
             //
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             for zpool_id in &u2_zpools {
-                let address = addr_alloc.next().expect("Not enough addrs");
+                let ip = addr_alloc.next().expect("Not enough addrs");
+                let port = omicron_common::address::CRUCIBLE_PORT;
+                let address = SocketAddrV6::new(ip, port, 0, 0);
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, address).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::Crucible(id),
                         &zone,
-                        omicron_common::address::CRUCIBLE_PORT,
+                        port,
                     )
                     .unwrap();
 
@@ -436,9 +442,11 @@ impl Plan {
             // responsibility of being internal DNS servers.
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
-                let dns_addr = dns_subnet.dns_address().ip();
+                let dns_ip = dns_subnet.dns_address().ip();
+                let http_address =
+                    SocketAddrV6::new(dns_ip, DNS_HTTP_PORT, 0, 0);
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, dns_addr).unwrap();
+                let zone = dns_builder.host_zone(id, dns_ip).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::InternalDns,
@@ -451,16 +459,14 @@ impl Plan {
                     zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::InternalDns {
                         http_address: SocketAddrV6::new(
-                            dns_addr,
+                            dns_ip,
                             DNS_HTTP_PORT,
                             0,
                             0,
                         ),
-                        dns_address: SocketAddrV6::new(
-                            dns_addr, DNS_PORT, 0, 0,
-                        ),
+                        dns_address: SocketAddrV6::new(dns_ip, DNS_PORT, 0, 0),
                     },
-                    address: dns_addr,
+                    address: http_address,
                     gz_address: Some(dns_subnet.gz_address().ip()),
                 });
             }

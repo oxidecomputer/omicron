@@ -62,7 +62,7 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
 use crate::params::{
-    AutonomousServiceOnlyError, DatasetEnsureBody, ServiceType,
+    AutonomousServiceOnlyError, DatasetEnsureBody, DatasetKind, ServiceType,
     ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
@@ -343,21 +343,23 @@ impl ServiceInner {
         // Start up the internal DNS services
         futures::future::join_all(service_plan.services.iter().map(
             |(sled_address, services_request)| async move {
-                let services: Vec<_> = services_request
-                    .services
+                let datasets: Vec<_> = services_request
+                    .datasets
                     .iter()
-                    .filter_map(|svc| {
-                        if matches!(svc.zone_type, ZoneType::InternalDns) {
-                            Some(svc.clone())
+                    .filter_map(|dataset| {
+                        if matches!(
+                            dataset.dataset_kind,
+                            DatasetKind::InternalDns { .. }
+                        ) {
+                            Some(dataset.clone())
                         } else {
                             None
                         }
                     })
                     .collect();
-                if !services.is_empty() {
-                    self.initialize_services(*sled_address, &services).await?;
+                if !datasets.is_empty() {
+                    self.initialize_datasets(*sled_address, &datasets).await?;
                 }
-
                 Ok(())
             },
         ))
@@ -372,39 +374,13 @@ impl ServiceInner {
             service_plan.services.iter().filter_map(
                 |(_, services_request)| {
                     // iterate services for this sled
-                    let dns_addrs: Vec<_> = services_request
-                        .services
+                    let dns_addrs: Vec<SocketAddrV6> = services_request
+                        .datasets
                         .iter()
-                        .filter_map(|svc| {
-                            if !matches!(svc.zone_type, ZoneType::InternalDns) {
-                                // This is not an internal DNS zone.
-                                None
-                            } else {
-                                // This is an internal DNS zone.  Find the IP
-                                // and port that have been assigned to it.
-                                // There should be exactly one.
-                                let addrs = svc.services.iter().filter_map(|s| {
-                                    if let ServiceType::InternalDns { http_address, .. } = &s.details {
-                                        Some(*http_address)
-                                    } else {
-                                        None
-                                    }
-                                }).collect::<Vec<_>>();
-
-                                if addrs.len() == 1 {
-                                    Some(addrs[0])
-                                } else {
-                                    warn!(
-                                        log,
-                                        "DNS configuration: expected one \
-                                        InternalDns service for zone with \
-                                        type ZoneType::InternalDns, but \
-                                        found {} (zone {})",
-                                        addrs.len(),
-                                        svc.id,
-                                    );
-                                    None
-                                }
+                        .filter_map(|dataset| {
+                            match dataset.dataset_kind {
+                                DatasetKind::InternalDns { http_address, .. } => Some(http_address),
+                                _ => None,
                             }
                         })
                         .collect();
@@ -416,7 +392,7 @@ impl ServiceInner {
                 }
             )
             .flatten()
-            .collect::<Vec<_>>();
+            .collect::<Vec<SocketAddrV6>>();
 
         let dns_config = &service_plan.dns_config;
         for ip_addr in dns_server_ips {

@@ -324,7 +324,7 @@ pub struct DatasetEnsureBody {
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
-    pub address: Ipv6Addr,
+    pub address: SocketAddrV6,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
     #[serde(default)]
@@ -337,6 +337,7 @@ impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {
             zpool_id: p.zpool_id,
             dataset_kind: p.dataset_kind.into(),
             address: p.address.to_string(),
+            gz_address: p.gz_address,
             id: p.id,
         }
     }
