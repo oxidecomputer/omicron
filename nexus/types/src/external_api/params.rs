@@ -589,6 +589,7 @@ pub struct SamlIdentityProviderCreate {
     pub technical_contact_email: String,
 
     /// request signing key pair
+    #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
 

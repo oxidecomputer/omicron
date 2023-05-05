@@ -13,7 +13,6 @@ use crate::opte::Gateway;
 use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
-use macaddr::MacAddr6;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -50,14 +49,6 @@ struct PortManagerInner {
     // Sequential identifier for each port on the system.
     next_port_id: AtomicU64,
 
-    // TODO-remove: This is part of the external IP address workaround.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/1335
-    //
-    // We only need this while OPTE needs to forward traffic to the local
-    // gateway. This will be replaced by boundary services.
-    gateway_mac: Option<MacAddr6>,
-
     // IP address of the hosting sled on the underlay.
     underlay_ip: Ipv6Addr,
 
@@ -84,15 +75,10 @@ pub struct PortManager {
 
 impl PortManager {
     /// Create a new manager, for creating OPTE ports
-    pub fn new(
-        log: Logger,
-        underlay_ip: Ipv6Addr,
-        gateway_mac: Option<MacAddr6>,
-    ) -> Self {
+    pub fn new(log: Logger, underlay_ip: Ipv6Addr) -> Self {
         let inner = Arc::new(PortManagerInner {
             log,
             next_port_id: AtomicU64::new(0),
-            gateway_mac,
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
         });
@@ -217,17 +203,6 @@ impl PortManager {
             vni,
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
-            // TODO-remove: Part of the external IP hack.
-            //
-            // NOTE: This value of this flag is irrelevant, since the driver
-            // always overwrites it. The field itself is used in the `oxide-vpc`
-            // code though, to determine how to set up the ARP layer, which is
-            // why it's still here.
-            proxy_arp_enable: true,
-            phys_gw_mac: match self.inner.gateway_mac {
-                Some(m) => Some(MacAddr::from(m.into_array())),
-                None => None,
-            },
             // TODO-completeness (#2153): Plumb domain search list
             domain_list: vec![],
         };
@@ -260,14 +235,6 @@ impl PortManager {
 
         // Initialize firewall rules for the new port.
         let mut rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-
-        // TODO-remove: This is part of the external IP hack.
-        //
-        // We need to allow incoming ARP packets past the firewall layer so
-        // that they may be handled properly at the gateway layer.
-        rules.push(
-            "dir=in priority=65534 protocol=arp action=allow".parse().unwrap(),
-        );
 
         // TODO-remove(#2930): Nexus will plumb proper service fw rules
         if let NetworkInterfaceKind::Service { .. } = nic.kind {

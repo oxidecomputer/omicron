@@ -2,7 +2,7 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-opte-0.21"
+#: target = "lab-opte-0.22"
 #: output_rules = [
 #:	"%/var/svc/log/oxide-sled-agent:default.log",
 #:	"%/zone/oxz_*/root/var/svc/log/oxide-*.log",
@@ -214,6 +214,7 @@ pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 # NOTE: this script configures softnpu's "rack network" settings using swadm
 ./tools/scrimlet/softnpu-init.sh
 
+export RUST_BACKTRACE=1
 ./tests/bootstrap
 
 rm ./tests/bootstrap

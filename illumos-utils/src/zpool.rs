@@ -5,10 +5,10 @@
 //! Utilities for managing Zpools.
 
 use crate::{execute, ExecutionError, PFEXEC};
+use camino::{Utf8Path, Utf8PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -167,7 +167,7 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
+    pub fn create(name: ZpoolName, vdev: &Utf8Path) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -211,6 +211,19 @@ impl Zpool {
             }
             Err(e) => Err(e.into()),
         }
+    }
+
+    /// `zpool set failmode=continue <name>`
+    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("failmode=continue")
+            .arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
     }
 
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
@@ -287,8 +300,8 @@ impl ZpoolName {
     /// Returns a path to a dataset's mountpoint within the zpool.
     ///
     /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
-    pub fn dataset_mountpoint(&self, dataset: &str) -> PathBuf {
-        let mut path = PathBuf::new();
+    pub fn dataset_mountpoint(&self, dataset: &str) -> Utf8PathBuf {
+        let mut path = Utf8PathBuf::new();
         path.push("/pool");
         match self.kind {
             ZpoolKind::External => path.push("ext"),

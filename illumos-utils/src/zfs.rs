@@ -5,8 +5,8 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
+use camino::Utf8PathBuf;
 use std::fmt;
-use std::path::PathBuf;
 
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
@@ -92,14 +92,14 @@ pub struct Zfs {}
 pub enum Mountpoint {
     #[allow(dead_code)]
     Legacy,
-    Path(PathBuf),
+    Path(Utf8PathBuf),
 }
 
 impl fmt::Display for Mountpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Mountpoint::Legacy => write!(f, "legacy"),
-            Mountpoint::Path(p) => write!(f, "{}", p.display()),
+            Mountpoint::Path(p) => write!(f, "{p}"),
         }
     }
 }
@@ -261,10 +261,13 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         }
     }
 
-    // Collect all datasets for ramdisk-based Oxide zones.
-    for dataset in &Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)? {
-        datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
-    }
-
+    // Collect all datasets for ramdisk-based Oxide zones,
+    // if any exist.
+    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    {
+        for dataset in &ramdisk_datasets {
+            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
+        }
+    };
     Ok(datasets)
 }

@@ -767,7 +767,7 @@ impl Instance {
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
-        let root = std::path::Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let root = camino::Utf8Path::new(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let installed_zone = InstalledZone::install(
             &inner.log,
             &inner.vnic_allocator,
@@ -994,7 +994,6 @@ mod test {
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::opte::PortManager;
-    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
@@ -1066,9 +1065,7 @@ mod test {
         let underlay_ip = std::net::Ipv6Addr::new(
             0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
         );
-        let mac = MacAddr6::from([0u8; 6]);
-        let port_manager =
-            PortManager::new(log.new(slog::o!()), underlay_ip, Some(mac));
+        let port_manager = PortManager::new(log.new(slog::o!()), underlay_ip);
         let lazy_nexus_client =
             LazyNexusClient::new(log.clone(), std::net::Ipv6Addr::LOCALHOST)
                 .unwrap();

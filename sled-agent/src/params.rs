@@ -10,8 +10,10 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::Baseboard;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use thiserror::Error;
 use uuid::Uuid;
 
 pub use illumos_utils::opte::params::VpcFirewallRule;
@@ -328,13 +330,29 @@ pub enum ServiceType {
         dns_address: SocketAddrV6,
     },
     Oximeter,
+    // We should never receive external requests to start wicketd, MGS,
+    // dendrite, tfport, or maghemite: these are all services running in the
+    // global zone or switch zone that we start autonomously. We tag them with
+    // `serde(skip)` both to omit them from our OpenAPI definition and to avoid
+    // needing their contained types to implement `JsonSchema + Deserialize +
+    // Serialize`.
+    #[serde(skip)]
     ManagementGatewayService,
-    Wicketd,
+    #[serde(skip)]
+    Wicketd {
+        baseboard: Baseboard,
+    },
+    #[serde(skip)]
     Dendrite {
         asic: DendriteAsic,
     },
+    #[serde(skip)]
     Tfport {
         pkt_source: String,
+    },
+    #[serde(skip)]
+    Maghemite {
+        mode: String,
     },
     CruciblePantry,
     BoundaryNtp {
@@ -351,9 +369,6 @@ pub enum ServiceType {
         dns_servers: Vec<String>,
         domain: Option<String>,
     },
-    Maghemite {
-        mode: String,
-    },
     Clickhouse,
     CockroachDb,
     Crucible,
@@ -367,7 +382,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::InternalDns { .. } => write!(f, "internal_dns"),
             ServiceType::Oximeter => write!(f, "oximeter"),
             ServiceType::ManagementGatewayService => write!(f, "mgs"),
-            ServiceType::Wicketd => write!(f, "wicketd"),
+            ServiceType::Wicketd { .. } => write!(f, "wicketd"),
             ServiceType::Dendrite { .. } => write!(f, "dendrite"),
             ServiceType::Tfport { .. } => write!(f, "tfport"),
             ServiceType::CruciblePantry => write!(f, "crucible/pantry"),
@@ -401,62 +416,63 @@ impl crate::smf_helper::Service for ServiceType {
     }
 }
 
-impl From<ServiceType> for sled_agent_client::types::ServiceType {
-    fn from(s: ServiceType) -> Self {
+/// Error returned by attempting to convert an internal service (i.e., a service
+/// started autonomously by sled-agent) into a
+/// `sled_agent_client::types::ServiceType` to be sent to a remote sled-agent.
+#[derive(Debug, Clone, Copy, Error)]
+#[error("This service may only be started autonomously by sled-agent")]
+pub struct AutonomousServiceOnlyError;
+
+impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceType) -> Result<Self, Self::Error> {
         use sled_agent_client::types::ServiceType as AutoSt;
         use ServiceType as St;
 
         match s {
             St::Nexus { internal_ip, external_ip, nic } => {
-                AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() }
+                Ok(AutoSt::Nexus { internal_ip, external_ip, nic: nic.into() })
             }
             St::ExternalDns { http_address, dns_address, nic } => {
-                AutoSt::ExternalDns {
+                Ok(AutoSt::ExternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
                     nic: nic.into(),
-                }
+                })
             }
             St::InternalDns { http_address, dns_address } => {
-                AutoSt::InternalDns {
+                Ok(AutoSt::InternalDns {
                     http_address: http_address.to_string(),
                     dns_address: dns_address.to_string(),
-                }
+                })
             }
-            St::Oximeter => AutoSt::Oximeter,
-            St::ManagementGatewayService => AutoSt::ManagementGatewayService,
-            St::Wicketd => AutoSt::Wicketd,
-            St::Dendrite { asic } => {
-                use sled_agent_client::types::DendriteAsic as AutoAsic;
-                let asic = match asic {
-                    DendriteAsic::TofinoAsic => AutoAsic::TofinoAsic,
-                    DendriteAsic::TofinoStub => AutoAsic::TofinoStub,
-                    DendriteAsic::SoftNpu => AutoAsic::SoftNpu,
-                };
-                AutoSt::Dendrite { asic }
-            }
-            St::Tfport { pkt_source } => AutoSt::Tfport { pkt_source },
-            St::CruciblePantry => AutoSt::CruciblePantry,
+            St::Oximeter => Ok(AutoSt::Oximeter),
+            St::CruciblePantry => Ok(AutoSt::CruciblePantry),
             St::BoundaryNtp {
                 ntp_servers,
                 dns_servers,
                 domain,
                 nic,
                 snat_cfg,
-            } => AutoSt::BoundaryNtp {
+            } => Ok(AutoSt::BoundaryNtp {
                 ntp_servers,
                 dns_servers,
                 domain,
                 nic: nic.into(),
                 snat_cfg: snat_cfg.into(),
-            },
+            }),
             St::InternalNtp { ntp_servers, dns_servers, domain } => {
-                AutoSt::InternalNtp { ntp_servers, dns_servers, domain }
+                Ok(AutoSt::InternalNtp { ntp_servers, dns_servers, domain })
             }
-            St::Maghemite { mode } => AutoSt::Maghemite { mode },
-            St::Clickhouse => AutoSt::Clickhouse,
-            St::CockroachDb => AutoSt::CockroachDb,
-            St::Crucible => AutoSt::Crucible,
+            St::Clickhouse => Ok(AutoSt::Clickhouse),
+            St::CockroachDb => Ok(AutoSt::CockroachDb),
+            St::Crucible => Ok(AutoSt::Crucible),
+            St::ManagementGatewayService
+            | St::Wicketd { .. }
+            | St::Dendrite { .. }
+            | St::Tfport { .. }
+            | St::Maghemite { .. } => Err(AutonomousServiceOnlyError),
         }
     }
 }
@@ -557,21 +573,25 @@ impl ServiceZoneRequest {
     }
 }
 
-impl From<ServiceZoneRequest> for sled_agent_client::types::ServiceZoneRequest {
-    fn from(s: ServiceZoneRequest) -> Self {
-        let mut services = Vec::new();
+impl TryFrom<ServiceZoneRequest>
+    for sled_agent_client::types::ServiceZoneRequest
+{
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceZoneRequest) -> Result<Self, Self::Error> {
+        let mut services = Vec::with_capacity(s.services.len());
         for service in s.services {
-            services.push(service.into())
+            services.push(service.try_into()?);
         }
 
-        Self {
+        Ok(Self {
             id: s.id,
             zone_type: s.zone_type.into(),
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
             gz_addresses: s.gz_addresses,
             services,
-        }
+        })
     }
 }
 
@@ -584,9 +604,14 @@ pub struct ServiceZoneService {
     pub details: ServiceType,
 }
 
-impl From<ServiceZoneService> for sled_agent_client::types::ServiceZoneService {
-    fn from(s: ServiceZoneService) -> Self {
-        Self { id: s.id, details: s.details.into() }
+impl TryFrom<ServiceZoneService>
+    for sled_agent_client::types::ServiceZoneService
+{
+    type Error = AutonomousServiceOnlyError;
+
+    fn try_from(s: ServiceZoneService) -> Result<Self, Self::Error> {
+        let details = s.details.try_into()?;
+        Ok(Self { id: s.id, details })
     }
 }
 

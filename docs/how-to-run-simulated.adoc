@@ -23,24 +23,44 @@ guide at xref:how-to-run.adoc[].
 
 == Installing Prerequisites
 
-Prerequisite software may be installed with the following script:
+First, set up your environment to include executables that will be installed shortly:
+
+[source,text]
+----
+$ source env.sh
+----
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ ./tools/install_builder_prerequisites.sh
 ----
 
+You need to do this once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
+
 == Running
 
-To **run Omicron** you need to run four programs:
+To run anything, you'll need to set up your environment as before:
+
+[source,text]
+----
+$ source env.sh
+----
+
+You don't need to do this again if you just did it.  But you'll need to do it each time you start a new shell session to work in this workspace.
+
+To **run Omicron** you need to run several programs:
 
 * a CockroachDB cluster.  For development, you can use the `omicron-dev` tool in this repository to start a single-node CockroachDB cluster **that will delete the database when you shut it down.**
 * a ClickHouse server. You should use the `omicron-dev` tool for this as well, see below, and as with CockroachDB,
 the database files will be deleted when you stop the program.
 * `nexus`: the guts of the control plane
 * `sled-agent-sim`: a simulator for the component that manages a single sled
+* an `external-dns` server
+* `oximeter`, which collects metrics from control plane components
 
-The easiest way to start the required databases is to use the built-in `omicron-dev` tool.  This tool assumes that the `cockroach` and `clickhouse` executables are on your PATH, and match the versions above.
+You can run these by hand, but it's easier to use `omicron-dev run-all`.  See below for more on both options.
 
 === Quick start
 

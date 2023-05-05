@@ -26,10 +26,9 @@ echo "tests will store output in $TEST_TMPDIR" >&2
 mkdir "$TEST_TMPDIR"
 
 #
-# Put "./cockroachdb/bin" and "./clickhouse" on the PATH for the test
-# suite.
+# Set up our PATH for the test suite.
 #
-export PATH="$PATH:$PWD/out/cockroachdb/bin:$PWD/out/clickhouse:$PWD/out/dendrite-stub/bin"
+source ./env.sh
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
@@ -63,7 +62,7 @@ ptime -m cargo build --locked --all-targets --verbose
 #
 
 banner test
-ptime -m cargo test --locked --verbose --no-fail-fast
+RUST_BACKTRACE=1 ptime -m cargo test --locked --verbose --no-fail-fast
 
 #
 # Make sure that we have left nothing around in $TEST_TMPDIR.  The easiest way

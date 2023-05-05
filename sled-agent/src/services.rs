@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
     ServiceZoneService, TimeSync, ZoneType,
@@ -33,6 +34,7 @@ use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::storage_manager::StorageManager;
+use camino::{Utf8Path, Utf8PathBuf};
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use illumos_utils::addrobj::AddrObject;
@@ -61,6 +63,7 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::api::external::Generation;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
     BackoffError,
@@ -70,14 +73,15 @@ use omicron_common::nexus_config::{
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
-use sled_hardware::underlay::{self, BOOTSTRAP_PREFIX};
+use sled_hardware::underlay;
+use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -91,10 +95,10 @@ use uuid::Uuid;
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize { path: PathBuf, err: toml::ser::Error },
+    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
 
     #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: PathBuf, err: toml::de::Error },
+    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -105,6 +109,9 @@ pub enum Error {
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
+
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
@@ -175,8 +182,8 @@ impl Error {
     fn io(message: &str, err: std::io::Error) -> Self {
         Self::Io { message: message.to_string(), err }
     }
-    fn io_path(path: &Path, err: std::io::Error) -> Self {
-        Self::Io { message: format!("Error accessing {}", path.display()), err }
+    fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {path}"), err }
     }
 }
 
@@ -195,96 +202,39 @@ pub struct Config {
 
     /// Identifies the revision of the sidecar to be used.
     pub sidecar_revision: String,
-
-    /// An optional internet gateway address for external services.
-    pub gateway_address: Option<Ipv4Addr>,
-
-    // The path for the ServiceManager to store information about
-    // all running services.
-    all_svcs_ledger_path: PathBuf,
-    storage_svcs_ledger_path: PathBuf,
 }
 
 impl Config {
-    pub fn new(
-        sled_id: Uuid,
-        sidecar_revision: String,
-        gateway_address: Option<Ipv4Addr>,
-    ) -> Self {
-        Self {
-            sled_id,
-            sidecar_revision,
-            gateway_address,
-            all_svcs_ledger_path: default_services_ledger_path(),
-            storage_svcs_ledger_path: default_storage_services_ledger_path(),
-        }
+    pub fn new(sled_id: Uuid, sidecar_revision: String) -> Self {
+        Self { sled_id, sidecar_revision }
     }
 }
 
-// The filename of ServiceManager's internal storage.
+// The filename of the ledger, within the provided directory.
 const SERVICES_LEDGER_FILENAME: &str = "services.toml";
 const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
-
-// The default path to service configuration
-fn default_services_ledger_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(SERVICES_LEDGER_FILENAME)
-}
-
-// The default path to storage service configuration
-fn default_storage_services_ledger_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join(STORAGE_SERVICES_LEDGER_FILENAME)
-}
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct AllZoneRequests {
+    generation: Generation,
     requests: Vec<ZoneRequest>,
 }
 
-impl AllZoneRequests {
-    fn new() -> Self {
-        Self { requests: vec![] }
+impl Default for AllZoneRequests {
+    fn default() -> Self {
+        Self { generation: Generation::new(), requests: vec![] }
+    }
+}
+
+impl Ledgerable for AllZoneRequests {
+    fn is_newer_than(&self, other: &AllZoneRequests) -> bool {
+        self.generation >= other.generation
     }
 
-    // Reads from `path` as a toml-serialized version of `Self`.
-    async fn read_from(log: &Logger, path: &Path) -> Result<Self, Error> {
-        if path.exists() {
-            debug!(
-                log,
-                "Reading old storage service requests from {}",
-                path.display()
-            );
-            toml::from_str(
-                &tokio::fs::read_to_string(&path)
-                    .await
-                    .map_err(|err| Error::io_path(&path, err))?,
-            )
-            .map_err(|err| Error::TomlDeserialize {
-                path: path.to_path_buf(),
-                err,
-            })
-        } else {
-            debug!(log, "No old storage service requests");
-            Ok(AllZoneRequests::new())
-        }
-    }
-
-    // Writes to `path` as a toml-serialized version of `Self`.
-    async fn write_to(&self, log: &Logger, path: &Path) -> Result<(), Error> {
-        debug!(log, "Writing zone request configuration to {}", path.display());
-        let serialized_services = toml::Value::try_from(&self)
-            .expect("Cannot serialize service list");
-        let services_str =
-            toml::to_string(&serialized_services).map_err(|err| {
-                Error::TomlSerialize { path: path.to_path_buf(), err }
-            })?;
-        tokio::fs::write(&path, services_str)
-            .await
-            .map_err(|err| Error::io_path(&path, err))?;
-        Ok(())
+    fn generation_bump(&mut self) {
+        self.generation = self.generation.next();
     }
 }
 
@@ -294,7 +244,7 @@ impl AllZoneRequests {
 struct ZoneRequest {
     zone: ServiceZoneRequest,
     // TODO: Consider collapsing "root" into ServiceZoneRequest
-    root: PathBuf,
+    root: Utf8PathBuf,
 }
 
 struct Task {
@@ -363,8 +313,8 @@ pub struct ServiceManagerInner {
     // TODO(https://github.com/oxidecomputer/omicron/issues/2888): We will
     // need this interface to provision Zone filesystems on explicit U.2s,
     // rather than simply placing them on the ramdisk.
-    #[allow(dead_code)]
     storage: StorageManager,
+    ledger_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -439,23 +389,62 @@ impl ServiceManager {
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
                 storage,
+                ledger_directory_override: OnceCell::new(),
             }),
         };
         Ok(mgr)
+    }
+
+    #[cfg(test)]
+    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
+        self.inner.ledger_directory_override.set(path).unwrap();
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
         self.inner.switch_zone_bootstrap_address
     }
 
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+        }
+        self.inner
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
+    async fn all_storage_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
+        }
+
+        self.inner
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(STORAGE_SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
     pub async fn load_non_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        let ledger = self.services_ledger_path()?;
-        if !ledger.exists() {
+        let mut existing_zones = self.inner.zones.lock().await;
+        let ledger = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_service_ledgers().await,
+        )
+        .await?;
+        let services = ledger.data();
+        if services.requests.is_empty() {
             return Ok(());
         }
-        let services = AllZoneRequests::read_from(log, &ledger).await?;
-        let mut existing_zones = self.inner.zones.lock().await;
 
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
@@ -523,12 +512,16 @@ impl ServiceManager {
 
     pub async fn load_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
-        let ledger = self.storage_services_ledger_path()?;
-        if !ledger.exists() {
+        let mut existing_zones = self.inner.dataset_zones.lock().await;
+        let ledger = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_storage_service_ledgers().await,
+        )
+        .await?;
+        let services = ledger.data();
+        if services.requests.is_empty() {
             return Ok(());
         }
-        let services = AllZoneRequests::read_from(log, &ledger).await?;
-        let mut existing_zones = self.inner.dataset_zones.lock().await;
         self.initialize_services_locked(
             &mut existing_zones,
             &services.requests,
@@ -580,26 +573,6 @@ impl ServiceManager {
         self.inner.sled_mode
     }
 
-    // Returns either the path to the explicitly provided ledger path, or
-    // chooses the default one.
-    fn services_ledger_path(&self) -> Result<PathBuf, Error> {
-        if let Some(info) = self.inner.sled_info.get() {
-            Ok(info.config.all_svcs_ledger_path.clone())
-        } else {
-            Err(Error::SledAgentNotReady)
-        }
-    }
-
-    // Returns either the path to the explicitly provided ledger path, or
-    // chooses the default one.
-    fn storage_services_ledger_path(&self) -> Result<PathBuf, Error> {
-        if let Some(info) = self.inner.sled_info.get() {
-            Ok(info.config.storage_svcs_ledger_path.clone())
-        } else {
-            Err(Error::SledAgentNotReady)
-        }
-    }
-
     // Advertise the /64 prefix of `address`, unless we already have.
     //
     // This method only blocks long enough to check our HashSet of
@@ -634,7 +607,7 @@ impl ServiceManager {
         }
 
         for dev in &devices {
-            if !Path::new(dev).exists() {
+            if !Utf8Path::new(dev).exists() {
                 return Err(Error::MissingDevice { device: dev.to_string() });
             }
         }
@@ -889,7 +862,7 @@ impl ServiceManager {
         let service = DnsClient {};
         let smfh = SmfHelper::new(&running_zone, &service);
 
-        let etc = PathBuf::from(running_zone.root()).join("etc");
+        let etc = running_zone.root().join("etc");
         let resolv_conf = etc.join("resolv.conf");
         let nsswitch_conf = etc.join("nsswitch.conf");
         let nsswitch_dns = etc.join("nsswitch.dns");
@@ -907,7 +880,7 @@ impl ServiceManager {
                 config.push_str(&format!("nameserver {s}\n"));
             }
 
-            debug!(self.inner.log, "creating {}", resolv_conf.display());
+            debug!(self.inner.log, "creating {resolv_conf}");
             tokio::fs::write(&resolv_conf, config)
                 .await
                 .map_err(|err| Error::io_path(&resolv_conf, err))?;
@@ -1353,7 +1326,7 @@ impl ServiceManager {
                     };
 
                     // Copy the partial config file to the expected location.
-                    let config_dir = PathBuf::from(format!(
+                    let config_dir = Utf8PathBuf::from(format!(
                         "{}/var/svc/manifest/site/nexus",
                         running_zone.root()
                     ));
@@ -1480,7 +1453,7 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Wicketd => {
+                ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
 
                     smfh.setprop(
@@ -1515,6 +1488,15 @@ impl ServiceManager {
                     smfh.setprop(
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
+                    )?;
+                    smfh.setprop(
+                        "config/baseboard-identifier",
+                        baseboard.identifier(),
+                    )?;
+                    smfh.setprop("config/baseboard-model", baseboard.model())?;
+                    smfh.setprop(
+                        "config/baseboard-revision",
+                        baseboard.revision(),
                     )?;
                     smfh.refresh()?;
                 }
@@ -1801,15 +1783,20 @@ impl ServiceManager {
         &self,
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
+        let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
-        let ledger_path = self.services_ledger_path()?;
 
-        let old_zone_requests =
-            AllZoneRequests::read_from(&self.inner.log, &ledger_path).await?;
+        // Read the existing set of services from the ledger.
+        let mut ledger = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_service_ledgers().await,
+        )
+        .await?;
+        let ledger_zone_requests = ledger.data_mut();
 
         let new_zone_requests: Vec<ServiceZoneRequest> = {
             let known_set: HashSet<&ServiceZoneRequest> = HashSet::from_iter(
-                old_zone_requests.requests.iter().map(|r| &r.zone),
+                ledger_zone_requests.requests.iter().map(|r| &r.zone),
             );
             let requested_set = HashSet::from_iter(request.services.iter());
 
@@ -1821,7 +1808,7 @@ impl ServiceManager {
                 // the case of changing configurations, rather than just doing
                 // that removal implicitly.
                 warn!(
-                    self.inner.log,
+                    log,
                     "Cannot request services on this sled, differing configurations: {:#?}",
                     known_set.symmetric_difference(&requested_set)
                 );
@@ -1833,9 +1820,9 @@ impl ServiceManager {
                 .collect::<Vec<ServiceZoneRequest>>()
         };
 
-        let mut zone_requests = AllZoneRequests::new();
+        let mut zone_requests = AllZoneRequests::default();
         for zone in new_zone_requests.into_iter() {
-            let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
             zone_requests.requests.push(ZoneRequest { zone, root });
         }
 
@@ -1845,8 +1832,9 @@ impl ServiceManager {
         )
         .await?;
 
-        zone_requests.requests.append(&mut old_zone_requests.requests.clone());
-        zone_requests.write_to(&self.inner.log, &ledger_path).await?;
+        // Update the services in the ledger and write it back to both M.2s
+        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger.commit().await?;
 
         Ok(())
     }
@@ -1860,13 +1848,18 @@ impl ServiceManager {
         &self,
         request: ServiceZoneRequest,
     ) -> Result<(), Error> {
+        let log = &self.inner.log;
         let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let ledger_path = self.storage_services_ledger_path()?;
 
-        let mut zone_requests =
-            AllZoneRequests::read_from(&self.inner.log, &ledger_path).await?;
+        // Read the existing set of services from the ledger.
+        let mut ledger = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_storage_service_ledgers().await,
+        )
+        .await?;
+        let ledger_zone_requests = ledger.data_mut();
 
-        if !zone_requests
+        if !ledger_zone_requests
             .requests
             .iter()
             .any(|zone_request| zone_request.zone.id == request.id)
@@ -1880,16 +1873,18 @@ impl ServiceManager {
             let root = dataset
                 .pool()
                 .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
-            zone_requests.requests.push(ZoneRequest { zone: request, root });
+            ledger_zone_requests
+                .requests
+                .push(ZoneRequest { zone: request, root });
         }
 
         self.initialize_services_locked(
             &mut existing_zones,
-            &zone_requests.requests,
+            &ledger_zone_requests.requests,
         )
         .await?;
 
-        zone_requests.write_to(&self.inner.log, &ledger_path).await?;
+        ledger.commit().await?;
 
         Ok(())
     }
@@ -1911,13 +1906,11 @@ impl ServiceManager {
 
         info!(self.inner.log, "Setting boot time to {:?}", now);
 
-        let files: Vec<String> = zones
+        let files: Vec<Utf8PathBuf> = zones
             .iter()
             .map(|z| z.root())
-            .chain(iter::once("".to_string()))
-            .flat_map(|r| {
-                [format!("{r}/var/adm/utmpx"), format!("{r}/var/adm/wtmpx")]
-            })
+            .chain(iter::once(Utf8PathBuf::from("/")))
+            .flat_map(|r| [r.join("var/adm/utmpx"), r.join("var/adm/wtmpx")])
             .collect();
 
         for file in files {
@@ -1925,7 +1918,7 @@ impl ServiceManager {
             let cmd = command.args(&[
                 "/usr/platform/oxide/bin/tmpx",
                 &format!("{}", now.as_secs()),
-                &file,
+                &file.as_str(),
             ]);
             match execute(cmd) {
                 Err(e) => {
@@ -1994,6 +1987,7 @@ impl ServiceManager {
     pub async fn activate_switch(
         &self,
         switch_zone_ip: Option<Ipv6Addr>,
+        baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
         let mut filesystems: Vec<zone::Fs> = vec![];
@@ -2013,7 +2007,7 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
@@ -2035,7 +2029,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
@@ -2282,7 +2276,7 @@ impl ServiceManager {
         let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
             return Ok(())
         };
-        let root = PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
         let request = ZoneRequest { zone: request.clone(), root };
         let zone = self.initialize_zone(&request, filesystems).await?;
         *sled_zone =
@@ -2340,7 +2334,6 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use macaddr::MacAddr6;
     use std::net::Ipv6Addr;
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
@@ -2463,26 +2456,19 @@ mod test {
     }
 
     struct TestConfig {
-        config_dir: tempfile::TempDir,
+        config_dir: camino_tempfile::Utf8TempDir,
     }
 
     impl TestConfig {
         async fn new() -> Self {
-            let config_dir = tempfile::TempDir::new().unwrap();
+            let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
             Self { config_dir }
         }
 
         fn make_config(&self) -> Config {
-            let all_svcs_ledger_path =
-                self.config_dir.path().join(SERVICES_LEDGER_FILENAME);
-            let storage_svcs_ledger_path =
-                self.config_dir.path().join(STORAGE_SERVICES_LEDGER_FILENAME);
             Config {
                 sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
-                gateway_address: None,
-                all_svcs_ledger_path,
-                storage_svcs_ledger_path,
             }
         }
     }
@@ -2510,11 +2496,14 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2556,11 +2545,14 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2605,11 +2597,14 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2642,11 +2637,14 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2688,10 +2686,13 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),
@@ -2706,10 +2707,12 @@ mod test {
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
-        // Next, delete the config. This means the service we just created will
+        // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
-        let config = test_config.make_config();
-        std::fs::remove_file(&config.all_svcs_ledger_path).unwrap();
+        std::fs::remove_file(
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+        )
+        .unwrap();
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
@@ -2727,10 +2730,14 @@ mod test {
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
+
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
-            Some(MacAddr6::from([0u8; 6])),
         );
         mgr.sled_agent_started(
             test_config.make_config(),

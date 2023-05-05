@@ -17,6 +17,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
 use crate::updates::{ConfigUpdates, UpdateManager};
+use camino::Utf8PathBuf;
 use dropshot::HttpError;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
@@ -34,7 +35,6 @@ use sled_hardware::underlay;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -226,16 +226,10 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics()?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
-        let (gateway_mac, gateway_address) = match &request.gateway {
-            Some(g) => (Some(g.mac.0), g.address),
-            None => (None, None),
-        };
-
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
             *sled_address.ip(),
-            gateway_mac,
         );
 
         storage
@@ -265,15 +259,13 @@ impl SledAgent {
         let hardware = HardwareManager::new(&parent_log, services.sled_mode())
             .map_err(|e| Error::Hardware(e))?;
 
-        let update_config =
-            ConfigUpdates { zone_artifact_path: PathBuf::from("/opt/oxide") };
+        let update_config = ConfigUpdates {
+            zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
+        };
         let updates = UpdateManager::new(update_config);
 
-        let svc_config = services::Config::new(
-            request.id,
-            config.sidecar_revision.clone(),
-            gateway_address,
-        );
+        let svc_config =
+            services::Config::new(request.id, config.sidecar_revision.clone());
         services
             .sled_agent_started(
                 svc_config,
@@ -328,9 +320,13 @@ impl SledAgent {
         let scrimlet = self.inner.hardware.is_scrimlet_driver_loaded();
 
         if scrimlet {
+            let baseboard = self.inner.hardware.baseboard();
             let switch_zone_ip = Some(self.inner.switch_zone_ip());
-            if let Err(e) =
-                self.inner.services.activate_switch(switch_zone_ip).await
+            if let Err(e) = self
+                .inner
+                .services
+                .activate_switch(switch_zone_ip, baseboard)
+                .await
             {
                 warn!(log, "Failed to activate switch: {e}");
             }
@@ -368,11 +364,12 @@ impl SledAgent {
                         self.notify_nexus_about_self(&log);
                     }
                     HardwareUpdate::TofinoLoaded => {
+                        let baseboard = self.inner.hardware.baseboard();
                         let switch_zone_ip = Some(self.inner.switch_zone_ip());
                         if let Err(e) = self
                             .inner
                             .services
-                            .activate_switch(switch_zone_ip)
+                            .activate_switch(switch_zone_ip, baseboard)
                             .await
                         {
                             warn!(log, "Failed to activate switch: {e}");

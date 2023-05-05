@@ -208,6 +208,7 @@ impl nexus_test_interface::NexusServer for Server {
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         external_dns_zone_name: &str,
+        recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -253,6 +254,7 @@ impl nexus_test_interface::NexusServer for Server {
                     certs: vec![],
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
+                    recovery_silo,
                 },
             )
             .await
