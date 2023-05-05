@@ -382,7 +382,7 @@ impl ServiceInner {
                         .iter()
                         .filter_map(|dataset| {
                             match dataset.dataset_name.dataset() {
-                                DatasetKind::InternalDns { http_address, .. } => Some(http_address.clone()),
+                                DatasetKind::InternalDns { http_address, .. } => Some(*http_address),
                                 _ => None,
                             }
                         })
