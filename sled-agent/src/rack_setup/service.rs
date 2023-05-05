@@ -62,7 +62,7 @@ use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
 use crate::params::{
-    AutonomousServiceOnlyError, DatasetEnsureBody, DatasetKind, ServiceType,
+    AutonomousServiceOnlyError, DatasetEnsureRequest, DatasetKind, ServiceType,
     ServiceZoneRequest, TimeSync, ZoneType,
 };
 use crate::rack_setup::plan::service::{
@@ -246,7 +246,7 @@ impl ServiceInner {
     async fn initialize_datasets(
         &self,
         sled_address: SocketAddrV6,
-        datasets: &Vec<DatasetEnsureBody>,
+        datasets: &Vec<DatasetEnsureRequest>,
     ) -> Result<(), SetupServiceError> {
         let dur = std::time::Duration::from_secs(60);
 
@@ -261,26 +261,29 @@ impl ServiceInner {
             self.log.new(o!("SledAgentClient" => sled_address.to_string())),
         );
 
+        let datasets =
+            datasets.iter().map(|d| d.clone().into()).collect::<Vec<_>>();
+
         info!(self.log, "sending dataset requests...");
-        for dataset in datasets {
-            let filesystem_put = || async {
-                info!(self.log, "creating new filesystem: {:?}", dataset);
-                client
-                    .filesystem_put(&dataset.clone().into())
-                    .await
-                    .map_err(BackoffError::transient)?;
-                Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
-            };
-            let log_failure = |error, _| {
-                warn!(self.log, "failed to create filesystem"; "error" => ?error);
-            };
-            retry_notify(
-                retry_policy_internal_service_aggressive(),
-                filesystem_put,
-                log_failure,
-            )
-            .await?;
-        }
+        let filesystem_put = || async {
+            info!(self.log, "creating new filesystems: {:?}", datasets);
+            client
+                .filesystems_put(&SledAgentTypes::DatasetEnsureBody {
+                    datasets: datasets.clone(),
+                })
+                .await
+                .map_err(BackoffError::transient)?;
+            Ok::<(), BackoffError<SledAgentError<SledAgentTypes::Error>>>(())
+        };
+        let log_failure = |error, _| {
+            warn!(self.log, "failed to create filesystem"; "error" => ?error);
+        };
+        retry_notify(
+            retry_policy_internal_service_aggressive(),
+            filesystem_put,
+            log_failure,
+        )
+        .await?;
 
         Ok(())
     }
@@ -348,7 +351,7 @@ impl ServiceInner {
                     .iter()
                     .filter_map(|dataset| {
                         if matches!(
-                            dataset.dataset_kind,
+                            dataset.dataset_name.dataset(),
                             DatasetKind::InternalDns { .. }
                         ) {
                             Some(dataset.clone())
@@ -378,8 +381,8 @@ impl ServiceInner {
                         .datasets
                         .iter()
                         .filter_map(|dataset| {
-                            match dataset.dataset_kind {
-                                DatasetKind::InternalDns { http_address, .. } => Some(http_address),
+                            match dataset.dataset_name.dataset() {
+                                DatasetKind::InternalDns { http_address, .. } => Some(http_address.clone()),
                                 _ => None,
                             }
                         })
@@ -703,11 +706,11 @@ impl ServiceInner {
 
             for dataset in service_request.datasets.iter() {
                 datasets.push(NexusTypes::DatasetCreateRequest {
-                    zpool_id: dataset.zpool_id,
+                    zpool_id: dataset.dataset_name.pool().id(),
                     dataset_id: dataset.id,
                     request: NexusTypes::DatasetPutRequest {
                         address: dataset.address.to_string(),
-                        kind: dataset.dataset_kind.clone().into(),
+                        kind: dataset.dataset_name.dataset().clone().into(),
                     },
                 })
             }

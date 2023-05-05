@@ -7,13 +7,15 @@
 use crate::bootstrap::params::SledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    DatasetEnsureRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
     ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use crate::storage::dataset::DatasetName;
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
+use illumos_utils::zpool::ZpoolName;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
@@ -93,7 +95,7 @@ pub enum PlanError {
 pub struct SledRequest {
     /// Datasets to be created.
     #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureBody>,
+    pub datasets: Vec<DatasetEnsureRequest>,
 
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
@@ -165,7 +167,7 @@ impl Plan {
     async fn get_u2_zpools_from_sled(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<Vec<Uuid>, PlanError> {
+    ) -> Result<Vec<ZpoolName>, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -179,7 +181,7 @@ impl Plan {
         );
 
         let get_u2_zpools = || async {
-            let zpools: Vec<Uuid> = client
+            let zpools: Vec<ZpoolName> = client
                 .zpools_get()
                 .await
                 .map(|response| {
@@ -187,7 +189,9 @@ impl Plan {
                         .into_inner()
                         .into_iter()
                         .filter_map(|zpool| match zpool.disk_type {
-                            SledAgentTypes::DiskType::U2 => Some(zpool.id),
+                            SledAgentTypes::DiskType::U2 => {
+                                Some(ZpoolName::new_external(zpool.id))
+                            }
                             SledAgentTypes::DiskType::M2 => None,
                         })
                         .collect()
@@ -298,19 +302,21 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
-                request.datasets.push(DatasetEnsureBody {
+                request.datasets.push(DatasetEnsureRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::ExternalDns {
-                        http_address: SocketAddrV6::new(
-                            internal_ip,
-                            http_port,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddr::new(external_ip, dns_port),
-                        nic,
-                    },
+                    dataset_name: DatasetName::new(
+                        u2_zpools[0].clone(),
+                        crate::params::DatasetKind::ExternalDns {
+                            http_address: SocketAddrV6::new(
+                                internal_ip,
+                                http_port,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddr::new(external_ip, dns_port),
+                            nic,
+                        },
+                    ),
                     address: http_address,
                     gz_address: None,
                 });
@@ -384,10 +390,12 @@ impl Plan {
                 dns_builder
                     .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
-                request.datasets.push(DatasetEnsureBody {
+                request.datasets.push(DatasetEnsureRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::CockroachDb,
+                    dataset_name: DatasetName::new(
+                        u2_zpools[0].clone(),
+                        crate::params::DatasetKind::CockroachDb,
+                    ),
                     address,
                     gz_address: None,
                 });
@@ -403,10 +411,12 @@ impl Plan {
                 dns_builder
                     .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
-                request.datasets.push(DatasetEnsureBody {
+                request.datasets.push(DatasetEnsureRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::Clickhouse,
+                    dataset_name: DatasetName::new(
+                        u2_zpools[0].clone(),
+                        crate::params::DatasetKind::Clickhouse,
+                    ),
                     address,
                     gz_address: None,
                 });
@@ -415,7 +425,7 @@ impl Plan {
             // Each zpool gets a crucible zone.
             //
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            for zpool_id in &u2_zpools {
+            for pool in &u2_zpools {
                 let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let address = SocketAddrV6::new(ip, port, 0, 0);
@@ -429,10 +439,12 @@ impl Plan {
                     )
                     .unwrap();
 
-                request.datasets.push(DatasetEnsureBody {
+                request.datasets.push(DatasetEnsureRequest {
                     id,
-                    zpool_id: *zpool_id,
-                    dataset_kind: crate::params::DatasetKind::Crucible,
+                    dataset_name: DatasetName::new(
+                        pool.clone(),
+                        crate::params::DatasetKind::Crucible,
+                    ),
                     address,
                     gz_address: None,
                 });
@@ -454,18 +466,22 @@ impl Plan {
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
-                request.datasets.push(DatasetEnsureBody {
+                request.datasets.push(DatasetEnsureRequest {
                     id,
-                    zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::InternalDns {
-                        http_address: SocketAddrV6::new(
-                            dns_ip,
-                            DNS_HTTP_PORT,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddrV6::new(dns_ip, DNS_PORT, 0, 0),
-                    },
+                    dataset_name: DatasetName::new(
+                        u2_zpools[0].clone(),
+                        crate::params::DatasetKind::InternalDns {
+                            http_address: SocketAddrV6::new(
+                                dns_ip,
+                                DNS_HTTP_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_ip, DNS_PORT, 0, 0,
+                            ),
+                        },
+                    ),
                     address: http_address,
                     gz_address: Some(dns_subnet.gz_address().ip()),
                 });

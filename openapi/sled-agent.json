@@ -56,7 +56,7 @@
     },
     "/filesystem": {
       "put": {
-        "operationId": "filesystem_put",
+        "operationId": "filesystems_put",
         "requestBody": {
           "content": {
             "application/json": {
@@ -609,14 +609,29 @@
         ]
       },
       "DatasetEnsureBody": {
+        "description": "Used to request that the Sled initialize multiple datasets.",
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetEnsureRequest"
+            }
+          }
+        },
+        "required": [
+          "datasets"
+        ]
+      },
+      "DatasetEnsureRequest": {
         "description": "Used to request a new dataset kind exists within a zpool.\n\nMany dataset types are associated with services that will be instantiated when the dataset is detected.",
         "type": "object",
         "properties": {
           "address": {
             "type": "string"
           },
-          "dataset_kind": {
-            "$ref": "#/components/schemas/DatasetKind"
+          "dataset_name": {
+            "$ref": "#/components/schemas/DatasetName"
           },
           "gz_address": {
             "nullable": true,
@@ -627,17 +642,12 @@
           "id": {
             "type": "string",
             "format": "uuid"
-          },
-          "zpool_id": {
-            "type": "string",
-            "format": "uuid"
           }
         },
         "required": [
           "address",
-          "dataset_kind",
-          "id",
-          "zpool_id"
+          "dataset_name",
+          "id"
         ]
       },
       "DatasetKind": {
