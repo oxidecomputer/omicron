@@ -930,10 +930,24 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        // Look for the image in the ramdisk first
+        let mut zone_image_paths = vec!["/opt/oxide".into()];
+        // If the boot disk exists, look for the image in the "install" dataset
+        // there too.
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.resources().boot_disk().await
+        {
+            zone_image_paths.push(
+                boot_zpool
+                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
+            );
+        }
+
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
             &request.root,
+            zone_image_paths.as_slice(),
             &request.zone.zone_type.to_string(),
             unique_name.as_deref(),
             datasets.as_slice(),

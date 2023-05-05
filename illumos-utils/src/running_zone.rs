@@ -564,6 +564,9 @@ pub enum InstallZoneError {
         #[source]
         err: crate::zone::AdmError,
     },
+
+    #[error("Failed to find zone image '{image}' from `{paths:?}'")]
+    ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
 }
 
 pub struct InstalledZone {
@@ -626,6 +629,7 @@ impl InstalledZone {
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
         zone_root_path: &Utf8Path,
+        zone_image_paths: &[Utf8PathBuf],
         zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
@@ -644,13 +648,27 @@ impl InstalledZone {
                 }
             })?;
 
-        // TODO: This has gotta change.
-        // TODO: Reach into M.2 for the correct pathway.
-        //
-        // TODO: Could *also* look in /opt/oxide? just like a "paths" argument?
         let full_zone_name = Self::get_zone_name(zone_type, unique_name);
-        let zone_image_path =
-            Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
+
+        // Looks for the image within `zone_image_path`, in order.
+        let image = format!("{}.tar.gz", zone_type);
+        let zone_image_path = zone_image_paths
+            .iter()
+            .find_map(|image_path| {
+                let path = image_path.join(&image);
+                if path.exists() {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| InstallZoneError::ImageNotFound {
+                image: image.to_string(),
+                paths: zone_image_paths
+                    .iter()
+                    .map(|p| p.to_path_buf())
+                    .collect(),
+            })?;
 
         let net_device_names: Vec<String> = opte_ports
             .iter()

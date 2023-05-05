@@ -772,6 +772,7 @@ impl Instance {
             &inner.log,
             &inner.vnic_allocator,
             &root,
+            &["/opt/oxide".into()],
             "propolis-server",
             Some(&inner.propolis_id().to_string()),
             // dataset=
