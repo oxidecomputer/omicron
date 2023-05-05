@@ -82,7 +82,7 @@ pub enum Error {
     },
 
     #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
-    UuidMismatch { name: DatasetName, old: Uuid, new: Uuid },
+    UuidMismatch { name: Box<DatasetName>, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
@@ -319,7 +319,7 @@ impl StorageWorker {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != dataset_id {
                     return Err(Error::UuidMismatch {
-                        name: dataset_name.clone(),
+                        name: Box::new(dataset_name.clone()),
                         old: id,
                         new: dataset_id,
                     });
