@@ -31,6 +31,27 @@ pub struct Switch {
     revision: i64,
 }
 
+impl Switch {
+    // TODO: Unify hardware identifiers
+    pub fn new(
+        id: Uuid,
+        serial_number: String,
+        part_number: String,
+        revision: i64,
+        rack_id: Uuid,
+    ) -> Self {
+        Self {
+            identity: SwitchIdentity::new(id),
+            time_deleted: None,
+            rcgen: Generation::new(),
+            rack_id,
+            serial_number,
+            part_number,
+            revision,
+        }
+    }
+}
+
 impl From<Switch> for views::Switch {
     fn from(switch: Switch) -> Self {
         Self {

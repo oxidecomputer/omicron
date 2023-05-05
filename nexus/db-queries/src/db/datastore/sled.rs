@@ -61,7 +61,7 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Sled> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::sled::dsl;
         paginated(dsl::sled, dsl::id, pagparams)
             .select(Sled::as_select())
