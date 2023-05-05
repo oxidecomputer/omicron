@@ -901,8 +901,8 @@ impl super::Nexus {
                 opctx,
                 params::DiskSelector {
                     project: match disk {
-                        NameOrId::Name(name) => Some(name.into()),
-                        NameOrId::Id(id) => Some(id.into()),
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
                     },
                     disk,
                 },
