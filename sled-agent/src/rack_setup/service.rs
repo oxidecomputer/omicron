@@ -339,7 +339,7 @@ impl ServiceInner {
                                     details: ServiceType::InternalDns { http_address, .. },
                                     ..
                                 } => {
-                                    Some(http_address.clone())
+                                    Some(*http_address)
                                 },
                                 _ => None,
                             }
