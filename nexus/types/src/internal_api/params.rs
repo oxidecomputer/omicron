@@ -14,7 +14,6 @@ use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Describes the role of the sled within the rack.
@@ -116,6 +115,8 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ExternalDns,
+    InternalDns,
 }
 
 impl fmt::Display for DatasetKind {
@@ -125,24 +126,10 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
         };
         write!(f, "{}", s)
-    }
-}
-
-impl FromStr for DatasetKind {
-    type Err = omicron_common::api::external::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetKind::*;
-        match s {
-            "crucible" => Ok(Crucible),
-            "cockroach" => Ok(Cockroach),
-            "clickhouse" => Ok(Clickhouse),
-            _ => Err(Self::Err::InternalError {
-                internal_message: format!("Unknown dataset kind: {}", s),
-            }),
-        }
     }
 }
 

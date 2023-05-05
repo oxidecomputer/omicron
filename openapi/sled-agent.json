@@ -678,6 +678,61 @@
             "required": [
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
+                "type": "string"
+              },
+              "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "http_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dns_address": {
+                "type": "string"
+              },
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dns_address",
+              "http_address",
+              "type"
+            ]
           }
         ]
       },

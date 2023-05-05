@@ -107,6 +107,7 @@ async fn filesystem_put(
         body_args.zpool_id,
         body_args.dataset_kind,
         body_args.address,
+        body_args.gz_address,
     )
     .await
     .map_err(|e| Error::from(e))?;

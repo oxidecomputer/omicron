@@ -885,7 +885,9 @@
         "enum": [
           "crucible",
           "cockroach",
-          "clickhouse"
+          "clickhouse",
+          "external_dns",
+          "internal_dns"
         ]
       },
       "DatasetPutRequest": {

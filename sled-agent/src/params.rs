@@ -216,6 +216,18 @@ pub enum DatasetKind {
     CockroachDb,
     Crucible,
     Clickhouse,
+    ExternalDns {
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+    },
 }
 
 impl DatasetKind {
@@ -225,6 +237,8 @@ impl DatasetKind {
             DatasetKind::CockroachDb => ZoneType::CockroachDb,
             DatasetKind::Crucible => ZoneType::Crucible,
             DatasetKind::Clickhouse => ZoneType::Clickhouse,
+            DatasetKind::ExternalDns { .. } => ZoneType::ExternalDns,
+            DatasetKind::InternalDns { .. } => ZoneType::InternalDns,
         }
     }
 
@@ -234,10 +248,16 @@ impl DatasetKind {
     /// service in their zone. If that precondition is no longer true, this
     /// interface should be re-visited.
     pub fn service_type(&self) -> ServiceType {
-        match *self {
+        match self.clone() {
             DatasetKind::CockroachDb => ServiceType::CockroachDb,
             DatasetKind::Crucible => ServiceType::Crucible,
             DatasetKind::Clickhouse => ServiceType::Clickhouse,
+            DatasetKind::ExternalDns { http_address, dns_address, nic } => {
+                ServiceType::ExternalDns { http_address, dns_address, nic }
+            }
+            DatasetKind::InternalDns { http_address, dns_address } => {
+                ServiceType::InternalDns { http_address, dns_address }
+            }
         }
     }
 }
@@ -249,6 +269,17 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
             CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ExternalDns { http_address, dns_address, nic } => {
+                Self::ExternalDns {
+                    http_address: http_address.to_string(),
+                    dns_address: dns_address.to_string(),
+                    nic: nic.into(),
+                }
+            }
+            InternalDns { http_address, dns_address } => Self::InternalDns {
+                http_address: http_address.to_string(),
+                dns_address: dns_address.to_string(),
+            },
         }
     }
 }
@@ -260,6 +291,8 @@ impl From<DatasetKind> for nexus_client::types::DatasetKind {
             CockroachDb { .. } => Self::Cockroach,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
+            ExternalDns { .. } => Self::ExternalDns,
+            InternalDns { .. } => Self::InternalDns,
         }
     }
 }
@@ -271,6 +304,8 @@ impl std::fmt::Display for DatasetKind {
             Crucible => "crucible",
             CockroachDb { .. } => "cockroachdb",
             Clickhouse => "clickhouse",
+            ExternalDns { .. } => "external_dns",
+            InternalDns { .. } => "internal_dns",
         };
         write!(f, "{}", s)
     }
@@ -289,7 +324,11 @@ pub struct DatasetEnsureBody {
     // The type of the filesystem.
     pub dataset_kind: DatasetKind,
     // The address on which the zone will listen for requests.
-    pub address: SocketAddrV6,
+    pub address: Ipv6Addr,
+    // The addresses in the global zone which should be created, if necessary
+    // to route to the service.
+    #[serde(default)]
+    pub gz_address: Option<Ipv6Addr>,
 }
 
 impl From<DatasetEnsureBody> for sled_agent_client::types::DatasetEnsureBody {

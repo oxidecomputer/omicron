@@ -296,26 +296,22 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
-                request.services.push(ServiceZoneRequest {
+                request.datasets.push(DatasetEnsureBody {
                     id,
-                    zone_type: ZoneType::ExternalDns,
-                    addresses: vec![internal_ip],
-                    dataset: None,
-                    gz_addresses: vec![],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::ExternalDns {
-                            http_address: SocketAddrV6::new(
-                                internal_ip,
-                                http_port,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddr::new(external_ip, dns_port),
-                            nic,
-                        },
-                    }],
-                })
+                    zpool_id: u2_zpools[0],
+                    dataset_kind: crate::params::DatasetKind::ExternalDns {
+                        http_address: SocketAddrV6::new(
+                            internal_ip,
+                            http_port,
+                            0,
+                            0,
+                        ),
+                        dns_address: SocketAddr::new(external_ip, dns_port),
+                        nic,
+                    },
+                    address: internal_ip,
+                    gz_address: None,
+                });
             }
 
             // The first enumerated sleds get assigned the responsibility
@@ -385,12 +381,12 @@ impl Plan {
                 dns_builder
                     .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
-                let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::CockroachDb,
                     address,
+                    gz_address: None,
                 });
             }
 
@@ -403,40 +399,36 @@ impl Plan {
                 dns_builder
                     .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
-                let address = SocketAddrV6::new(address, port, 0, 0);
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
                     dataset_kind: crate::params::DatasetKind::Clickhouse,
                     address,
+                    gz_address: None,
                 });
             }
 
             // Each zpool gets a crucible zone.
             //
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-            for zpool_id in u2_zpools {
-                let address = SocketAddrV6::new(
-                    addr_alloc.next().expect("Not enough addrs"),
-                    omicron_common::address::CRUCIBLE_PORT,
-                    0,
-                    0,
-                );
+            for zpool_id in &u2_zpools {
+                let address = addr_alloc.next().expect("Not enough addrs");
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, *address.ip()).unwrap();
+                let zone = dns_builder.host_zone(id, address).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::Crucible(id),
                         &zone,
-                        address.port(),
+                        omicron_common::address::CRUCIBLE_PORT,
                     )
                     .unwrap();
 
                 request.datasets.push(DatasetEnsureBody {
                     id,
-                    zpool_id,
+                    zpool_id: *zpool_id,
                     dataset_kind: crate::params::DatasetKind::Crucible,
                     address,
+                    gz_address: None,
                 });
             }
 
@@ -454,26 +446,22 @@ impl Plan {
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
-                request.services.push(ServiceZoneRequest {
+                request.datasets.push(DatasetEnsureBody {
                     id,
-                    zone_type: ZoneType::InternalDns,
-                    addresses: vec![dns_addr],
-                    dataset: None,
-                    gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    services: vec![ServiceZoneService {
-                        id,
-                        details: ServiceType::InternalDns {
-                            http_address: SocketAddrV6::new(
-                                dns_addr,
-                                DNS_HTTP_PORT,
-                                0,
-                                0,
-                            ),
-                            dns_address: SocketAddrV6::new(
-                                dns_addr, DNS_PORT, 0, 0,
-                            ),
-                        },
-                    }],
+                    zpool_id: u2_zpools[0],
+                    dataset_kind: crate::params::DatasetKind::InternalDns {
+                        http_address: SocketAddrV6::new(
+                            dns_addr,
+                            DNS_HTTP_PORT,
+                            0,
+                            0,
+                        ),
+                        dns_address: SocketAddrV6::new(
+                            dns_addr, DNS_PORT, 0, 0,
+                        ),
+                    },
+                    address: dns_addr,
+                    gz_address: Some(dns_subnet.gz_address().ip()),
                 });
             }
 

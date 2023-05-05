@@ -364,7 +364,9 @@ CREATE TABLE omicron.public.Zpool (
 CREATE TYPE omicron.public.dataset_kind AS ENUM (
   'crucible',
   'cockroach',
-  'clickhouse'
+  'clickhouse',
+  'external_dns',
+  'internal_dns'
 );
 
 /*

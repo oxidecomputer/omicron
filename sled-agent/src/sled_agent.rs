@@ -516,7 +516,8 @@ impl SledAgent {
         dataset_id: Uuid,
         zpool_id: Uuid,
         dataset_kind: DatasetKind,
-        address: SocketAddrV6,
+        address: Ipv6Addr,
+        gz_address: Option<Ipv6Addr>,
     ) -> Result<(), Error> {
         // First, ensure the dataset exists
         let dataset = self
@@ -541,9 +542,9 @@ impl SledAgent {
         let request = crate::params::ServiceZoneRequest {
             id: dataset_id,
             zone_type: dataset_kind.zone_type(),
-            addresses: vec![*address.ip()],
+            addresses: vec![address],
             dataset: Some(dataset),
-            gz_addresses: vec![],
+            gz_addresses: gz_address.into_iter().collect(),
             services,
         };
         self.inner.services.ensure_storage_service(request).await?;
