@@ -216,50 +216,8 @@ pub enum DatasetKind {
     CockroachDb,
     Crucible,
     Clickhouse,
-    ExternalDns {
-        /// The address at which the external DNS server API is reachable.
-        http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        dns_address: SocketAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-    },
-    InternalDns {
-        http_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-    },
-}
-
-impl DatasetKind {
-    /// Returns the type of the zone which manages this dataset.
-    pub fn zone_type(&self) -> ZoneType {
-        match *self {
-            DatasetKind::CockroachDb => ZoneType::CockroachDb,
-            DatasetKind::Crucible => ZoneType::Crucible,
-            DatasetKind::Clickhouse => ZoneType::Clickhouse,
-            DatasetKind::ExternalDns { .. } => ZoneType::ExternalDns,
-            DatasetKind::InternalDns { .. } => ZoneType::InternalDns,
-        }
-    }
-
-    /// Returns the service type which runs in the zone managing this dataset.
-    ///
-    /// NOTE: This interface is only viable because datasets run a single
-    /// service in their zone. If that precondition is no longer true, this
-    /// interface should be re-visited.
-    pub fn service_type(&self) -> ServiceType {
-        match self.clone() {
-            DatasetKind::CockroachDb => ServiceType::CockroachDb,
-            DatasetKind::Crucible => ServiceType::Crucible,
-            DatasetKind::Clickhouse => ServiceType::Clickhouse,
-            DatasetKind::ExternalDns { http_address, dns_address, nic } => {
-                ServiceType::ExternalDns { http_address, dns_address, nic }
-            }
-            DatasetKind::InternalDns { http_address, dns_address } => {
-                ServiceType::InternalDns { http_address, dns_address }
-            }
-        }
-    }
+    ExternalDns,
+    InternalDns,
 }
 
 impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
@@ -269,17 +227,8 @@ impl From<DatasetKind> for sled_agent_client::types::DatasetKind {
             CockroachDb => Self::CockroachDb,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
-            ExternalDns { http_address, dns_address, nic } => {
-                Self::ExternalDns {
-                    http_address: http_address.to_string(),
-                    dns_address: dns_address.to_string(),
-                    nic: nic.into(),
-                }
-            }
-            InternalDns { http_address, dns_address } => Self::InternalDns {
-                http_address: http_address.to_string(),
-                dns_address: dns_address.to_string(),
-            },
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
         }
     }
 }
@@ -288,11 +237,11 @@ impl From<DatasetKind> for nexus_client::types::DatasetKind {
     fn from(k: DatasetKind) -> Self {
         use DatasetKind::*;
         match k {
-            CockroachDb { .. } => Self::Cockroach,
+            CockroachDb => Self::Cockroach,
             Crucible => Self::Crucible,
             Clickhouse => Self::Clickhouse,
-            ExternalDns { .. } => Self::ExternalDns,
-            InternalDns { .. } => Self::InternalDns,
+            ExternalDns => Self::ExternalDns,
+            InternalDns => Self::InternalDns,
         }
     }
 }
@@ -335,6 +284,7 @@ pub struct DatasetEnsureRequest {
     pub gz_address: Option<Ipv6Addr>,
 }
 
+/*
 impl From<DatasetEnsureRequest>
     for sled_agent_client::types::DatasetEnsureRequest
 {
@@ -347,6 +297,7 @@ impl From<DatasetEnsureRequest>
         }
     }
 }
+*/
 
 /// Describes service-specific parameters.
 #[derive(
@@ -576,6 +527,21 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
+/// Describes a request to provision a specific dataset
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct DatasetRequest {
+    pub id: Uuid,
+    pub name: crate::storage::dataset::DatasetName,
+}
+
+impl From<DatasetRequest> for sled_agent_client::types::DatasetRequest {
+    fn from(d: DatasetRequest) -> Self {
+        Self { id: d.id, name: d.name.into() }
+    }
+}
+
 /// Describes a request to create a zone running one or more services.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -589,7 +555,7 @@ pub struct ServiceZoneRequest {
     pub addresses: Vec<Ipv6Addr>,
     // Datasets which should be managed by this service.
     #[serde(default)]
-    pub dataset: Option<crate::storage::dataset::DatasetName>,
+    pub dataset: Option<DatasetRequest>,
     // The addresses in the global zone which should be created, if necessary
     // to route to the service.
     //
@@ -614,7 +580,7 @@ impl ServiceZoneRequest {
 
     // The name of a unique identifier for the zone, if one is necessary.
     pub fn zone_name_unique_identifier(&self) -> Option<String> {
-        self.dataset.as_ref().map(|d| d.pool().to_string())
+        self.dataset.as_ref().map(|d| d.name.pool().to_string())
     }
 }
 

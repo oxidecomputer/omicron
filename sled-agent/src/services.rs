@@ -209,7 +209,6 @@ impl Config {
 
 // The filename of the ledger, within the provided directory.
 const SERVICES_LEDGER_FILENAME: &str = "services.toml";
-const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
 
 // A wrapper around `ZoneRequest`, which allows it to be serialized
 // to a toml file.
@@ -298,8 +297,6 @@ pub struct ServiceManagerInner {
     switch_zone_maghemite_links: Vec<PhysicalLink>,
     // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
-    // Zones representing services which own datasets
-    dataset_zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -371,7 +368,6 @@ impl ServiceManager {
                 sidecar_revision,
                 switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
-                dataset_zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     underlay_etherstub,
@@ -415,22 +411,7 @@ impl ServiceManager {
             .collect()
     }
 
-    async fn all_storage_service_ledgers(&self) -> Vec<Utf8PathBuf> {
-        if let Some(dir) = self.inner.ledger_directory_override.get() {
-            return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
-        }
-
-        self.inner
-            .storage
-            .resources()
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
-            .await
-            .into_iter()
-            .map(|p| p.join(STORAGE_SERVICES_LEDGER_FILENAME))
-            .collect()
-    }
-
-    pub async fn load_non_storage_services(&self) -> Result<(), Error> {
+    pub async fn load_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
         let Some(ledger) = Ledger::<AllZoneRequests>::new(
@@ -506,25 +487,6 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub async fn load_storage_services(&self) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let Some(ledger) = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_storage_service_ledgers().await,
-        )
-        .await else {
-            return Ok(());
-        };
-        let services = ledger.data();
-        self.initialize_services_locked(
-            &mut existing_zones,
-            &services.requests,
-        )
-        .await?;
-        Ok(())
-    }
-
     /// Loads services from the services manager, and returns once all requested
     /// services have been started.
     pub async fn sled_agent_started(
@@ -550,15 +512,11 @@ impl ServiceManager {
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
 
-        self.load_non_storage_services().await?;
         // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
         // These will fail if the disks aren't attached.
         // Should we have a retry loop here? Kinda like we have with the switch
         // / NTP zone?
-        //
-        // NOTE: We could totally do the same thing with
-        // "load_non_storage_services".
-        self.load_storage_services().await?;
+        self.load_services().await?;
 
         Ok(())
     }
@@ -922,7 +880,7 @@ impl ServiceManager {
             .zone
             .dataset
             .iter()
-            .map(|d| zone::Dataset { name: d.full() })
+            .map(|d| zone::Dataset { name: d.name.full() })
             .collect::<Vec<_>>();
 
         let devices: Vec<zone::Device> = device_names
@@ -1098,16 +1056,18 @@ impl ServiceManager {
                 let listen_addr = &request.zone.addresses[0].to_string();
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
-                let dataset = request
+                let dataset_name = request
                     .zone
                     .dataset
                     .as_ref()
+                    .map(|d| d.name.full())
+                    .clone()
                     .expect("Crucible requires dataset");
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
                     .add_property("gateway", "astring", gateway)
-                    .add_property("dataset", "astring", &dataset.full())
+                    .add_property("dataset", "astring", &dataset_name)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("uuid", "astring", uuid)
@@ -1850,63 +1810,6 @@ impl ServiceManager {
 
         // Update the services in the ledger and write it back to both M.2s
         ledger_zone_requests.requests.append(&mut zone_requests.requests);
-        ledger.commit().await?;
-
-        Ok(())
-    }
-
-    /// Ensures that a storage zone be initialized.
-    ///
-    /// These services will be instantiated by this function, and will be
-    /// recorded to a local file to ensure they start automatically on next
-    /// boot.
-    pub async fn ensure_storage_service(
-        &self,
-        request: ServiceZoneRequest,
-    ) -> Result<(), Error> {
-        let log = &self.inner.log;
-        let mut existing_zones = self.inner.dataset_zones.lock().await;
-
-        // Read the existing set of services from the ledger.
-        let service_paths = self.all_storage_service_ledgers().await;
-        let mut ledger =
-            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
-                .await
-            {
-                Some(ledger) => ledger,
-                None => Ledger::<AllZoneRequests>::new_with(
-                    log,
-                    service_paths.clone(),
-                    AllZoneRequests::default(),
-                ),
-            };
-        let ledger_zone_requests = ledger.data_mut();
-
-        if !ledger_zone_requests
-            .requests
-            .iter()
-            .any(|zone_request| zone_request.zone.id == request.id)
-        {
-            // If this is a new request, provision a zone filesystem on the same
-            // disk as the dataset.
-            let dataset = request
-                .dataset
-                .as_ref()
-                .expect("Storage services should have a dataset");
-            let root = dataset
-                .pool()
-                .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
-            ledger_zone_requests
-                .requests
-                .push(ZoneRequest { zone: request, root });
-        }
-
-        self.initialize_services_locked(
-            &mut existing_zones,
-            &ledger_zone_requests.requests,
-        )
-        .await?;
-
         ledger.commit().await?;
 
         Ok(())

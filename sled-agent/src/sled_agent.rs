@@ -9,10 +9,10 @@ use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
 use crate::params::{
-    DatasetEnsureBody, DiskStateRequested, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, ServiceEnsureBody,
-    ServiceZoneService, SledRole, TimeSync, VpcFirewallRule, Zpool,
+    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
+    VpcFirewallRule, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_manager::{self, StorageManager};
@@ -491,6 +491,25 @@ impl SledAgent {
         &self,
         requested_services: ServiceEnsureBody,
     ) -> Result<(), Error> {
+        let datasets: Vec<_> = requested_services
+            .services
+            .iter()
+            .filter_map(|service| service.dataset.clone())
+            .collect();
+
+        // TODO:
+        // - If these are the set of filesystems, we should also consider
+        // removing the ones which are not listed here.
+        // - It's probably worth sending a bulk request to the storage system,
+        // rather than requesting individual datasets.
+        for dataset in &datasets {
+            // First, ensure the dataset exists
+            self.inner
+                .storage
+                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .await?;
+        }
+
         self.inner.services.ensure_all_services(requested_services).await?;
         Ok(())
     }
@@ -508,59 +527,6 @@ impl SledAgent {
         } else {
             SledRole::Gimlet
         }
-    }
-
-    /// Ensures that all filesystem type exists within the zpool.
-    pub async fn filesystems_ensure(
-        &self,
-        requested_datasets: DatasetEnsureBody,
-    ) -> Result<(), Error> {
-        // TODO:
-        // - If these are the set of filesystems, we should also consider
-        // removing the ones which are not listed here.
-        // - It's probably worth sending a bulk request to the storage system,
-        // rather than requesting individual datasets.
-        for dataset in &requested_datasets.datasets {
-            let dataset_id = dataset.id;
-
-            // First, ensure the dataset exists
-            self.inner
-                .storage
-                .upsert_filesystem(dataset_id, dataset.dataset_name.clone())
-                .await?;
-        }
-
-        for dataset in &requested_datasets.datasets {
-            let dataset_id = dataset.id;
-            let address = dataset.address;
-            let gz_address = dataset.gz_address;
-
-            // NOTE: We use the "dataset_id" as the "service_id" here.
-            //
-            // Since datasets are tightly coupled with their own services - e.g.,
-            // from the perspective of Nexus, provisioning a dataset implies the
-            // sled should start a service - this is ID re-use is reasonable.
-            //
-            // If Nexus ever wants sleds to provision datasets independently of
-            // launching services, this ID type overlap should be reconsidered.
-            let service_type = dataset.dataset_name.dataset().service_type();
-            let services = vec![ServiceZoneService {
-                id: dataset_id,
-                details: service_type,
-            }];
-
-            // Next, ensure a zone exists to manage storage for that dataset
-            let request = crate::params::ServiceZoneRequest {
-                id: dataset_id,
-                zone_type: dataset.dataset_name.dataset().zone_type(),
-                addresses: vec![*address.ip()],
-                dataset: Some(dataset.dataset_name.clone()),
-                gz_addresses: gz_address.into_iter().collect(),
-                services,
-            };
-            self.inner.services.ensure_storage_service(request).await?;
-        }
-        Ok(())
     }
 
     /// Idempotently ensures that a given instance is registered with this sled,

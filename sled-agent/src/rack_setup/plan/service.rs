@@ -7,8 +7,8 @@
 use crate::bootstrap::params::SledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetEnsureRequest, ServiceType, ServiceZoneRequest, ServiceZoneService,
-    ZoneType,
+    DatasetKind, DatasetRequest, ServiceType, ServiceZoneRequest,
+    ServiceZoneService, ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use crate::storage::dataset::DatasetName;
@@ -93,10 +93,6 @@ pub enum PlanError {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct SledRequest {
-    /// Datasets to be created.
-    #[serde(default, rename = "dataset")]
-    pub datasets: Vec<DatasetEnsureRequest>,
-
     /// Services to be instantiated.
     #[serde(default, rename = "service")]
     pub services: Vec<ServiceZoneRequest>,
@@ -302,11 +298,21 @@ impl Plan {
                     .unwrap();
                 let (nic, external_ip) =
                     svc_port_builder.next_dns(id, &mut services_ip_pool)?;
-                request.datasets.push(DatasetEnsureRequest {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    dataset_name: DatasetName::new(
-                        u2_zpools[0].clone(),
-                        crate::params::DatasetKind::ExternalDns {
+                    zone_type: ZoneType::ExternalDns,
+                    addresses: vec![*http_address.ip()],
+                    dataset: Some(DatasetRequest {
+                        id: Uuid::new_v4(),
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            DatasetKind::ExternalDns,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id: Uuid::new_v4(),
+                        details: ServiceType::ExternalDns {
                             http_address: SocketAddrV6::new(
                                 internal_ip,
                                 http_port,
@@ -316,9 +322,7 @@ impl Plan {
                             dns_address: SocketAddr::new(external_ip, dns_port),
                             nic,
                         },
-                    ),
-                    address: http_address,
-                    gz_address: None,
+                    }],
                 });
             }
 
@@ -385,19 +389,26 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::COCKROACH_PORT;
-                let address = SocketAddrV6::new(ip, port, 0, 0);
                 let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Cockroach, &zone, port)
                     .unwrap();
-                request.datasets.push(DatasetEnsureRequest {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    dataset_name: DatasetName::new(
-                        u2_zpools[0].clone(),
-                        crate::params::DatasetKind::CockroachDb,
-                    ),
-                    address,
-                    gz_address: None,
+                    zone_type: ZoneType::CockroachDb,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            crate::params::DatasetKind::CockroachDb,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::CockroachDb,
+                    }],
                 });
             }
 
@@ -406,19 +417,26 @@ impl Plan {
                 let id = Uuid::new_v4();
                 let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CLICKHOUSE_PORT;
-                let address = SocketAddrV6::new(ip, port, 0, 0);
                 let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                     .unwrap();
-                request.datasets.push(DatasetEnsureRequest {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    dataset_name: DatasetName::new(
-                        u2_zpools[0].clone(),
-                        crate::params::DatasetKind::Clickhouse,
-                    ),
-                    address,
-                    gz_address: None,
+                    zone_type: ZoneType::Clickhouse,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            crate::params::DatasetKind::Clickhouse,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Clickhouse,
+                    }],
                 });
             }
 
@@ -428,7 +446,6 @@ impl Plan {
             for pool in &u2_zpools {
                 let ip = addr_alloc.next().expect("Not enough addrs");
                 let port = omicron_common::address::CRUCIBLE_PORT;
-                let address = SocketAddrV6::new(ip, port, 0, 0);
                 let id = Uuid::new_v4();
                 let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
@@ -439,14 +456,22 @@ impl Plan {
                     )
                     .unwrap();
 
-                request.datasets.push(DatasetEnsureRequest {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    dataset_name: DatasetName::new(
-                        pool.clone(),
-                        crate::params::DatasetKind::Crucible,
-                    ),
-                    address,
-                    gz_address: None,
+                    zone_type: ZoneType::Crucible,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            pool.clone(),
+                            crate::params::DatasetKind::Crucible,
+                        ),
+                    }),
+                    gz_addresses: vec![],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Crucible,
+                    }],
                 });
             }
 
@@ -454,11 +479,9 @@ impl Plan {
             // responsibility of being internal DNS servers.
             if idx < dns_subnets.len() {
                 let dns_subnet = &dns_subnets[idx];
-                let dns_ip = dns_subnet.dns_address().ip();
-                let http_address =
-                    SocketAddrV6::new(dns_ip, DNS_HTTP_PORT, 0, 0);
+                let ip = dns_subnet.dns_address().ip();
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, dns_ip).unwrap();
+                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
                     .service_backend_zone(
                         ServiceName::InternalDns,
@@ -466,24 +489,30 @@ impl Plan {
                         DNS_HTTP_PORT,
                     )
                     .unwrap();
-                request.datasets.push(DatasetEnsureRequest {
+                request.services.push(ServiceZoneRequest {
                     id,
-                    dataset_name: DatasetName::new(
-                        u2_zpools[0].clone(),
-                        crate::params::DatasetKind::InternalDns {
+                    zone_type: ZoneType::InternalDns,
+                    addresses: vec![ip],
+                    dataset: Some(DatasetRequest {
+                        id,
+                        name: DatasetName::new(
+                            u2_zpools[0].clone(),
+                            crate::params::DatasetKind::InternalDns,
+                        ),
+                    }),
+                    gz_addresses: vec![dns_subnet.gz_address().ip()],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::InternalDns {
                             http_address: SocketAddrV6::new(
-                                dns_ip,
+                                ip,
                                 DNS_HTTP_PORT,
                                 0,
                                 0,
                             ),
-                            dns_address: SocketAddrV6::new(
-                                dns_ip, DNS_PORT, 0, 0,
-                            ),
+                            dns_address: SocketAddrV6::new(ip, DNS_PORT, 0, 0),
                         },
-                    ),
-                    address: http_address,
-                    gz_address: Some(dns_subnet.gz_address().ip()),
+                    }],
                 });
             }
 

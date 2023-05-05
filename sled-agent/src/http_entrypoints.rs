@@ -5,10 +5,9 @@
 //! HTTP entrypoint functions for the sled agent's exposed API
 
 use crate::params::{
-    DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
+    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
+    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
+    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -31,7 +30,6 @@ type SledApiDescription = ApiDescription<SledAgent>;
 pub fn api() -> SledApiDescription {
     fn register_endpoints(api: &mut SledApiDescription) -> Result<(), String> {
         api.register(disk_put)?;
-        api.register(filesystems_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
@@ -90,20 +88,6 @@ async fn sled_role_get(
 ) -> Result<HttpResponseOk<SledRole>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.get_role().await))
-}
-
-#[endpoint {
-    method = PUT,
-    path = "/filesystem",
-}]
-async fn filesystems_put(
-    rqctx: RequestContext<SledAgent>,
-    body: TypedBody<DatasetEnsureBody>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
-    let body_args = body.into_inner();
-    sa.filesystems_ensure(body_args).await.map_err(|e| Error::from(e))?;
-    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Instance requests (sled agent API)

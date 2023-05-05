@@ -54,32 +54,6 @@
         }
       }
     },
-    "/filesystem": {
-      "put": {
-        "operationId": "filesystems_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DatasetEnsureBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}": {
       "put": {
         "operationId": "instance_register",
@@ -608,48 +582,6 @@
           "target"
         ]
       },
-      "DatasetEnsureBody": {
-        "description": "Used to request that the Sled initialize multiple datasets.",
-        "type": "object",
-        "properties": {
-          "datasets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatasetEnsureRequest"
-            }
-          }
-        },
-        "required": [
-          "datasets"
-        ]
-      },
-      "DatasetEnsureRequest": {
-        "description": "Used to request a new dataset kind exists within a zpool.\n\nMany dataset types are associated with services that will be instantiated when the dataset is detected.",
-        "type": "object",
-        "properties": {
-          "address": {
-            "type": "string"
-          },
-          "dataset_name": {
-            "$ref": "#/components/schemas/DatasetName"
-          },
-          "gz_address": {
-            "nullable": true,
-            "default": null,
-            "type": "string",
-            "format": "ipv6"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "address",
-          "dataset_name",
-          "id"
-        ]
-      },
       "DatasetKind": {
         "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
         "oneOf": [
@@ -698,22 +630,6 @@
           {
             "type": "object",
             "properties": {
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
-              },
-              "http_address": {
-                "description": "The address at which the external DNS server API is reachable.",
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing external connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -722,21 +638,12 @@
               }
             },
             "required": [
-              "dns_address",
-              "http_address",
-              "nic",
               "type"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "dns_address": {
-                "type": "string"
-              },
-              "http_address": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -745,8 +652,6 @@
               }
             },
             "required": [
-              "dns_address",
-              "http_address",
               "type"
             ]
           }
@@ -765,6 +670,23 @@
         "required": [
           "kind",
           "pool_name"
+        ]
+      },
+      "DatasetRequest": {
+        "description": "Describes a request to provision a specific dataset",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/DatasetName"
+          }
+        },
+        "required": [
+          "id",
+          "name"
         ]
       },
       "DiskEnsureBody": {
@@ -2085,7 +2007,7 @@
             "default": null,
             "allOf": [
               {
-                "$ref": "#/components/schemas/DatasetName"
+                "$ref": "#/components/schemas/DatasetRequest"
               }
             ]
           },
