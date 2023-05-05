@@ -213,7 +213,7 @@ impl Zpool {
         }
     }
 
-    /// zpool set failmode=continue <name>
+    /// `zpool set failmode=continue <name>`
     pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
