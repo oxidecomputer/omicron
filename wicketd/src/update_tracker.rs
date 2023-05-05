@@ -524,7 +524,7 @@ impl UpdateDriver {
             &mut rot_registrar,
             SpComponent::ROT.const_as_str(),
             rot_firmware_slot_and_artifact.clone(),
-            Default::default(),
+            SpComponentUpdateStepNames::for_rot(),
         );
 
         // Reset the RoT into the updated build we just sent.
@@ -575,7 +575,7 @@ impl UpdateDriver {
             &mut sp_registrar,
             SpComponent::SP_ITSELF.const_as_str(),
             StepHandle::ready((sp_firmware_slot, sp_artifact)).into_shared(),
-            Default::default(),
+            SpComponentUpdateStepNames::for_sp(),
         );
         sp_registrar
             .new_step(UpdateStepId::ResetSp, "Resetting SP", |_cx| async move {
@@ -1385,19 +1385,25 @@ impl SpComponentUpdateStepNames {
     fn for_host_phase_1(kind: &str) -> Self {
         Self {
             sending: format!("Sending {kind} phase 1 image to MGS").into(),
-            preparing: format!("Preparing to receive {kind} phase 1 update")
+            preparing: format!("Preparing to write {kind} phase 1 update")
                 .into(),
             writing: format!("Writing {kind} phase 1 update").into(),
         }
     }
-}
 
-impl Default for SpComponentUpdateStepNames {
-    fn default() -> Self {
+    fn for_sp() -> Self {
         Self {
-            sending: "Sending artifact to MGS".into(),
-            preparing: "Preparing to receive update".into(),
-            writing: "Writing update".into(),
+            sending: "Sending SP image to MGS".into(),
+            preparing: "Preparing to write SP update".into(),
+            writing: "Writing SP update".into(),
+        }
+    }
+
+    fn for_rot() -> Self {
+        Self {
+            sending: "Sending RoT image to MGS".into(),
+            preparing: "Preparing to write RoT update".into(),
+            writing: "Writing RoT update".into(),
         }
     }
 }
