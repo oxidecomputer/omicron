@@ -2518,6 +2518,7 @@ dependencies = [
  "clap 4.2.5",
  "futures",
  "gateway-client",
+ "gateway-messages",
  "hex",
  "libc",
  "omicron-common 0.1.0",
@@ -2552,13 +2553,13 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2dcc63c645005a7184ba754b5c42c341a0777c66#2dcc63c645005a7184ba754b5c42c341a0777c66"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=330443bb043b0e152b8c86f0fac959a1b3d24c48#330443bb043b0e152b8c86f0fac959a1b3d24c48"
 dependencies = [
  "bitflags",
- "hubpack 0.1.1",
+ "hubpack 0.1.2",
  "serde",
  "serde_repr",
- "smoltcp",
+ "smoltcp 0.9.1",
  "static_assertions",
  "uuid",
  "zerocopy 0.6.1",
@@ -2567,7 +2568,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2dcc63c645005a7184ba754b5c42c341a0777c66#2dcc63c645005a7184ba754b5c42c341a0777c66"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=330443bb043b0e152b8c86f0fac959a1b3d24c48#330443bb043b0e152b8c86f0fac959a1b3d24c48"
 dependencies = [
  "async-trait",
  "backoff",
@@ -2575,7 +2576,7 @@ dependencies = [
  "fxhash",
  "gateway-messages",
  "hex",
- "hubpack 0.1.1",
+ "hubpack 0.1.2",
  "lru-cache",
  "nix",
  "once_cell",
@@ -2955,9 +2956,9 @@ dependencies = [
 
 [[package]]
 name = "hubpack"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf8f3c0e51b49dd73e277f8d157f7248e91b3597e3487884181b259682b715d3"
+checksum = "61a0b84aeae519f65e0ba3aa998327080993426024edbd5cc38dbaf5ec524303"
 dependencies = [
  "hubpack_derive 0.1.1",
  "serde",
@@ -4793,7 +4794,7 @@ dependencies = [
  "opte-api",
  "postcard",
  "serde",
- "smoltcp",
+ "smoltcp 0.8.2",
  "version_check",
  "zerocopy 0.6.1",
 ]
@@ -4808,7 +4809,7 @@ dependencies = [
  "ipnetwork",
  "postcard",
  "serde",
- "smoltcp",
+ "smoltcp 0.8.2",
 ]
 
 [[package]]
@@ -4897,7 +4898,7 @@ dependencies = [
  "illumos-sys-hdrs",
  "opte",
  "serde",
- "smoltcp",
+ "smoltcp 0.8.2",
  "zerocopy 0.6.1",
 ]
 
@@ -7284,6 +7285,19 @@ checksum = "ee34c1e1bfc7e9206cc0fb8030a90129b4e319ab53856249bb27642cab914fb3"
 dependencies = [
  "bitflags",
  "byteorder",
+ "managed",
+]
+
+[[package]]
+name = "smoltcp"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e9786ac45091b96f946693e05bfa4d8ca93e2d3341237d97a380107a6b38dea"
+dependencies = [
+ "bitflags",
+ "byteorder",
+ "cfg-if 1.0.0",
+ "heapless",
  "managed",
 ]
 
