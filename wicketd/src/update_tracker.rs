@@ -380,7 +380,8 @@ impl UpdateTrackerData {
     }
 
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
-        // Are there any updates currently running? If so, then
+        // Are there any updates currently running? If so, then reject the new
+        // repository.
         let running_sps = self
             .sp_update_data
             .iter()
@@ -496,9 +497,14 @@ impl UpdateDriver {
                 UpdateStepId::ResettingSp,
                 "Resetting SP",
                 |_cx| async move {
-                    update_cx.reset_sp().await.map_err(|error| {
-                        UpdateTerminalError::SpResetFailed { error }
-                    })?;
+                    update_cx
+                        .reset_sp_component(
+                            SpComponent::SP_ITSELF.const_as_str(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SpResetFailed { error }
+                        })?;
                     StepResult::success((), Default::default())
                 },
             )
@@ -1156,9 +1162,9 @@ impl UpdateContext {
         StepResult::success((), Default::default())
     }
 
-    async fn reset_sp(&self) -> anyhow::Result<()> {
+    async fn reset_sp_component(&self, component: &str) -> anyhow::Result<()> {
         self.mgs_client
-            .sp_reset(self.sp.type_, self.sp.slot)
+            .sp_component_reset(self.sp.type_, self.sp.slot, component)
             .await
             .context("failed to reset SP")
             .map(|res| res.into_inner())

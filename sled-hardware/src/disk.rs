@@ -188,7 +188,6 @@ pub struct Disk {
     zpool_name: ZpoolName,
 }
 
-pub const FACTORY_DATASET: &'static str = "factory";
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
@@ -201,10 +200,8 @@ static U2_EXPECTED_DATASETS: [&'static str; U2_EXPECTED_DATASET_COUNT] = [
     ZONE_DATASET,
 ];
 
-const M2_EXPECTED_DATASET_COUNT: usize = 5;
+const M2_EXPECTED_DATASET_COUNT: usize = 4;
 static M2_EXPECTED_DATASETS: [&'static str; M2_EXPECTED_DATASET_COUNT] = [
-    // Stores a "factory install" set of software
-    FACTORY_DATASET,
     // Stores software images.
     //
     // Should be duplicated to both M.2s.
@@ -264,6 +261,7 @@ impl Disk {
         zpool_name: &ZpoolName,
     ) -> Result<(), DiskError> {
         Self::ensure_zpool_imported(log, &zpool_name)?;
+        Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
         Self::ensure_zpool_has_datasets(&zpool_name)?;
         Ok(())
     }
@@ -315,6 +313,27 @@ impl Disk {
     ) -> Result<(), DiskError> {
         Zpool::import(zpool_name.clone()).map_err(|e| {
             warn!(log, "Failed to import zpool {zpool_name}: {e}");
+            DiskError::ZpoolImport(e)
+        })?;
+        Ok(())
+    }
+
+    fn ensure_zpool_failmode_is_continue(
+        log: &Logger,
+        zpool_name: &ZpoolName,
+    ) -> Result<(), DiskError> {
+        // Ensure failmode is set to `continue`. See
+        // https://github.com/oxidecomputer/omicron/issues/2766 for details. The
+        // short version is, each pool is only backed by one vdev. There is no
+        // recovery if one starts breaking, so if connectivity to one dies it's
+        // actively harmful to try to wait for it to come back; we'll be waiting
+        // forever and get stuck. We'd rather get the errors so we can deal with
+        // them ourselves.
+        Zpool::set_failmode_continue(&zpool_name).map_err(|e| {
+            warn!(
+                log,
+                "Failed to set failmode=continue on zpool {zpool_name}: {e}"
+            );
             DiskError::ZpoolImport(e)
         })?;
         Ok(())
