@@ -526,22 +526,6 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-// Serve the console bundle without an auth gate just for the login form. This
-// is meant to stand in for the customers identity provider. Since this is a
-// placeholder, it's easiest to build the form into the console bundle. If we
-// really wanted a login form, we would probably make it a standalone page,
-// otherwise the user is downloading a bunch of JS for nothing.
-#[endpoint {
-   method = GET,
-   path = "/spoof_login",
-   unpublished = true,
-}]
-pub async fn login_spoof_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx.context()).await
-}
-
 #[derive(Deserialize, JsonSchema)]
 pub struct StateParam {
     state: Option<String>,
@@ -638,6 +622,22 @@ pub async fn console_index_or_login_redirect(
         .body("".into())?)
 }
 
+// Serve the console bundle without an auth gate just for the login form. This
+// is meant to stand in for the customers identity provider. Since this is a
+// placeholder, it's easiest to build the form into the console bundle. If we
+// really wanted a login form, we would probably make it a standalone page,
+// otherwise the user is downloading a bunch of JS for nothing.
+#[endpoint {
+   method = GET,
+   path = "/spoof_login",
+   unpublished = true,
+}]
+pub async fn login_spoof_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<Response<Body>, HttpError> {
+    serve_console_index(rqctx.context()).await
+}
+
 // Dropshot does not have route match ranking and does not allow overlapping
 // route definitions, so we cannot have a catchall `/*` route for console pages
 // and then also define, e.g., `/api/blah/blah` and give the latter priority
@@ -645,14 +645,37 @@ pub async fn console_index_or_login_redirect(
 // catchall route a prefix to avoid overlap. Long-term, if a route prefix is
 // part of the solution, we would probably prefer it to be on the API endpoints,
 // not on the console pages.
+//
+#[endpoint {
+   method = GET,
+   path = "/",
+   unpublished = true,
+}]
+pub async fn console_root(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
 #[endpoint {
    method = GET,
    path = "/projects/{path:.*}",
    unpublished = true,
 }]
-pub async fn console_page(
+pub async fn console_projects(
     rqctx: RequestContext<Arc<ServerContext>>,
     _path_params: Path<RestPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
+#[endpoint {
+   method = GET,
+   path = "/projects-new",
+   unpublished = true,
+}]
+pub async fn console_projects_new(
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await
 }
@@ -683,10 +706,21 @@ pub async fn console_system_page(
 
 #[endpoint {
    method = GET,
-   path = "/",
+   path = "/utilization",
    unpublished = true,
 }]
-pub async fn console_root(
+pub async fn console_silo_utilization(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<Response<Body>, HttpError> {
+    console_index_or_login_redirect(rqctx).await
+}
+
+#[endpoint {
+   method = GET,
+   path = "/access",
+   unpublished = true,
+}]
+pub async fn console_silo_access(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     console_index_or_login_redirect(rqctx).await

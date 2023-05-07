@@ -520,8 +520,8 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     let metric_url = |metric_type: &str, id: Uuid| {
         format!(
             "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
-            Utc::now() - chrono::Duration::seconds(30),
-            Utc::now() + chrono::Duration::seconds(30),
+            cptestctx.start_time,
+            Utc::now(),
         )
     };
     oximeter.force_collect().await;

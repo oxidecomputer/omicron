@@ -261,10 +261,13 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         }
     }
 
-    // Collect all datasets for ramdisk-based Oxide zones.
-    for dataset in &Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)? {
-        datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
-    }
-
+    // Collect all datasets for ramdisk-based Oxide zones,
+    // if any exist.
+    if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
+    {
+        for dataset in &ramdisk_datasets {
+            datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
+        }
+    };
     Ok(datasets)
 }

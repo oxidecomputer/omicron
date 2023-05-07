@@ -18,12 +18,24 @@ A major prerequisite is to have a machine already running Helios. An easy way to
 do this is by using a https://github.com/oxidecomputer/helios-engvm[Helios VM].
 ISOs are also available for download https://pkg.oxide.computer/install[here].
 
-Any additional prerequisite software may be installed with the following script:
+The steps below will install several executables that will need to be in your
+`PATH`.  You can set that up first using:
+
+[source,text]
+----
+$ source env.sh
+----
+
+(You'll want to do this in the future in every shell where you work in this workspace.)
+
+Then install prerequisite software with the following script:
 
 [source,text]
 ----
 $ pfexec ./tools/install_prerequisites.sh
 ----
+
+You need to do this step once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
 
 This script expects that you are both attempting to compile code and execute
 it on the same machine. If you'd like to have a different machine for a "builder"
@@ -37,10 +49,7 @@ $ ./tools/install_builder_prerequisites.sh
 $ ./tools/install_runner_prerequisites.sh
 ----
 
-There will be several binaries that will need to be in your `PATH`. The various
-prerequisites scripts will alert you to where you can find the binaries to add
-them to your `PATH`. You can also reference the file in `tools/setup-path.sh` for
-an example of how to add them to your `PATH`.
+Again, if these scripts report any PATH problems, you'll need to correct those before proceeding.
 
 === Make (or unmake) me a Gimlet!
 
