@@ -288,6 +288,15 @@ enum Command {
         #[clap(value_parser = sp_identifier_from_str, action)]
         sp: SpIdentifier,
     },
+
+    /// Instruct the SP to reset a component.
+    ResetComponent {
+        /// Target SP (e.g., 'sled/7', 'switch/1', 'power/0')
+        #[clap(value_parser = sp_identifier_from_str, action)]
+        sp: SpIdentifier,
+        /// Component to reset
+        component: String,
+    },
 }
 
 fn level_from_str(s: &str) -> Result<Level> {
@@ -583,7 +592,12 @@ async fn main() -> Result<()> {
             }
         }
         Command::Reset { sp } => {
-            client.sp_reset(sp.type_, sp.slot).await?;
+            let component =
+                gateway_messages::SpComponent::SP_ITSELF.const_as_str();
+            client.sp_component_reset(sp.type_, sp.slot, component).await?;
+        }
+        Command::ResetComponent { sp, component } => {
+            client.sp_component_reset(sp.type_, sp.slot, &component).await?;
         }
     }
 

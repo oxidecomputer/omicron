@@ -182,9 +182,13 @@ impl RunningZone {
 
         Zones::boot(&zone.name).await?;
 
-        // Wait for the network services to come online, so future
-        // requests to create addresses can operate immediately.
-        let fmri = "svc:/milestone/network:default";
+        // Wait until the zone reaches the 'single-user' SMF milestone.
+        // At this point, we know that the dependent
+        //  - svc:/milestone/network
+        //  - svc:/system/manifest-import
+        // services are up, so future requests to create network addresses
+        // or manipulate services will work.
+        let fmri = "svc:/milestone/single-user:default";
         wait_for_service(Some(&zone.name), fmri).await.map_err(|_| {
             BootError::Timeout {
                 service: fmri.to_string(),
