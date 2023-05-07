@@ -18,13 +18,10 @@ use omicron_common::{
 };
 use tokio::sync::oneshot;
 use uuid::Uuid;
+use wicket_common::update_events::{StepEventKind, UpdateComponent};
 use wicketd::{RunningUpdateState, StartUpdateError};
-use wicketd_client::{
-    types::{
-        GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
-        UpdateComponent,
-    },
-    StepEventKind,
+use wicketd_client::types::{
+    GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
 };
 
 #[tokio::test]
@@ -123,7 +120,7 @@ async fn test_updates() {
         slog::debug!(log, "received event report"; "event_report" => ?event_report);
 
         for event in event_report.step_events {
-            if let StepEventKind::ExecutionFailed { .. } = event.data {
+            if let StepEventKind::ExecutionFailed { .. } = event.kind {
                 break 'outer event;
             }
         }
@@ -131,7 +128,7 @@ async fn test_updates() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
 
-    match terminal_event.data {
+    match terminal_event.kind {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
@@ -337,7 +334,7 @@ async fn test_update_races() {
     let last_event =
         event_buffer.step_events.last().expect("at least one event");
     assert!(
-        matches!(last_event.data, StepEventKind::ExecutionCompleted { .. }),
+        matches!(last_event.kind, StepEventKind::ExecutionCompleted { .. }),
         "last event is execution completed: {last_event:#?}"
     );
 
