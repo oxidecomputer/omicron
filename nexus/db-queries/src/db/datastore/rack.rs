@@ -66,7 +66,7 @@ pub struct RackInit {
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
     pub recovery_user_id: external_params::UserId,
-    pub recovery_user_password_hash: nexus_passwords::PasswordHashString,
+    pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
 }
 

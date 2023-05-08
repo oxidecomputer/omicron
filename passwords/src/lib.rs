@@ -15,6 +15,11 @@ use password_hash::SaltString;
 use rand::prelude::ThreadRng;
 use rand::CryptoRng;
 use rand::RngCore;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_with::SerializeDisplay;
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 // Parameters for the Argon2 key derivation function (KDF).  These parameters
@@ -118,6 +123,77 @@ pub struct PasswordSetError(#[from] argon2::password_hash::errors::Error);
 // invalid, and the caller's going to want to handle these all the same way: as
 // 500 errors.
 pub struct PasswordVerifyError(#[from] argon2::password_hash::errors::Error);
+
+/// Password hash string for a _new_ password
+///
+/// This is a thin wrapper around `PasswordHashString` aimed at providing
+/// validation that a new given password hash meets our security requirements.
+///
+/// We do not use this in the `Hasher` because it's possible that we might want
+/// to verify password hashes that we wouldn't allow someone to create anew.
+#[derive(Clone, Debug, Deserialize, SerializeDisplay, PartialEq, Eq)]
+#[serde(try_from = "String")]
+pub struct NewPasswordHash(PasswordHashString);
+
+impl fmt::Display for NewPasswordHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl NewPasswordHash {
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<NewPasswordHash> for PasswordHashString {
+    fn from(value: NewPasswordHash) -> Self {
+        value.0
+    }
+}
+
+impl FromStr for NewPasswordHash {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(NewPasswordHash(parse_phc_hash(s)?))
+    }
+}
+
+impl TryFrom<String> for NewPasswordHash {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl JsonSchema for NewPasswordHash {
+    fn schema_name() -> String {
+        "NewPasswordHash".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A password hash in PHC string format".to_string()),
+                description: Some(
+                    "Password hashes must be in PHC (Password Hashing \
+                    Competition) string format.  Passwords must be hashed \
+                    with Argon2id.  Password hashes may be rejected if the \
+                    parameters appear not to be secure enough."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
 
 /// Create and verify stored passwords for local-only Silo users
 // This is currently a thin wrapper around `argon2`.  It encapsulates the

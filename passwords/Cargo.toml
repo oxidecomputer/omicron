@@ -1,5 +1,5 @@
 [package]
-name = "nexus-passwords"
+name = "omicron-passwords"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -8,6 +8,9 @@ license = "MPL-2.0"
 argon2 = { version = "0.5.0", features = ["alloc", "password-hash", "rand", "std"] }
 rand.workspace = true
 thiserror.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_with.workspace = true
 
 [dev-dependencies]
 argon2alt = { package = "rust-argon2", version = "1.0" }

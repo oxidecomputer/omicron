@@ -11,20 +11,20 @@ use parse_display::Display;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
-/// Newtype wrapper around [`nexus_passwords::PasswordHashString`].
+/// Newtype wrapper around [`omicron_passwords::PasswordHashString`].
 #[derive(
     Clone, Debug, Display, AsExpression, FromSqlRow, Eq, PartialEq, RefCast,
 )]
 #[diesel(sql_type = sql_types::Text)]
 #[repr(transparent)]
 #[display("{0}")]
-pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 
 NewtypeFrom! {
-    () pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+    () pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 }
 NewtypeDeref! {
-    () pub struct PasswordHashString(pub nexus_passwords::PasswordHashString);
+    () pub struct PasswordHashString(pub omicron_passwords::PasswordHashString);
 }
 
 impl<DB> ToSql<sql_types::Text, DB> for PasswordHashString
