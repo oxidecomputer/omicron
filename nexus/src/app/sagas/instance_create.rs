@@ -464,7 +464,10 @@ async fn sic_add_network_config(
 
     let nat_target = dpd_client::types::NatTarget {
         inner_mac: dpd_client::types::MacAddr {
-            a: mac_address.into_array().to_vec(),
+            a: {
+                let [v0, v1, v2, v3, v4, v5] = mac_address.into_array();
+                (v0, v1, v2, v3, v4, v5)
+            },
         },
         internal_ip: *sled_ip_address.ip(),
         vni: vni.into(),
