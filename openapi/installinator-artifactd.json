@@ -454,7 +454,7 @@
             "format": "uuid"
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with [`Self::from_generic`] to deserialize generic metadata.",
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
             "type": "string"
           },
           "total_elapsed": {
@@ -490,7 +490,7 @@
             "format": "uuid"
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with [`Self::from_generic`] to deserialize generic metadata.",
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
             "type": "string"
           },
           "total_elapsed": {
@@ -950,7 +950,7 @@
             "format": "uuid"
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with [`Self::from_generic`] to deserialize generic metadata.",
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
             "type": "string"
           },
           "total_elapsed": {
@@ -993,7 +993,7 @@
             "format": "uuid"
           },
           "spec": {
-            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with [`Self::from_generic`] to deserialize generic metadata.",
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
             "type": "string"
           },
           "total_elapsed": {
