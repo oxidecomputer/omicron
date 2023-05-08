@@ -285,6 +285,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
             external_address: config
                 .deployment
                 .dropshot_external
+                .dropshot
                 .bind_address
                 .ip(),
         },

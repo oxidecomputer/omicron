@@ -45,6 +45,8 @@ bind_address = "127.0.0.1:12220"
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
 
+# XXX-dap add a commented-out section showing how to enable TLS
+
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API
 bind_address = "[::1]:12221"

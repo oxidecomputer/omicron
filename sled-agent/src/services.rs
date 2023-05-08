@@ -69,7 +69,7 @@ use omicron_common::backoff::{
     BackoffError,
 };
 use omicron_common::nexus_config::{
-    self, DeploymentConfig as NexusDeploymentConfig,
+    self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
@@ -1304,12 +1304,15 @@ impl ServiceManager {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
 
-                        dropshot_external: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(port_ip, 80),
-                            // This has to be large enough to support:
-                            // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
-                            ..Default::default()
+                        dropshot_external: ConfigDropshotWithTls {
+                            tls: true, // XXX-dap only if cert provided to RSS?
+                            dropshot: dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(port_ip, 80),
+                                // This has to be large enough to support:
+                                // - bulk writes to disks
+                                request_body_max_bytes: 8192 * 1024,
+                                ..Default::default()
+                            },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
