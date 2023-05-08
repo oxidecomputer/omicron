@@ -89,7 +89,7 @@ async fn main() {
     let dropshot_config = ConfigDropshot {
         bind_address: address,
         request_body_max_bytes: 2048,
-        tls: None,
+        ..Default::default()
     };
     let logging_config =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug };

@@ -54,11 +54,13 @@ impl super::Nexus {
 
         match kind {
             shared::ServiceUsingCertificate::ExternalApi => {
-                // TODO: If we make this operation "add a certificate, and try to update
-                // nearby Nexus servers to use it", that means it'll be combining a DB
-                // operation with a service update request. If we want both to reliably
-                // complete together, we should consider making this a saga.
+                // TODO: If we make this operation "add a certificate, and try
+                // to update nearby Nexus servers to use it", that means it'll
+                // be combining a DB operation with a service update request. If
+                // we want both to reliably complete together, we should
+                // consider making this a saga.
                 // TODO: Refresh other nexus servers?
+                // XXX-dap background task
                 self.refresh_tls_config(&opctx).await?;
                 info!(self.log, "TLS refreshed successfully");
                 Ok(cert)
@@ -84,6 +86,7 @@ impl super::Nexus {
         match db_cert.service {
             ServiceKind::Nexus => {
                 // TODO: Refresh other nexus servers?
+                // XXX-dap background task
                 self.refresh_tls_config(&opctx).await?;
             }
             _ => (),
@@ -149,70 +152,71 @@ impl super::Nexus {
     /// - Tearing down an HTTPS server if no certificates exist
     pub async fn refresh_tls_config(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
     ) -> Result<(), Error> {
-        let tls_config = self.get_nexus_tls_config(&opctx).await?;
-
-        let mut external_servers = self.external_servers.lock().await;
-
-        match (tls_config, external_servers.https.take()) {
-            // Create a new server, using server context from an existing HTTP
-            // server.
-            (Some(tls_config), None) => {
-                info!(self.log, "Refresh TLS: Creating HTTPS server");
-                let mut cfg = external_servers.config.clone();
-                cfg.bind_address.set_port(external_servers.https_port());
-                cfg.tls = Some(tls_config);
-
-                let context =
-                    external_servers.get_context().ok_or_else(|| {
-                        Error::internal_error("No server context available")
-                    })?;
-
-                let log =
-                    context.log.new(o!("component" => "dropshot_external"));
-                let server_starter_external = dropshot::HttpServerStarter::new(
-                    &cfg,
-                    crate::external_api::http_entrypoints::external_api(),
-                    context,
-                    &log,
-                )
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "Initializing HTTPS server: {e}"
-                    ))
-                })?;
-                external_servers.set_https(server_starter_external.start());
-            }
-            // Refresh an existing server.
-            (Some(tls_config), Some(https)) => {
-                info!(
-                    self.log,
-                    "Refresh TLS: Refreshing HTTPS server at {}",
-                    https.local_addr()
-                );
-                https.refresh_tls(&tls_config)
-                    .await
-                    .expect("HTTPS server should be using HTTPS already, to enable refresh");
-                external_servers.set_https(https);
-            }
-            // Tear down an existing server.
-            (None, Some(https)) => {
-                info!(
-                    self.log,
-                    "Refresh TLS: Stopping HTTPS server at {}",
-                    https.local_addr()
-                );
-                https.close().await.map_err(|e| {
-                    Error::internal_error(&format!(
-                        "Failed to stop server: {e}"
-                    ))
-                })?;
-            }
-            // No config, no server.
-            (None, None) => (),
-        }
-
-        Ok(())
+        todo!(); // XXX-dap
+//        let tls_config = self.get_nexus_tls_config(&opctx).await?;
+//
+//        let mut external_servers = self.external_servers.lock().await;
+//
+//        match (tls_config, external_servers.https.take()) {
+//            // Create a new server, using server context from an existing HTTP
+//            // server.
+//            (Some(tls_config), None) => {
+//                info!(self.log, "Refresh TLS: Creating HTTPS server");
+//                let mut cfg = external_servers.config.clone();
+//                cfg.bind_address.set_port(external_servers.https_port());
+//                cfg.tls = Some(tls_config);
+//
+//                let context =
+//                    external_servers.get_context().ok_or_else(|| {
+//                        Error::internal_error("No server context available")
+//                    })?;
+//
+//                let log =
+//                    context.log.new(o!("component" => "dropshot_external"));
+//                let server_starter_external = dropshot::HttpServerStarter::new(
+//                    &cfg,
+//                    crate::external_api::http_entrypoints::external_api(),
+//                    context,
+//                    &log,
+//                )
+//                .map_err(|e| {
+//                    Error::internal_error(&format!(
+//                        "Initializing HTTPS server: {e}"
+//                    ))
+//                })?;
+//                external_servers.set_https(server_starter_external.start());
+//            }
+//            // Refresh an existing server.
+//            (Some(tls_config), Some(https)) => {
+//                info!(
+//                    self.log,
+//                    "Refresh TLS: Refreshing HTTPS server at {}",
+//                    https.local_addr()
+//                );
+//                https.refresh_tls(&tls_config)
+//                    .await
+//                    .expect("HTTPS server should be using HTTPS already, to enable refresh");
+//                external_servers.set_https(https);
+//            }
+//            // Tear down an existing server.
+//            (None, Some(https)) => {
+//                info!(
+//                    self.log,
+//                    "Refresh TLS: Stopping HTTPS server at {}",
+//                    https.local_addr()
+//                );
+//                https.close().await.map_err(|e| {
+//                    Error::internal_error(&format!(
+//                        "Failed to stop server: {e}"
+//                    ))
+//                })?;
+//            }
+//            // No config, no server.
+//            (None, None) => (),
+//        }
+//
+//        Ok(())
     }
 }

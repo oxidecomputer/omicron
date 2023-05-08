@@ -272,6 +272,8 @@ pub struct BackgroundTaskConfig {
     pub dns_internal: DnsTasksConfig,
     /// configuration for external DNS background tasks
     pub dns_external: DnsTasksConfig,
+    /// configuration for TLS certificate list watcher
+    pub tls_certs: TlsCertsConfig,
 }
 
 #[serde_as]
@@ -294,6 +296,16 @@ pub struct DnsTasksConfig {
 
     /// maximum number of concurrent DNS server updates
     pub max_concurrent_server_updates: usize,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TlsCertsConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+    // Other policy around the TLS certificates could go here (e.g.,
+    // allow/disallow wildcard certs, don't serve expired certs, etc.)
 }
 
 /// Configuration for a nexus server
@@ -397,7 +409,7 @@ mod test {
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::nexus_config::{
         BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
-        DpdConfig, LoadErrorKind,
+        DpdConfig, LoadErrorKind, TlsCertsConfig,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -540,6 +552,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            tls_certs.period_secs = 9
             "##,
         )
         .unwrap();
@@ -607,6 +620,9 @@ mod test {
                             period_secs_propagation: Duration::from_secs(7),
                             max_concurrent_server_updates: 8,
                         },
+                        tls_certs: TlsCertsConfig {
+                            period_secs: Duration::from_secs(9),
+                        }
                     },
                 },
             }
@@ -653,6 +669,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            tls_certs.period_secs = 9
             "##,
         )
         .unwrap();
