@@ -167,7 +167,7 @@ CREATE TABLE omicron.public.switch (
     /* Baseboard information about the switch */
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
-    revision INT8 NOT NULL,
+    revision INT8 NOT NULL
 );
 
 /* Add an index which lets us look up switches on a rack */
