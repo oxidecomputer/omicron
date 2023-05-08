@@ -188,8 +188,7 @@ impl Zfs {
             cmd.args(&["-o", "zoned=on"]);
         }
         if let Some(details) = encryption_details {
-            let keyloc =
-                format!("keylocation=file://{}", details.keypath.to_string());
+            let keyloc = format!("keylocation=file://{}", details.keypath);
             let epoch = format!("oxide:epoch={}", details.epoch);
             cmd.args(&[
                 "-o",

@@ -2662,6 +2662,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
+        let storage_key_requester = spawn_key_manager().await;
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
