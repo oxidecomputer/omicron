@@ -1378,7 +1378,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
