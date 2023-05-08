@@ -451,6 +451,10 @@ impl Disk {
 
             let encryption_details = EncryptionDetails { keypath, epoch };
 
+            info!(
+                log,
+                "Ensuring encryted filesystem: {} for epoch {}", dataset, epoch
+            );
             let result = Zfs::ensure_filesystem(
                 &format!("{}/{}", zpool_name, dataset),
                 Mountpoint::Path(mountpoint),
