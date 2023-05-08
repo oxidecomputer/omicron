@@ -17,7 +17,16 @@ use update_engine::StepSpec;
 pub enum WicketdEngineSpec {}
 
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum UpdateComponent {
@@ -52,7 +61,7 @@ impl StepSpec for WicketdEngineSpec {
     type Error = UpdateTerminalError;
 }
 
-update_engine::define_update_engine!(pub(crate) WicketdEngineSpec);
+update_engine::define_update_engine!(pub WicketdEngineSpec);
 
 #[derive(Debug, Error)]
 pub enum UpdateTerminalError {

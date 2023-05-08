@@ -259,7 +259,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::console_page)?;
+        api.register(console_api::console_projects)?;
+        api.register(console_api::console_projects_new)?;
+        api.register(console_api::console_silo_utilization)?;
+        api.register(console_api::console_silo_access)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
         api.register(console_api::console_system_page)?;
@@ -2094,12 +2097,12 @@ async fn instance_disk_detach(
     disk_to_detach: TypedBody<params::DiskPath>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let disk = disk_to_detach.into_inner().disk;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk = disk_to_detach.into_inner().disk;
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
