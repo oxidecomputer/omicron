@@ -279,6 +279,77 @@ impl RotArchives {
     }
 }
 
+/// Represents control plane zone images.
+///
+/// The control plane artifact is actually a tarball that contains a set of zone
+/// images. This code extracts those images out of the tarball.
+#[derive(Clone, Debug)]
+pub struct ControlPlaneZoneImages {
+    pub zones: Vec<(String, Bytes)>,
+}
+
+impl ControlPlaneZoneImages {
+    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
+        let uncompressed =
+            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+        let mut archive = tar::Archive::new(uncompressed);
+
+        let mut oxide_json_found = false;
+        let mut zones = Vec::new();
+        for entry in archive
+            .entries()
+            .context("error building list of entries from archive")?
+        {
+            let entry = entry.context("error reading entry from archive")?;
+            let path = entry
+                .header()
+                .path()
+                .context("error reading path from archive")?;
+            if path == Path::new(OXIDE_JSON_FILE_NAME) {
+                let json_bytes = read_entry(entry, OXIDE_JSON_FILE_NAME)?;
+                let metadata: oxide_metadata::Metadata =
+                    serde_json::from_slice(&json_bytes).with_context(|| {
+                        format!(
+                            "error deserializing JSON from {OXIDE_JSON_FILE_NAME}"
+                        )
+                    })?;
+                if !metadata.is_control_plane() {
+                    bail!(
+                        "unexpected archive type: expected control_plane, found {:?}",
+                        metadata.archive_type(),
+                    )
+                }
+                oxide_json_found = true;
+            } else if path.starts_with(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY) {
+                if let Some(name) = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                {
+                    let data = read_entry(entry, &name)?;
+                    zones.push((name, data));
+                }
+            }
+        }
+
+        let mut not_found = Vec::new();
+        if !oxide_json_found {
+            not_found.push(OXIDE_JSON_FILE_NAME);
+        }
+        if !not_found.is_empty() {
+            bail!("required files not found: {}", not_found.join(", "))
+        }
+        if zones.is_empty() {
+            bail!(
+                "no zone images found in `{}/`",
+                CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY
+            );
+        }
+
+        Ok(Self { zones })
+    }
+}
+
 static FILLER_TEXT: &[u8; 16] = b"tufaceousfaketxt";
 static OXIDE_JSON_FILE_NAME: &str = "oxide.json";
 static HOST_PHASE_1_FILE_NAME: &str = "image/rom";

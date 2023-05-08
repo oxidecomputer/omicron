@@ -5,17 +5,19 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use buf_list::Cursor;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent,
-    InstallinatorStepId, StepContext, UpdateEngine,
+    InstallinatorStepId, StepContext, StepHandle, UpdateEngine,
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
 use slog::Drain;
+use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepResult;
 
 use crate::{
@@ -235,36 +237,82 @@ impl InstallOpts {
             )
             .register();
 
+        let destination = if self.install_on_gimlet {
+            let log = log.clone();
+            engine
+                .new_step(
+                    InstallinatorComponent::Both,
+                    InstallinatorStepId::Scan,
+                    "Scanning hardware to find M.2 disks",
+                    move |_cx| async move {
+                        let destination =
+                            tokio::task::spawn_blocking(move || {
+                                WriteDestination::from_hardware(&log)
+                            })
+                            .await
+                            .unwrap()?;
+
+                        let disks_found = destination.num_target_disks();
+                        StepResult::success(
+                            destination,
+                            InstallinatorCompletionMetadata::HardwareScan {
+                                disks_found,
+                            },
+                        )
+                    },
+                )
+                .register()
+        } else {
+            // clap ensures `self.destination` is not `None` if
+            // `install_on_gimlet` is false.
+            let destination = self.destination.as_ref().unwrap();
+            StepHandle::ready(WriteDestination::in_directory(destination)?)
+        };
+
+        let control_plane_zones = engine
+            .new_step(
+                InstallinatorComponent::ControlPlane,
+                InstallinatorStepId::UnpackControlPlaneArtifact,
+                "Unpacking composite control plane artifact",
+                move |cx| async move {
+                    let control_plane_artifact =
+                        control_plane_artifact.into_value(cx.token()).await;
+                    let zones = tokio::task::spawn_blocking(|| {
+                        ControlPlaneZoneImages::extract(Cursor::new(
+                            control_plane_artifact.artifact,
+                        ))
+                    })
+                    .await
+                    .unwrap()?;
+
+                    let zones_to_install = zones.zones.len();
+                    StepResult::success(
+                        zones,
+                        InstallinatorCompletionMetadata::ControlPlaneZones {
+                            zones_to_install,
+                        },
+                    )
+                },
+            )
+            .register();
+
         engine
             .new_step(
                 InstallinatorComponent::Both,
                 InstallinatorStepId::Write,
                 "Writing host and control plane artifacts",
                 |cx| async move {
-                    let destination = if self.install_on_gimlet {
-                        let log = log.clone();
-                        tokio::task::spawn_blocking(move || {
-                            WriteDestination::from_hardware(&log)
-                        })
-                        .await
-                        .unwrap()?
-                    } else {
-                        // clap ensures `self.destination` is not `None` if
-                        // `install_on_gimlet` is false.
-                        let destination = self.destination.as_ref().unwrap();
-                        WriteDestination::in_directory(destination)?
-                    };
-
+                    let destination = destination.into_value(cx.token()).await;
                     let host_phase_2_artifact =
                         host_phase_2_artifact.into_value(cx.token()).await;
-                    let control_plane_artifact =
-                        control_plane_artifact.into_value(cx.token()).await;
+                    let control_plane_zones =
+                        control_plane_zones.into_value(cx.token()).await;
 
                     let mut writer = ArtifactWriter::new(
                         &host_2_phase_id_2,
                         &host_phase_2_artifact.artifact,
                         &control_plane_id_2,
-                        &control_plane_artifact.artifact,
+                        &control_plane_zones,
                         destination,
                     );
 

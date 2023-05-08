@@ -66,6 +66,8 @@ pub enum InstallinatorComponent {
 pub enum InstallinatorStepId {
     Download,
     Format,
+    Scan,
+    UnpackControlPlaneArtifact,
     Write,
 }
 
@@ -103,6 +105,16 @@ pub enum InstallinatorProgressMetadata {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum InstallinatorCompletionMetadata {
+    HardwareScan {
+        /// Number of disks found.
+        disks_found: usize,
+    },
+
+    ControlPlaneZones {
+        /// Number of zone images that will be installed.
+        zones_to_install: usize,
+    },
+
     Download {
         /// The address the artifact was downloaded from.
         address: SocketAddrV6,
@@ -258,6 +270,34 @@ impl AsError for WriteError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
+}
+
+/// The specification for writing control plane zones.
+#[derive(JsonSchema)]
+pub enum ControlPlaneZonesSpec {}
+
+// This is a nested spec used within a `WriteSpec` engine, and we reuse a couple
+// of `WriteSpec`'s types for simplicity.
+impl StepSpec for ControlPlaneZonesSpec {
+    type Component = WriteComponent;
+    type StepId = ControlPlaneZonesStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = ();
+    type CompletionMetadata = ();
+    type SkippedMetadata = ();
+    type Error = WriteError;
+}
+
+/// A step identifier for the control plane zones operation.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ControlPlaneZonesStepId {
+    /// Writing a zone.
+    Zone { name: String },
+
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
 }
 
 fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
