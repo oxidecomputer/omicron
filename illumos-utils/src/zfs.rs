@@ -109,11 +109,11 @@ impl fmt::Display for Mountpoint {
 
 /// This is the path for an encryption key used by ZFS
 #[derive(Debug, Clone)]
-pub struct Keypath(pub PathBuf);
+pub struct Keypath(pub Utf8PathBuf);
 
 impl fmt::Display for Keypath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.display())
+        write!(f, "{}", self.0)
     }
 }
 

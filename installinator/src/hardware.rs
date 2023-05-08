@@ -50,19 +50,14 @@ impl Hardware {
             "num_disks" => disks.len(),
         );
 
-        let m2_disks = disks
-            .into_iter()
-            .filter_map(|disk| {
-                // Skip U.2 disks
-                match disk.variant() {
-                    DiskVariant::U2 => {
-                        info!(
-                            log, "ignoring U.2 disk";
-                            "path" => disk.devfs_path().as_str(),
-                        );
-                        return None;
-                    }
-                    DiskVariant::M2 => (),
+        let mut m2_disks = vec![];
+        for disk in disks {
+            match disk.variant() {
+                DiskVariant::U2 => {
+                    info!(
+                        log, "ignoring U.2 disk";
+                        "path" => disk.devfs_path().as_str(),
+                    );
                 }
                 DiskVariant::M2 => {
                     let disk = Disk::new(log, disk, None)

@@ -14,6 +14,8 @@ use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use slog::Logger;
 use slog::{info, warn};
+use tokio::fs::{remove_file, File};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
 
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
@@ -101,7 +103,7 @@ impl From<&DiskIdentity> for Keypath {
             "{}-{}-{}-zfs-aes-256-gcm.key",
             id.vendor, id.serial, id.model
         );
-        let mut path = PathBuf::new();
+        let mut path = Utf8PathBuf::new();
         path.push(KEYPATH_ROOT);
         path.push(filename);
         Keypath(path)
@@ -315,7 +317,13 @@ impl Disk {
     ) -> Result<(), DiskError> {
         Self::ensure_zpool_imported(log, &zpool_name)?;
         Self::ensure_zpool_failmode_is_continue(log, &zpool_name)?;
-        Self::ensure_zpool_has_datasets(&zpool_name)?;
+        Self::ensure_zpool_has_datasets(
+            log,
+            &zpool_name,
+            disk_identity,
+            key_requester,
+        )
+        .await?;
         Ok(())
     }
 
