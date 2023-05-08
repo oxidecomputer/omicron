@@ -168,10 +168,6 @@ CREATE TABLE omicron.public.switch (
     serial_number STRING(63) NOT NULL,
     part_number STRING(63) NOT NULL,
     revision INT8 NOT NULL,
-
-    CONSTRAINT serial_part_revision_unique UNIQUE (
-      serial_number, part_number, revision
-    )
 );
 
 /* Add an index which lets us look up switches on a rack */
