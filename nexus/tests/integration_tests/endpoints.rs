@@ -1432,11 +1432,12 @@ lazy_static! {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        // TODO: Switches should be configured alongside sled agents during test setup
         VerifyEndpoint {
             url: &HARDWARE_SWITCH_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
         VerifyEndpoint {
