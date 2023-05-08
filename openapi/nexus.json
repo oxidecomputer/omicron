@@ -399,7 +399,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -570,7 +572,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -1018,7 +1024,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "end_time",
+            "start_time"
+          ]
+        }
       }
     },
     "/v1/groups": {
@@ -1075,7 +1086,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/groups/{group_id}": {
@@ -1189,7 +1202,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -1432,7 +1447,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -1635,7 +1654,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/instances/{instance}/disks/attach": {
@@ -2222,7 +2243,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/me/ssh-keys": {
@@ -2280,7 +2303,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -2458,7 +2483,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "instance"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -2793,7 +2822,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -3090,7 +3121,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -3278,7 +3313,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -3438,7 +3475,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/racks": {
@@ -3495,7 +3534,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/racks/{rack_id}": {
@@ -3591,7 +3632,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/sleds/{sled_id}": {
@@ -3697,7 +3740,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/switches": {
@@ -3858,7 +3903,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "silo"
+          ]
+        }
       }
     },
     "/v1/system/identity-providers/local/users": {
@@ -4152,7 +4201,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -4360,7 +4411,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/ip-pools/{pool}/ranges/add": {
@@ -4527,7 +4580,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/ip-pools-service/ranges/add": {
@@ -4680,7 +4735,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "end_time",
+            "start_time"
+          ]
+        }
       }
     },
     "/v1/system/policy": {
@@ -4792,7 +4852,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/roles/{role_name}": {
@@ -4888,7 +4950,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
         "tags": [
@@ -5133,7 +5197,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/deployments": {
@@ -5190,7 +5256,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/deployments/{id}": {
@@ -5363,7 +5431,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/updates/{version}": {
@@ -5529,7 +5599,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "silo"
+          ]
+        }
       }
     },
     "/v1/system/users/{user_id}": {
@@ -5634,7 +5708,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/users-builtin/{user}": {
@@ -5737,7 +5813,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/vpc-firewall-rules": {
@@ -5919,7 +5997,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "router"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -6240,7 +6322,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "vpc"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -6528,7 +6614,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "vpc"
+          ]
+        }
       },
       "post": {
         "tags": [
@@ -6825,7 +6915,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/vpcs": {
@@ -6890,7 +6982,11 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
       },
       "post": {
         "tags": [

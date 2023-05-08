@@ -56,6 +56,7 @@ use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
 use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SharedStepHandle;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
@@ -460,24 +461,110 @@ impl UpdateDriver {
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
 
-        let (_rot_artifact, sp_artifact) = match update_cx.sp.type_ {
-            SpType::Sled => (&plan.gimlet_rot, &plan.gimlet_sp),
-            SpType::Power => (&plan.psc_rot, &plan.psc_sp),
-            SpType::Switch => (&plan.sidecar_rot, &plan.sidecar_sp),
+        let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
+            SpType::Sled => (
+                plan.gimlet_rot_a.clone(),
+                plan.gimlet_rot_b.clone(),
+                plan.gimlet_sp.clone(),
+            ),
+            SpType::Power => (
+                plan.psc_rot_a.clone(),
+                plan.psc_rot_b.clone(),
+                plan.psc_sp.clone(),
+            ),
+            SpType::Switch => (
+                plan.sidecar_rot_a.clone(),
+                plan.sidecar_rot_b.clone(),
+                plan.sidecar_sp.clone(),
+            ),
         };
 
-        /*
-        // TODO: Fetch current running RoT slot; update the other one!
+        // To update the RoT, we have to know which slot (A or B) it is
+        // currently executing; we must update the _other_ slot.
         let mut rot_registrar = engine.for_component(UpdateComponent::Rot);
+        let rot_firmware_slot_and_artifact = rot_registrar
+            .new_step(
+                UpdateStepId::InterrogateRot,
+                "Interrogating RoT for currently-active slot",
+                |_cx| async move {
+                    let rot_active_slot = update_cx
+                        .get_component_active_slot(
+                            SpComponent::ROT.const_as_str(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::GetRotActiveSlotFailed {
+                                error,
+                            }
+                        })?;
+
+                    // Flip these around: if 0 (A) is active, we want to
+                    // update 1 (B), and vice versa.
+                    let (slot_to_update, artifact) = match rot_active_slot {
+                        0 => (1, rot_b),
+                        1 => (0, rot_a),
+                        _ => return Err(
+                            UpdateTerminalError::GetRotActiveSlotFailed {
+                                error: anyhow!("unexpected RoT active slot {rot_active_slot}"),
+                            }
+                        ),
+                    };
+
+                    StepResult::success(
+                        (slot_to_update, artifact),
+                        Default::default(),
+                    )
+                },
+            )
+            .register()
+            .into_shared();
+
+        // Send the update to the RoT.
         self.register_sp_component_steps(
             update_cx,
             &mut rot_registrar,
-            rot_artifact,
             SpComponent::ROT.const_as_str(),
-            firmware_slot_FIXME,
-            Default::default(),
+            rot_firmware_slot_and_artifact.clone(),
+            SpComponentUpdateStepNames::for_rot(),
         );
-        */
+
+        // Reset the RoT into the updated build we just sent.
+        rot_registrar
+            .new_step(
+                UpdateStepId::ResetRot,
+                "Resetting RoT",
+                |cx| async move {
+                    let (rot_firmware_slot, _) = rot_firmware_slot_and_artifact
+                        .into_value(cx.token())
+                        .await;
+
+                    // Mark the slot we just updated as the slot to use,
+                    // persistently.
+                    update_cx
+                        .set_component_active_slot(
+                            SpComponent::ROT.const_as_str(),
+                            rot_firmware_slot,
+                            true,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SetRotActiveSlotFailed {
+                                error,
+                            }
+                        })?;
+
+                    // Reset the RoT.
+                    update_cx
+                        .reset_sp_component(SpComponent::ROT.const_as_str())
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::RotResetFailed { error }
+                        })?;
+
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
 
         // The SP only has one updateable firmware slot ("the inactive bank") -
         // we always pass 0.
@@ -487,27 +574,20 @@ impl UpdateDriver {
         self.register_sp_component_steps(
             update_cx,
             &mut sp_registrar,
-            sp_artifact,
             SpComponent::SP_ITSELF.const_as_str(),
-            sp_firmware_slot,
-            Default::default(),
+            StepHandle::ready((sp_firmware_slot, sp_artifact)).into_shared(),
+            SpComponentUpdateStepNames::for_sp(),
         );
         sp_registrar
-            .new_step(
-                UpdateStepId::ResettingSp,
-                "Resetting SP",
-                |_cx| async move {
-                    update_cx
-                        .reset_sp_component(
-                            SpComponent::SP_ITSELF.const_as_str(),
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::SpResetFailed { error }
-                        })?;
-                    StepResult::success((), Default::default())
-                },
-            )
+            .new_step(UpdateStepId::ResetSp, "Resetting SP", |_cx| async move {
+                update_cx
+                    .reset_sp_component(SpComponent::SP_ITSELF.const_as_str())
+                    .await
+                    .map_err(|error| UpdateTerminalError::SpResetFailed {
+                        error,
+                    })?;
+                StepResult::success((), Default::default())
+            })
             .register();
 
         if update_cx.sp.type_ == SpType::Sled {
@@ -542,20 +622,23 @@ impl UpdateDriver {
         &self,
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
-        artifact: &'a ArtifactIdData,
         component_name: &'static str,
-        firmware_slot: u16,
+        firmware_slot_and_data: SharedStepHandle<(u16, ArtifactIdData)>,
         step_names: SpComponentUpdateStepNames,
     ) {
         let update_id = Uuid::new_v4();
 
+        let slot_and_data = firmware_slot_and_data.clone();
         registrar
             .new_step(
                 UpdateStepId::SpComponentUpdate {
                     stage: SpComponentUpdateStage::Sending,
                 },
                 step_names.sending.clone(),
-                move |_cx| async move {
+                move |cx| async move {
+                    let (firmware_slot, artifact) =
+                        slot_and_data.into_value(cx.token()).await;
+
                     // TODO: we should be able to report some sort of progress
                     // here for the file upload.
                     update_cx
@@ -586,7 +669,7 @@ impl UpdateDriver {
         self.register_component_update_completion_steps(
             update_cx,
             registrar,
-            &artifact.id,
+            firmware_slot_and_data,
             update_id,
             component_name,
             step_names,
@@ -597,11 +680,12 @@ impl UpdateDriver {
         &self,
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'_, 'a>,
-        artifact: &'a ArtifactId,
+        firmware_slot_and_data: SharedStepHandle<(u16, ArtifactIdData)>,
         update_id: Uuid,
         component: &'static str,
         step_names: SpComponentUpdateStepNames,
     ) {
+        let slot_and_data = firmware_slot_and_data.clone();
         registrar
             .new_step(
                 UpdateStepId::SpComponentUpdate {
@@ -609,6 +693,8 @@ impl UpdateDriver {
                 },
                 step_names.preparing,
                 move |cx| async move {
+                    let (_, artifact) =
+                        slot_and_data.into_value(cx.token()).await;
                     update_cx
                         .poll_component_update(
                             cx,
@@ -620,7 +706,7 @@ impl UpdateDriver {
                         .map_err(|error| {
                             UpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Preparing,
-                                artifact: artifact.clone(),
+                                artifact: artifact.id,
                                 error,
                             }
                         })?;
@@ -637,6 +723,8 @@ impl UpdateDriver {
                 },
                 step_names.writing,
                 move |cx| async move {
+                    let (_, artifact) =
+                        firmware_slot_and_data.into_value(cx.token()).await;
                     update_cx
                         .poll_component_update(
                             cx,
@@ -648,7 +736,7 @@ impl UpdateDriver {
                         .map_err(|error| {
                             UpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Writing,
-                                artifact: artifact.clone(),
+                                artifact: artifact.id,
                                 error,
                             }
                         })?;
@@ -817,14 +905,10 @@ impl UpdateDriver {
                 "Setting host startup options",
                 move |_cx| async move {
                     update_cx
-                        .mgs_client
-                        .sp_component_active_slot_set(
-                            update_cx.sp.type_,
-                            update_cx.sp.slot,
+                        .set_component_active_slot(
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                            &SpComponentFirmwareSlot {
-                                slot: trampoline_phase_1_boot_slot,
-                            },
+                            trampoline_phase_1_boot_slot,
+                            false,
                         )
                         .await
                         .map_err(|error| {
@@ -1004,9 +1088,8 @@ impl UpdateDriver {
         self.register_sp_component_steps(
             update_cx,
             registrar,
-            artifact,
             HOST_BOOT_FLASH,
-            boot_slot,
+            StepHandle::ready((boot_slot, artifact.clone())).into_shared(),
             step_names,
         );
     }
@@ -1162,6 +1245,40 @@ impl UpdateContext {
         StepResult::success((), Default::default())
     }
 
+    async fn get_component_active_slot(
+        &self,
+        component: &str,
+    ) -> anyhow::Result<u16> {
+        self.mgs_client
+            .sp_component_active_slot_get(
+                self.sp.type_,
+                self.sp.slot,
+                component,
+            )
+            .await
+            .context("failed to get component active slot")
+            .map(|res| res.into_inner().slot)
+    }
+
+    async fn set_component_active_slot(
+        &self,
+        component: &str,
+        slot: u16,
+        persist: bool,
+    ) -> anyhow::Result<()> {
+        self.mgs_client
+            .sp_component_active_slot_set(
+                self.sp.type_,
+                self.sp.slot,
+                component,
+                persist,
+                &SpComponentFirmwareSlot { slot },
+            )
+            .await
+            .context("failed to set component active slot")
+            .map(|res| res.into_inner())
+    }
+
     async fn reset_sp_component(&self, component: &str) -> anyhow::Result<()> {
         self.mgs_client
             .sp_component_reset(self.sp.type_, self.sp.slot, component)
@@ -1269,19 +1386,25 @@ impl SpComponentUpdateStepNames {
     fn for_host_phase_1(kind: &str) -> Self {
         Self {
             sending: format!("Sending {kind} phase 1 image to MGS").into(),
-            preparing: format!("Preparing to receive {kind} phase 1 update")
+            preparing: format!("Preparing to write {kind} phase 1 update")
                 .into(),
             writing: format!("Writing {kind} phase 1 update").into(),
         }
     }
-}
 
-impl Default for SpComponentUpdateStepNames {
-    fn default() -> Self {
+    fn for_sp() -> Self {
         Self {
-            sending: "Sending artifact to MGS".into(),
-            preparing: "Preparing to receive update".into(),
-            writing: "Writing update".into(),
+            sending: "Sending SP image to MGS".into(),
+            preparing: "Preparing to write SP update".into(),
+            writing: "Writing SP update".into(),
+        }
+    }
+
+    fn for_rot() -> Self {
+        Self {
+            sending: "Sending RoT image to MGS".into(),
+            preparing: "Preparing to write RoT update".into(),
+            writing: "Writing RoT update".into(),
         }
     }
 }

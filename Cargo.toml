@@ -22,6 +22,7 @@ members = [
     "installinator-common",
     "internal-dns",
     "ipcc-key-value",
+    "key-manager",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -29,7 +30,6 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/passwords",
     "nexus/test-interface",
     "nexus/test-utils",
     "nexus/test-utils-macros",
@@ -43,6 +43,7 @@ members = [
     "oximeter/oximeter-macro-impl",
     "oximeter/producer",
     "package",
+    "passwords",
     "rpaths",
     "sled-agent",
     "sled-agent-client",
@@ -79,6 +80,7 @@ default-members = [
     "installinator-common",
     "internal-dns",
     "ipcc-key-value",
+    "key-manager",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -86,7 +88,6 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/passwords",
     "nexus/types",
     "oxide-client",
     "oximeter-client",
@@ -97,6 +98,7 @@ default-members = [
     "oximeter/oximeter-macro-impl",
     "oximeter/producer",
     "package",
+    "passwords",
     "rpaths",
     "sled-agent",
     "sled-agent-client",
@@ -165,8 +167,8 @@ flate2 = "1.0.26"
 fs-err = "2.9.0"
 futures = "0.3.28"
 gateway-client = { path = "gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "330443bb043b0e152b8c86f0fac959a1b3d24c48" }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "330443bb043b0e152b8c86f0fac959a1b3d24c48" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", default-features = false, features = ["std"], rev = "2d8598404cc3fd86104681ae25a86a17fe5a0773" }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2d8598404cc3fd86104681ae25a86a17fe5a0773" }
 gateway-test-utils = { path = "gateway-test-utils" }
 headers = "0.3.8"
 heck = "0.4"
@@ -199,7 +201,7 @@ nexus-client = { path = "nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
-nexus-passwords = { path = "nexus/passwords" }
+omicron-passwords = { path = "passwords" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -264,6 +266,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.21.1"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
+secrecy = "0.8.0"
 semver = { version = "1.0.17", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"

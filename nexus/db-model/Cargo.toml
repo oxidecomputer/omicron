@@ -33,6 +33,6 @@ uuid.workspace = true
 db-macros.workspace = true
 omicron-common.workspace = true
 nexus-defaults.workspace = true
-nexus-passwords.workspace = true
 nexus-types.workspace = true
+omicron-passwords.workspace = true
 sled-agent-client.workspace = true

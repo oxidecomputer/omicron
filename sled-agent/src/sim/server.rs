@@ -313,7 +313,7 @@ impl Server {
             // needs to be changed with this hash are the instructions given to
             // individuals running this program who then want to log in as this
             // user.  For more on what's supported, see the API docs for this
-            // type and the specific constraints in the nexus-passwords crate.
+            // type and the specific constraints in the omicron-passwords crate.
             user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
             RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
                 .parse()

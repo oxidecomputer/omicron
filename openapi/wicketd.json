@@ -2752,7 +2752,35 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "interrogate_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_sp"
                 ]
               }
             },
