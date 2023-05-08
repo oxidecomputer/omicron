@@ -225,8 +225,7 @@ impl Zfs {
         Ok(())
     }
 
-    // Return true if the dataset exists, with an optional epoch if there is one.
-    // Epochs are only written to encrypted root datasets
+    // Return true if the dataset exists, false otherwise.
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,

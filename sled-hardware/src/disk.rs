@@ -419,19 +419,23 @@ impl Disk {
             let mountpoint = zpool_name.dataset_mountpoint(dataset);
             let keypath: Keypath = disk_identity.into();
 
-            let epoch = if let Ok(epoch_str) =
-                Zfs::get_oxide_value(, "epoch")
-            {
-                if let Ok(epoch) = epoch_str.parse::<u64>() {
-                    epoch
+            let epoch =
+                if let Ok(epoch_str) = Zfs::get_oxide_value(dataset, "epoch") {
+                    if let Ok(epoch) = epoch_str.parse::<u64>() {
+                        epoch
+                    } else {
+                        return Err(DiskError::MissingEpochProperty(
+                            dataset.to_string(),
+                        ));
+                    }
                 } else {
-                    return Err(DiskError::MissingEpochProperty(
-                        dataset.to_string(),
-                    ));
-                }
-            } else {
-                key_requester.load_latest_secret().await?
-            };
+                    // We assume the error indicates that the dataset doesn't
+                    // exist here. Use the latest secret to create it. If the
+                    // error did not actually indicate that the dataset didn't
+                    // exist the creation will fail, so we don't need to do any
+                    // special handling.
+                    key_requester.load_latest_secret().await?
+                };
 
             let key = key_requester
                 .get_key(epoch, disk_identity.clone().into())
@@ -555,6 +559,7 @@ impl KeyFile {
             .open(&path.0)
             .await?;
         file.write_all(key).await?;
+        info!(log, "Created keyfile {}", path);
         Ok(KeyFile { path, file, log: log.clone() })
     }
 
@@ -564,7 +569,7 @@ impl KeyFile {
         let zeroes = [0u8; 32];
         let _ = self.file.seek(SeekFrom::Start(0)).await?;
         self.file.write_all(&zeroes).await?;
-        info!(self.log, "Zeroed keyfile {}", self.path);
+        info!(self.log, "Zeroed and unlinked keyfile {}", self.path);
         remove_file(&self.path().0).await?;
         Ok(())
     }
