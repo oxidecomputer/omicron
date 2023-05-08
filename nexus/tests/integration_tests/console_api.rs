@@ -166,10 +166,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let console_paths = &[
         "/",
         "/projects/irrelevant-path",
+        "/projects-new",
         "/settings/irrelevant-path",
         "/sys/irrelevant-path",
         "/device/success",
         "/device/verify",
+        "/utilization",
+        "/access",
     ];
 
     for path in console_paths {

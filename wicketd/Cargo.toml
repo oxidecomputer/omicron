@@ -42,6 +42,7 @@ omicron-common.workspace = true
 sled-hardware.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
+wicket-common.workspace = true
 
 [[bin]]
 name = "wicketd"

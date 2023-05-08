@@ -32,6 +32,7 @@ use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_nexus::db::fixed_data::{silo::SILO_ID, FLEET_ID};
 use omicron_nexus::TestInterfaces as _;
 use omicron_nexus::{external_api::params, Nexus};
@@ -61,18 +62,36 @@ fn get_instance_disks_url(instance_name: &str) -> String {
     format!("/v1/instances/{instance_name}/disks?project={}", PROJECT_NAME)
 }
 
-fn get_disk_attach_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{instance_name}/disks/attach?project={}",
-        PROJECT_NAME
-    )
+fn get_disk_attach_url(instance: &NameOrId) -> String {
+    match instance {
+        NameOrId::Name(instance_name) => format!(
+            "/v1/instances/{}/disks/attach?project={}",
+            instance_name.as_str(),
+            PROJECT_NAME
+        ),
+        NameOrId::Id(instance_id) => {
+            format!(
+                "/v1/instances/{}/disks/attach",
+                instance_id.to_string().as_str()
+            )
+        }
+    }
 }
 
-fn get_disk_detach_url(instance_name: &str) -> String {
-    format!(
-        "/v1/instances/{instance_name}/disks/detach?project={}",
-        PROJECT_NAME
-    )
+fn get_disk_detach_url(instance: &NameOrId) -> String {
+    match instance {
+        NameOrId::Name(instance_name) => format!(
+            "/v1/instances/{}/disks/detach?project={}",
+            instance_name.as_str(),
+            PROJECT_NAME
+        ),
+        NameOrId::Id(instance_id) => {
+            format!(
+                "/v1/instances/{}/disks/detach",
+                instance_id.to_string().as_str()
+            )
+        }
+    }
 }
 
 async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
@@ -215,9 +234,9 @@ async fn test_disk_create_attach_detach_delete(
     assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
-        get_disk_attach_url(instance.identity.name.as_str());
+        get_disk_attach_url(&instance.identity.id.into());
     let url_instance_detach_disk =
-        get_disk_detach_url(instance.identity.name.as_str());
+        get_disk_detach_url(&instance.identity.id.into());
 
     // Start attaching the disk to the instance.
     let attached_disk = disk_post(
@@ -362,9 +381,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 0);
 
     let url_instance_attach_disk =
-        get_disk_attach_url(instance.identity.name.as_str());
+        get_disk_attach_url(&instance.identity.name.clone().into());
     let url_instance_detach_disk =
-        get_disk_detach_url(instance.identity.name.as_str());
+        get_disk_detach_url(&instance.identity.name.into());
 
     // Start attaching the disk to the instance.
     let attached_disk = disk_post(
@@ -391,9 +410,9 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     instance_simulate(nexus, &instance_next.identity.id).await;
 
     let url_instance2_attach_disk =
-        get_disk_attach_url(instance2.identity.name.as_str());
+        get_disk_attach_url(&instance2.identity.id.into());
     let url_instance2_detach_disk =
-        get_disk_detach_url(instance2.identity.name.as_str());
+        get_disk_detach_url(&instance2.identity.id.into());
 
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url_instance2_attach_disk)

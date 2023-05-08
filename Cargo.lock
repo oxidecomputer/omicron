@@ -972,9 +972,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.2.5"
+version = "4.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a1f23fa97e1d1641371b51f35535cb26959b8e27ab50d167a8b996b5bada819"
+checksum = "34d21f9bf1b425d2968943631ec91202fe5e837264063503708b83013f8fc938"
 dependencies = [
  "clap_builder",
  "clap_derive 4.2.0",
@@ -983,9 +983,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.2.5"
+version = "4.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fdc5d93c358224b4d6867ef1356d740de2303e9892edc06c5340daeccd96bab"
+checksum = "914c8c79fb560f238ef6429439a30023c862f7a28e688c58f7203f12b29970bd"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1885,7 +1885,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.2.5",
+ "clap 4.2.7",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -1995,7 +1995,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls 0.21.0",
+ "rustls 0.21.1",
  "rustls-pemfile",
  "schemars",
  "serde",
@@ -2515,7 +2515,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3037,7 +3037,7 @@ dependencies = [
  "http",
  "hyper",
  "log",
- "rustls 0.21.0",
+ "rustls 0.21.1",
  "rustls-native-certs",
  "tokio",
  "tokio-rustls 0.24.0",
@@ -3196,7 +3196,7 @@ dependencies = [
  "buf-list",
  "bytes",
  "camino",
- "clap 4.2.5",
+ "clap 4.2.7",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3256,7 +3256,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "camino",
- "clap 4.2.5",
+ "clap 4.2.7",
  "dropshot",
  "expectorate",
  "hyper",
@@ -3421,9 +3421,9 @@ dependencies = [
 
 [[package]]
 name = "keccak"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3afef3b6eff9ce9d8ff9b3601125eec7f0c8cbac7abd14f355d053fa56c98768"
+checksum = "8f6d5ed8676d904364de097082f4e7d240b571b67989ced0240f08b7f966f940"
 dependencies = [
  "cpufeatures",
 ]
@@ -3479,9 +3479,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.142"
+version = "0.2.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a987beff54b60ffa6d51982e1aa1146bc42f19bd26be28b0586f252fccf5317"
+checksum = "edc207893e85c5d6be840e969b496b53d94cec8be2d501b214f50daa97fa8024"
 
 [[package]]
 name = "libdlpi-sys"
@@ -3965,7 +3965,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "rustls 0.21.0",
+ "rustls 0.21.1",
  "samael",
  "schemars",
  "serde",
@@ -4351,7 +4351,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "crossbeam",
  "omicron-package",
  "omicron-sled-agent",
@@ -4368,7 +4368,7 @@ name = "omicron-dev-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "dropshot",
  "expectorate",
  "futures",
@@ -4396,7 +4396,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "ciborium",
- "clap 4.2.5",
+ "clap 4.2.7",
  "crucible-smf",
  "dropshot",
  "expectorate",
@@ -4445,7 +4445,7 @@ dependencies = [
  "bb8",
  "camino",
  "chrono",
- "clap 4.2.5",
+ "clap 4.2.7",
  "cookie",
  "criterion",
  "crucible-agent-client",
@@ -4510,7 +4510,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring",
- "rustls 0.21.0",
+ "rustls 0.21.1",
  "samael",
  "schemars",
  "serde",
@@ -4541,7 +4541,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.2.5",
+ "clap 4.2.7",
  "expectorate",
  "futures",
  "hex",
@@ -4589,7 +4589,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if 1.0.0",
  "chrono",
- "clap 4.2.5",
+ "clap 4.2.7",
  "crucible-agent-client",
  "crucible-client-types 0.1.0 (git+https://github.com/oxidecomputer/crucible?rev=0b34a53b57038a7804ac69ab90400539bd1961e8)",
  "ddm-admin-client",
@@ -4949,7 +4949,7 @@ dependencies = [
 name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
- "clap 4.2.5",
+ "clap 4.2.7",
  "dropshot",
  "expectorate",
  "futures",
@@ -4981,7 +4981,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
- "clap 4.2.5",
+ "clap 4.2.7",
  "dropshot",
  "itertools",
  "omicron-test-utils",
@@ -5661,7 +5661,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c965167e7e
 dependencies = [
  "anyhow",
  "built",
- "clap 4.2.5",
+ "clap 4.2.7",
  "openapiv3",
  "progenitor-client",
  "progenitor-impl",
@@ -6474,9 +6474,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07180898a28ed6a7f7ba2311594308f595e3dd2e3c3812fa0a80a47b45f17e5d"
+checksum = "c911ba11bc8433e811ce56fde130ccf32f5127cab0e0194e9c68c5a5b671791e"
 dependencies = [
  "log",
  "ring",
@@ -6742,9 +6742,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.160"
+version = "1.0.162"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb2f3770c8bce3bcda7e149193a069a0f4365bda1fa5cd88e03bca26afc1216c"
+checksum = "71b2f6e1ab5c2b98c05f0f35b236b22e8df7ead6ffbf51d7808da7f8817e7ab6"
 dependencies = [
  "serde_derive",
 ]
@@ -6778,9 +6778,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.160"
+version = "1.0.162"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "291a097c63d8497e00160b166a967a4a79c64f3facdd01cbd7502231688d77df"
+checksum = "a2a0814352fd64b58489904a44ea8d90cb1a91dcb6b4f5ebabc32c8318e93cb6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7005,9 +7005,9 @@ dependencies = [
 
 [[package]]
 name = "sha3"
-version = "0.10.7"
+version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54c2bb1a323307527314a36bfb73f24febb08ce2b8a554bf4ffd6f51ad15198c"
+checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
  "digest 0.10.6",
  "keccak",
@@ -7349,7 +7349,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.2.5",
+ "clap 4.2.7",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -7980,7 +7980,7 @@ version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0d409377ff5b1e3ca6437aa86c1eb7d40c134bfec254e44c830defa92669db5"
 dependencies = [
- "rustls 0.21.0",
+ "rustls 0.21.1",
  "tokio",
 ]
 
@@ -8271,7 +8271,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.2.5",
+ "clap 4.2.7",
  "console",
  "datatest-stable",
  "fs-err",
@@ -8900,7 +8900,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.2.5",
+ "clap 4.2.7",
  "crossterm 0.26.1",
  "futures",
  "hex",
@@ -8927,7 +8927,22 @@ dependencies = [
  "toml 0.7.3",
  "tui",
  "tui-tree-widget",
+ "wicket-common",
  "wicketd-client",
+]
+
+[[package]]
+name = "wicket-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gateway-client",
+ "omicron-common 0.1.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "update-engine",
 ]
 
 [[package]]
@@ -8938,7 +8953,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.2.5",
+ "clap 4.2.7",
  "crossterm 0.26.1",
  "reedline",
  "serde",
@@ -8961,7 +8976,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.2.5",
+ "clap 4.2.7",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -9004,6 +9019,7 @@ dependencies = [
  "tufaceous-lib",
  "update-engine",
  "uuid",
+ "wicket-common",
  "wicketd-client",
 ]
 
@@ -9022,6 +9038,7 @@ dependencies = [
  "slog",
  "update-engine",
  "uuid",
+ "wicket-common",
 ]
 
 [[package]]
@@ -9337,9 +9354,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0445d0fbc924bb93539b4316c11afb121ea39296f99a3c4c9edad09e3658cdef"
+checksum = "7e92305c174683d78035cbf1b70e18db6329cc0f1b9cae0a52ca90bf5bfe7125"
 dependencies = [
  "byteorder",
  "bzip2",
