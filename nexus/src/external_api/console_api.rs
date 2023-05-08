@@ -91,7 +91,7 @@ pub async fn login_spoof(
                 header::SET_COOKIE,
                 http::HeaderValue::from_str(&session_cookie_header_value(
                     &session.token,
-                    apictx.session_idle_timeout(),
+                    apictx.session_absolute_timeout(),
                 ))
                 .map_err(|error| {
                     HttpError::for_internal_error(format!(
@@ -446,13 +446,16 @@ async fn login_finish(
 
     {
         let headers = response_with_headers.headers_mut();
+        let cookie = session_cookie_header_value(
+            &session.token,
+            // use absolute timeout even though session might idle out first.
+            // browser expiration is mostly for convenience, as the API will
+            // reject requests with an expired session regardless
+            apictx.session_absolute_timeout(),
+        );
         headers.append(
             header::SET_COOKIE,
-            http::HeaderValue::from_str(&session_cookie_header_value(
-                &session.token,
-                apictx.session_idle_timeout(),
-            ))
-            .map_err(|error| {
+            http::HeaderValue::from_str(&cookie).map_err(|error| {
                 HttpError::for_internal_error(format!(
                     "unsupported cookie value: {:#}",
                     error
