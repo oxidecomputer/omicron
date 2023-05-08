@@ -228,7 +228,9 @@ pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
 pub const CLUSTER_DATASET: &'static str = "cluster";
 pub const CONFIG_DATASET: &'static str = "config";
-pub const ZONE_DATASET: &'static str = "zone";
+
+// U.2 datasets live under the encrypted dataset and inherit encryption
+pub const ZONE_DATASET: &'static str = "crypt/zone";
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
