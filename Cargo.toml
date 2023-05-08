@@ -22,6 +22,7 @@ members = [
     "installinator-common",
     "internal-dns",
     "ipcc-key-value",
+    "key-manager",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -79,6 +80,7 @@ default-members = [
     "installinator-common",
     "internal-dns",
     "ipcc-key-value",
+    "key-manager",
     "nexus",
     "nexus-client",
     "nexus/authz-macros",
@@ -264,6 +266,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.21.1"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.12"
+secrecy = "0.8.0"
 semver = { version = "1.0.17", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
