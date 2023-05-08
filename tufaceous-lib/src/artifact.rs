@@ -394,7 +394,7 @@ fn read_entry<R: io::Read>(
 /// Represents RoT A/B hubris archives.
 ///
 /// RoT artifacts are actually tarballs, with both A and B hubris archives
-/// inside the. This code extracts those archives out of the tarballs.
+/// inside them. This code extracts those archives out of the tarballs.
 #[derive(Clone, Debug)]
 pub struct RotArchives {
     pub archive_a: Bytes,
