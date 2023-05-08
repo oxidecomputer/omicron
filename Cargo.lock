@@ -6103,9 +6103,9 @@ checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"
-version = "0.23.1"
+version = "0.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11bafc859c6815fbaffbbbf4229ecb767ac913fecb27f9ad4343662e9ef099ea"
+checksum = "0ce5e73202a820a31f8a0ee32ada5e21029c81fd9e3ebf668a40832e4219d9d1"
 dependencies = [
  "memchr",
  "serde",
@@ -6824,8 +6824,8 @@ dependencies = [
 
 [[package]]
 name = "samael"
-version = "0.0.10"
-source = "git+https://github.com/njaremko/samael?branch=master#52028e45d11ceb7114bf0c730a9971207e965602"
+version = "0.0.11"
+source = "git+https://github.com/njaremko/samael?branch=master#e5af7bd64ffa86be8fa81fbbb9cf5fb75f7d8a55"
 dependencies = [
  "base64 0.21.0",
  "bindgen",
