@@ -48,6 +48,15 @@ pub struct ConfigHardware {
     pub physical_ram: u64,
 }
 
+/// Describes how to look up the Nexus socket address
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum NexusAddressSource {
+    /// Resolve the Nexus socket address using an internal DNS server
+    FromDns { internal_dns_address: SocketAddr },
+    /// Use the directly-supplied Nexus socket address
+    Direct { address: SocketAddr },
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
@@ -55,8 +64,8 @@ pub struct Config {
     pub id: Uuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
-    /// IP address and TCP port for Nexus instance to register with
-    pub nexus_address: SocketAddr,
+    /// Address of Nexus
+    pub nexus_address_source: NexusAddressSource,
     /// configuration for the sled agent dropshot server
     pub dropshot: ConfigDropshot,
     /// configuration for the sled agent debug log

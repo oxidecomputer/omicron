@@ -3060,7 +3060,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         additional_sleds.push(
             start_sled_agent(
                 log,
-                addr,
+                sim::NexusAddressSource::Direct { address: addr },
                 sa_id,
                 &update_directory,
                 sim::SimMode::Explicit,

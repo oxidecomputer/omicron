@@ -522,7 +522,7 @@ mod tests {
             let update_dir = Utf8Path::new("/should/be/unused");
             let sa = start_sled_agent(
                 log,
-                addr,
+                omicron_sled_agent::sim::NexusAddressSource::Direct { address: addr },
                 sa_id,
                 &update_dir,
                 omicron_sled_agent::sim::SimMode::Explicit,

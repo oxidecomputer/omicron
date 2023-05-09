@@ -11,6 +11,9 @@ use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
+// TODO: Confirm we want this dep?
+// It was used by the sled agent
+use nexus_client::types as NexusTypes;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::RecoverySiloConfig;
@@ -69,11 +72,10 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub dendrite: dev::dendrite::DendriteInstance,
+
     pub external_dns_zone_name: String,
-    pub external_dns_server: dns_server::dns_server::ServerHandle,
-    pub external_dns_config_server:
-        dropshot::HttpServer<dns_server::http_server::Context>,
-    pub external_dns_resolver: trust_dns_resolver::TokioAsyncResolver,
+    pub external_dns: dns_server::InMemoryServer,
+    pub internal_dns: dns_server::InMemoryServer,
     pub silo_name: Name,
     pub user_name: UserId,
 }
@@ -153,41 +155,338 @@ pub async fn test_setup<N: NexusServer>(
         .await
 }
 
+struct RackInitRequestBuilder {
+    services: Vec<NexusTypes::ServicePutRequest>,
+    datasets: Vec<NexusTypes::DatasetCreateRequest>,
+    internal_dns_config: internal_dns::DnsConfigBuilder,
+}
+
+impl RackInitRequestBuilder {
+    fn new() -> Self {
+        Self {
+            services: vec![],
+            datasets: vec![],
+            internal_dns_config: internal_dns::DnsConfigBuilder::new(),
+        }
+    }
+
+    fn add_service(
+        &mut self,
+        address: SocketAddrV6,
+        kind: NexusTypes::ServiceKind,
+        service_name: internal_dns::ServiceName,
+        sled_id: Uuid,
+    ) {
+        let zone_id = Uuid::new_v4();
+        self.services.push(
+            NexusTypes::ServicePutRequest {
+                address: address.to_string(),
+                kind,
+                service_id: Uuid::new_v4(),
+                sled_id,
+                zone_id: Some(zone_id),
+            }
+        );
+        let zone = self.internal_dns_config.host_zone(
+            zone_id,
+            *address.ip(),
+        ).expect("Failed to set up DNS for {kind}");
+        self.internal_dns_config.service_backend_zone(
+            service_name,
+            &zone,
+            address.port(),
+        ).expect("Failed to set up DNS for {kind}");
+    }
+
+    fn add_dataset(
+        &mut self,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
+        address: SocketAddrV6,
+        kind: NexusTypes::DatasetKind,
+        service_name: internal_dns::ServiceName,
+    ) {
+        self.datasets.push(NexusTypes::DatasetCreateRequest {
+            zpool_id,
+            dataset_id,
+            request: NexusTypes::DatasetPutRequest {
+                address: address.to_string(),
+                kind: kind.into(),
+            },
+        });
+        let zone = self.internal_dns_config.host_zone(
+            dataset_id,
+            *address.ip(),
+        ).expect("Failed to set up DNS for {kind}");
+        self.internal_dns_config.service_backend_zone(
+            service_name,
+            &zone,
+            address.port(),
+        ).expect("Failed to set up DNS for {kind}");
+    }
+}
+
+// TODO: Maybe split this out into a few different files?
+
+pub struct ControlPlaneTestContextBuilder<'a, N> {
+    pub config: &'a mut omicron_common::nexus_config::Config,
+    rack_init_builder: RackInitRequestBuilder,
+
+    pub start_time: chrono::DateTime<chrono::Utc>,
+    pub logctx: LogContext,
+
+    pub external_client: Option<ClientTestContext>,
+    pub internal_client: Option<ClientTestContext>,
+
+    pub server: Option<N>,
+    pub database: Option<dev::db::CockroachInstance>,
+    pub clickhouse: Option<dev::clickhouse::ClickHouseInstance>,
+    pub sled_agent_storage: Option<camino_tempfile::Utf8TempDir>,
+    pub sled_agent: Option<sim::Server>,
+    pub oximeter: Option<Oximeter>,
+    pub producer: Option<ProducerServer>,
+    pub dendrite: Option<dev::dendrite::DendriteInstance>,
+
+    pub external_dns_zone_name: Option<String>,
+    pub external_dns: Option<dns_server::InMemoryServer>,
+    pub internal_dns: Option<dns_server::InMemoryServer>,
+
+    pub silo_name: Option<Name>,
+    pub user_name: Option<UserId>,
+}
+
+impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
+    pub fn new(
+        test_name: &str,
+        config: &'a mut omicron_common::nexus_config::Config,
+    ) -> Self {
+        let start_time = chrono::Utc::now();
+        let logctx = LogContext::new(test_name, &config.pkg.log);
+
+        Self {
+            config,
+            rack_init_builder: RackInitRequestBuilder::new(),
+            start_time,
+            logctx,
+            external_client: None,
+            internal_client: None,
+            server: None,
+            database: None,
+            clickhouse: None,
+            sled_agent_storage: None,
+            sled_agent: None,
+            oximeter: None,
+            producer: None,
+            dendrite: None,
+            external_dns_zone_name: None,
+            external_dns: None,
+            internal_dns: None,
+            silo_name: None,
+            user_name: None,
+        }
+    }
+
+    pub async fn start_crdb(&mut self) {
+        let log = &self.logctx.log;
+        // Start up CockroachDB.
+        let database = db::test_setup_database(log).await;
+        // Store actual address/port information for the databases after they start.
+        // TODO: Use DNS, not a hard-coded config
+        self.config.deployment.database =
+            nexus_config::Database::FromUrl { url: database.pg_config().clone() };
+
+        self.database = Some(database);
+
+        // TODO: We don't know the port
+        /*
+        self.rack_init_builder.add_dataset(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            address: dataset
+        );
+        */
+    }
+
+    // Start ClickHouse database server.
+    pub async fn start_clickhouse(&mut self) {
+        let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+        let port = clickhouse.port();
+
+        let zpool_id = Uuid::new_v4();
+        let dataset_id = Uuid::new_v4();
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+        self.rack_init_builder.add_dataset(
+            zpool_id,
+            dataset_id,
+            address,
+            NexusTypes::DatasetKind::Clickhouse,
+            internal_dns::ServiceName::Clickhouse,
+        );
+        self.clickhouse = Some(clickhouse);
+
+        // TODO: Use DNS, not a hard-coded config
+        self.config
+            .pkg
+            .timeseries_db
+            .address
+            .as_mut()
+            .expect("Tests expect to set a port of Clickhouse")
+            .set_port(port);
+    }
+
+    pub async fn start_dendrite(&mut self) {
+        // Set up a stub instance of dendrite
+        let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
+        let port = dendrite.port;
+        self.dendrite = Some(dendrite);
+
+        // TODO: Use DNS, not a hard-coded config
+        self.config
+            .pkg
+            .dendrite
+            .address
+            .as_mut()
+            .expect("Tests expect an explicit dendrite address")
+            .set_port(port);
+    }
+
+    pub async fn start_nexus(&mut self) {
+        // Begin starting Nexus.
+        let (nexus_internal, nexus_internal_addr) =
+            N::start_internal(&self.config, &self.logctx.log).await;
+
+        // TODO: Finish?
+    }
+
+    pub async fn start_sled(
+        &mut self,
+        nexus_address: sim::NexusAddressSource,
+        sim_mode: sim::SimMode,
+    ) {
+        // Set up a single sled agent.
+        let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        let tempdir = camino_tempfile::tempdir().unwrap();
+        let sled_agent = start_sled_agent(
+            self.logctx.log.new(o!(
+                "component" => "omicron_sled_agent::sim::Server",
+                "sled_id" => sa_id.to_string(),
+            )),
+            nexus_address,
+            sa_id,
+            tempdir.path(),
+            sim_mode,
+        )
+        .await
+        .unwrap();
+
+        self.sled_agent = Some(sled_agent);
+        self.sled_agent_storage = Some(tempdir);
+    }
+
+    // Set up the Crucible Pantry on an existing Sled Agent.
+    pub async fn start_crucible_pantry(
+        &mut self,
+        dns: &mut internal_dns::DnsConfigBuilder,
+    ) {
+        let sled_agent = self.sled_agent.as_mut()
+            .expect("Cannot start pantry without first starting sled agent");
+
+        // TODO: it's possible that we do the DNS management ourselves, and
+        // *don't* let this be the responsibility of the simulated sled agent?
+        sled_agent.start_pantry(dns).await;
+    }
+
+    // Set up an external DNS server.
+    pub async fn start_external_dns(&mut self) {
+        let log = self.logctx.log.new(o!("component" => "external_dns_server"));
+        let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+
+        let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
+
+        let SocketAddr::V6(address) = *dns.server.local_address() else {
+            panic!("Unsupported IPv4 DNS address");
+        };
+        self.rack_init_builder.add_service(
+            address,
+            NexusTypes::ServiceKind::ExternalDns,
+            internal_dns::ServiceName::ExternalDns,
+            sled_id,
+        );
+
+        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
+            panic!("Unsupported IPv4 DNS address");
+        };
+        self.rack_init_builder.add_service(
+            address,
+            NexusTypes::ServiceKind::ExternalDnsConfig,
+            internal_dns::ServiceName::ExternalDns,
+            sled_id,
+        );
+
+        self.external_dns = Some(dns);
+    }
+
+    // Set up an internal DNS server.
+    pub async fn start_internal_dns(&mut self) {
+        let log = self.logctx.log.new(o!("component" => "internal_dns_server"));
+        let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
+        let dns = dns_server::InMemoryServer::new(&log).await.unwrap();
+
+        let SocketAddr::V6(address) = *dns.server.local_address() else {
+            panic!("Unsupported IPv4 DNS address");
+        };
+        self.rack_init_builder.add_service(
+            address,
+            NexusTypes::ServiceKind::InternalDns,
+            internal_dns::ServiceName::InternalDns,
+            sled_id,
+        );
+
+        let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
+            panic!("Unsupported IPv4 DNS address");
+        };
+        self.rack_init_builder.add_service(
+            address,
+            NexusTypes::ServiceKind::InternalDnsConfig,
+            internal_dns::ServiceName::InternalDns,
+            sled_id,
+        );
+
+        self.internal_dns = Some(dns);
+    }
+
+    // TODO: aggregate "ServicePutRequest" objects, handoff to
+    // nexus server via N::start (NexusServer::start)
+    //
+    // TODO: we aggregate the following:
+    // - DNS Service(s) (internal/external config + DNS service)
+    // - Nexus
+    //
+    // TODO: We could also handoff info about datasets / internal DNS config,
+    // but we'll need to change the interface to "NexusServer::start"
+    pub fn build(self) -> ControlPlaneTestContext<N> {
+        todo!();
+    }
+}
+
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
 ) -> ControlPlaneTestContext<N> {
-    let start_time = chrono::Utc::now();
-    let logctx = LogContext::new(test_name, &config.pkg.log);
-    let log = &logctx.log;
+    let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
 
-    // Start up CockroachDB.
-    let database = db::test_setup_database(log).await;
+    builder.start_crdb().await;
+    builder.start_clickhouse().await;
+    builder.start_dendrite().await;
+    builder.start_internal_dns().await;
+    builder.start_external_dns().await;
 
-    // Start ClickHouse database server.
-    let clickhouse = dev::clickhouse::ClickHouseInstance::new(0).await.unwrap();
+    // TODO TODO TODO TODO TODO: start here
+    asdfsadf
 
-    // Set up a stub instance of dendrite
-    let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
-
-    // Store actual address/port information for the databases after they start.
-    config.deployment.database =
-        nexus_config::Database::FromUrl { url: database.pg_config().clone() };
-    config
-        .pkg
-        .timeseries_db
-        .address
-        .as_mut()
-        .expect("Tests expect to set a port of Clickhouse")
-        .set_port(clickhouse.port());
-    config
-        .pkg
-        .dendrite
-        .address
-        .as_mut()
-        .expect("Tests expect an explicit dendrite address")
-        .set_port(dendrite.port);
+    builder.start_sled(sim::NexusAddressSource::FromDns { internal_dns_address: () });
+    
 
     // Begin starting Nexus.
     let (nexus_internal, nexus_internal_addr) =
@@ -201,7 +500,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
             "component" => "omicron_sled_agent::sim::Server",
             "sled_id" => sa_id.to_string(),
         )),
-        nexus_internal_addr,
+        sim::NexusAddressSource::Direct { address: nexus_internal_addr },
         sa_id,
         tempdir.path(),
         sim_mode,
@@ -209,32 +508,18 @@ pub async fn test_setup_with_config<N: NexusServer>(
     .await
     .unwrap();
 
-    // Set up an external DNS server.
-    let (
-        external_dns_server,
-        external_dns_config_server,
-        external_dns_resolver,
-    ) = start_dns_server(
-        logctx.log.new(o!(
-            "component" => "external_dns_server",
-        )),
-        tempdir.path(),
-    )
-    .await
-    .unwrap();
-
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address_internal = match sled_agent
-        .dns_dropshot_server
+    let dns_server_address_internal = match internal_dns
+        .dropshot_server
         .local_addr()
     {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_server_dns_address_internal = match sled_agent
-        .dns_server
+    let dns_server_dns_address_internal = match internal_dns
+        .server
         .local_address()
     {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
@@ -255,7 +540,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         address: dns_server_dns_address_internal,
         kind: ServiceKind::InternalDns,
     };
-    let dns_server_address_external = match external_dns_config_server
+    let dns_server_address_external = match external_dns.dropshot_server
         .local_addr()
     {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
@@ -305,6 +590,10 @@ pub async fn test_setup_with_config<N: NexusServer>(
         user_password_hash,
     };
 
+    // TODO: Could we just call the "handoff_to_nexus" in the simulated server?
+    // This avoids a "backdoor" to nexus, and uses the same API as RSS would.
+    //
+    // TODO: Need to pass datasets, internal dns config here.
     let server = N::start(
         nexus_internal,
         &config,
@@ -338,7 +627,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         .set_resolver(
             internal_dns::resolver::Resolver::new_from_addrs(
                 logctx.log.new(o!("component" => "DnsResolver")),
-                vec![*sled_agent.dns_server.local_address()],
+                vec![*internal_dns.server.local_address()],
             )
             .unwrap(),
         )
@@ -375,9 +664,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
         logctx,
         dendrite,
         external_dns_zone_name,
-        external_dns_server,
-        external_dns_config_server,
-        external_dns_resolver,
+        external_dns,
+        internal_dns,
         silo_name,
         user_name,
     }
@@ -385,7 +673,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
 pub async fn start_sled_agent(
     log: Logger,
-    nexus_address: SocketAddr,
+    nexus_address_source: sim::NexusAddressSource,
     id: Uuid,
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
@@ -393,7 +681,7 @@ pub async fn start_sled_agent(
     let config = sim::Config {
         id,
         sim_mode,
-        nexus_address,
+        nexus_address_source,
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
@@ -413,9 +701,7 @@ pub async fn start_sled_agent(
             physical_ram: TEST_PHYSICAL_RAM,
         },
     };
-
-    let (server, _rack_init_request) =
-        sim::Server::start(&config, &log, &sim::RssArgs::default()).await?;
+    let server = sim::Server::start(&config, &log).await.map_err(|e| e.to_string())?;
     Ok(server)
 }
 

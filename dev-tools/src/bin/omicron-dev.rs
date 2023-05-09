@@ -363,16 +363,16 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     );
     println!(
         "omicron-dev: external DNS HTTP:     http://{}",
-        cptestctx.external_dns_config_server.local_addr()
+        cptestctx.external_dns.dropshot_server.local_addr()
     );
     println!(
         "omicron-dev: external DNS:          {}",
-        cptestctx.external_dns_server.local_address()
+        cptestctx.external_dns.server.local_address()
     );
     println!(
         "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-        cptestctx.external_dns_server.local_address().ip(),
-        cptestctx.external_dns_server.local_address().port(),
+        cptestctx.external_dns.server.local_address().ip(),
+        cptestctx.external_dns.server.local_address().port(),
         cptestctx.silo_name,
         cptestctx.external_dns_zone_name,
     );

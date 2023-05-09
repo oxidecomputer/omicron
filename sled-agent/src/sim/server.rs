@@ -4,22 +4,21 @@
 
 //! Library interface to the sled agent
 
-use super::config::Config;
+use super::config::{Config, NexusAddressSource};
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
-use anyhow::Context;
+use anyhow::anyhow;
 use crucible_agent_client::types::State as RegionState;
+use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
-use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
-use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -28,33 +27,52 @@ use uuid::Uuid;
 /// Packages up a [`SledAgent`], running the sled agent API under a Dropshot
 /// server wired up to the sled agent
 pub struct Server {
+    // Configuration used to start server
+    config: Config,
+    log: Logger,
+
     /// underlying sled agent
     pub sled_agent: Arc<SledAgent>,
     /// dropshot server for the API
     pub http_server: dropshot::HttpServer<Arc<SledAgent>>,
     /// simulated pantry server
-    pub pantry_server: PantryServer,
-    /// real internal dns server storage dir
-    pub dns_server_storage_dir: tempfile::TempDir,
-    /// real internal dns server
-    pub dns_server: dns_server::dns_server::ServerHandle,
-    /// real internal dns dropshot server
-    pub dns_dropshot_server:
-        dropshot::HttpServer<dns_server::http_server::Context>,
+    pub pantry_server: Option<PantryServer>,
+}
+
+// Looks up the Nexus socket address with the mechanism described
+// in the configuration.
+async fn get_nexus_address(
+    config: &Config,
+    log: &Logger,
+) -> Result<SocketAddr, anyhow::Error> {
+    match config.nexus_address_source {
+        NexusAddressSource::FromDns { internal_dns_address } => {
+            let resolver = Resolver::new_from_addrs(
+                log.new(o!("component" => "DNS Resolver")),
+                vec![internal_dns_address],
+            ).map_err(|error| anyhow!("creating DNS resolver: {}", error))?;
+            let address = resolver.lookup_socket_v6(
+                ServiceName::Nexus,
+            ).await.map_err(|error| anyhow!("looking up Nexus address: {}", error))?;
+            Ok(SocketAddr::V6(address))
+        },
+        NexusAddressSource::Direct { address } => {
+            Ok(address)
+        },
+    }
 }
 
 impl Server {
-    /// Start a SledAgent server
     pub async fn start(
         config: &Config,
         log: &Logger,
-        rss_args: &RssArgs,
-    ) -> Result<(Server, NexusTypes::RackInitializationRequest), String> {
+    ) -> Result<Server, anyhow::Error> {
         info!(log, "setting up sled agent server");
 
+        let nexus_address = get_nexus_address(config, log).await?;
         let client_log = log.new(o!("component" => "NexusClient"));
         let nexus_client = Arc::new(NexusClient::new(
-            &format!("http://{}", config.nexus_address),
+            &format!("http://{}", nexus_address),
             client_log,
         ));
 
@@ -65,7 +83,7 @@ impl Server {
         let sled_agent = SledAgent::new_simulated_with_id(
             &config,
             sa_log,
-            config.nexus_address,
+            nexus_address,
             Arc::clone(&nexus_client),
         )
         .await;
@@ -77,7 +95,7 @@ impl Server {
             sled_agent.clone(),
             &dropshot_log,
         )
-        .map_err(|error| format!("initializing server: {}", error))?
+        .map_err(|error| anyhow!("initializing server: {}", error))?
         .start();
 
         // Notify the control plane that we're up, and continue trying this
@@ -129,7 +147,7 @@ impl Server {
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
         for zpool in &config.storage.zpools {
-            let zpool_id = uuid::Uuid::new_v4();
+            let zpool_id = Uuid::new_v4();
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
             let model = "synthetic-model".to_string();
@@ -144,7 +162,7 @@ impl Server {
             sled_agent
                 .create_zpool(zpool_id, vendor, serial, model, zpool.size)
                 .await;
-            let dataset_id = uuid::Uuid::new_v4();
+            let dataset_id = Uuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
@@ -166,51 +184,31 @@ impl Server {
                 .await;
         }
 
+        Ok(
+            Server {
+                config: config.clone(),
+                log: log.clone(),
+                sled_agent,
+                http_server,
+                pantry_server: None,
+            },
+        )
+    }
+
+    /// Starts the pantry service and add it to the DNS config builder
+    pub async fn start_pantry(
+        &mut self,
+        dns: &mut internal_dns::DnsConfigBuilder,
+    ) {
         // Create the simulated Pantry
         let pantry_server = PantryServer::new(
-            log.new(o!("kind" => "pantry")),
-            config.storage.ip,
-            sled_agent.clone(),
+            self.log.new(o!("kind" => "pantry")),
+            self.config.storage.ip,
+            self.sled_agent.clone(),
         )
         .await;
 
-        // Start the internal DNS server, insert the simulated Pantry DNS
-        // record
-        let dns_server_storage_dir =
-            tempfile::tempdir().map_err(|e| e.to_string())?;
-
-        let dns_log = log.new(o!("kind" => "dns"));
-
-        let store = dns_server::storage::Store::new(
-            log.new(o!("component" => "store")),
-            &dns_server::storage::Config {
-                keep_old_generations: 3,
-                storage_path: dns_server_storage_dir
-                    .path()
-                    .to_string_lossy()
-                    .to_string()
-                    .into(),
-            },
-        )
-        .context("initializing DNS storage")
-        .map_err(|e| e.to_string())?;
-
-        let (dns_server, dns_dropshot_server) = dns_server::start_servers(
-            dns_log,
-            store,
-            &dns_server::dns_server::Config {
-                bind_address: "[::1]:0".parse().unwrap(),
-            },
-            &dropshot::ConfigDropshot {
-                bind_address: "[::1]:0".parse().unwrap(),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
         // Insert SRV and AAAA record for Crucible Pantry
-        let mut dns = internal_dns::DnsConfigBuilder::new();
         let pantry_zone_id = pantry_server.server.app_private().id;
         let pantry_addr = match pantry_server.addr() {
             SocketAddr::V6(v6) => v6,
@@ -228,24 +226,34 @@ impl Server {
         )
         .expect("failed to set up DNS");
 
-        let dns_config = dns.build();
-        let dns_config_client = dns_service_client::Client::new(
-            &format!("http://{}", dns_dropshot_server.local_addr()),
-            log.clone(),
-        );
-        dns_config_client
-            .dns_config_put(&dns_config)
-            .await
-            .context("initializing DNS")
-            .map_err(|e| e.to_string())?;
+        self.pantry_server = Some(pantry_server);
+    }
+
+/*
+    #[deprecated]
+    pub async fn start_deprecated(
+        config: &Config,
+        log: &Logger,
+        // TODO: remove this arg
+        // Why: because the sled agent shouldn't be doing RSS work - that's up
+        // to the caller.
+//        rss_args: &RssArgs,
+    ) -> Result<Server, String> {
+        let mut server = Server::start(config, log).await?;
+        let dns = InternalDnsServer::new(&log).await?;
+
+        let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+        server.start_pantry(&mut dns_config_builder).await;
+
+        dns.initialize_with_config(log, dns_config_builder).await?;
 
         // Record the internal DNS server as though RSS had provisioned it so
         // that Nexus knows about it.
-        let dns_bound = match dns_server.local_address() {
+        let dns_bound = match dns.dns_server.local_address() {
             SocketAddr::V4(_) => panic!("did not expect v4 address"),
             SocketAddr::V6(a) => *a,
         };
-        let http_bound = match dns_dropshot_server.local_addr() {
+        let http_bound = match dns.dns_dropshot_server.local_addr() {
             SocketAddr::V4(_) => panic!("did not expect v4 address"),
             SocketAddr::V6(a) => a,
         };
@@ -271,7 +279,7 @@ impl Server {
             let ip = nexus_external_addr.ip();
 
             services.push(NexusTypes::ServicePutRequest {
-                address: config.nexus_address.to_string(),
+                address: nexus_address.to_string(),
                 kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
@@ -328,26 +336,26 @@ impl Server {
             recovery_silo,
         };
 
-        Ok((
+        Ok(
             Server {
                 sled_agent,
                 http_server,
                 pantry_server,
-                dns_server_storage_dir,
-                dns_server,
-                dns_dropshot_server,
+//                dns_server_storage_dir,
+//                dns_server,
+//                dns_dropshot_server,
             },
-            rack_init_request,
-        ))
+        )
     }
+*/
 
     /// Wait for the given server to shut down
     ///
     /// Note that this doesn't initiate a graceful shutdown, so if you call this
     /// immediately after calling `start()`, the program will block indefinitely
     /// or until something else initiates a graceful shutdown.
-    pub async fn wait_for_finish(self) -> Result<(), String> {
-        self.http_server.await
+    pub async fn wait_for_finish(self) -> Result<(), anyhow::Error> {
+        self.http_server.await.map_err(|err| anyhow!(err))
     }
 }
 
@@ -355,9 +363,10 @@ async fn handoff_to_nexus(
     log: &Logger,
     config: &Config,
     request: &NexusTypes::RackInitializationRequest,
-) -> Result<(), String> {
+) -> Result<(), anyhow::Error> {
+    let nexus_address = get_nexus_address(config, log).await?;
     let nexus_client = NexusClient::new(
-        &format!("http://{}", config.nexus_address),
+        &format!("http://{}", nexus_address),
         log.new(o!("component" => "NexusClient")),
     );
     let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
@@ -376,8 +385,7 @@ async fn handoff_to_nexus(
         notify_nexus,
         log_failure,
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     Ok(())
 }
 
@@ -396,25 +404,67 @@ pub struct RssArgs {
 pub async fn run_server(
     config: &Config,
     rss_args: &RssArgs,
-) -> Result<(), String> {
+) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
         config
             .log
             .to_logger("sled-agent")
-            .map_err(|message| format!("initializing logger: {}", message))?,
+            .map_err(|message| anyhow!("initializing logger: {}", message))?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!());
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);
-        return Err(msg);
+        return Err(anyhow!(msg));
     } else {
         debug!(log, "registered DTrace probes");
     }
 
-    let (server, rack_init_request) =
-        Server::start(config, &log, rss_args).await?;
+    // Start the sled agent
+    let mut server = Server::start(config, &log).await?;
     info!(log, "sled agent started successfully");
+
+    // Start the Internal DNS server
+    let dns = dns_server::InMemoryServer::new(&log).await?;
+    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+
+    // Start the Crucible Pantry
+    server.start_pantry(&mut dns_config_builder).await;
+
+    // Initialize the internal DNS entries
+    let dns_config = dns_config_builder.build();
+    dns.initialize_with_config(&log, &dns_config).await?;
+
+    let recovery_silo = NexusTypes::RecoverySiloConfig {
+        silo_name: "demo-silo".parse().unwrap(),
+        user_name: "demo-privileged".parse().unwrap(),
+        // The following is a hash for the password "oxide".  This is
+        // (obviously) only intended for transient deployments in
+        // development with no sensitive data or resources.  You can change
+        // this value to any other supported hash.  The only thing that
+        // needs to be changed with this hash are the instructions given to
+        // individuals running this program who then want to log in as this
+        // user.  For more on what's supported, see the API docs for this
+        // type and the specific constraints in the nexus-passwords crate.
+        user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
+        RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
+            .parse()
+            .unwrap(),
+    };
+
+    // TODO: These values are not quite right.
+    // TODO: Specifically:
+    // - The "services" previously contained: DNS servers, nexus, external DNS
+    // - internal services came from Nexus
+    let rack_init_request = NexusTypes::RackInitializationRequest {
+        services: vec![],
+        datasets: vec![],
+        internal_services_ip_pool_ranges: vec![],
+        certs: vec![],
+        internal_dns_zone_config: d2n_params(&dns_config),
+        external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
+        recovery_silo,
+    };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;
     info!(log, "Handoff to Nexus is complete");
