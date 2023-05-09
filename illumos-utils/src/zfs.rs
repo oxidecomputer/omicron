@@ -6,11 +6,13 @@
 
 use crate::{execute, PFEXEC};
 use camino::Utf8PathBuf;
+use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 const ZFS: &str = "/usr/sbin/zfs";
+pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -41,7 +43,7 @@ enum EnsureFilesystemErrorRaw {
     #[error("Unexpected output from ZFS commands: {0}")]
     Output(String),
 
-    #[error("Failed to mount encrypted filesystem")]
+    #[error("Failed to mount encrypted filesystem: {0}")]
     MountEncryptedFsFailed(crate::ExecutionError),
 }
 
@@ -114,6 +116,19 @@ pub struct Keypath(pub Utf8PathBuf);
 impl fmt::Display for Keypath {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl From<&DiskIdentity> for Keypath {
+    fn from(id: &DiskIdentity) -> Self {
+        let filename = format!(
+            "{}-{}-{}-zfs-aes-256-gcm.key",
+            id.vendor, id.serial, id.model
+        );
+        let mut path = Utf8PathBuf::new();
+        path.push(KEYPATH_ROOT);
+        path.push(filename);
+        Keypath(path)
     }
 }
 

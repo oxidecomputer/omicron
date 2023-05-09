@@ -14,6 +14,8 @@ use sha3::Sha3_256;
 use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use omicron_common::disk::DiskIdentity;
+
 /// Input Key Material
 ///
 /// This should never be used directly, and always wrapped in a `Secret<Ikm>`
@@ -77,20 +79,6 @@ impl VersionedAes256GcmDiskEncryptionKey {
     pub fn expose_secret(&self) -> &[u8; 32] {
         &self.key.expose_secret().0
     }
-}
-
-/// We have to define a separate type here to prevent a circular dependency
-/// with the `sled-hardware` crate. `sled-hardware` uses `key-manager`, so we
-/// can't have `key-manager` also depend on `sled-hardware`
-///
-/// We provide `From<sled_hardware::DiskIdentity> for <key_manager::DiskIdentity>`
-/// in the `sled-hardware` crate, which is what uses `StorageKeyRequester` in the first
-/// place.
-#[derive(Debug, Clone)]
-pub struct DiskIdentity {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
 }
 
 /// A request sent from a [`StorageKeyRequester`] to the [`KeyManager`].

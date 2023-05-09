@@ -12,6 +12,7 @@ use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
+use omicron_common::disk::DiskIdentity;
 use slog::Logger;
 use slog::{info, warn};
 use tokio::fs::{remove_file, File};
@@ -77,37 +78,6 @@ pub struct DiskPaths {
     pub devfs_path: Utf8PathBuf,
     // Optional path to the disk under "/dev/dsk".
     pub dev_path: Option<Utf8PathBuf>,
-}
-
-/// Uniquely identifies a disk.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DiskIdentity {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
-}
-
-impl From<DiskIdentity> for key_manager::DiskIdentity {
-    fn from(value: DiskIdentity) -> Self {
-        key_manager::DiskIdentity {
-            vendor: value.vendor,
-            serial: value.serial,
-            model: value.model,
-        }
-    }
-}
-
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
-        let filename = format!(
-            "{}-{}-{}-zfs-aes-256-gcm.key",
-            id.vendor, id.serial, id.model
-        );
-        let mut path = Utf8PathBuf::new();
-        path.push(KEYPATH_ROOT);
-        path.push(filename);
-        Keypath(path)
-    }
 }
 
 impl DiskPaths {
