@@ -46,7 +46,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[allow(unused)]
 #[derive(Debug)]
 pub enum Request {
-    StartUpdate(ComponentId),
+    StartUpdate { component_id: ComponentId, test_step_seconds: Option<u64> },
     IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
@@ -100,8 +100,8 @@ impl WicketdManager {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     match request {
-                        Request::StartUpdate(component_id) => {
-                            self.start_update(component_id);
+                        Request::StartUpdate { component_id, test_step_seconds } => {
+                            self.start_update(component_id, test_step_seconds);
                         }
                         Request::IgnitionCommand(component_id, command) => {
                             self.start_ignition_command(
@@ -120,14 +120,20 @@ impl WicketdManager {
         }
     }
 
-    fn start_update(&self, component_id: ComponentId) {
+    fn start_update(
+        &self,
+        component_id: ComponentId,
+        test_step_seconds: Option<u64>,
+    ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
-            let res = update_client.post_start_update(sp.type_, sp.slot).await;
+            let res = update_client
+                .post_start_update(sp.type_, sp.slot, test_step_seconds)
+                .await;
             // We don't return errors or success values, as there's nobody to
             // return them to. Instead, all updates are periodically polled
             // and global state mutated. This allows the update pane to

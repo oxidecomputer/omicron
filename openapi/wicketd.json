@@ -210,6 +210,17 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "test_step_seconds",
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -497,6 +508,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -509,6 +524,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -528,6 +544,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -540,6 +560,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1488,6 +1509,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1501,6 +1526,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1526,6 +1552,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1539,6 +1569,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -2730,6 +2761,20 @@
       },
       "UpdateStepId": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
           {
             "type": "object",
             "properties": {
