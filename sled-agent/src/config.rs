@@ -79,8 +79,8 @@ pub enum ConfigError {
         #[source]
         err: toml::de::Error,
     },
-    #[error("Failed to generate self-signed certificate: {0}")]
-    GenerateCertificate(#[source] anyhow::Error),
+    #[error("Loading certificate: {0}")]
+    Certificate(#[source] anyhow::Error),
     #[error("Could not determine if host is a Gimlet: {0}")]
     SystemDetection(#[source] anyhow::Error),
     #[error("Could not enumerate physical links")]

@@ -44,7 +44,6 @@ progenitor.workspace = true
 propolis-client = { workspace = true, features = [ "generated-migration" ] }
 propolis-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
-rcgen.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
 semver.workspace = true
@@ -81,6 +80,7 @@ omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 pretty_assertions.workspace = true
+rcgen.workspace = true
 serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
