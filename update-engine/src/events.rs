@@ -67,6 +67,15 @@ impl<S: StepSpec> Event<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "StepEventFor{S}")]
 pub struct StepEvent<S: StepSpec> {
+    /// The specification that this event belongs to.
+    ///
+    /// This is typically the name of the type `S` for which `StepSpec` is
+    /// implemented.
+    ///
+    /// This can be used with `Self::from_generic` to deserialize generic
+    /// metadata.
+    pub spec: String,
+
     /// The execution ID.
     pub execution_id: ExecutionId,
 
@@ -91,6 +100,7 @@ impl<S: StepSpec> StepEvent<S> {
         match &self.kind {
             StepEventKind::ExecutionStarted { first_step, .. } => {
                 Some(ProgressEvent {
+                    spec: self.spec.clone(),
                     execution_id: self.execution_id,
                     total_elapsed: self.total_elapsed,
                     kind: ProgressEventKind::WaitingForProgress {
@@ -108,6 +118,7 @@ impl<S: StepSpec> StepEvent<S> {
                 attempt_elapsed,
                 ..
             } => Some(ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::WaitingForProgress {
@@ -123,6 +134,7 @@ impl<S: StepSpec> StepEvent<S> {
                 step_elapsed,
                 ..
             } => Some(ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::WaitingForProgress {
@@ -135,6 +147,7 @@ impl<S: StepSpec> StepEvent<S> {
             }),
             StepEventKind::StepCompleted { next_step, .. } => {
                 Some(ProgressEvent {
+                    spec: self.spec.clone(),
                     execution_id: self.execution_id,
                     total_elapsed: self.total_elapsed,
                     kind: ProgressEventKind::WaitingForProgress {
@@ -154,6 +167,7 @@ impl<S: StepSpec> StepEvent<S> {
                 event,
                 ..
             } => event.progress_event().map(|progress_event| ProgressEvent {
+                spec: self.spec.clone(),
                 execution_id: self.execution_id,
                 total_elapsed: self.total_elapsed,
                 kind: ProgressEventKind::Nested {
@@ -178,6 +192,7 @@ impl<S: StepSpec> StepEvent<S> {
         value: StepEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(StepEvent {
+            spec: value.spec,
             execution_id: value.execution_id,
             event_index: value.event_index,
             total_elapsed: value.total_elapsed,
@@ -198,6 +213,7 @@ impl<S: StepSpec> StepEvent<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> StepEvent<GenericSpec<E>> {
         StepEvent {
+            spec: self.spec,
             execution_id: self.execution_id,
             event_index: self.event_index,
             total_elapsed: self.total_elapsed,
@@ -807,6 +823,15 @@ impl<S: StepSpec> StepOutcome<S> {
 #[serde(bound = "", rename_all = "snake_case")]
 #[schemars(rename = "ProgressEventFor{S}")]
 pub struct ProgressEvent<S: StepSpec> {
+    /// The specification that this event belongs to.
+    ///
+    /// This is typically the name of the type `S` for which `StepSpec` is
+    /// implemented.
+    ///
+    /// This can be used with `Self::from_generic` to deserialize generic
+    /// metadata.
+    pub spec: String,
+
     /// The execution ID.
     pub execution_id: ExecutionId,
 
@@ -827,6 +852,7 @@ impl<S: StepSpec> ProgressEvent<S> {
         value: ProgressEvent<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         Ok(Self {
+            spec: value.spec,
             execution_id: value.execution_id,
             total_elapsed: value.total_elapsed,
             kind: ProgressEventKind::from_generic(value.kind)
@@ -846,6 +872,7 @@ impl<S: StepSpec> ProgressEvent<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> ProgressEvent<GenericSpec<E>> {
         ProgressEvent {
+            spec: self.spec,
             execution_id: self.execution_id,
             total_elapsed: self.total_elapsed,
             kind: self.kind.into_generic(),
@@ -922,6 +949,48 @@ pub enum ProgressEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> ProgressEventKind<S> {
+    /// Returns the progress counter for this event, if available.
+    pub fn progress_counter(&self) -> Option<ProgressCounter> {
+        match self {
+            ProgressEventKind::Progress { progress, .. } => *progress,
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.progress_counter()
+            }
+            ProgressEventKind::WaitingForProgress { .. }
+            | ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `attempt` for the leaf event, recursing into nested events as
+    /// necessary.
+    ///
+    /// Returns None for unknown events.
+    pub fn leaf_attempt(&self) -> Option<usize> {
+        match self {
+            ProgressEventKind::WaitingForProgress { attempt, .. }
+            | ProgressEventKind::Progress { attempt, .. } => Some(*attempt),
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_attempt()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `step_elapsed` for the leaf event, recursing into nested events
+    /// as necessary.
+    pub fn leaf_step_elapsed(&self) -> Option<Duration> {
+        match self {
+            ProgressEventKind::WaitingForProgress { step_elapsed, .. }
+            | ProgressEventKind::Progress { step_elapsed, .. } => {
+                Some(*step_elapsed)
+            }
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_step_elapsed()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -1224,7 +1293,9 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 /// number of bytes. There is no guarantee that the counter won't go back in
 /// subsequent events; that can happen e.g. if a fetch happens from multiple
 /// peers within a single attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ProgressCounter {
     pub current: u64,
@@ -1419,6 +1490,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "event_index": 0,
                     "total_elapsed": {
@@ -1455,6 +1527,7 @@ mod tests {
                   }
                 "#,
                 StepEvent {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     event_index: 0,
                     total_elapsed: Duration::ZERO,
@@ -1464,6 +1537,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "event_index": 1,
                     "total_elapsed": {
@@ -1501,6 +1575,7 @@ mod tests {
                   }
                 "#,
                 StepEvent::<TestSpec> {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     event_index: 1,
                     total_elapsed: Duration::ZERO,
@@ -1553,6 +1628,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
@@ -1589,6 +1665,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Unknown,
@@ -1597,6 +1674,7 @@ mod tests {
             (
                 r#"
                   {
+                    "spec": "TestSpec",
                     "execution_id": "2cc08a14-5e96-4917-bc70-e98293a3b703",
                     "total_elapsed": {
                       "secs": 0,
@@ -1634,6 +1712,7 @@ mod tests {
                   }
                 "#,
                 ProgressEvent::<TestSpec> {
+                    spec: TestSpec::schema_name(),
                     execution_id,
                     total_elapsed: Duration::ZERO,
                     kind: ProgressEventKind::Progress {

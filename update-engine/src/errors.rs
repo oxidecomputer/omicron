@@ -52,7 +52,7 @@ impl<S: StepSpec> From<mpsc::error::SendError<Event<S>>> for ExecutionError<S> {
     }
 }
 
-/// Returns an error that occurred while converting an event into its generic
+/// An error that occurred while converting an event into or from its generic
 /// form.
 #[derive(Debug)]
 pub struct ConvertGenericError {
