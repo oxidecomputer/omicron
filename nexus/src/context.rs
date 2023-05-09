@@ -57,8 +57,6 @@ pub struct ConsoleConfig {
     pub session_idle_timeout: Duration,
     /// how long a session can exist before expiring
     pub session_absolute_timeout: Duration,
-    /// how long browsers can cache static assets
-    pub cache_control_max_age: Duration,
     /// directory containing static file to serve
     pub static_dir: Option<PathBuf>,
 }
@@ -191,9 +189,6 @@ impl ServerContext {
                     config.pkg.console.session_absolute_timeout_minutes.into(),
                 ),
                 static_dir,
-                cache_control_max_age: Duration::minutes(
-                    config.pkg.console.cache_control_max_age_minutes.into(),
-                ),
             },
         }))
     }
