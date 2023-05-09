@@ -3799,7 +3799,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/switches/{switch_id}": {
