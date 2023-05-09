@@ -452,6 +452,15 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "persist",
+            "description": "Persist this choice of active slot.",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {

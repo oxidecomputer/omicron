@@ -900,7 +900,10 @@ impl super::Nexus {
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
-                    project: Some(authz_project.id().into()),
+                    project: match disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
                     disk,
                 },
             )?
@@ -957,7 +960,10 @@ impl super::Nexus {
             .disk_lookup(
                 opctx,
                 params::DiskSelector {
-                    project: Some(authz_project.id().into()),
+                    project: match disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
                     disk,
                 },
             )?

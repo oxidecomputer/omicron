@@ -4,7 +4,6 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{header, method::Method, StatusCode};
-use nexus_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::{create_local_user, create_silo};
@@ -14,6 +13,7 @@ use omicron_nexus::authz::SiloRole;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use omicron_nexus::external_api::views;
+use omicron_passwords::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
 use std::str::FromStr;
 
 type ControlPlaneTestContext =
@@ -448,7 +448,7 @@ async fn expect_login_success(
         .split_once("; ")
         .expect("session cookie: bad cookie header value (missing semicolon)");
     assert!(token_cookie.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
     let (_, session_token) = token_cookie
         .split_once('=')
         .expect("session cookie: bad cookie header value (missing 'session=')");
@@ -456,7 +456,7 @@ async fn expect_login_success(
     // It's not clear how a successful login could ever take less than the
     // minimum verification time, but we verify it here anyway.  (If we fail
     // here, it's possible that our hash parameters have gotten too weak for the
-    // current hardware.  See the similar test in the nexus_passwords module.)
+    // current hardware.  See the similar test in the omicron_passwords module.)
     if elapsed < MIN_EXPECTED_PASSWORD_VERIFY_TIME {
         panic!(
             "successful login unexpectedly took less time ({:?}) than \

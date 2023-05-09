@@ -17,7 +17,16 @@ use update_engine::StepSpec;
 pub enum WicketdEngineSpec {}
 
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[serde(tag = "component", rename_all = "snake_case")]
 pub enum UpdateComponent {
@@ -30,7 +39,9 @@ pub enum UpdateComponent {
 #[serde(tag = "id", rename_all = "snake_case")]
 pub enum UpdateStepId {
     SetHostPowerState { state: PowerState },
-    ResettingSp,
+    InterrogateRot,
+    ResetRot,
+    ResetSp,
     SpComponentUpdate { stage: SpComponentUpdateStage },
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,
@@ -50,7 +61,7 @@ impl StepSpec for WicketdEngineSpec {
     type Error = UpdateTerminalError;
 }
 
-update_engine::define_update_engine!(pub(crate) WicketdEngineSpec);
+update_engine::define_update_engine!(pub WicketdEngineSpec);
 
 #[derive(Debug, Error)]
 pub enum UpdateTerminalError {
@@ -66,6 +77,21 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
+    #[error("getting currently-active RoT slot failed")]
+    GetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("setting currently-active RoT slot failed")]
+    SetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("resetting RoT failed")]
+    RotResetFailed {
+        #[source]
+        error: anyhow::Error,
+    },
     #[error("SP reset failed")]
     SpResetFailed {
         #[source]
@@ -79,7 +105,7 @@ pub enum UpdateTerminalError {
     #[error("setting host boot flash slot failed")]
     SetHostBootFlashSlotFailed {
         #[source]
-        error: gateway_client::Error<gateway_client::types::Error>,
+        error: anyhow::Error,
     },
     #[error("setting host startup options failed for {description}")]
     SetHostStartupOptionsFailed {

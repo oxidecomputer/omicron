@@ -727,6 +727,12 @@ async fn sp_component_active_slot_get(
     Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct SetComponentActiveSlotParams {
+    /// Persist this choice of active slot.
+    pub persist: bool,
+}
+
 /// Set the currently-active slot for an SP component
 ///
 /// Note that the meaning of "current" in "currently-active" may vary depending
@@ -739,6 +745,7 @@ async fn sp_component_active_slot_get(
 async fn sp_component_active_slot_set(
     rqctx: RequestContext<Arc<ServerContext>>,
     path: Path<PathSpComponent>,
+    query_params: Query<SetComponentActiveSlotParams>,
     body: TypedBody<SpComponentFirmwareSlot>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
@@ -746,8 +753,9 @@ async fn sp_component_active_slot_set(
     let sp = apictx.mgmt_switch.sp(sp.into())?;
     let component = component_from_str(&component)?;
     let slot = body.into_inner().slot;
+    let persist = query_params.into_inner().persist;
 
-    sp.set_component_active_slot(component, slot, false)
+    sp.set_component_active_slot(component, slot, persist)
         .await
         .map_err(SpCommsError::from)?;
 

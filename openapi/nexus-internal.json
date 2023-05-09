@@ -408,7 +408,9 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/sagas/{saga_id}": {
@@ -2118,6 +2120,11 @@
         "minLength": 1,
         "maxLength": 63
       },
+      "NewPasswordHash": {
+        "title": "A password hash in PHC string format",
+        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+        "type": "string"
+      },
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
@@ -2140,11 +2147,6 @@
           "address",
           "collector_id"
         ]
-      },
-      "PasswordHash": {
-        "title": "A password hash in PHC string format",
-        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
-        "type": "string"
       },
       "PhysicalDiskDeleteRequest": {
         "type": "object",
@@ -2374,7 +2376,7 @@
             "$ref": "#/components/schemas/UserId"
           },
           "user_password_hash": {
-            "$ref": "#/components/schemas/PasswordHash"
+            "$ref": "#/components/schemas/NewPasswordHash"
           }
         },
         "required": [

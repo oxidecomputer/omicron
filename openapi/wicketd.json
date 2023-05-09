@@ -10,18 +10,18 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts": {
+    "/artifacts-and-event-reports": {
       "get": {
-        "summary": "An endpoint used to report all available artifacts.",
+        "summary": "An endpoint used to report all available artifacts and event reports.",
         "description": "The order of the returned artifacts is unspecified, and may change between calls even if the total set of artifacts has not.",
-        "operationId": "get_artifacts",
+        "operationId": "get_artifacts_and_event_reports",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GetArtifactsResponse"
+                  "$ref": "#/components/schemas/GetArtifactsAndEventReportsResponse"
                 }
               }
             }
@@ -135,31 +135,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/update": {
-      "get": {
-        "summary": "An endpoint to get the status of all updates being performed or recently",
-        "description": "completed on all SPs.",
-        "operationId": "get_update_all",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventReportAll"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -330,24 +305,6 @@
           "request_id"
         ]
       },
-      "EventReportAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
-              }
-            }
-          }
-        },
-        "required": [
-          "sps"
-        ]
-      },
       "EventReportForWicketdEngineSpec": {
         "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
         "type": "object",
@@ -379,7 +336,7 @@
           "step_events"
         ]
       },
-      "GetArtifactsResponse": {
+      "GetArtifactsAndEventReportsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
         "properties": {
@@ -387,6 +344,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ArtifactId"
+            }
+          },
+          "event_reports": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
             }
           },
           "system_version": {
@@ -399,7 +365,8 @@
           }
         },
         "required": [
-          "artifacts"
+          "artifacts",
+          "event_reports"
         ]
       },
       "GetInventoryParams": {
@@ -1411,7 +1378,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
@@ -2785,7 +2754,35 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "interrogate_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_sp"
                 ]
               }
             },

@@ -463,9 +463,7 @@ async fn sic_add_network_config(
     debug!(log, "creating nat entry for: {target_ip:#?}");
 
     let nat_target = dpd_client::types::NatTarget {
-        inner_mac: dpd_client::types::MacAddr {
-            a: mac_address.into_array().to_vec(),
-        },
+        inner_mac: dpd_client::types::MacAddr { a: mac_address.into_array() },
         internal_ip: *sled_ip_address.ip(),
         vni: vni.into(),
     };
