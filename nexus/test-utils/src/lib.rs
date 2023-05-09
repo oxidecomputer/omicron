@@ -293,12 +293,14 @@ pub async fn test_setup_with_config<N: NexusServer>(
         internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
     let silo_name: Name = "test-suite-silo".parse().unwrap();
     let user_name = UserId::try_from("test-privileged".to_string()).unwrap();
-    let user_password_hash = nexus_passwords::Hasher::default()
+    let user_password_hash = omicron_passwords::Hasher::default()
         .create_password(
-            &nexus_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
+            &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
         )
         .unwrap()
-        .into();
+        .as_str()
+        .parse()
+        .unwrap();
     let recovery_silo = RecoverySiloConfig {
         silo_name: silo_name.clone(),
         user_name: user_name.clone(),

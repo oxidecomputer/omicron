@@ -24,6 +24,8 @@ pub enum ArchiveType {
     Baseline,
     Layer,
     Os,
+    Rot,
+    ControlPlane,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -79,6 +81,10 @@ impl Metadata {
 
     pub fn is_os(&self) -> bool {
         matches!(&self.t, ArchiveType::Os)
+    }
+
+    pub fn is_rot(&self) -> bool {
+        matches!(&self.t, ArchiveType::Rot)
     }
 
     pub fn archive_type(&self) -> ArchiveType {

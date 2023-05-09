@@ -6,7 +6,6 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
-use crate::update_events::EventReport;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -28,6 +27,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use uuid::Uuid;
+use wicket_common::update_events::EventReport;
 
 use crate::ServerContext;
 
@@ -40,9 +40,8 @@ pub fn api() -> WicketdApiDescription {
     ) -> Result<(), String> {
         api.register(get_inventory)?;
         api.register(put_repository)?;
-        api.register(get_artifacts)?;
+        api.register(get_artifacts_and_event_reports)?;
         api.register(post_start_update)?;
-        api.register(get_update_all)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
         Ok(())
@@ -108,9 +107,8 @@ async fn put_repository(
 
     // TODO: do we need to return more information with the response?
 
-    rqctx
-        .artifact_store
-        .put_repository(body.into_stream().try_collect().await?)?;
+    let bytes = body.into_stream().try_collect().await?;
+    rqctx.update_tracker.put_repository(bytes).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -119,25 +117,26 @@ async fn put_repository(
 /// all artifacts currently held by wicketd.
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub struct GetArtifactsResponse {
+pub struct GetArtifactsAndEventReportsResponse {
     pub system_version: Option<SemverVersion>,
     pub artifacts: Vec<ArtifactId>,
+    pub event_reports: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
 }
 
-/// An endpoint used to report all available artifacts.
+/// An endpoint used to report all available artifacts and event reports.
 ///
 /// The order of the returned artifacts is unspecified, and may change between
 /// calls even if the total set of artifacts has not.
 #[endpoint {
     method = GET,
-    path = "/artifacts",
+    path = "/artifacts-and-event-reports",
 }]
-async fn get_artifacts(
+async fn get_artifacts_and_event_reports(
     rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<GetArtifactsResponse>, HttpError> {
-    let (system_version, artifacts) =
-        rqctx.context().artifact_store.system_version_and_artifact_ids();
-    Ok(HttpResponseOk(GetArtifactsResponse { system_version, artifacts }))
+) -> Result<HttpResponseOk<GetArtifactsAndEventReportsResponse>, HttpError> {
+    let response =
+        rqctx.context().update_tracker.artifacts_and_event_reports().await;
+    Ok(HttpResponseOk(response))
 }
 
 /// An endpoint to start updating a sled.
@@ -151,20 +150,6 @@ async fn post_start_update(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
     let target = target.into_inner();
-
-    // Do we have a plan with which we can apply updates (i.e., has a valid TUF
-    // repository been uploaded)?
-    let plan = rqctx.artifact_store.current_plan().ok_or_else(|| {
-        // TODO-correctness `for_bad_request` is a little questionable because
-        // the problem isn't this request specifically, but that we haven't
-        // gotten request yet with a valid TUF repository. `for_unavail` might
-        // be more accurate, but `for_unavail` doesn't give us away to give the
-        // client a meaningful error.
-        HttpError::for_bad_request(
-            None,
-            "upload a valid TUF repository first".to_string(),
-        )
-    })?;
 
     // Can we update the target SP? We refuse to update if:
     //
@@ -247,31 +232,10 @@ async fn post_start_update(
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target, plan, update_id).await {
+    match rqctx.update_tracker.start(target, update_id).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }
-}
-
-/// The response to a `get_update_all` call: the list of all updates (in-flight
-/// or completed) known by wicketd.
-#[derive(Clone, Debug, JsonSchema, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub struct EventReportAll {
-    pub sps: BTreeMap<SpType, BTreeMap<u32, EventReport>>,
-}
-
-/// An endpoint to get the status of all updates being performed or recently
-/// completed on all SPs.
-#[endpoint {
-    method = GET,
-    path = "/update",
-}]
-async fn get_update_all(
-    rqctx: RequestContext<ServerContext>,
-) -> Result<HttpResponseOk<EventReportAll>, HttpError> {
-    let sps = rqctx.context().update_tracker.event_report_all().await;
-    Ok(HttpResponseOk(EventReportAll { sps }))
 }
 
 /// An endpoint to get the status of any update being performed or recently

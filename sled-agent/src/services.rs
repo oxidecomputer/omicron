@@ -749,7 +749,7 @@ impl ServiceManager {
             // We also need to update the switch with the NAT mappings
             let nat_target = dpd_client::types::NatTarget {
                 inner_mac: dpd_client::types::MacAddr {
-                    a: port.0.mac().into_array().to_vec(),
+                    a: port.0.mac().into_array(),
                 },
                 internal_ip: *underlay_address,
                 vni: port.0.vni().as_u32().into(),

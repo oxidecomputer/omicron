@@ -187,6 +187,34 @@ mod tests {
     }
 
     #[test]
+    fn parse_rack_initialization_weak_hash() {
+        let config = r#"
+            rack_subnet = "fd00:1122:3344:0100::"
+            bootstrap_discovery.type = "only_ours"
+            rack_secret_threshold = 1
+            ntp_servers = [ "ntp.eng.oxide.computer" ]
+            dns_servers = [ "1.1.1.1", "9.9.9.9" ]
+            external_dns_zone_name = "oxide.test"
+            
+            [[internal_services_ip_pool_ranges]]
+            first = "192.168.1.20"
+            last = "192.168.1.22"
+            
+            [recovery_silo]
+            silo_name = "recovery"
+            user_name = "recovery"
+            user_password_hash = "$argon2i$v=19$m=16,t=2,p=1$NVR0a2QxVXNiQjlObFJXbA$iGFJWOlUqN20B8KR4Fsmrg"
+        "#;
+
+        let error = toml::from_str::<RackInitializeRequest>(config)
+            .expect_err("unexpectedly parsed with bad password hash");
+        println!("found error: {}", error);
+        assert!(error.to_string().contains(
+            "password hash: algorithm: expected argon2id, found argon2i"
+        ));
+    }
+
+    #[test]
     fn json_serialization_round_trips() {
         let secret = RackSecret::new();
         let (mut shares, verifier) = secret.split(2, 4).unwrap();
