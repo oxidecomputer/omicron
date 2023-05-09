@@ -994,8 +994,7 @@ impl Agent {
     }
 }
 
-// We intentionally DO NOT derive `Debug``; it provides avenues
-// by which we may accidentally log the contents of our trust quorum share.
+// TODO-correctness: remove / rework trust quorum share storage
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, SledAgentRequest>,
