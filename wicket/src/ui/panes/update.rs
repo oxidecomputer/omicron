@@ -147,7 +147,7 @@ impl UpdatePane {
                         style::plain_text(),
                     ),
                 ];
-                body.lines.push(Spans(spans));
+                body.lines.push(Spans::from(spans));
             }
             StepStatus::Running { progress_event, .. } => {
                 let mut spans = vec![
@@ -1039,11 +1039,11 @@ impl ComponentUpdateListState {
             ));
 
             // Add step keys and items to the list.
-            list_items.insert(step_key, ListItem::new(Spans(item_spans)));
+            list_items.insert(step_key, ListItem::new(Spans::from(item_spans)));
         }
 
         self.event_buffer = event_buffer;
-        self.status_text = Spans(status_text);
+        self.status_text = Spans::from(status_text);
         self.list_items = list_items;
         let selected_needs_reset = match self.selected {
             Some(step_key) => {
