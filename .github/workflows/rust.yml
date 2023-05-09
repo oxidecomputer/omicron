@@ -5,6 +5,9 @@ name: Rust
 
 on: [ push, pull_request ]
 
+env:
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
 jobs:
   check-style:
     runs-on: ubuntu-22.04

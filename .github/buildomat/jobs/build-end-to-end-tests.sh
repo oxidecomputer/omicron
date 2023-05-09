@@ -14,6 +14,7 @@ set -o xtrace
 
 cargo --version
 rustc --version
+export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 

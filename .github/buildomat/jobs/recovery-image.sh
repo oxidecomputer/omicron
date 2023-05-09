@@ -39,6 +39,7 @@ set -o xtrace
 
 cargo --version
 rustc --version
+export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 
 TOP=$PWD
 
