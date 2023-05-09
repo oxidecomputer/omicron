@@ -22,8 +22,9 @@ pub enum ObservedMigrationStatus {
     NoMigration,
 
     /// Propolis thinks a migration is in progress, but its migration ID does
-    /// not agree with the instance's current runtime state: either the ID is
-    /// wrong or the current runtime state has no ID.
+    /// not agree with the instance's current runtime state: either the current
+    /// runtime state has no ID, or Propolis has an older ID than sled agent
+    /// does because a newer migration has begun (see below).
     ///
     /// This is expected in the following scenarios:
     ///
