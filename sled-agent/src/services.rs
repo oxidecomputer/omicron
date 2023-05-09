@@ -312,6 +312,7 @@ pub struct ServiceManagerInner {
     // rather than simply placing them on the ramdisk.
     storage: StorageManager,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
+    image_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -387,14 +388,20 @@ impl ServiceManager {
                 switch_zone_bootstrap_address,
                 storage,
                 ledger_directory_override: OnceCell::new(),
+                image_directory_override: OnceCell::new(),
             }),
         };
         Ok(mgr)
     }
 
     #[cfg(test)]
-    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
+    fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
+    }
+
+    #[cfg(test)]
+    fn override_image_directory(&self, path: Utf8PathBuf) {
+        self.inner.image_directory_override.set(path).unwrap();
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
@@ -930,10 +937,29 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        // Look for the image in the ramdisk first
+        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
+        // Inject an image path if requested by a test.
+        if let Some(path) = self.inner.image_directory_override.get() {
+            zone_image_paths.push(path.clone());
+        };
+
+        // If the boot disk exists, look for the image in the "install" dataset
+        // there too.
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.resources().boot_disk().await
+        {
+            zone_image_paths.push(
+                boot_zpool
+                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
+            );
+        }
+
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
             &request.root,
+            zone_image_paths.as_slice(),
             &request.zone.zone_type.to_string(),
             unique_name.as_deref(),
             datasets.as_slice(),
@@ -2480,6 +2506,18 @@ mod test {
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
             }
         }
+
+        fn override_paths(&self, mgr: &ServiceManager) {
+            let dir = self.config_dir.path();
+            mgr.override_ledger_directory(dir.to_path_buf());
+            mgr.override_image_directory(dir.to_path_buf());
+
+            // We test launching "fake" versions of the zones, but the
+            // logic to find paths relies on checking the existence of
+            // files.
+            std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
+                .unwrap();
+        }
     }
 
     #[tokio::test]
@@ -2505,10 +2543,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2554,10 +2589,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2606,10 +2638,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2646,10 +2675,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2695,10 +2721,8 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
+
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
@@ -2739,10 +2763,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
