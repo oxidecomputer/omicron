@@ -105,7 +105,7 @@ async fn test_updates() {
     // Now, try starting the update on SP 0.
     wicketd_testctx
         .wicketd_client
-        .post_start_update(target_sp.type_, target_sp.slot)
+        .post_start_update(target_sp.type_, target_sp.slot, None)
         .await
         .expect("update started successfully");
 
