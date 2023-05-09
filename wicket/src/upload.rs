@@ -4,12 +4,16 @@
 
 //! Support for uploading artifacts to wicketd.
 
-use std::{convert::Infallible, net::SocketAddrV6, time::Duration};
+use std::{
+    convert::Infallible,
+    net::SocketAddrV6,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use buf_list::BufList;
 use clap::Args;
-use futures::TryStreamExt;
+use futures::StreamExt;
 use reqwest::Body;
 use tokio_util::io::ReaderStream;
 
@@ -40,18 +44,8 @@ impl UploadArgs {
         log: slog::Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
-        // Read the entire repository from stdin into memory.
-        let repo_bytes: BufList = ReaderStream::new(tokio::io::stdin())
-            .try_collect()
-            .await
-            .context("error reading repository from stdin")?;
-
+        let repo_bytes = Self::read_repository_from_stdin(&log).await?;
         let repository_bytes_len = repo_bytes.num_bytes();
-
-        slog::info!(
-            log,
-            "read repository ({repository_bytes_len} bytes) from stdin",
-        );
 
         // Repository validation is performed by wicketd.
 
@@ -83,5 +77,40 @@ impl UploadArgs {
         }
 
         Ok(())
+    }
+
+    async fn read_repository_from_stdin(log: &slog::Logger) -> Result<BufList> {
+        const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
+        slog::info!(log, "beginning read of repository from stdin");
+
+        let mut last_progress_report = Instant::now();
+
+        // Read the entire repository from stdin into memory.
+        let mut stream = ReaderStream::new(tokio::io::stdin());
+        let mut repo_bytes = BufList::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.context("error reading repository from stdin")?;
+
+            repo_bytes.push_chunk(chunk);
+
+            let now = Instant::now();
+            if now.duration_since(last_progress_report) > PROGRESS_INTERVAL {
+                slog::info!(
+                    log,
+                    "continuing to read repository from stdin \
+                     ({} bytes read so far)",
+                    repo_bytes.num_bytes(),
+                );
+                last_progress_report = now;
+            }
+        }
+
+        slog::info!(
+            log,
+            "finished reading repository from stdin ({} bytes)",
+            repo_bytes.num_bytes(),
+        );
+
+        Ok(repo_bytes)
     }
 }
