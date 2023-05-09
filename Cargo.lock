@@ -4787,6 +4787,7 @@ dependencies = [
  "propolis-client",
  "propolis-server",
  "rand 0.8.5",
+ "rcgen",
  "reqwest",
  "schemars",
  "semver 1.0.17",

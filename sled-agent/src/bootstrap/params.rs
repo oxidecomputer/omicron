@@ -55,10 +55,14 @@ pub struct RackInitializeRequest {
     /// DNS name for the DNS zone delegated to the rack for external DNS
     pub external_dns_zone_name: String,
 
+    /// initial TLS certificates for the external API
+    pub external_certificates: Vec<Certificate>,
+
     /// Configuration of the Recovery Silo (the initial Silo)
     pub recovery_silo: RecoverySiloConfig,
 }
 
+pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
 /// Configuration information for launching a Sled Agent.

@@ -19,6 +19,10 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
 # Delegated external DNS zone name
 external_dns_zone_name = "oxide.test"
+extra_cert = "generate_self_signed"
+
+# Initial TLS certificates for the external API
+external_certificates = []
 
 # The IP ranges configured as part of the services IP Pool.
 # e.g., Nexus will be configured to use an address from this
