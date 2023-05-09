@@ -455,7 +455,7 @@ async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
 
     assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
 
     session_token.to_string()
 }

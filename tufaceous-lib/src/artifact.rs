@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    io::{self, BufReader, BufWriter, Read, Write},
+    io::{self, BufReader, Read, Write},
     path::Path,
 };
 
@@ -11,21 +11,22 @@ use anyhow::{bail, Context, Result};
 use buf_list::BufList;
 use bytes::Bytes;
 use camino::Utf8PathBuf;
-use flate2::Compression;
 use fs_err::File;
-use omicron_common::{
-    api::{external::SemverVersion, internal::nexus::KnownArtifactKind},
-    update::ArtifactKind,
-};
+use omicron_common::{api::external::SemverVersion, update::ArtifactKind};
 
 use crate::oxide_metadata;
+
+mod composite;
+
+pub use composite::CompositeControlPlaneArchiveBuilder;
+pub use composite::CompositeHostArchiveBuilder;
+pub use composite::CompositeRotArchiveBuilder;
 
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
 pub enum ArtifactSource {
     File(Utf8PathBuf),
     Memory(BufList),
-    Fake { size: u64 },
     // We might need to support downloading data over HTTP as well
 }
 
@@ -104,202 +105,14 @@ impl AddArtifact {
                     writer.write_all(chunk)?;
                 }
             }
-            ArtifactSource::Fake { size } => match self.kind.to_known() {
-                Some(
-                    KnownArtifactKind::Host | KnownArtifactKind::Trampoline,
-                ) => {
-                    write_host_tarball_fake_artifact(*size, writer)?;
-                }
-                Some(
-                    KnownArtifactKind::GimletRot
-                    | KnownArtifactKind::SwitchRot
-                    | KnownArtifactKind::PscRot,
-                ) => {
-                    write_rot_tarball_fake_artifact(*size, writer)?;
-                }
-                _ => {
-                    write_generic_fake_artifact(*size, writer)?;
-                }
-            },
         }
 
         Ok(())
     }
 }
 
-/// Writes a fake artifact with no internal structure.
-fn write_generic_fake_artifact<W: Write>(
-    size: u64,
-    writer: &mut W,
-) -> io::Result<()> {
-    let mut buf_writer = BufWriter::new(writer);
-    // Don't need to get the size exactly right, capping to the nearest 16 is fine.
-    let times = (size as usize) / FILLER_TEXT.len();
-    for _ in 0..times {
-        buf_writer.write_all(FILLER_TEXT)?;
-    }
-    buf_writer.flush()
-}
-
-/// Writes a fake artifact that looks like a host or trampoline tarball.
-fn write_host_tarball_fake_artifact<W: Write>(
-    size: u64,
-    writer: &mut W,
-) -> Result<()> {
-    let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
-        BufWriter::new(writer),
-        Compression::fast(),
-    ));
-
-    let times = (size as usize) / FILLER_TEXT.len();
-    let phase_1_times = times / 8;
-    let phase_2_times = times - phase_1_times;
-
-    {
-        let metadata = oxide_metadata::MetadataBuilder::new(
-            oxide_metadata::ArchiveType::Os,
-        )
-        .build()
-        .context("error building oxide metadata")?;
-        metadata.append_to_tar(&mut builder)?;
-    }
-
-    {
-        let header = make_tar_header(
-            HOST_PHASE_1_FILE_NAME,
-            phase_1_times * FILLER_TEXT.len(),
-        );
-        builder
-            .append(&header, FillerReader::new(phase_1_times))
-            .with_context(|| {
-                format!("error writing `{HOST_PHASE_1_FILE_NAME}`")
-            })?;
-    }
-
-    {
-        let header = make_tar_header(
-            HOST_PHASE_2_FILE_NAME,
-            phase_2_times * FILLER_TEXT.len(),
-        );
-        builder
-            .append(&header, FillerReader::new(phase_2_times))
-            .with_context(|| {
-                format!("error writing `{HOST_PHASE_2_FILE_NAME}`")
-            })?;
-    }
-
-    let gz_encoder =
-        builder.into_inner().context("error finalizing archive")?;
-    let buf_writer =
-        gz_encoder.finish().context("error finishing gz encoder")?;
-    buf_writer
-        .into_inner()
-        .map_err(|_| anyhow::anyhow!("error flushing archive writer"))?;
-
-    Ok(())
-}
-
-/// Writes a fake artifact that looks like an RoT tarball
-fn write_rot_tarball_fake_artifact<W: Write>(
-    size: u64,
-    writer: &mut W,
-) -> Result<()> {
-    let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
-        BufWriter::new(writer),
-        Compression::fast(),
-    ));
-
-    let times = (size as usize) / FILLER_TEXT.len() / 2;
-
-    {
-        let metadata = oxide_metadata::MetadataBuilder::new(
-            oxide_metadata::ArchiveType::Rot,
-        )
-        .build()
-        .context("error building oxide metadata")?;
-        metadata.append_to_tar(&mut builder)?;
-    }
-
-    {
-        let header =
-            make_tar_header(ROT_ARCHIVE_A_FILE_NAME, times * FILLER_TEXT.len());
-        builder.append(&header, FillerReader::new(times)).with_context(
-            || format!("error writing `{ROT_ARCHIVE_A_FILE_NAME}`"),
-        )?;
-    }
-
-    {
-        let header =
-            make_tar_header(ROT_ARCHIVE_B_FILE_NAME, times * FILLER_TEXT.len());
-        builder.append(&header, FillerReader::new(times)).with_context(
-            || format!("error writing `{ROT_ARCHIVE_B_FILE_NAME}`"),
-        )?;
-    }
-
-    let gz_encoder =
-        builder.into_inner().context("error finalizing archive")?;
-    let buf_writer =
-        gz_encoder.finish().context("error finishing gz encoder")?;
-    buf_writer
-        .into_inner()
-        .map_err(|_| anyhow::anyhow!("error flushing archive writer"))?;
-
-    Ok(())
-}
-
-fn make_tar_header(path: &str, size: usize) -> tar::Header {
-    let mut header = tar::Header::new_ustar();
-    header.set_path(path).unwrap();
-    header.set_size(size as u64);
-    header.set_entry_type(tar::EntryType::Regular);
-    header.set_cksum();
-
-    header
-}
-
-/// A simple `Read` implementation used to generate filler text.
-///
-/// This is used by [`write_host_tarball_fake_artifact`] above. Ideally, we'd
-/// just be able to write the filler text directly to some sort of handle
-/// provided by tar. However, `tar::Builder` only exposes `append` methods that
-/// take a `Read` impl, so instead we hand-write a `Read` impl that achieves the
-/// same goal.
-///
-/// This is really a bug in upstream tar, since providing a writer is more
-/// generic than providing a reader (you can always use `std::io::copy` to copy
-/// data from a reader to a writer). The bug is tracked at
-/// https://github.com/alexcrichton/tar-rs/issues/304.
-struct FillerReader {
-    remaining_times: usize,
-    // Current position within the text.
-    pos: usize,
-}
-
-impl FillerReader {
-    fn new(times: usize) -> Self {
-        Self { remaining_times: times, pos: 0 }
-    }
-}
-
-impl io::Read for FillerReader {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.remaining_times == 0 {
-            // Signal the end of the reader.
-            return Ok(0);
-        }
-
-        let bytes_to_write = (FILLER_TEXT.len() - self.pos).min(buf.len());
-        buf[..bytes_to_write].copy_from_slice(
-            &FILLER_TEXT[self.pos..(self.pos + bytes_to_write)],
-        );
-
-        if self.pos + bytes_to_write == FILLER_TEXT.len() {
-            self.remaining_times -= 1;
-            self.pos = 0;
-        }
-
-        Ok(bytes_to_write)
-    }
+pub(crate) fn make_filler_text(length: usize) -> Vec<u8> {
+    std::iter::repeat(FILLER_TEXT).flatten().copied().take(length).collect()
 }
 
 /// Represents host phase images.
@@ -472,3 +285,4 @@ static HOST_PHASE_1_FILE_NAME: &str = "image/rom";
 static HOST_PHASE_2_FILE_NAME: &str = "image/zfs.img";
 static ROT_ARCHIVE_A_FILE_NAME: &str = "archive-a.zip";
 static ROT_ARCHIVE_B_FILE_NAME: &str = "archive-b.zip";
+static CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY: &str = "zones";
