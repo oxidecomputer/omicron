@@ -3729,7 +3729,7 @@ async fn sled_list(
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let sleds = nexus
-            .sleds_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .sled_list(&opctx, &data_page_params_for(&rqctx, &query)?)
             .await?
             .into_iter()
             .map(|s| s.into())
@@ -3765,8 +3765,9 @@ async fn sled_view(
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let sled_info = nexus.sled_lookup(&opctx, &path.sled_id).await?;
-        Ok(HttpResponseOk(sled_info.into()))
+        let (.., sled) =
+            nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
+        Ok(HttpResponseOk(sled.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

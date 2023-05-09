@@ -63,6 +63,7 @@ mod silo_group;
 mod silo_user;
 mod silo_user_password_hash;
 mod sled;
+mod sled_instance;
 mod sled_resource;
 mod sled_resource_kind;
 mod snapshot;

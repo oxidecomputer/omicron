@@ -141,7 +141,7 @@ table! {
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
-        active_server_id -> Uuid,
+        active_sled_id -> Uuid,
         active_propolis_id -> Uuid,
         active_propolis_ip -> Nullable<Inet>,
         target_propolis_id -> Nullable<Uuid>,
@@ -150,6 +150,22 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+    }
+}
+
+table! {
+    sled_instance (id) {
+        id -> Uuid,
+        name -> Text,
+        silo_name -> Text,
+        project_name -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        state -> crate::InstanceStateEnum,
+        active_sled_id -> Uuid,
+        migration_id -> Nullable<Uuid>,
+        ncpus -> Int8,
+        memory -> Int8,
     }
 }
 

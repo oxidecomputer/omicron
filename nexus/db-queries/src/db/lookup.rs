@@ -734,6 +734,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "SledInstance",
+    ancestors = [],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+}
+
+lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
     children = [],

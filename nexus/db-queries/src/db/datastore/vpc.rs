@@ -363,7 +363,7 @@ impl DataStore {
                     .on(instance::id
                         .eq(instance_network_interface::instance_id)),
             )
-            .inner_join(sled::table.on(sled::id.eq(instance::active_server_id)))
+            .inner_join(sled::table.on(sled::id.eq(instance::active_sled_id)))
             .filter(instance_network_interface::vpc_id.eq(vpc_id))
             .filter(instance_network_interface::time_deleted.is_null())
             .filter(instance::time_deleted.is_null())
