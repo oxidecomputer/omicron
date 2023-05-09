@@ -94,11 +94,8 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML to file {path}: {err}")]
+    #[error("Cannot serialize TOML to file: {path}: {err}")]
     TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
-
-    #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -436,15 +433,14 @@ impl ServiceManager {
     pub async fn load_non_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
-        let ledger = Ledger::<AllZoneRequests>::new(
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
             self.all_service_ledgers().await,
         )
-        .await?;
-        let services = ledger.data();
-        if services.requests.is_empty() {
+        .await else {
             return Ok(());
-        }
+        };
+        let services = ledger.data();
 
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
@@ -513,15 +509,14 @@ impl ServiceManager {
     pub async fn load_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let ledger = Ledger::<AllZoneRequests>::new(
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
             self.all_storage_service_ledgers().await,
         )
-        .await?;
-        let services = ledger.data();
-        if services.requests.is_empty() {
+        .await else {
             return Ok(());
-        }
+        };
+        let services = ledger.data();
         self.initialize_services_locked(
             &mut existing_zones,
             &services.requests,
@@ -754,7 +749,7 @@ impl ServiceManager {
             // We also need to update the switch with the NAT mappings
             let nat_target = dpd_client::types::NatTarget {
                 inner_mac: dpd_client::types::MacAddr {
-                    a: port.0.mac().into_array().to_vec(),
+                    a: port.0.mac().into_array(),
                 },
                 internal_ip: *underlay_address,
                 vni: port.0.vni().as_u32().into(),
@@ -1787,11 +1782,18 @@ impl ServiceManager {
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Read the existing set of services from the ledger.
-        let mut ledger = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_service_ledgers().await,
-        )
-        .await?;
+        let service_paths = self.all_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
         let ledger_zone_requests = ledger.data_mut();
 
         let new_zone_requests: Vec<ServiceZoneRequest> = {
@@ -1852,11 +1854,18 @@ impl ServiceManager {
         let mut existing_zones = self.inner.dataset_zones.lock().await;
 
         // Read the existing set of services from the ledger.
-        let mut ledger = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_storage_service_ledgers().await,
-        )
-        .await?;
+        let service_paths = self.all_storage_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
         let ledger_zone_requests = ledger.data_mut();
 
         if !ledger_zone_requests
