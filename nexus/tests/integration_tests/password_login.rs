@@ -448,7 +448,7 @@ async fn expect_login_success(
         .split_once("; ")
         .expect("session cookie: bad cookie header value (missing semicolon)");
     assert!(token_cookie.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
     let (_, session_token) = token_cookie
         .split_once('=')
         .expect("session cookie: bad cookie header value (missing 'session=')");
