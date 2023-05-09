@@ -113,6 +113,7 @@ impl super::Nexus {
         resource_id: Uuid,
         resource_kind: db::model::SledResourceKind,
         resources: db::model::Resources,
+        constraints: db::model::SledReservationConstraints,
     ) -> Result<db::model::SledResource, Error> {
         self.db_datastore
             .sled_reservation_create(
@@ -120,6 +121,7 @@ impl super::Nexus {
                 resource_id,
                 resource_kind,
                 resources,
+                constraints,
             )
             .await
     }
@@ -260,6 +262,7 @@ impl super::Nexus {
         opctx: &OpContext,
         id: Uuid,
         sled_id: Uuid,
+        zone_id: Option<Uuid>,
         address: SocketAddrV6,
         kind: ServiceKind,
     ) -> Result<(), Error> {
@@ -270,13 +273,16 @@ impl super::Nexus {
             "service_id" => id.to_string(),
             "address" => address.to_string(),
         );
-        let service = db::model::Service::new(id, sled_id, address, kind);
+        let service =
+            db::model::Service::new(id, sled_id, zone_id, address, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
 
         if kind == ServiceKind::ExternalDnsConfig {
-            self.background_tasks.activate(&self.task_external_dns_servers);
+            self.background_tasks
+                .activate(&self.background_tasks.task_external_dns_servers);
         } else if kind == ServiceKind::InternalDnsConfig {
-            self.background_tasks.activate(&self.task_internal_dns_servers);
+            self.background_tasks
+                .activate(&self.background_tasks.task_internal_dns_servers);
         }
 
         Ok(())

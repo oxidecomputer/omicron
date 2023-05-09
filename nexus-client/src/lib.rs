@@ -5,9 +5,24 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
-use omicron_common::generate_logging_api;
-
-generate_logging_api!("../openapi/nexus-internal.json");
+progenitor::generate_api!(
+    spec = "../openapi/nexus-internal.json",
+    derives = [schemars::JsonSchema, PartialEq],
+    inner_type = slog::Logger,
+    pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
+        slog::debug!(log, "client request";
+            "method" => %request.method(),
+            "uri" => %request.url(),
+            "body" => ?&request.body(),
+        );
+    }),
+    post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
+        slog::debug!(log, "client response"; "result" => ?result);
+    }),
+    replace = {
+        NewPasswordHash = omicron_passwords::NewPasswordHash,
+    }
+);
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {

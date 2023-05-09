@@ -4,15 +4,19 @@
 
 //! Integration testing facilities for Nexus
 
+use anyhow::Context;
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
+use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServicePutRequest;
-use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::nexus_config;
 use omicron_sled_agent::sim;
@@ -23,8 +27,12 @@ use slog::o;
 use slog::Logger;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::path::Path;
 use std::time::Duration;
+use trust_dns_resolver::config::NameServerConfig;
+use trust_dns_resolver::config::Protocol;
+use trust_dns_resolver::config::ResolverConfig;
+use trust_dns_resolver::config::ResolverOpts;
+use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 pub mod db;
@@ -41,18 +49,33 @@ pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
 
+/// Password for the user created by the test suite
+///
+/// This is only used by the test suite and `omicron-dev run-all` (the latter of
+/// which uses the test suite setup code for most of its operation).   These are
+/// both transient deployments with no sensitive data.
+pub const TEST_SUITE_PASSWORD: &str = "oxide";
+
 pub struct ControlPlaneTestContext<N> {
+    pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
     pub clickhouse: dev::clickhouse::ClickHouseInstance,
     pub logctx: LogContext,
-    pub sled_agent_storage: tempfile::TempDir,
+    pub sled_agent_storage: camino_tempfile::Utf8TempDir,
     pub sled_agent: sim::Server,
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub dendrite: dev::dendrite::DendriteInstance,
+    pub external_dns_zone_name: String,
+    pub external_dns_server: dns_server::dns_server::ServerHandle,
+    pub external_dns_config_server:
+        dropshot::HttpServer<dns_server::http_server::Context>,
+    pub external_dns_resolver: trust_dns_resolver::TokioAsyncResolver,
+    pub silo_name: Name,
+    pub user_name: UserId,
 }
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
@@ -114,7 +137,7 @@ pub fn load_test_config() -> omicron_common::nexus_config::Config {
     // change the logging level and local IP if they want, and as we add more
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
-    let config_file_path = Path::new("tests/config.test.toml");
+    let config_file_path = Utf8Path::new("tests/config.test.toml");
     let mut config =
         omicron_common::nexus_config::Config::from_file(config_file_path)
             .expect("failed to load config.test.toml");
@@ -135,6 +158,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
 ) -> ControlPlaneTestContext<N> {
+    let start_time = chrono::Utc::now();
     let logctx = LogContext::new(test_name, &config.pkg.log);
     let log = &logctx.log;
 
@@ -171,7 +195,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 
     // Set up a single sled agent.
     let sa_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
-    let tempdir = tempfile::tempdir().unwrap();
+    let tempdir = camino_tempfile::tempdir().unwrap();
     let sled_agent = start_sled_agent(
         logctx.log.new(o!(
             "component" => "omicron_sled_agent::sim::Server",
@@ -185,20 +209,117 @@ pub async fn test_setup_with_config<N: NexusServer>(
     .await
     .unwrap();
 
+    // Set up an external DNS server.
+    let (
+        external_dns_server,
+        external_dns_config_server,
+        external_dns_resolver,
+    ) = start_dns_server(
+        logctx.log.new(o!(
+            "component" => "external_dns_server",
+        )),
+        tempdir.path(),
+    )
+    .await
+    .unwrap();
+
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address = match sled_agent.dns_dropshot_server.local_addr() {
+    let dns_server_address_internal = match sled_agent
+        .dns_dropshot_server
+        .local_addr()
+    {
         SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
         SocketAddr::V6(addr) => addr,
     };
-    let dns_service = ServicePutRequest {
+    let dns_server_dns_address_internal = match sled_agent
+        .dns_server
+        .local_address()
+    {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => *addr,
+    };
+    let dns_server_zone = Uuid::new_v4();
+    let dns_service_config = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
-        address: dns_server_address,
+        zone_id: Some(dns_server_zone),
+        address: dns_server_address_internal,
         kind: ServiceKind::InternalDnsConfig,
     };
-    let server = N::start(nexus_internal, &config, vec![dns_service]).await;
+    let dns_service_dns = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(dns_server_zone),
+        address: dns_server_dns_address_internal,
+        kind: ServiceKind::InternalDns,
+    };
+    let dns_server_address_external = match external_dns_config_server
+        .local_addr()
+    {
+        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
+        SocketAddr::V6(addr) => addr,
+    };
+    let dns_service_external = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
+        address: dns_server_address_external,
+        kind: ServiceKind::ExternalDnsConfig,
+    };
+    let nexus_service = ServicePutRequest {
+        service_id: Uuid::new_v4(),
+        sled_id: sa_id,
+        zone_id: Some(Uuid::new_v4()),
+        address: SocketAddrV6::new(
+            match nexus_internal_addr.ip() {
+                IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+                IpAddr::V6(addr) => addr,
+            },
+            nexus_internal_addr.port(),
+            0,
+            0,
+        ),
+        kind: ServiceKind::Nexus {
+            external_address: config
+                .deployment
+                .dropshot_external
+                .bind_address
+                .ip(),
+        },
+    };
+    let external_dns_zone_name =
+        internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
+    let silo_name: Name = "test-suite-silo".parse().unwrap();
+    let user_name = UserId::try_from("test-privileged".to_string()).unwrap();
+    let user_password_hash = omicron_passwords::Hasher::default()
+        .create_password(
+            &omicron_passwords::Password::new(TEST_SUITE_PASSWORD).unwrap(),
+        )
+        .unwrap()
+        .as_str()
+        .parse()
+        .unwrap();
+    let recovery_silo = RecoverySiloConfig {
+        silo_name: silo_name.clone(),
+        user_name: user_name.clone(),
+        user_password_hash,
+    };
+
+    let server = N::start(
+        nexus_internal,
+        &config,
+        vec![
+            dns_service_config,
+            dns_service_dns,
+            dns_service_external,
+            nexus_service,
+        ],
+        &external_dns_zone_name,
+        recovery_silo,
+    )
+    .await;
 
     let external_server_addr =
         server.get_http_server_external_address().await.unwrap();
@@ -243,6 +364,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     register_test_producer(&producer).unwrap();
 
     ControlPlaneTestContext {
+        start_time,
         server,
         external_client: testctx_external,
         internal_client: testctx_internal,
@@ -254,6 +376,12 @@ pub async fn test_setup_with_config<N: NexusServer>(
         producer,
         logctx,
         dendrite,
+        external_dns_zone_name,
+        external_dns_server,
+        external_dns_config_server,
+        external_dns_resolver,
+        silo_name,
+        user_name,
     }
 }
 
@@ -261,7 +389,7 @@ pub async fn start_sled_agent(
     log: Logger,
     nexus_address: SocketAddr,
     id: Uuid,
-    update_directory: &Path,
+    update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config {
@@ -289,7 +417,7 @@ pub async fn start_sled_agent(
     };
 
     let (server, _rack_init_request) =
-        sim::Server::start(&config, &log).await?;
+        sim::Server::start(&config, &log, &sim::RssArgs::default()).await?;
     Ok(server)
 }
 
@@ -422,4 +550,55 @@ pub fn assert_same_items<T: PartialEq + Debug>(v1: Vec<T>, v2: Vec<T>) {
     for item in v1.iter() {
         assert!(v2.contains(item), "{:?} and {:?} don't match", v1, v2);
     }
+}
+
+pub async fn start_dns_server(
+    log: slog::Logger,
+    storage_path: &Utf8Path,
+) -> Result<
+    (
+        dns_server::dns_server::ServerHandle,
+        dropshot::HttpServer<dns_server::http_server::Context>,
+        TokioAsyncResolver,
+    ),
+    anyhow::Error,
+> {
+    let config_store = dns_server::storage::Config {
+        keep_old_generations: 3,
+        storage_path: storage_path.into(),
+    };
+    let store = dns_server::storage::Store::new(
+        log.new(o!("component" => "DnsStore")),
+        &config_store,
+    )
+    .unwrap();
+
+    let (dns_server, http_server) = dns_server::start_servers(
+        log,
+        store,
+        &dns_server::dns_server::Config {
+            bind_address: "[::1]:0".parse().unwrap(),
+        },
+        &dropshot::ConfigDropshot {
+            bind_address: "[::1]:0".parse().unwrap(),
+            request_body_max_bytes: 8 * 1024,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut resolver_config = ResolverConfig::new();
+    resolver_config.add_name_server(NameServerConfig {
+        socket_addr: *dns_server.local_address(),
+        protocol: Protocol::Udp,
+        tls_dns_name: None,
+        trust_nx_responses: false,
+        bind_addr: None,
+    });
+    let resolver =
+        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
+            .context("creating DNS resolver")?;
+
+    Ok((dns_server, http_server, resolver))
 }

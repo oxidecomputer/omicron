@@ -13,6 +13,7 @@ async-bb8-diesel.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 bb8.workspace = true
+camino.workspace = true
 clap.workspace = true
 chrono.workspace = true
 cookie.workspace = true
@@ -80,9 +81,9 @@ db-macros.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
-nexus-passwords.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-passwords.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
@@ -107,6 +108,7 @@ regex.workspace = true
 rustls = { workspace = true, features = ["dangerous_configuration"] }
 subprocess.workspace = true
 term.workspace = true
+trust-dns-resolver.workspace = true
 httptest.workspace = true
 strum.workspace = true
 

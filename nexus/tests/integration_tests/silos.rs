@@ -25,6 +25,7 @@ use omicron_nexus::external_api::views::{
     self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use omicron_nexus::external_api::{params, shared};
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write;
@@ -34,6 +35,10 @@ use base64::Engine;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
+use std::convert::Infallible;
+use std::net::Ipv4Addr;
+use std::time::Duration;
+use trust_dns_resolver::error::ResolveErrorKind;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -43,6 +48,32 @@ type ControlPlaneTestContext =
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
+
+    // Verify that we cannot create a name with the same name as the recovery
+    // Silo that was created during rack initialization.
+    let error: dropshot::HttpErrorResponseBody =
+        NexusRequest::expect_failure_with_body(
+            client,
+            StatusCode::BAD_REQUEST,
+            Method::POST,
+            "/v1/system/silos",
+            &params::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: cptestctx.silo_name.clone(),
+                    description: "a silo".to_string(),
+                },
+                discoverable: false,
+                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                admin_group_name: None,
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+    assert_eq!(error.message, "already exists: silo \"test-suite-silo\"");
 
     // Create two silos: one discoverable, one not
     create_silo(
@@ -54,6 +85,10 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     .await;
     create_silo(&client, "hidden", false, shared::SiloIdentityMode::LocalOnly)
         .await;
+
+    // Verify that an external DNS name was propagated for these Silos.
+    verify_silo_dns_name(cptestctx, "discoverable", true).await;
+    verify_silo_dns_name(cptestctx, "hidden", true).await;
 
     // Verify GET /v1/system/silos/{silo} works for both discoverable and not
     let discoverable_url = "/v1/system/silos/discoverable";
@@ -219,6 +254,9 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to make request");
+
+    // Verify the DNS name was removed.
+    verify_silo_dns_name(cptestctx, "discoverable", false).await;
 
     // Verify silo user was also deleted
     LookupPath::new(&authn_opctx, nexus.datastore())
@@ -2084,4 +2122,58 @@ async fn run_user_tests(
         .items;
     println!("last_users: {:?}", last_users);
     assert_eq!(last_users, existing_users);
+}
+
+pub async fn verify_silo_dns_name(
+    cptestctx: &ControlPlaneTestContext,
+    silo_name: &str,
+    should_exist: bool,
+) {
+    // The DNS naming scheme for Silo DNS names is just:
+    //     $silo_name.sys.$delegated_name
+    // This is determined by RFD 357 and also implemented in Nexus.
+    let dns_name =
+        format!("{}.sys.{}", silo_name, cptestctx.external_dns_zone_name);
+
+    // We assume that in the test suite, Nexus's "external" address is
+    // localhost.
+    let nexus_ip = Ipv4Addr::LOCALHOST;
+
+    wait_for_condition(
+        || async {
+            let found = match cptestctx
+                .external_dns_resolver
+                .ipv4_lookup(&dns_name)
+                .await
+            {
+                Ok(result) => {
+                    let addrs: Vec<_> = result.iter().collect();
+                    if addrs.is_empty() {
+                        false
+                    } else {
+                        assert_eq!(addrs, [&nexus_ip]);
+                        true
+                    }
+                }
+                Err(error) => match error.kind() {
+                    ResolveErrorKind::NoRecordsFound { .. } => false,
+                    _ => panic!(
+                        "unexpected error querying external \
+                            DNS server for Silo DNS name {:?}: {:#}",
+                        dns_name, error
+                    ),
+                },
+            };
+
+            if should_exist == found {
+                Ok(())
+            } else {
+                Err::<_, CondCheckError<Infallible>>(CondCheckError::NotYet)
+            }
+        },
+        &Duration::from_millis(50),
+        &Duration::from_secs(15),
+    )
+    .await
+    .expect("failed to verify external DNS configuration");
 }

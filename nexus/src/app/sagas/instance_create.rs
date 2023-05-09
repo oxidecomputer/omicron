@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
+use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
@@ -462,9 +463,7 @@ async fn sic_add_network_config(
     debug!(log, "creating nat entry for: {target_ip:#?}");
 
     let nat_target = dpd_client::types::NatTarget {
-        inner_mac: dpd_client::types::MacAddr {
-            a: mac_address.into_array().to_vec(),
-        },
+        inner_mac: dpd_client::types::MacAddr { a: mac_address.into_array() },
         internal_ip: *sled_ip_address.ip(),
         vni: vni.into(),
     };
@@ -615,6 +614,7 @@ async fn sic_alloc_server(
             propolis_id,
             db::model::SledResourceKind::Instance,
             resources,
+            db::model::SledReservationConstraints::none(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -1075,10 +1075,9 @@ async fn ensure_instance_disk_attach_state(
 pub(super) async fn allocate_sled_ipv6(
     opctx: &OpContext,
     sagactx: NexusActionContext,
-    sled_id_name: &str,
+    sled_uuid: Uuid,
 ) -> Result<Ipv6Addr, ActionError> {
     let osagactx = sagactx.user_data();
-    let sled_uuid = sagactx.lookup::<Uuid>(sled_id_name)?;
     osagactx
         .datastore()
         .next_ipv6_address(opctx, sled_uuid)
@@ -1145,7 +1144,8 @@ async fn sic_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_sled_ipv6(&opctx, sagactx, "server_id").await
+    let sled_uuid = sagactx.lookup::<Uuid>("server_id")?;
+    allocate_sled_ipv6(&opctx, sagactx, sled_uuid).await
 }
 
 async fn sic_create_instance_record(
@@ -1400,7 +1400,12 @@ async fn sic_instance_ensure_registered_undo(
 
     osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &db_instance)
+        .instance_ensure_unregistered(
+            &opctx,
+            &authz_instance,
+            &db_instance,
+            WriteBackUpdatedInstance::WriteBack,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1571,11 +1576,12 @@ pub mod test {
     }
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::ExternalIp;
+        use crate::db::model::{ExternalIp, IpKind};
         use crate::db::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
+            .filter(dsl::kind.ne(IpKind::Service))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(
                 datastore.pool_for_tests().await.unwrap(),

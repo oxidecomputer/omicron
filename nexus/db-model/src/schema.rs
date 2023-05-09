@@ -470,6 +470,7 @@ table! {
         time_modified -> Timestamptz,
 
         sled_id -> Uuid,
+        zone_id -> Nullable<Uuid>,
         ip -> Inet,
         port -> Int4,
         kind -> crate::ServiceKindEnum,
@@ -905,3 +906,5 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
+allow_tables_to_appear_in_same_query!(external_ip, nexus_service);
+joinable!(nexus_service -> external_ip (external_ip_id));

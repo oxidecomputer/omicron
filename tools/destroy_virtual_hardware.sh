@@ -43,7 +43,7 @@ function fail {
 }
 
 function verify_omicron_uninstalled {
-    svcs "svc:/system/illumos/sled-agent:default" 2>&1 > /dev/null && \
+    svcs "svc:/oxide/sled-agent:default" 2>&1 > /dev/null && \
         fail "Omicron is still installed, please run \`omicron-package uninstall\`, and then re-run this script"
 }
 
@@ -102,16 +102,19 @@ function try_remove_vnics {
 }
 
 function try_destroy_zpools {
-    readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^oxp_")
-    for ZPOOL in "${ZPOOLS[@]}"; do
-        VDEV_FILE="$OMICRON_TOP/$ZPOOL.vdev"
-        zfs destroy -r "$ZPOOL" && \
-                zfs unmount "$ZPOOL" && \
-                zpool destroy "$ZPOOL" && \
-                rm -f "$VDEV_FILE" || \
-                warn "Failed to remove ZFS pool and vdev: $ZPOOL"
+    ZPOOL_TYPES=('oxp_' 'oxi_')
+    for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
+        readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
+        for ZPOOL in "${ZPOOLS[@]}"; do
+            VDEV_FILE="$OMICRON_TOP/$ZPOOL.vdev"
+            zfs destroy -r "$ZPOOL" && \
+                    zfs unmount "$ZPOOL" && \
+                    zpool destroy "$ZPOOL" && \
+                    rm -f "$VDEV_FILE" || \
+                    warn "Failed to remove ZFS pool and vdev: $ZPOOL"
 
-        success "Verified ZFS pool and vdev $ZPOOL does not exist"
+            success "Verified ZFS pool and vdev $ZPOOL does not exist"
+        done
     done
 }
 

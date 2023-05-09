@@ -6,7 +6,7 @@
 
 use crate::zpool::ZpoolName;
 use crate::{execute, PFEXEC};
-use std::path::Path;
+use camino::Utf8Path;
 use std::str::FromStr;
 
 const FSTYP: &str = "/usr/sbin/fstyp";
@@ -33,7 +33,7 @@ pub struct Fstyp {}
 impl Fstyp {
     /// Executes the 'fstyp' command and parses the name of a zpool from it, if
     /// one exists.
-    pub fn get_zpool(path: &Path) -> Result<ZpoolName, Error> {
+    pub fn get_zpool(path: &Utf8Path) -> Result<ZpoolName, Error> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");

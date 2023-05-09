@@ -10,7 +10,7 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client = build_client()?;
+    let client = build_client().await?;
 
     // ===== ENSURE NEXUS IS UP ===== //
     eprintln!("waiting for nexus to come up...");
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
 
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool...");
-    let (first, last) = get_system_ip_pool()?;
+    let (first, last) = get_system_ip_pool().await?;
     client
         .ip_pool_range_add()
         .pool("default")

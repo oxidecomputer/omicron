@@ -10,18 +10,18 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts": {
+    "/artifacts-and-event-reports": {
       "get": {
-        "summary": "An endpoint used to report all available artifacts.",
+        "summary": "An endpoint used to report all available artifacts and event reports.",
         "description": "The order of the returned artifacts is unspecified, and may change between calls even if the total set of artifacts has not.",
-        "operationId": "get_artifacts",
+        "operationId": "get_artifacts_and_event_reports",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GetArtifactsResponse"
+                  "$ref": "#/components/schemas/GetArtifactsAndEventReportsResponse"
                 }
               }
             }
@@ -145,31 +145,6 @@
         }
       }
     },
-    "/update": {
-      "get": {
-        "summary": "An endpoint to get the status of all updates being performed or recently",
-        "description": "completed on all SPs.",
-        "operationId": "get_update_all",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UpdateLogAll"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/update/{type}/{slot}": {
       "get": {
         "summary": "An endpoint to get the status of any update being performed or recently",
@@ -201,7 +176,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UpdateLog"
+                  "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
                 }
               }
             }
@@ -292,56 +267,6 @@
           "version"
         ]
       },
-      "CurrentProgress": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "data": {
-                "description": "The kind of event this is.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
-                  }
-                ]
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "progress_event"
-                ]
-              },
-              "total_elapsed": {
-                "description": "Total time elapsed since the start of execution.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/Duration"
-                  }
-                ]
-              }
-            },
-            "required": [
-              "data",
-              "kind",
-              "total_elapsed"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "waiting_for_progress_event"
-                ]
-              }
-            },
-            "required": [
-              "kind"
-            ]
-          }
-        ]
-      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -380,7 +305,38 @@
           "request_id"
         ]
       },
-      "GetArtifactsResponse": {
+      "EventReportForWicketdEngineSpec": {
+        "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
+        "type": "object",
+        "properties": {
+          "last_seen": {
+            "nullable": true,
+            "description": "The last event seen.\n\n`last_seen` can be used to retrieve deltas of events.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "progress_events": {
+            "description": "A list of progress events, or whether we're currently waiting for a progress event.\n\nCurrently, this produces one progress event for each top-level and nested event in progress.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
+            }
+          },
+          "step_events": {
+            "description": "A list of step events.\n\nStep events include success and failure events.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
+            }
+          }
+        },
+        "required": [
+          "progress_events",
+          "step_events"
+        ]
+      },
+      "GetArtifactsAndEventReportsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
         "properties": {
@@ -388,6 +344,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ArtifactId"
+            }
+          },
+          "event_reports": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
             }
           },
           "system_version": {
@@ -400,7 +365,8 @@
           }
         },
         "required": [
-          "artifacts"
+          "artifacts",
+          "event_reports"
         ]
       },
       "GetInventoryParams": {
@@ -526,6 +492,11 @@
               }
             ]
           },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -537,11 +508,92 @@
         },
         "required": [
           "data",
+          "execution_id",
+          "total_elapsed"
+        ]
+      },
+      "ProgressEventForWicketdEngineSpec": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "description": "The kind of event this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProgressEventKindForWicketdEngineSpec"
+              }
+            ]
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_elapsed": {
+            "description": "Total time elapsed since the start of execution.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "execution_id",
           "total_elapsed"
         ]
       },
       "ProgressEventKindForGenericSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -679,6 +731,55 @@
       },
       "ProgressEventKindForWicketdEngineSpec": {
         "oneOf": [
+          {
+            "description": "The update engine is waiting for a progress message.\n\nThe update engine sends this message immediately after a [`StepEvent`] corresponding to a new step.",
+            "type": "object",
+            "properties": {
+              "attempt": {
+                "description": "The attempt number currently being executed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "Total time elapsed since the start of the attempt.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_progress"
+                ]
+              },
+              "step": {
+                "description": "Information about the step.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "step",
+              "step_elapsed"
+            ]
+          },
           {
             "type": "object",
             "properties": {
@@ -1277,7 +1378,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
@@ -1374,6 +1477,17 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1385,6 +1499,8 @@
         },
         "required": [
           "data",
+          "event_index",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -1399,6 +1515,17 @@
               }
             ]
           },
+          "event_index": {
+            "description": "A monotonically increasing index for this `StepEvent`.",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "execution_id": {
+            "description": "The execution ID.",
+            "type": "string",
+            "format": "uuid"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1410,6 +1537,8 @@
         },
         "required": [
           "data",
+          "event_index",
+          "execution_id",
           "total_elapsed"
         ]
       },
@@ -2599,46 +2728,6 @@
           }
         ]
       },
-      "UpdateLog": {
-        "type": "object",
-        "properties": {
-          "current": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CurrentProgress"
-              }
-            ]
-          },
-          "events": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StepEventForWicketdEngineSpec"
-            }
-          }
-        },
-        "required": [
-          "events"
-        ]
-      },
-      "UpdateLogAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/UpdateLog"
-              }
-            }
-          }
-        },
-        "required": [
-          "sps"
-        ]
-      },
       "UpdateStepId": {
         "oneOf": [
           {
@@ -2665,7 +2754,35 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "interrogate_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_sp"
                 ]
               }
             },

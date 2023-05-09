@@ -19,7 +19,8 @@ use tui::layout::{Constraint, Direction, Layout, Rect};
 use tui::text::{Span, Spans, Text};
 use tui::widgets::{Block, BorderType, Borders, Paragraph};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use wicketd_client::types::{SemverVersion, UpdateComponent};
+use wicket_common::update_events::UpdateComponent;
+use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -86,7 +87,7 @@ impl UpdatePane {
 
     pub fn draw_log_popup(&mut self, state: &State, frame: &mut Frame<'_>) {
         let selected = state.rack_state.selected;
-        let logs = state.update_state.logs.get(&selected).map_or_else(
+        let logs = state.update_state.event_reports.get(&selected).map_or_else(
             || "No Logs Available".to_string(),
             |l| format!("{:#?}", l),
         );

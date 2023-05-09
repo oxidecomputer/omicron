@@ -15,6 +15,11 @@ use password_hash::SaltString;
 use rand::prelude::ThreadRng;
 use rand::CryptoRng;
 use rand::RngCore;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_with::SerializeDisplay;
+use std::fmt;
+use std::str::FromStr;
 use thiserror::Error;
 
 // Parameters for the Argon2 key derivation function (KDF).  These parameters
@@ -119,6 +124,77 @@ pub struct PasswordSetError(#[from] argon2::password_hash::errors::Error);
 // 500 errors.
 pub struct PasswordVerifyError(#[from] argon2::password_hash::errors::Error);
 
+/// Password hash string for a _new_ password
+///
+/// This is a thin wrapper around `PasswordHashString` aimed at providing
+/// validation that a new given password hash meets our security requirements.
+///
+/// We do not use this in the `Hasher` because it's possible that we might want
+/// to verify password hashes that we wouldn't allow someone to create anew.
+#[derive(Clone, Debug, Deserialize, SerializeDisplay, PartialEq, Eq)]
+#[serde(try_from = "String")]
+pub struct NewPasswordHash(PasswordHashString);
+
+impl fmt::Display for NewPasswordHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl NewPasswordHash {
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl From<NewPasswordHash> for PasswordHashString {
+    fn from(value: NewPasswordHash) -> Self {
+        value.0
+    }
+}
+
+impl FromStr for NewPasswordHash {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(NewPasswordHash(parse_phc_hash(s)?))
+    }
+}
+
+impl TryFrom<String> for NewPasswordHash {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl JsonSchema for NewPasswordHash {
+    fn schema_name() -> String {
+        "NewPasswordHash".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("A password hash in PHC string format".to_string()),
+                description: Some(
+                    "Password hashes must be in PHC (Password Hashing \
+                    Competition) string format.  Passwords must be hashed \
+                    with Argon2id.  Password hashes may be rejected if the \
+                    parameters appear not to be secure enough."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 /// Create and verify stored passwords for local-only Silo users
 // This is currently a thin wrapper around `argon2`.  It encapsulates the
 // specific key derivation function (KDF) and related policy choices.  It also
@@ -161,6 +237,77 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
     }
 }
 
+/// Parses the given PHC-format password hash string and returns it only if it
+/// meets some basic requirements (which match the way we generate password
+/// hashes).
+pub fn parse_phc_hash(s: &str) -> Result<PasswordHashString, String> {
+    let hash = PasswordHashString::new(s)
+        .map_err(|e| format!("password hash: {}", e))?;
+    verify_strength(&hash)?;
+    Ok(hash)
+}
+
+fn verify_strength(hash: &PasswordHashString) -> Result<(), String> {
+    if hash.algorithm() != ARGON2_ALGORITHM.ident() {
+        return Err(format!(
+            "password hash: algorithm: expected {}, found {}",
+            ARGON2_ALGORITHM,
+            hash.algorithm()
+        ));
+    }
+
+    match hash.salt() {
+        None => return Err("password hash: expected salt".to_string()),
+        Some(s) if s.len() < argon2::RECOMMENDED_SALT_LEN => {
+            return Err(format!(
+                "password hash: salt: expected at least {} bytes",
+                argon2::RECOMMENDED_SALT_LEN
+            ));
+        }
+        _ => (),
+    };
+
+    match hash.hash() {
+        None => return Err("password hash: expected hash".to_string()),
+        Some(s) if s.len() < argon2::Params::DEFAULT_OUTPUT_LEN => {
+            return Err(format!(
+                "password hash: output: expected at least {} bytes",
+                argon2::Params::DEFAULT_OUTPUT_LEN
+            ));
+        }
+        _ => (),
+    };
+
+    let params = argon2::Params::try_from(&hash.password_hash())
+        .map_err(|e| format!("password hash: argon2 parameters: {}", e))?;
+    if params.m_cost() < ARGON2_COST_M_KIB {
+        return Err(format!(
+            "password hash: parameter 'm': expected at least {} (KiB), \
+            found {}",
+            ARGON2_COST_M_KIB,
+            params.m_cost()
+        ));
+    }
+
+    if params.t_cost() < ARGON2_COST_T {
+        return Err(format!(
+            "password hash: parameter 't': expected at least {}, found {}",
+            ARGON2_COST_T,
+            params.t_cost()
+        ));
+    }
+
+    if params.p_cost() < ARGON2_COST_P {
+        return Err(format!(
+            "password hash: parameter 'p': expected at least {}, found {}",
+            ARGON2_COST_P,
+            params.p_cost()
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::external_password_argon;
@@ -171,6 +318,8 @@ mod test {
     use super::ARGON2_COST_P;
     use super::ARGON2_COST_T;
     use super::MAX_PASSWORD_LENGTH;
+    use crate::parse_phc_hash;
+    use crate::verify_strength;
     use crate::MIN_EXPECTED_PASSWORD_VERIFY_TIME;
     use argon2::password_hash::PasswordHashString;
     use argon2::password_hash::SaltString;
@@ -209,6 +358,9 @@ mod test {
         println!("example password: {}", PASSWORD_STR);
         println!("hashed:           {}", hash_str);
         println!("structured hash:  {:?}", hash);
+
+        // Verify that the generated hash matches our own requirements.
+        verify_strength(&hash_str).unwrap();
 
         // Verify that salt strings are at least as long as we think they are
         // (16 bytes).
@@ -275,6 +427,7 @@ mod test {
         assert_ne!(hash_str, hash_str2);
         assert!(hasher.verify_password(&password, &hash_str2).unwrap());
         assert!(!hasher.verify_password(&bad_password, &hash_str2).unwrap());
+        verify_strength(&hash_str2).unwrap();
 
         // If we create a new hasher and hash the same password, we should also
         // get a different string.  It should behave the same way.
@@ -284,6 +437,7 @@ mod test {
         assert_ne!(hash_str2, hash_str3);
         assert!(hasher.verify_password(&password, &hash_str2).unwrap());
         assert!(!hasher.verify_password(&bad_password, &hash_str2).unwrap());
+        verify_strength(&hash_str3).unwrap();
     }
 
     #[test]
@@ -298,11 +452,13 @@ mod test {
                 Hasher::new(external_password_argon(), known_rng.clone());
             hasher.create_password(&password).unwrap()
         };
+        verify_strength(&hash1).unwrap();
         let hash2 = {
             let mut hasher = Hasher::new(external_password_argon(), known_rng);
             hasher.create_password(&password).unwrap()
         };
         assert_eq!(hash1, hash2);
+        verify_strength(&hash2).unwrap();
     }
 
     // Verifies that known password hashes continue to verify as we expect.
@@ -370,6 +526,7 @@ mod test {
         // parameters are because that's encoded in the hash string.
         let password = Password::new(PASSWORD_STR).unwrap();
         let password_hash_str = hasher.create_password(&password).unwrap();
+        verify_strength(&password_hash_str).unwrap();
         assert!(argon2alt::verify_encoded(
             password_hash_str.as_ref(),
             PASSWORD_STR.as_bytes()
@@ -415,5 +572,75 @@ mod test {
             argon2alt::hash_encoded(password_bytes, salt_bytes, &config)
                 .unwrap();
         assert_eq!(alt_hash, password_hash_str.to_string());
+    }
+
+    #[test]
+    fn test_weak_hashes() {
+        assert_eq!(
+            parse_phc_hash("dummy").unwrap_err(),
+            "password hash: password hash string missing field"
+        );
+        // This input was generated from argon2.online using the empty string as
+        // input.
+        let _ = parse_phc_hash(
+            "$argon2id$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
+            $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I",
+        )
+        .unwrap();
+
+        // The following inputs were constructed by taking the valid hash above
+        // and adjusting the string by hand.
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2i$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            "password hash: algorithm: expected argon2id, found argon2i"
+        );
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2id$v=19$m=98304,t=13,p=1$\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            // sic
+            "password hash: salt invalid: value to short",
+        );
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2id$v=19$m=98304,t=13,p=1$MDEyMzQ1Njc\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            "password hash: salt: expected at least 16 bytes",
+        );
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2id$v=19$m=4096,t=13,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            "password hash: parameter 'm': expected at least 98304 (KiB), \
+            found 4096"
+        );
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2id$v=19$m=98304,t=12,p=1$MDEyMzQ1Njc4OTAxMjM0NQ\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            "password hash: parameter 't': expected at least 13, found 12"
+        );
+        assert_eq!(
+            parse_phc_hash(
+                "$argon2id$v=19$m=98304,t=13,p=0$MDEyMzQ1Njc4OTAxMjM0NQ\
+                $tFRlFMnzazQduuAkXOEi6k9g88nwBbUV8rJI0PjT8/I"
+            )
+            .unwrap_err(),
+            // sic
+            "password hash: argon2 parameters: invalid parameter value: \
+            value to short"
+        );
     }
 }

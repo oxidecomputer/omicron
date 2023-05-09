@@ -90,7 +90,13 @@ CREATE TABLE omicron.public.sled (
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
     /* The last address allocated to an Oxide service on this sled. */
-    last_used_address INET NOT NULL
+    last_used_address INET NOT NULL,
+
+    -- This constraint should be upheld, even for deleted disks
+    -- in the fleet.
+    CONSTRAINT serial_part_revision_unique UNIQUE (
+      serial_number, part_number, revision
+    )
 );
 
 /* Add an index which lets us look up sleds on a rack */
@@ -168,6 +174,8 @@ CREATE TABLE omicron.public.service (
 
     /* FK into the Sled table */
     sled_id UUID NOT NULL,
+    /* For services in illumos zones, the zone's unique id (for debugging) */
+    zone_id UUID,
     /* The IP address of the service. */
     ip INET NOT NULL,
     /* The UDP or TCP port on which the service listens. */
@@ -194,6 +202,10 @@ CREATE TABLE omicron.public.nexus_service (
     id UUID PRIMARY KEY,
     -- The external IP address used for Nexus' external interface.
     external_ip_id UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.nexus_service (
+    external_ip_id
 );
 
 CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
@@ -1934,8 +1946,18 @@ CREATE TABLE omicron.public.dns_name (
     name TEXT NOT NULL,
     dns_record_data JSONB NOT NULL,
 
-    PRIMARY KEY (dns_zone_id, version_added, name)
+    PRIMARY KEY (dns_zone_id, name, version_added)
 );
+
+/*
+ * Any given live name should only exist once.  (Put differently: the primary
+ * key already prevents us from having the same name added twice in the same
+ * version.  But you should also not be able to add a name in any version if the
+ * name is currently still live (i.e., version_removed IS NULL).
+ */
+CREATE UNIQUE INDEX ON omicron.public.dns_name (
+    dns_zone_id, name
+) WHERE version_removed IS NULL;
 
 /*******************************************************************/
 

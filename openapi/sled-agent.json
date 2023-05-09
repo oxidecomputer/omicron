@@ -210,6 +210,50 @@
         }
       }
     },
+    "/instances/{instance_id}/migration-ids": {
+      "put": {
+        "operationId": "instance_put_migration_ids",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstancePutMigrationIdsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceRuntimeState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/state": {
       "put": {
         "operationId": "instance_put_state",
@@ -506,7 +550,7 @@
     },
     "schemas": {
       "ByteCount": {
-        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
@@ -596,13 +640,6 @@
           {
             "type": "object",
             "properties": {
-              "all_addresses": {
-                "description": "The addresses of all nodes within the cluster.",
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -611,7 +648,6 @@
               }
             },
             "required": [
-              "all_addresses",
               "type"
             ]
           },
@@ -645,12 +681,19 @@
           }
         ]
       },
-      "DendriteAsic": {
-        "type": "string",
-        "enum": [
-          "tofino_asic",
-          "tofino_stub",
-          "soft_npu"
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
         ]
       },
       "DiskEnsureBody": {
@@ -739,7 +782,7 @@
         ]
       },
       "DiskState": {
-        "description": "State of a Disk (primarily: attached or not)",
+        "description": "State of a Disk",
         "oneOf": [
           {
             "description": "Disk is being initialized",
@@ -1174,6 +1217,24 @@
           "snapshot_id"
         ]
       },
+      "InstanceMigrationSourceParams": {
+        "description": "Instance runtime state to update for a migration.",
+        "type": "object",
+        "properties": {
+          "dst_propolis_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst_propolis_id",
+          "migration_id"
+        ]
+      },
       "InstanceMigrationTargetParams": {
         "description": "Parameters used when directing Propolis to initialize itself via live migration.",
         "type": "object",
@@ -1191,6 +1252,32 @@
         "required": [
           "src_propolis_addr",
           "src_propolis_id"
+        ]
+      },
+      "InstancePutMigrationIdsBody": {
+        "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
+        "type": "object",
+        "properties": {
+          "migration_params": {
+            "nullable": true,
+            "description": "The migration identifiers to set. If `None`, this operation clears the migration IDs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMigrationSourceParams"
+              }
+            ]
+          },
+          "old_runtime": {
+            "description": "The last runtime state known to this requestor. This request will succeed if either (a) the Propolis generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "old_runtime"
         ]
       },
       "InstancePutStateBody": {
@@ -1553,7 +1640,7 @@
         "maxLength": 63
       },
       "NetworkInterface": {
-        "description": "Information required to construct a virtual network interface for a guest",
+        "description": "Information required to construct a virtual network interface",
         "type": "object",
         "properties": {
           "id": {
@@ -1563,6 +1650,9 @@
           "ip": {
             "type": "string",
             "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
           },
           "mac": {
             "$ref": "#/components/schemas/MacAddr"
@@ -1588,6 +1678,7 @@
         "required": [
           "id",
           "ip",
+          "kind",
           "mac",
           "name",
           "primary",
@@ -1596,12 +1687,57 @@
           "vni"
         ]
       },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize certain services on initialization.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
+        "description": "Used to request that the Sled initialize multiple services.\n\nThis may be used to record that certain sleds are responsible for launching services which may not be associated with a dataset, such as Nexus.",
         "type": "object",
         "properties": {
           "services": {
@@ -1622,12 +1758,22 @@
             "type": "object",
             "properties": {
               "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
                 "type": "string",
                 "format": "ip"
               },
               "internal_ip": {
+                "description": "The address at which the internal nexus server is reachable.",
                 "type": "string",
                 "format": "ipv6"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1639,6 +1785,7 @@
             "required": [
               "external_ip",
               "internal_ip",
+              "nic",
               "type"
             ]
           },
@@ -1646,10 +1793,20 @@
             "type": "object",
             "properties": {
               "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
                 "type": "string"
               },
               "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
                 "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -1661,6 +1818,7 @@
             "required": [
               "dns_address",
               "http_address",
+              "nic",
               "type"
             ]
           },
@@ -1706,70 +1864,6 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "management_gateway_service"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "wicketd"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "asic": {
-                "$ref": "#/components/schemas/DendriteAsic"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "dendrite"
-                ]
-              }
-            },
-            "required": [
-              "asic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "pkt_source": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "tfport"
-                ]
-              }
-            },
-            "required": [
-              "pkt_source",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
                   "crucible_pantry"
                 ]
               }
@@ -1781,9 +1875,56 @@
           {
             "type": "object",
             "properties": {
-              "boundary": {
-                "type": "boolean"
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "dns_servers": {
                 "type": "array",
                 "items": {
@@ -1803,12 +1944,11 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "ntp"
+                  "internal_ntp"
                 ]
               }
             },
             "required": [
-              "boundary",
               "dns_servers",
               "ntp_servers",
               "type"
@@ -1817,18 +1957,42 @@
           {
             "type": "object",
             "properties": {
-              "mode": {
-                "type": "string"
-              },
               "type": {
                 "type": "string",
                 "enum": [
-                  "maghemite"
+                  "clickhouse"
                 ]
               }
             },
             "required": [
-              "mode",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
               "type"
             ]
           }
@@ -1845,6 +2009,15 @@
               "format": "ipv6"
             }
           },
+          "dataset": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
+              }
+            ]
+          },
           "gz_addresses": {
             "default": [],
             "type": "array",
@@ -1860,7 +2033,7 @@
           "services": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServiceType"
+              "$ref": "#/components/schemas/ServiceZoneService"
             }
           },
           "zone_type": {
@@ -1872,6 +2045,23 @@
           "id",
           "services",
           "zone_type"
+        ]
+      },
+      "ServiceZoneService": {
+        "description": "Used to request that the Sled initialize a single service.",
+        "type": "object",
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/ServiceType"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "details",
+          "id"
         ]
       },
       "SetVirtualNetworkInterfaceHost": {
@@ -1925,22 +2115,22 @@
         "minimum": 0
       },
       "SourceNatConfig": {
-        "description": "An IP address and port range used for instance source NAT, i.e., making outbound network connections from guests.",
+        "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
         "properties": {
           "first_port": {
-            "description": "The first port used for instance NAT, inclusive.",
+            "description": "The first port used for source NAT, inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "ip": {
-            "description": "The external address provided to the instance",
+            "description": "The external address provided to the instance or service.",
             "type": "string",
             "format": "ip"
           },
           "last_port": {
-            "description": "The last port used for instance NAT, also inclusive.",
+            "description": "The last port used for source NAT, also inclusive.",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -2260,13 +2450,16 @@
         "description": "The type of zone which may be requested from Sled Agent",
         "type": "string",
         "enum": [
+          "clickhouse",
+          "cockroach_db",
+          "crucible_pantry",
+          "crucible",
           "external_dns",
           "internal_dns",
           "nexus",
+          "ntp",
           "oximeter",
-          "switch",
-          "crucible_pantry",
-          "ntp"
+          "switch"
         ]
       },
       "Zpool": {
@@ -2283,6 +2476,30 @@
         "required": [
           "disk_type",
           "id"
+        ]
+      },
+      "ZpoolKind": {
+        "type": "string",
+        "enum": [
+          "external",
+          "internal"
+        ]
+      },
+      "ZpoolName": {
+        "description": "A wrapper around a zpool name.\n\nThis expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix when reading the structure, and validate that the UUID can be utilized.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZpoolKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       }
     }

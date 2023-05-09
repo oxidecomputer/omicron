@@ -38,12 +38,15 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use sled_agent_client::types as sled_client_types;
+use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
 /// interface and VPC subnet tables.
 #[derive(Debug, diesel::Queryable)]
 struct NicInfo {
-    id: uuid::Uuid,
+    id: Uuid,
+    parent_id: Uuid,
+    kind: NetworkInterfaceKind,
     name: db::model::Name,
     ip: ipnetwork::IpNetwork,
     mac: db::model::MacAddr,
@@ -61,8 +64,17 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
         } else {
             external::IpNet::V6(nic.ipv6_block.0)
         };
+        let kind = match nic.kind {
+            NetworkInterfaceKind::Instance => {
+                sled_client_types::NetworkInterfaceKind::Instance(nic.parent_id)
+            }
+            NetworkInterfaceKind::Service => {
+                sled_client_types::NetworkInterfaceKind::Service(nic.parent_id)
+            }
+        };
         sled_client_types::NetworkInterface {
             id: nic.id,
+            kind,
             name: sled_client_types::Name::from(&nic.name.0),
             ip: nic.ip.ip(),
             mac: sled_client_types::MacAddr::from(nic.mac.0),
@@ -222,6 +234,8 @@ impl DataStore {
             // of a JOIN and not from a single table. DRY this out if possible.
             .select((
                 network_interface::id,
+                network_interface::parent_id,
+                network_interface::kind,
                 network_interface::name,
                 network_interface::ip,
                 network_interface::mac,

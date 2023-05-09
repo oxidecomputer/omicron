@@ -131,6 +131,9 @@ fn d2n_record(
     record: &dns_service_client::types::DnsRecord,
 ) -> nexus_client::types::DnsRecord {
     match record {
+        dns_service_client::types::DnsRecord::A(addr) => {
+            nexus_client::types::DnsRecord::A(*addr)
+        }
         dns_service_client::types::DnsRecord::Aaaa(addr) => {
             nexus_client::types::DnsRecord::Aaaa(*addr)
         }

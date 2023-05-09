@@ -7,17 +7,17 @@
 use crate::addrobj::AddrObject;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
-use crate::opte::Port;
+use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
 use crate::zone::{AddressRequest, ZONE_PREFIX};
+use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
+use omicron_common::backoff;
 use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
-use std::net::{Ipv4Addr, Ipv6Addr};
-use std::path::PathBuf;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -56,10 +56,28 @@ pub enum EnsureAddressError {
     #[error(transparent)]
     EnsureAddressError(#[from] crate::zone::EnsureAddressError),
 
+    #[error(transparent)]
+    GetAddressesError(#[from] crate::zone::GetAddressesError),
+
+    #[error("Failed ensuring link-local address in {zone}: {err}")]
+    LinkLocal { zone: String, err: crate::ExecutionError },
+
+    #[error("Failed to find non-link-local address in {zone}")]
+    NoDhcpV6Addr { zone: String },
+
     #[error(
         "Cannot allocate bootstrap {address} in {zone}: missing bootstrap vnic"
     )]
     MissingBootstrapVnic { address: String, zone: String },
+
+    #[error(
+        "Failed ensuring address in {zone}: missing opte port ({port_idx})"
+    )]
+    MissingOptePort { zone: String, port_idx: usize },
+
+    // TODO-remove(#2931): See comment in `ensure_address_for_port`
+    #[error(transparent)]
+    OpteGatewayConfig(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::get`].
@@ -71,6 +89,9 @@ pub enum GetZoneError {
         #[source]
         err: crate::zone::AdmError,
     },
+
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
 
     #[error("Zone with prefix '{prefix}' not found")]
     NotFound { prefix: String },
@@ -125,8 +146,8 @@ impl RunningZone {
     }
 
     /// Returns the filesystem path to the zone's root
-    pub fn root(&self) -> String {
-        format!("{}/{}/root", ZONE_ZFS_DATASET_MOUNTPOINT, self.name())
+    pub fn root(&self) -> Utf8PathBuf {
+        self.inner.zonepath.join("root")
     }
 
     /// Runs a command within the Zone, return the output.
@@ -161,9 +182,13 @@ impl RunningZone {
 
         Zones::boot(&zone.name).await?;
 
-        // Wait for the network services to come online, so future
-        // requests to create addresses can operate immediately.
-        let fmri = "svc:/milestone/network:default";
+        // Wait until the zone reaches the 'single-user' SMF milestone.
+        // At this point, we know that the dependent
+        //  - svc:/milestone/network
+        //  - svc:/system/manifest-import
+        // services are up, so future requests to create network addresses
+        // or manipulate services will work.
+        let fmri = "svc:/milestone/single-user:default";
         wait_for_service(Some(&zone.name), fmri).await.map_err(|_| {
             BootError::Timeout {
                 service: fmri.to_string(),
@@ -232,32 +257,117 @@ impl RunningZone {
         Ok(())
     }
 
-    // TODO: Remove once Nexus uses OPTE - external addresses should generally
-    // be served via OPTE.
-    pub async fn ensure_external_address_with_name(
+    pub async fn ensure_address_for_port(
         &self,
-        addrtype: AddressRequest,
         name: &str,
+        port_idx: usize,
     ) -> Result<IpNetwork, EnsureAddressError> {
-        info!(self.inner.log, "Adding address: {:?}", addrtype);
-        // XXX there's an open PR changing Nexus to use OPTE that removes this
-        // function! keep it in so that this PR can be tested.
-        let addrobj = AddrObject::new(self.inner.links[0].name(), name)
-            .map_err(|err| EnsureAddressError::AddrObject {
-                request: addrtype,
+        info!(self.inner.log, "Ensuring address for OPTE port");
+        let port = self.opte_ports().nth(port_idx).ok_or_else(|| {
+            EnsureAddressError::MissingOptePort {
                 zone: self.inner.name.clone(),
-                err,
+                port_idx,
+            }
+        })?;
+        // TODO-remove(#2932): Switch to using port directly once vnic is no longer needed.
+        let addrobj =
+            AddrObject::new(port.vnic_name(), name).map_err(|err| {
+                EnsureAddressError::AddrObject {
+                    request: AddressRequest::Dhcp,
+                    zone: self.inner.name.clone(),
+                    err,
+                }
             })?;
-        let network =
-            Zones::ensure_address(Some(&self.inner.name), &addrobj, addrtype)?;
-        Ok(network)
+        let zone = Some(self.inner.name.as_ref());
+        if let IpAddr::V4(gateway) = port.gateway().ip() {
+            let addr =
+                Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)?;
+            // TODO-remove(#2931): OPTE's DHCP "server" returns the list of routes
+            // to add via option 121 (Classless Static Route). The illumos DHCP
+            // client currently does not support this option, so we add the routes
+            // manually here.
+            let gateway_ip = gateway.to_string();
+            let private_ip = addr.ip();
+            self.run_cmd(&[
+                "/usr/sbin/route",
+                "add",
+                "-host",
+                &gateway_ip,
+                &private_ip.to_string(),
+                "-interface",
+                "-ifp",
+                port.vnic_name(),
+            ])?;
+            self.run_cmd(&[
+                "/usr/sbin/route",
+                "add",
+                "-inet",
+                "default",
+                &gateway_ip,
+            ])?;
+            Ok(addr)
+        } else {
+            // If the port is using IPv6 addressing we still want it to use
+            // DHCP(v6) which requires first creating a link-local address.
+            Zones::ensure_has_link_local_v6_address(zone, &addrobj).map_err(
+                |err| EnsureAddressError::LinkLocal {
+                    zone: self.inner.name.clone(),
+                    err,
+                },
+            )?;
+
+            // Unlike DHCPv4, there's no blocking `ipadm` call we can
+            // make as it just happens in the background. So we just poll
+            // until we find a non link-local address.
+            backoff::retry_notify(
+                backoff::retry_policy_local(),
+                || async {
+                    // Grab all the address on the addrobj. There should
+                    // always be at least one (the link-local we added)
+                    let addrs = Zones::get_all_addresses(zone, &addrobj)
+                        .map_err(|e| {
+                            backoff::BackoffError::permanent(
+                                EnsureAddressError::from(e),
+                            )
+                        })?;
+
+                    // Ipv6Addr::is_unicast_link_local is sadly not stable
+                    let is_ll =
+                        |ip: Ipv6Addr| (ip.segments()[0] & 0xffc0) == 0xfe80;
+
+                    // Look for a non link-local addr
+                    addrs
+                        .into_iter()
+                        .find(|addr| match addr {
+                            IpNetwork::V6(ip) => !is_ll(ip.ip()),
+                            _ => false,
+                        })
+                        .ok_or_else(|| {
+                            backoff::BackoffError::transient(
+                                EnsureAddressError::NoDhcpV6Addr {
+                                    zone: self.inner.name.clone(),
+                                },
+                            )
+                        })
+                },
+                |error, delay| {
+                    slog::debug!(
+                        self.inner.log,
+                        "No non link-local address yet (retrying in {:?})",
+                        delay;
+                        "error" => ?error
+                    );
+                },
+            )
+            .await
+        }
     }
 
-    pub async fn add_default_route(
+    pub fn add_default_route(
         &self,
         gateway: Ipv6Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -268,15 +378,33 @@ impl RunningZone {
         Ok(())
     }
 
-    pub async fn add_default_route4(
+    pub fn add_default_route4(
         &self,
         gateway: Ipv4Addr,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd(&[
+        self.run_cmd([
             "/usr/sbin/route",
             "add",
             "default",
             &gateway.to_string(),
+        ])?;
+        Ok(())
+    }
+
+    pub fn add_bootstrap_route(
+        &self,
+        bootstrap_prefix: u16,
+        gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), RunCommandError> {
+        self.run_cmd([
+            "/usr/sbin/route",
+            "add",
+            "-inet6",
+            &format!("{bootstrap_prefix:x}::/16"),
+            &gz_bootstrap_addr.to_string(),
+            "-ifp",
+            zone_vnic_name,
         ])?;
         Ok(())
     }
@@ -355,6 +483,7 @@ impl RunningZone {
             running: true,
             inner: InstalledZone {
                 log: log.new(o!("zone" => zone_name.to_string())),
+                zonepath: zone_info.path().to_path_buf().try_into()?,
                 name: zone_name.to_string(),
                 control_vnic,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725)
@@ -368,8 +497,15 @@ impl RunningZone {
     }
 
     /// Return references to the OPTE ports for this zone.
-    pub fn opte_ports(&self) -> &[Port] {
-        &self.inner.opte_ports
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.inner.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Remove the OPTE ports on this zone from the port manager.
+    pub fn release_opte_ports(&mut self) {
+        for (_, ticket) in self.inner.opte_ports.drain(..) {
+            ticket.release();
+        }
     }
 
     /// Halts and removes the zone, awaiting its termination.
@@ -424,7 +560,7 @@ pub enum InstallZoneError {
     #[error("Failed to install zone '{zone}' from '{image_path}': {err}")]
     InstallZone {
         zone: String,
-        image_path: PathBuf,
+        image_path: Utf8PathBuf,
         #[source]
         err: crate::zone::AdmError,
     },
@@ -432,6 +568,9 @@ pub enum InstallZoneError {
 
 pub struct InstalledZone {
     log: Logger,
+
+    // Filesystem path of the zone
+    zonepath: Utf8PathBuf,
 
     // Name of the Zone.
     name: String,
@@ -443,7 +582,7 @@ pub struct InstalledZone {
     bootstrap_vnic: Option<Link>,
 
     // OPTE devices for the guest network interfaces
-    opte_ports: Vec<Port>,
+    opte_ports: Vec<(Port, PortTicket)>,
 
     // Physical NICs possibly provisioned to the zone.
     links: Vec<Link>,
@@ -460,24 +599,38 @@ impl InstalledZone {
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_name: &str, unique_name: Option<&str>) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_name);
+    pub fn get_zone_name(zone_type: &str, unique_name: Option<&str>) -> String {
+        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
         if let Some(suffix) = unique_name {
             zone_name.push_str(&format!("_{}", suffix));
         }
         zone_name
     }
 
+    pub fn get_control_vnic_name(&self) -> &str {
+        self.control_vnic.name()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the filesystem path to the zonepath
+    pub fn zonepath(&self) -> &Utf8Path {
+        &self.zonepath
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn install(
         log: &Logger,
         underlay_vnic_allocator: &VnicAllocator<Etherstub>,
-        zone_name: &str,
+        zone_root_path: &Utf8Path,
+        zone_type: &str,
         unique_name: Option<&str>,
         datasets: &[zone::Dataset],
         filesystems: &[zone::Fs],
         devices: &[zone::Device],
-        opte_ports: Vec<Port>,
+        opte_ports: Vec<(Port, PortTicket)>,
         bootstrap_vnic: Option<Link>,
         links: Vec<Link>,
         limit_priv: Vec<String>,
@@ -485,18 +638,18 @@ impl InstalledZone {
         let control_vnic =
             underlay_vnic_allocator.new_control(None).map_err(|err| {
                 InstallZoneError::CreateVnic {
-                    zone: zone_name.to_string(),
+                    zone: zone_type.to_string(),
                     err,
                 }
             })?;
 
-        let full_zone_name = Self::get_zone_name(zone_name, unique_name);
+        let full_zone_name = Self::get_zone_name(zone_type, unique_name);
         let zone_image_path =
-            PathBuf::from(&format!("/opt/oxide/{}.tar.gz", zone_name));
+            Utf8PathBuf::from(format!("/opt/oxide/{}.tar.gz", zone_type));
 
         let net_device_names: Vec<String> = opte_ports
             .iter()
-            .map(|port| port.vnic_name().to_string())
+            .map(|(port, _)| port.vnic_name().to_string())
             .chain(std::iter::once(control_vnic.name().to_string()))
             .chain(bootstrap_vnic.as_ref().map(|vnic| vnic.name().to_string()))
             .chain(links.iter().map(|nic| nic.name().to_string()))
@@ -504,11 +657,12 @@ impl InstalledZone {
 
         Zones::install_omicron_zone(
             log,
+            &zone_root_path,
             &full_zone_name,
             &zone_image_path,
-            &datasets,
-            &filesystems,
-            &devices,
+            datasets,
+            filesystems,
+            devices,
             net_device_names,
             limit_priv,
         )
@@ -521,6 +675,7 @@ impl InstalledZone {
 
         Ok(InstalledZone {
             log: log.new(o!("zone" => full_zone_name.clone())),
+            zonepath: zone_root_path.join(&full_zone_name),
             name: full_zone_name,
             control_vnic,
             bootstrap_vnic,

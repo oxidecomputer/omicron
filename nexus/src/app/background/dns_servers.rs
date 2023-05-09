@@ -233,6 +233,7 @@ mod test {
                 .values(Service::new(
                     Uuid::new_v4(),
                     Uuid::new_v4(),
+                    Some(Uuid::new_v4()),
                     SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0),
                     ServiceKind::InternalDnsConfig,
                 ))
@@ -255,6 +256,7 @@ mod test {
                     Service::new(
                         Uuid::new_v4(),
                         Uuid::new_v4(),
+                        Some(Uuid::new_v4()),
                         SocketAddrV6::new(Ipv6Addr::LOCALHOST, i + 2, 0, 0),
                         ServiceKind::InternalDnsConfig,
                     )

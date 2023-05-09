@@ -8,23 +8,26 @@ license = "MPL-2.0"
 anyhow.workspace = true
 debug-ignore.workspace = true
 derive-where.workspace = true
+either.workspace = true
 futures.workspace = true
 linear-map.workspace = true
+petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
-schemars.workspace = true
+schemars = { workspace = true, features = ["uuid1"] }
 slog.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
+uuid.workspace = true
 
 [dev-dependencies]
 buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true
 omicron-test-utils.workspace = true
 owo-colors.workspace = true
-tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-stream.workspace = true

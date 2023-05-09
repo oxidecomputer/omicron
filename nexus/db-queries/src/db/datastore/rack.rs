@@ -4,9 +4,12 @@
 
 //! [`DataStore`] methods on [`Rack`]s.
 
+use super::dns::DnsVersionUpdateBuilder;
 use super::DataStore;
 use super::SERVICE_IP_POOL_NAME;
 use crate::authz;
+use crate::authz::FleetRole;
+use crate::authz::SiloRole;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -26,11 +29,19 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::PasswordHashString;
+use nexus_db_model::SiloUser;
+use nexus_db_model::SiloUserPasswordHash;
+use nexus_types::external_api::params as external_params;
+use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
@@ -40,9 +51,11 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 /// Groups arguments related to rack initialization
+#[derive(Clone)]
 pub struct RackInit {
     pub rack_id: Uuid,
     pub services: Vec<internal_params::ServicePutRequest>,
@@ -51,6 +64,10 @@ pub struct RackInit {
     pub certificates: Vec<Certificate>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
+    pub recovery_silo: external_params::SiloCreate,
+    pub recovery_user_id: external_params::UserId,
+    pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
+    pub dns_update: DnsVersionUpdateBuilder,
 }
 
 impl DataStore {
@@ -123,6 +140,8 @@ impl DataStore {
             DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
             DnsSerialization(Error),
+            Silo(Error),
+            RoleAssignment(Error),
         }
         type TxnError = TransactionError<RackInitError>;
 
@@ -172,6 +191,7 @@ impl DataStore {
                     let service_db = db::model::Service::new(
                         service.service_id,
                         service.sled_id,
+                        service.zone_id,
                         service.address,
                         service.kind.into(),
                     );
@@ -274,6 +294,8 @@ impl DataStore {
                 }
                 info!(log, "Inserted certificates");
 
+                // Insert the initial contents of the internal and external DNS
+                // zones.
                 Self::load_dns_data(&conn, internal_dns)
                     .await
                     .map_err(RackInitError::DnsSerialization)
@@ -285,6 +307,117 @@ impl DataStore {
                     .map_err(RackInitError::DnsSerialization)
                     .map_err(TxnError::CustomError)?;
                 info!(log, "Populated DNS tables for external DNS");
+
+                // Create the initial Recovery Silo
+                let db_silo = self.silo_create_conn(
+                    &conn,
+                    opctx,
+                    opctx,
+                    rack_init.recovery_silo,
+                    rack_init.dns_update
+                )
+                    .await
+                    .map_err(RackInitError::Silo)
+                    .map_err(TxnError::CustomError)?;
+                info!(log, "Created recovery silo");
+
+                // Create the first user in the initial Recovery Silo
+                let silo_user_id = Uuid::new_v4();
+                let silo_user = SiloUser::new(
+                    db_silo.id(),
+                    silo_user_id,
+                    rack_init.recovery_user_id.as_ref().to_owned(),
+                );
+                {
+                    use db::schema::silo_user::dsl;
+                    diesel::insert_into(dsl::silo_user)
+                        .values(silo_user)
+                        .execute_async(&conn)
+                        .await?;
+                }
+                info!(log, "Created recovery user");
+
+                // Set that user's password.
+                let hash = SiloUserPasswordHash::new(
+                    silo_user_id,
+                    PasswordHashString::from(
+                        rack_init.recovery_user_password_hash
+                    )
+                );
+                {
+                    use db::schema::silo_user_password_hash::dsl;
+                    diesel::insert_into(dsl::silo_user_password_hash)
+                        .values(hash)
+                        .execute_async(&conn)
+                        .await?;
+                }
+                info!(log, "Created recovery user's password");
+
+                // Grant that user "Fleet Admin" privileges and Admin privileges
+                // on the Recovery Silo.
+                //
+                // First, fetch the current set of role assignments for the
+                // Fleet so that we can modify it.
+                let old_fleet_role_asgns = self
+                    .role_assignment_fetch_visible_conn(
+                        opctx,
+                        &authz::FLEET,
+                        &conn
+                    )
+                    .await
+                    .map_err(RackInitError::RoleAssignment)
+                    .map_err(TxnError::CustomError)?
+                    .into_iter()
+                    .map(|r| r.try_into())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(RackInitError::RoleAssignment)
+                    .map_err(TxnError::CustomError)?;
+                let new_fleet_role_asgns = old_fleet_role_asgns
+                    .into_iter()
+                    .chain(std::iter::once(shared::RoleAssignment {
+                        identity_type: IdentityType::SiloUser,
+                        identity_id: silo_user_id,
+                        role_name: FleetRole::Admin,
+                    }))
+                    .collect::<Vec<_>>();
+
+                // This is very subtle: we must generate both of these pairs of
+                // queries before we execute any of them, and we must not
+                // attempt to do any authz checks after this in the same
+                // transaction because they may deadlock with our query.
+                let (q1, q2) = Self::role_assignment_replace_visible_queries(
+                    opctx,
+                    &authz::FLEET,
+                    &new_fleet_role_asgns
+                )
+                    .await
+                    .map_err(RackInitError::RoleAssignment)
+                    .map_err(TxnError::CustomError)?;
+                let authz_silo = authz::Silo::new(
+                    authz::FLEET,
+                    db_silo.id(),
+                    LookupType::ById(db_silo.id())
+                );
+                let (q3, q4) = Self::role_assignment_replace_visible_queries(
+                    opctx,
+                    &authz_silo,
+                    &[shared::RoleAssignment {
+                        identity_type: IdentityType::SiloUser,
+                        identity_id: silo_user_id,
+                        role_name: SiloRole::Admin,
+                    }]
+                )
+                    .await
+                    .map_err(RackInitError::RoleAssignment)
+                    .map_err(TxnError::CustomError)?;
+                debug!(log, "Generated role assignment queries");
+
+                q1.execute_async(&conn).await?;
+                q2.execute_async(&conn).await?;
+                info!(log, "Granted Fleet privileges");
+                q3.execute_async(&conn).await?;
+                q4.execute_async(&conn).await?;
+                info!(log, "Granted Silo privileges");
 
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
@@ -354,6 +487,16 @@ impl DataStore {
                         "failed to serialize initial DNS records: {:#}", err
                     ))
                 },
+                TxnError::CustomError(RackInitError::Silo(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to create recovery Silo: {:#}", err
+                    ))
+                },
+                TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to assign role to initial user: {:#}", err
+                    ))
+                },
                 TxnError::Pool(e) => {
                     Error::internal_error(&format!("Transaction error: {}", e))
                 }
@@ -401,6 +544,41 @@ impl DataStore {
 
         Ok(())
     }
+
+    pub async fn nexus_external_addresses(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Vec<IpAddr>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
+
+        use crate::db::schema::external_ip::dsl as extip_dsl;
+        use crate::db::schema::nexus_service::dsl as nexus_dsl;
+        type TxnError = TransactionError<()>;
+        self.pool_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                // This is the rare case where we want to allow table scans.
+                // There must not be enough Nexus instances for this to be a
+                // problem.  If there were, we couldn't fit them in DNS anyway.
+                let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+                conn.batch_execute_async(sql).await?;
+                Ok(extip_dsl::external_ip
+                    .inner_join(nexus_dsl::nexus_service)
+                    .select(ExternalIp::as_select())
+                    .get_results_async(&conn)
+                    .await?
+                    .into_iter()
+                    .map(|external_ip| external_ip.ip.ip())
+                    .collect())
+            })
+            .await
+            .map_err(|error: TxnError| match error {
+                TransactionError::CustomError(()) => unimplemented!(),
+                TransactionError::Pool(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            })
+    }
 }
 
 #[cfg(test)]
@@ -410,6 +588,7 @@ mod test {
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::lookup::LookupPath;
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
@@ -418,33 +597,66 @@ mod test {
     use internal_params::DnsRecord;
     use nexus_db_model::{DnsGroup, InitialDnsGroup};
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
+    use omicron_common::api::external::http_pagination::PaginatedBy;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
+    use std::num::NonZeroU32;
+
+    // Default impl is for tests only, and really just so that tests can more
+    // easily specify just the parts that they want.
+    impl Default for RackInit {
+        fn default() -> Self {
+            RackInit {
+                rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
+                services: vec![],
+                datasets: vec![],
+                service_ip_pool_ranges: vec![],
+                certificates: vec![],
+                internal_dns: InitialDnsGroup::new(
+                    DnsGroup::Internal,
+                    internal_dns::DNS_ZONE,
+                    "test suite",
+                    "test suite",
+                    HashMap::new(),
+                ),
+                external_dns: InitialDnsGroup::new(
+                    DnsGroup::External,
+                    internal_dns::DNS_ZONE,
+                    "test suite",
+                    "test suite",
+                    HashMap::new(),
+                ),
+                recovery_silo: external_params::SiloCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "test-silo".parse().unwrap(),
+                        description: String::new(),
+                    },
+                    discoverable: false,
+                    identity_mode: SiloIdentityMode::LocalOnly,
+                    admin_group_name: None,
+                },
+                recovery_user_id: "test-user".parse().unwrap(),
+                // empty string password
+                recovery_user_password_hash: "$argon2id$v=19$m=98304,t=13,\
+                p=1$d2t2UHhOdWt3NkYyY1l3cA$pIvmXrcTk/\
+                nsUzWvBQIeuMJk96ijye/oIXHCj15xg+M"
+                    .parse()
+                    .unwrap(),
+                dns_update: DnsVersionUpdateBuilder::new(
+                    DnsGroup::External,
+                    "test suite".to_string(),
+                    "test suite".to_string(),
+                ),
+            }
+        }
+    }
 
     fn rack_id() -> Uuid {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
-    }
-
-    fn internal_dns_empty() -> InitialDnsGroup {
-        InitialDnsGroup::new(
-            DnsGroup::Internal,
-            internal_dns::DNS_ZONE,
-            "test suite",
-            "test suite",
-            HashMap::new(),
-        )
-    }
-
-    fn external_dns_empty() -> InitialDnsGroup {
-        InitialDnsGroup::new(
-            DnsGroup::External,
-            "testing.oxide.example",
-            "test suite",
-            "test suite",
-            HashMap::new(),
-        )
     }
 
     #[tokio::test]
@@ -453,26 +665,11 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let before = Utc::now();
-
-        let services = vec![];
-        let datasets = vec![];
-        let service_ip_pool_ranges = vec![];
-        let certificates = vec![];
+        let rack_init = RackInit::default();
 
         // Initializing the rack with no data is odd, but allowed.
         let rack = datastore
-            .rack_set_initialized(
-                &opctx,
-                RackInit {
-                    rack_id: rack_id(),
-                    services: services.clone(),
-                    datasets: datasets.clone(),
-                    service_ip_pool_ranges: service_ip_pool_ranges.clone(),
-                    certificates: certificates.clone(),
-                    internal_dns: internal_dns_empty(),
-                    external_dns: external_dns_empty(),
-                },
-            )
+            .rack_set_initialized(&opctx, rack_init.clone())
             .await
             .expect("Failed to initialize rack");
 
@@ -480,6 +677,7 @@ mod test {
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
 
+        // Verify the DNS configuration.
         let dns_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
@@ -493,23 +691,68 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_internal.generation, dns_external.generation);
+        // The external DNS zone has an extra update due to the initial Silo
+        // creation.
+        assert_eq!(dns_internal.generation + 1, dns_external.generation);
         assert_eq!(dns_internal.zones, dns_external.zones);
+
+        // Verify the details about the initial Silo.
+        let silos = datastore
+            .silos_list(
+                &opctx,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    limit: NonZeroU32::new(2).unwrap(),
+                    direction: dropshot::PaginationOrder::Ascending,
+                }),
+            )
+            .await
+            .expect("Failed to list Silos");
+        // It should *not* show up in the list because it's not discoverable.
+        assert_eq!(silos.len(), 0);
+        let (authz_silo, db_silo) = LookupPath::new(&opctx, &datastore)
+            .silo_name(&nexus_db_model::Name(
+                rack_init.recovery_silo.identity.name.clone(),
+            ))
+            .fetch()
+            .await
+            .expect("Failed to lookup Silo");
+        assert!(!db_silo.discoverable);
+
+        // Verify that the user exists and has the password (hash) that we
+        // expect.
+        let silo_users = datastore
+            .silo_users_list(
+                &opctx,
+                &authz::SiloUserList::new(authz_silo.clone()),
+                &DataPageParams {
+                    marker: None,
+                    limit: NonZeroU32::new(2).unwrap(),
+                    direction: dropshot::PaginationOrder::Ascending,
+                },
+            )
+            .await
+            .expect("failed to list users");
+        assert_eq!(silo_users.len(), 1);
+        assert_eq!(
+            silo_users[0].external_id,
+            rack_init.recovery_user_id.as_ref()
+        );
+        let authz_silo_user = authz::SiloUser::new(
+            authz_silo,
+            silo_users[0].id(),
+            LookupType::ById(silo_users[0].id()),
+        );
+        let hash = datastore
+            .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
+            .await
+            .expect("Failed to lookup password hash")
+            .expect("Found no password hash");
+        assert_eq!(hash.hash.0, rack_init.recovery_user_password_hash);
 
         // It should also be idempotent.
         let rack2 = datastore
-            .rack_set_initialized(
-                &opctx,
-                RackInit {
-                    rack_id: rack_id(),
-                    services,
-                    datasets,
-                    service_ip_pool_ranges,
-                    certificates,
-                    internal_dns: internal_dns_empty(),
-                    external_dns: external_dns_empty(),
-                },
-            )
+            .rack_set_initialized(&opctx, rack_init)
             .await
             .expect("Failed to initialize rack");
         assert_eq!(rack.time_modified(), rack2.time_modified());
@@ -586,29 +829,25 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
-            service_id: Uuid::new_v4(),
+            service_id: nexus_id,
             sled_id: sled.id(),
+            zone_id: Some(nexus_id),
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
             },
         }];
-        let datasets = vec![];
         let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
-        let certificates = vec![];
 
         let rack = datastore
             .rack_set_initialized(
                 &opctx,
                 RackInit {
-                    rack_id: rack_id(),
                     services: services.clone(),
-                    datasets: datasets.clone(),
                     service_ip_pool_ranges,
-                    certificates: certificates.clone(),
-                    internal_dns: internal_dns_empty(),
-                    external_dns: external_dns_empty(),
+                    ..Default::default()
                 },
             )
             .await
@@ -680,18 +919,22 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
+        let nexus_id1 = Uuid::new_v4();
+        let nexus_id2 = Uuid::new_v4();
         let mut services = vec![
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id1,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id1),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_start),
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id2,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id2),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_end),
@@ -705,7 +948,6 @@ mod test {
         let service_ip_pool_ranges =
             vec![IpRange::try_from((nexus_ip_start, nexus_ip_end))
                 .expect("Cannot create IP Range")];
-        let certificates = vec![];
 
         let internal_records = vec![
             DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap()),
@@ -733,13 +975,12 @@ mod test {
             .rack_set_initialized(
                 &opctx,
                 RackInit {
-                    rack_id: rack_id(),
                     services: services.clone(),
                     datasets: datasets.clone(),
                     service_ip_pool_ranges,
-                    certificates: certificates.clone(),
                     internal_dns,
                     external_dns,
+                    ..Default::default()
                 },
             )
             .await
@@ -840,15 +1081,15 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config_external.generation, 1);
+        assert_eq!(dns_config_external.generation, 2);
         assert_eq!(dns_config_external.zones.len(), 1);
         assert_eq!(
             dns_config_external.zones[0].zone_name,
             "test-suite.oxide.test",
         );
         assert_eq!(
-            dns_config_external.zones[0].records,
-            HashMap::from([("api.sys".to_string(), external_records)]),
+            dns_config_external.zones[0].records.get("api.sys"),
+            Some(&external_records)
         );
 
         db.cleanup().await.unwrap();
@@ -866,30 +1107,21 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
-            service_id: Uuid::new_v4(),
+            service_id: nexus_id,
             sled_id: sled.id(),
+            zone_id: Some(nexus_id),
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
             },
         }];
-        let datasets = vec![];
-        let service_ip_pool_ranges = vec![];
-        let certificates = vec![];
 
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                RackInit {
-                    rack_id: rack_id(),
-                    services: services.clone(),
-                    datasets: datasets.clone(),
-                    service_ip_pool_ranges,
-                    certificates: certificates.clone(),
-                    internal_dns: internal_dns_empty(),
-                    external_dns: external_dns_empty(),
-                },
+                RackInit { services: services.clone(), ..Default::default() },
             )
             .await;
         assert!(result.is_err());
@@ -919,28 +1151,30 @@ mod test {
 
         // Request two services which happen to be using the same IP address.
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_id1 = Uuid::new_v4();
+        let nexus_id2 = Uuid::new_v4();
 
         let services = vec![
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id1,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id1),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: Uuid::new_v4(),
+                service_id: nexus_id2,
                 sled_id: sled.id(),
+                zone_id: Some(nexus_id2),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
                 },
             },
         ];
-        let datasets = vec![];
         let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
-        let certificates = vec![];
 
         let result = datastore
             .rack_set_initialized(
@@ -948,11 +1182,8 @@ mod test {
                 RackInit {
                     rack_id: rack_id(),
                     services: services.clone(),
-                    datasets: datasets.clone(),
                     service_ip_pool_ranges,
-                    certificates: certificates.clone(),
-                    internal_dns: internal_dns_empty(),
-                    external_dns: external_dns_empty(),
+                    ..Default::default()
                 },
             )
             .await;

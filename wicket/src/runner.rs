@@ -108,17 +108,19 @@ impl RunnerCore {
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateArtifacts { system_version, artifacts } => {
+            Event::ArtifactsAndEventReports {
+                system_version,
+                artifacts,
+                event_reports,
+            } => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                self.state
-                    .update_state
-                    .update_artifacts(system_version, artifacts);
-                self.screen.draw(&self.state, &mut self.terminal)?;
-            }
-            Event::UpdateLog(logs) => {
-                self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", logs);
-                self.state.update_state.update_logs(&self.log, logs);
+                debug!(self.log, "{:#?}", event_reports);
+                self.state.update_state.update_artifacts_and_reports(
+                    &self.log,
+                    system_version,
+                    artifacts,
+                    event_reports,
+                );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),

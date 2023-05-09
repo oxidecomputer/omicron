@@ -6,18 +6,16 @@
 
 use crate::nexus::LazyNexusClient;
 use crate::params::{
-    InstanceHardware, InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, VpcFirewallRule,
+    InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
 };
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
-use macaddr::MacAddr6;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -39,9 +37,6 @@ pub enum Error {
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
-
-    #[error("No datalinks found")]
-    NoDatalinks,
 }
 
 struct InstanceManagerInternal {
@@ -69,8 +64,7 @@ impl InstanceManager {
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
         etherstub: Etherstub,
-        underlay_ip: Ipv6Addr,
-        gateway_mac: MacAddr6,
+        port_manager: PortManager,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
@@ -78,11 +72,7 @@ impl InstanceManager {
                 lazy_nexus_client,
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                port_manager: PortManager::new(
-                    log.new(o!("component" => "PortManager")),
-                    underlay_ip,
-                    gateway_mac,
-                ),
+                port_manager,
             }),
         })
     }
@@ -229,6 +219,26 @@ impl InstanceManager {
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
     }
 
+    /// Idempotently attempts to set the instance's migration IDs to the
+    /// supplied IDs.
+    pub async fn put_migration_ids(
+        &self,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let (_, instance) = self
+            .inner
+            .instances
+            .lock()
+            .unwrap()
+            .get(&instance_id)
+            .ok_or_else(|| Error::NoSuchInstance(instance_id))?
+            .clone();
+
+        Ok(instance.put_migration_ids(old_runtime, migration_ids).await?)
+    }
+
     pub async fn instance_issue_disk_snapshot_request(
         &self,
         instance_id: Uuid,
@@ -332,15 +342,14 @@ mod test {
     use crate::instance::MockInstance;
     use crate::nexus::LazyNexusClient;
     use crate::params::InstanceStateRequested;
-    use crate::params::SourceNatConfig;
     use chrono::Utc;
     use illumos_utils::dladm::Etherstub;
     use illumos_utils::{dladm::MockDladm, zone::MockZones};
-    use macaddr::MacAddr6;
     use omicron_common::api::external::{
         ByteCount, Generation, InstanceCpuCount, InstanceState,
     };
     use omicron_common::api::internal::nexus::InstanceRuntimeState;
+    use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev::test_setup_log;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -398,14 +407,17 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
+        let port_manager = PortManager::new(
+            log.clone(),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ),
+        );
         let im = InstanceManager::new(
             log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
+            port_manager,
         )
         .unwrap();
 
@@ -510,14 +522,17 @@ mod test {
         let dladm_get_vnics_ctx = MockDladm::get_vnics_context();
         dladm_get_vnics_ctx.expect().return_once(|| Ok(vec![]));
 
+        let port_manager = PortManager::new(
+            log.clone(),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            ),
+        );
         let im = InstanceManager::new(
             log.clone(),
             lazy_nexus_client,
             Etherstub("mylink".to_string()),
-            std::net::Ipv6Addr::new(
-                0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-            ),
-            MacAddr6::from([0u8; 6]),
+            port_manager,
         )
         .unwrap();
 

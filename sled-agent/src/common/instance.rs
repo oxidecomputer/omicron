@@ -4,6 +4,7 @@
 
 //! Describes the states of VM instances.
 
+use crate::params::InstanceMigrationSourceParams;
 use chrono::Utc;
 use omicron_common::api::external::InstanceState as ApiInstanceState;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
@@ -105,11 +106,80 @@ impl InstanceStates {
         self.current.gen = self.current.gen.next();
         self.current.time_updated = Utc::now();
     }
+
+    /// Sets or clears this instance's migration IDs and advances its Propolis
+    /// generation number.
+    pub(crate) fn set_migration_ids(
+        &mut self,
+        ids: &Option<InstanceMigrationSourceParams>,
+    ) {
+        if let Some(ids) = ids {
+            self.current.migration_id = Some(ids.migration_id);
+            self.current.dst_propolis_id = Some(ids.dst_propolis_id);
+        } else {
+            self.current.migration_id = None;
+            self.current.dst_propolis_id = None;
+        }
+
+        self.current.propolis_gen = self.current.propolis_gen.next();
+    }
+
+    /// Returns true if the migration IDs in this instance are already set as they
+    /// would be on a successful transition from the migration IDs in
+    /// `old_runtime` to the ones in `migration_ids`.
+    pub(crate) fn migration_ids_already_set(
+        &self,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> bool {
+        // For the old and new records to match, the new record's Propolis
+        // generation must immediately succeed the old record's.
+        //
+        // This is an equality check to try to avoid the following A-B-A
+        // problem:
+        //
+        // 1. Instance starts on sled 1.
+        // 2. Parallel sagas start, one to migrate the instance to sled 2
+        //    and one to migrate the instance to sled 3.
+        // 3. The "migrate to sled 2" saga completes.
+        // 4. A new migration starts that migrates the instance back to sled 1.
+        // 5. The "migrate to sled 3" saga attempts to set its migration
+        //    ID.
+        //
+        // A simple less-than check allows the migration to sled 3 to proceed
+        // even though the most-recently-expressed intent to migrate put the
+        // instance on sled 1.
+        if old_runtime.propolis_gen.next() != self.current.propolis_gen {
+            return false;
+        }
+
+        match (self.current.migration_id, migration_ids) {
+            // If the migration ID is already set, and this is a request to set
+            // IDs, the records match if the relevant IDs match.
+            (Some(current_migration_id), Some(ids)) => {
+                let current_dst_id = self.current.dst_propolis_id.expect(
+                    "migration ID and destination ID must be set together",
+                );
+
+                current_migration_id == ids.migration_id
+                    && current_dst_id == ids.dst_propolis_id
+            }
+            // If the migration ID is already cleared, and this is a request to
+            // clear IDs, the records match.
+            (None, None) => {
+                assert!(self.current.dst_propolis_id.is_none());
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::{Action, InstanceStates};
+
+    use crate::params::InstanceMigrationSourceParams;
 
     use chrono::Utc;
     use omicron_common::api::external::{
@@ -146,5 +216,67 @@ mod test {
         assert!(matches!(requested_action, Some(Action::Destroy)));
         assert!(instance.current.gen > original_instance.current.gen);
         assert_eq!(instance.current.run_state, State::Stopped);
+    }
+
+    #[test]
+    fn test_migration_ids_already_set() {
+        let orig_instance = make_instance();
+        let mut old_instance = orig_instance.clone();
+        let mut new_instance = old_instance.clone();
+
+        // Advancing the old instance's migration IDs and then asking if the
+        // new IDs are present should indicate that they are indeed present.
+        let migration_ids = InstanceMigrationSourceParams {
+            migration_id: Uuid::new_v4(),
+            dst_propolis_id: Uuid::new_v4(),
+        };
+
+        new_instance.set_migration_ids(&Some(migration_ids));
+        assert!(new_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
+
+        // The IDs aren't already set if the new record has an ID that's
+        // advanced from the old record by more than one generation.
+        let mut newer_instance = new_instance.clone();
+        newer_instance.current.propolis_gen =
+            newer_instance.current.propolis_gen.next();
+        assert!(!newer_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
+
+        // They also aren't set if the old generation has somehow equaled or
+        // surpassed the current generation.
+        old_instance.current.propolis_gen =
+            old_instance.current.propolis_gen.next();
+        assert!(!new_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
+
+        // If the generation numbers are right, but either requested ID is not
+        // present in the current instance, the requested IDs aren't set.
+        old_instance = orig_instance;
+        new_instance.current.migration_id = Some(Uuid::new_v4());
+        assert!(!new_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
+
+        new_instance.current.migration_id = Some(migration_ids.migration_id);
+        new_instance.current.dst_propolis_id = Some(Uuid::new_v4());
+        assert!(!new_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
+
+        new_instance.current.migration_id = None;
+        new_instance.current.dst_propolis_id = None;
+        assert!(!new_instance.migration_ids_already_set(
+            old_instance.current(),
+            &Some(migration_ids)
+        ));
     }
 }

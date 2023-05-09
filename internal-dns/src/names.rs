@@ -9,6 +9,10 @@ use uuid::Uuid;
 /// Name for the control plane DNS zone
 pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 
+/// Name for the delegated external DNS zone that's used in testing and
+/// development
+pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
+
 /// Names of services within the control plane
 #[derive(Clone, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
@@ -25,8 +29,8 @@ pub enum ServiceName {
     CruciblePantry,
     SledAgent(Uuid),
     Crucible(Uuid),
-    BoundaryNTP,
-    InternalNTP,
+    BoundaryNtp,
+    InternalNtp,
     Maghemite,
 }
 
@@ -46,8 +50,8 @@ impl ServiceName {
             ServiceName::CruciblePantry => "crucible-pantry",
             ServiceName::SledAgent(_) => "sledagent",
             ServiceName::Crucible(_) => "crucible",
-            ServiceName::BoundaryNTP => "boundary-ntp",
-            ServiceName::InternalNTP => "internal-ntp",
+            ServiceName::BoundaryNtp => "boundary-ntp",
+            ServiceName::InternalNtp => "internal-ntp",
             ServiceName::Maghemite => "maghemite",
         }
     }
@@ -67,8 +71,8 @@ impl ServiceName {
             | ServiceName::Dendrite
             | ServiceName::Tfport
             | ServiceName::CruciblePantry
-            | ServiceName::BoundaryNTP
-            | ServiceName::InternalNTP
+            | ServiceName::BoundaryNtp
+            | ServiceName::InternalNtp
             | ServiceName::Maghemite => {
                 format!("_{}._tcp", self.service_kind())
             }

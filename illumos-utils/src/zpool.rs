@@ -5,9 +5,10 @@
 //! Utilities for managing Zpools.
 
 use crate::{execute, ExecutionError, PFEXEC};
-use serde::{Deserialize, Deserializer};
+use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
-use std::path::Path;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -26,6 +27,9 @@ pub enum Error {
 
     #[error(transparent)]
     Parse(#[from] ParseError),
+
+    #[error("No Zpools found")]
+    NoZpools,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -163,7 +167,7 @@ pub struct Zpool {}
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zpool {
-    pub fn create(name: ZpoolName, vdev: &Path) -> Result<(), CreateError> {
+    pub fn create(name: ZpoolName, vdev: &Utf8Path) -> Result<(), CreateError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
@@ -209,6 +213,19 @@ impl Zpool {
         }
     }
 
+    /// `zpool set failmode=continue <name>`
+    pub fn set_failmode_continue(name: &ZpoolName) -> Result<(), Error> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        cmd.env_clear();
+        cmd.env("LC_ALL", "C.UTF-8");
+        cmd.arg(ZPOOL)
+            .arg("set")
+            .arg("failmode=continue")
+            .arg(&name.to_string());
+        execute(&mut cmd).map_err(Error::from)?;
+        Ok(())
+    }
+
     pub fn list() -> Result<Vec<ZpoolName>, ListError> {
         let mut command = std::process::Command::new(ZPOOL);
         let cmd = command.args(&["list", "-Hpo", "name"]);
@@ -244,7 +261,8 @@ impl Zpool {
     }
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolKind {
     // This zpool is used for external storage (u.2)
     External,
@@ -256,7 +274,7 @@ pub enum ZpoolKind {
 ///
 /// This expects that the format will be: `ox{i,p}_<UUID>` - we parse the prefix
 /// when reading the structure, and validate that the UUID can be utilized.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, JsonSchema)]
 pub struct ZpoolName {
     id: Uuid,
     kind: ZpoolKind,
@@ -278,6 +296,21 @@ impl ZpoolName {
     pub fn kind(&self) -> ZpoolKind {
         self.kind
     }
+
+    /// Returns a path to a dataset's mountpoint within the zpool.
+    ///
+    /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
+    pub fn dataset_mountpoint(&self, dataset: &str) -> Utf8PathBuf {
+        let mut path = Utf8PathBuf::new();
+        path.push("/pool");
+        match self.kind {
+            ZpoolKind::External => path.push("ext"),
+            ZpoolKind::Internal => path.push("int"),
+        };
+        path.push(self.id().to_string());
+        path.push(dataset);
+        path
+    }
 }
 
 impl<'de> Deserialize<'de> for ZpoolName {
@@ -287,6 +320,15 @@ impl<'de> Deserialize<'de> for ZpoolName {
     {
         let s = String::deserialize(deserializer)?;
         ZpoolName::from_str(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for ZpoolName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
     }
 }
 

@@ -20,31 +20,42 @@
 //! of what other services Nexus wants to have executing on the sled.
 //!
 //! To accomplish this, the following interfaces are exposed:
-//! - [ServiceManager::ensure_persistent] exposes an API to request a set of
+//! - [ServiceManager::ensure_all_services] exposes an API to request a set of
 //! services that should persist beyond reboot.
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
-use crate::bootstrap::ddm_admin_client::{DdmAdminClient, DdmError};
+use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest, TimeSync,
-    ZoneType,
+    DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
+    ServiceZoneService, TimeSync, ZoneType,
 };
+use crate::profile::*;
 use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
+use crate::storage_manager::StorageManager;
+use camino::{Utf8Path, Utf8PathBuf};
+use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
 use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
 use illumos_utils::link::{Link, VnicAllocator};
+use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{InstalledZone, RunningZone};
-use illumos_utils::zfs::ZONE_ZFS_DATASET_MOUNTPOINT;
+use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use internal_dns::resolver::Resolver;
 use itertools::Itertools;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
+use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
+use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
@@ -52,20 +63,25 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_PORT;
-use omicron_common::backoff::{retry_notify, retry_policy_local, BackoffError};
+use omicron_common::api::external::Generation;
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
+    BackoffError,
+};
 use omicron_common::nexus_config::{
     self, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
+use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
 use slog::Logger;
 use std::collections::HashSet;
 use std::iter;
 use std::iter::FromIterator;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -76,28 +92,23 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-// The filename of ServiceManager's internal storage.
-const SERVICE_CONFIG_FILENAME: &str = "service.toml";
-// The filename of a half-completed config, in need of parameters supplied at
-// runtime.
-const PARTIAL_CONFIG_FILENAME: &str = "config-partial.toml";
-// The filename of a completed config, merging the partial config with
-// additional appended parameters known at runtime.
-const COMPLETE_CONFIG_FILENAME: &str = "config.toml";
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML to file {path}: {err}")]
-    TomlSerialize { path: PathBuf, err: toml::ser::Error },
+    #[error("Cannot serialize TOML to file: {path}: {err}")]
+    TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
 
-    #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: PathBuf, err: toml::de::Error },
-
-    #[error("I/O Error accessing {path}: {err}")]
-    Io { path: PathBuf, err: std::io::Error },
+    #[error("Failed to perform I/O: {message}: {err}")]
+    Io {
+        message: String,
+        #[source]
+        err: std::io::Error,
+    },
 
     #[error("Failed to find device {device}")]
     MissingDevice { device: String },
+
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Sled Agent not initialized yet")]
     SledAgentNotReady,
@@ -130,8 +141,14 @@ pub enum Error {
     #[error("Failed to access underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
-    #[error("Failed to create Vnic for Nexus: {0}")]
-    NexusVnicCreation(illumos_utils::dladm::CreateVnicError),
+    #[error("Failed to create OPTE port for service {service}: {err}")]
+    ServicePortCreation {
+        service: String,
+        err: Box<illumos_utils::opte::Error>,
+    },
+
+    #[error("Error contacting dpd: {0}")]
+    DpdError(#[from] DpdError<DpdTypes::Error>),
 
     #[error("Failed to create Vnic in sled-local zone: {0}")]
     SledLocalVnicCreation(illumos_utils::dladm::CreateVnicError),
@@ -153,6 +170,18 @@ pub enum Error {
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
+
+    #[error("Error resolving DNS name: {0}")]
+    ResolveError(#[from] internal_dns::resolver::ResolveError),
+}
+
+impl Error {
+    fn io(message: &str, err: std::io::Error) -> Self {
+        Self::Io { message: message.to_string(), err }
+    }
+    fn io_path(path: &Utf8Path, err: std::io::Error) -> Self {
+        Self::Io { message: format!("Error accessing {path}"), err }
+    }
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -163,49 +192,56 @@ impl From<Error> for omicron_common::api::external::Error {
     }
 }
 
-/// The default path to service configuration, if one is not
-/// explicitly provided.
-pub fn default_services_config_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join(SERVICE_CONFIG_FILENAME)
-}
-
-// Converts a zone and service name into a full configuration directory path.
-type ConfigDirGetter = Box<dyn Fn(&str, &str) -> PathBuf + Send + Sync>;
-
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
+    /// Identifies the sled being configured
+    pub sled_id: Uuid,
+
     /// Identifies the revision of the sidecar to be used.
     pub sidecar_revision: String,
-
-    /// An optional internet gateway address for external services.
-    pub gateway_address: Option<Ipv4Addr>,
-
-    /// The path for the ServiceManager to store information about
-    /// all running services.
-    pub all_svcs_config_path: PathBuf,
-
-    /// A function which returns the path the directory holding the
-    /// service's configuration file.
-    pub get_svc_config_dir: ConfigDirGetter,
 }
 
 impl Config {
-    pub fn new(
-        sidecar_revision: String,
-        gateway_address: Option<Ipv4Addr>,
-    ) -> Self {
-        Self {
-            sidecar_revision,
-            gateway_address,
-            all_svcs_config_path: default_services_config_path(),
-            get_svc_config_dir: Box::new(|zone_name: &str, svc_name: &str| {
-                PathBuf::from(ZONE_ZFS_DATASET_MOUNTPOINT)
-                    .join(PathBuf::from(zone_name))
-                    .join("root")
-                    .join(format!("var/svc/manifest/site/{}", svc_name))
-            }),
-        }
+    pub fn new(sled_id: Uuid, sidecar_revision: String) -> Self {
+        Self { sled_id, sidecar_revision }
     }
+}
+
+// The filename of the ledger, within the provided directory.
+const SERVICES_LEDGER_FILENAME: &str = "services.toml";
+const STORAGE_SERVICES_LEDGER_FILENAME: &str = "storage-services.toml";
+
+// A wrapper around `ZoneRequest`, which allows it to be serialized
+// to a toml file.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct AllZoneRequests {
+    generation: Generation,
+    requests: Vec<ZoneRequest>,
+}
+
+impl Default for AllZoneRequests {
+    fn default() -> Self {
+        Self { generation: Generation::new(), requests: vec![] }
+    }
+}
+
+impl Ledgerable for AllZoneRequests {
+    fn is_newer_than(&self, other: &AllZoneRequests) -> bool {
+        self.generation >= other.generation
+    }
+
+    fn generation_bump(&mut self) {
+        self.generation = self.generation.next();
+    }
+}
+
+// This struct represents the combo of "what zone did you ask for" + "where did
+// we put it".
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct ZoneRequest {
+    zone: ServiceZoneRequest,
+    // TODO: Consider collapsing "root" into ServiceZoneRequest
+    root: Utf8PathBuf,
 }
 
 struct Task {
@@ -253,13 +289,17 @@ enum SledLocalZone {
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
+    global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
     skip_timesync: Option<bool>,
     time_synced: AtomicBool,
     sidecar_revision: String,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
+    // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
+    // Zones representing services which own datasets
+    dataset_zones: Mutex<Vec<RunningZone>>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -267,13 +307,19 @@ pub struct ServiceManagerInner {
     advertised_prefixes: Mutex<HashSet<Ipv6Subnet<SLED_PREFIX>>>,
     sled_info: OnceCell<SledAgentInfo>,
     switch_zone_bootstrap_address: Ipv6Addr,
+    // TODO(https://github.com/oxidecomputer/omicron/issues/2888): We will
+    // need this interface to provision Zone filesystems on explicit U.2s,
+    // rather than simply placing them on the ramdisk.
+    storage: StorageManager,
+    ledger_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
 // operational.
 struct SledAgentInfo {
     config: Config,
-    physical_link_vnic_allocator: VnicAllocator<PhysicalLink>,
+    port_manager: PortManager,
+    resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
 }
@@ -299,6 +345,7 @@ impl ServiceManager {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: Logger,
+        global_zone_bootstrap_link_local_address: Ipv6Addr,
         underlay_etherstub: Etherstub,
         underlay_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
@@ -307,12 +354,14 @@ impl ServiceManager {
         sidecar_revision: String,
         switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
+        storage: StorageManager,
     ) -> Result<Self, Error> {
         debug!(log, "Creating new ServiceManager");
         let log = log.new(o!("component" => "ServiceManager"));
         let mgr = Self {
             inner: Arc::new(ServiceManagerInner {
                 log: log.clone(),
+                global_zone_bootstrap_link_local_address,
                 // TODO(https://github.com/oxidecomputer/omicron/issues/725):
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
@@ -322,6 +371,7 @@ impl ServiceManager {
                 sidecar_revision,
                 switch_zone_maghemite_links,
                 zones: Mutex::new(vec![]),
+                dataset_zones: Mutex::new(vec![]),
                 underlay_vnic_allocator: VnicAllocator::new(
                     "Service",
                     underlay_etherstub,
@@ -331,17 +381,148 @@ impl ServiceManager {
                     "Bootstrap",
                     bootstrap_etherstub,
                 ),
-                ddmd_client: DdmAdminClient::localhost(log)?,
+                ddmd_client: DdmAdminClient::localhost(&log)?,
                 advertised_prefixes: Mutex::new(HashSet::new()),
                 sled_info: OnceCell::new(),
                 switch_zone_bootstrap_address,
+                storage,
+                ledger_directory_override: OnceCell::new(),
             }),
         };
         Ok(mgr)
     }
 
+    #[cfg(test)]
+    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
+        self.inner.ledger_directory_override.set(path).unwrap();
+    }
+
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
         self.inner.switch_zone_bootstrap_address
+    }
+
+    async fn all_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(SERVICES_LEDGER_FILENAME)];
+        }
+        self.inner
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
+    async fn all_storage_service_ledgers(&self) -> Vec<Utf8PathBuf> {
+        if let Some(dir) = self.inner.ledger_directory_override.get() {
+            return vec![dir.join(STORAGE_SERVICES_LEDGER_FILENAME)];
+        }
+
+        self.inner
+            .storage
+            .resources()
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(STORAGE_SERVICES_LEDGER_FILENAME))
+            .collect()
+    }
+
+    pub async fn load_non_storage_services(&self) -> Result<(), Error> {
+        let log = &self.inner.log;
+        let mut existing_zones = self.inner.zones.lock().await;
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_service_ledgers().await,
+        )
+        .await else {
+            return Ok(());
+        };
+        let services = ledger.data();
+
+        // Initialize and DNS and NTP services first as they are required
+        // for time synchronization, which is a pre-requisite for the other
+        // services.
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services
+                .requests
+                .clone()
+                .into_iter()
+                .filter(|svc| {
+                    matches!(
+                        svc.zone.zone_type,
+                        ZoneType::InternalDns | ZoneType::Ntp
+                    )
+                })
+                .collect(),
+        )
+        .await?;
+
+        drop(existing_zones);
+
+        info!(&self.inner.log, "Waiting for sled time synchronization");
+
+        retry_notify(
+            retry_policy_local(),
+            || async {
+                match self.timesync_get().await {
+                    Ok(TimeSync { sync: true, .. }) => {
+                        info!(&self.inner.log, "Time is synchronized");
+                        Ok(())
+                    }
+                    Ok(ts) => Err(BackoffError::transient(format!(
+                        "No sync {:?}",
+                        ts
+                    ))),
+                    Err(e) => Err(BackoffError::transient(format!(
+                        "Error checking for time synchronization: {}",
+                        e
+                    ))),
+                }
+            },
+            |error, delay| {
+                warn!(
+                    self.inner.log,
+                    "Time not yet synchronised (retrying in {:?})",
+                    delay;
+                    "error" => ?error
+                );
+            },
+        )
+        .await
+        .expect("Expected an infinite retry loop syncing time");
+
+        let mut existing_zones = self.inner.zones.lock().await;
+
+        // Initialize all remaining serivces
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services.requests,
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub async fn load_storage_services(&self) -> Result<(), Error> {
+        let log = &self.inner.log;
+        let mut existing_zones = self.inner.dataset_zones.lock().await;
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
+            log,
+            self.all_storage_service_ledgers().await,
+        )
+        .await else {
+            return Ok(());
+        };
+        let services = ledger.data();
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &services.requests,
+        )
+        .await?;
+        Ok(())
     }
 
     /// Loads services from the services manager, and returns once all requested
@@ -349,109 +530,35 @@ impl ServiceManager {
     pub async fn sled_agent_started(
         &self,
         config: Config,
-        physical_link: PhysicalLink,
+        port_manager: PortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
     ) -> Result<(), Error> {
+        debug!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
         self.inner
             .sled_info
             .set(SledAgentInfo {
                 config,
-                physical_link_vnic_allocator: VnicAllocator::new(
-                    "Public",
-                    // NOTE: Right now, we only use a connection to one of the
-                    // Chelsio links. Longer-term, when we we use OPTE, we'll
-                    // be able to use both connections.
-                    physical_link,
-                ),
+                port_manager,
+                resolver: Resolver::new_from_ip(
+                    self.inner.log.new(o!("component" => "DnsResolver")),
+                    underlay_address,
+                )?,
                 underlay_address,
                 rack_id,
             })
             .map_err(|_| "already set".to_string())
             .expect("Sled Agent should only start once");
 
-        let config_path = self.services_config_path()?;
-        if config_path.exists() {
-            info!(
-                &self.inner.log,
-                "Sled services found at {}; loading",
-                config_path.to_string_lossy()
-            );
-            let cfg: ServiceEnsureBody = toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await.map_err(
-                    |err| Error::Io { path: config_path.clone(), err },
-                )?,
-            )
-            .map_err(|err| Error::TomlDeserialize {
-                path: config_path.clone(),
-                err,
-            })?;
-            let mut existing_zones = self.inner.zones.lock().await;
-
-            // Initialize and DNS and NTP services first as they are required
-            // for time synchronization, which is a pre-requisite for the other
-            // services.
-            self.initialize_services_locked(
-                &mut existing_zones,
-                &cfg.services
-                    .clone()
-                    .into_iter()
-                    .filter(|svc| {
-                        matches!(
-                            svc.zone_type,
-                            ZoneType::InternalDns | ZoneType::Ntp
-                        )
-                    })
-                    .collect(),
-            )
-            .await?;
-
-            drop(existing_zones);
-
-            info!(&self.inner.log, "Waiting for sled time synchronization");
-
-            retry_notify(
-                retry_policy_local(),
-                || async {
-                    match self.timesync_get().await {
-                        Ok(TimeSync { sync: true, .. }) => {
-                            info!(&self.inner.log, "Time is synchronized");
-                            Ok(())
-                        }
-                        Ok(ts) => Err(BackoffError::transient(format!(
-                            "No sync {:?}",
-                            ts
-                        ))),
-                        Err(e) => Err(BackoffError::transient(format!(
-                            "Error checking for time synchronization: {}",
-                            e
-                        ))),
-                    }
-                },
-                |error, delay| {
-                    warn!(
-                        self.inner.log,
-                        "Time not yet synchronised (retrying in {:?})",
-                        delay;
-                        "error" => ?error
-                    );
-                },
-            )
-            .await
-            .expect("Expected an infinite retry loop syncing time");
-
-            let mut existing_zones = self.inner.zones.lock().await;
-
-            // Initialize all remaining serivces
-            self.initialize_services_locked(&mut existing_zones, &cfg.services)
-                .await?;
-        } else {
-            info!(
-                &self.inner.log,
-                "No sled services found at {}",
-                config_path.to_string_lossy()
-            );
-        }
+        self.load_non_storage_services().await?;
+        // TODO(https://github.com/oxidecomputer/omicron/issues/2973):
+        // These will fail if the disks aren't attached.
+        // Should we have a retry loop here? Kinda like we have with the switch
+        // / NTP zone?
+        //
+        // NOTE: We could totally do the same thing with
+        // "load_non_storage_services".
+        self.load_storage_services().await?;
 
         Ok(())
     }
@@ -459,16 +566,6 @@ impl ServiceManager {
     /// Returns the sled's configured mode.
     pub fn sled_mode(&self) -> SledMode {
         self.inner.sled_mode
-    }
-
-    // Returns either the path to the explicitly provided config path, or
-    // chooses the default one.
-    fn services_config_path(&self) -> Result<PathBuf, Error> {
-        if let Some(info) = self.inner.sled_info.get() {
-            Ok(info.config.all_svcs_config_path.clone())
-        } else {
-            Err(Error::SledAgentNotReady)
-        }
     }
 
     // Advertise the /64 prefix of `address`, unless we already have.
@@ -488,7 +585,7 @@ impl ServiceManager {
     fn devices_needed(req: &ServiceZoneRequest) -> Result<Vec<String>, Error> {
         let mut devices = vec![];
         for svc in &req.services {
-            match svc {
+            match &svc.details {
                 ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic } => {
                     if let Ok(Some(n)) = tofino::get_tofino() {
                         if let Ok(device_path) = n.device_path() {
@@ -505,7 +602,7 @@ impl ServiceManager {
         }
 
         for dev in &devices {
-            if !Path::new(dev).exists() {
+            if !Utf8Path::new(dev).exists() {
                 return Err(Error::MissingDevice { device: dev.to_string() });
             }
         }
@@ -535,43 +632,26 @@ impl ServiceManager {
     }
 
     // Check the services intended to run in the zone to determine whether any
-    // physical links or vnics need to be mapped into the zone when it is created.
-    //
-    // NOTE: This function is implemented to return the first link found, under
-    // the assumption that "at most one" would be necessary.
+    // physical links or vnics need to be mapped into the zone when it is
+    // created. Returns a list of links, plus whether or not they need link
+    // local addresses in the zone.
     fn links_needed(
         &self,
         req: &ServiceZoneRequest,
-    ) -> Result<Vec<Link>, Error> {
+    ) -> Result<Vec<(Link, bool)>, Error> {
+        let mut links: Vec<(Link, bool)> = Vec::new();
+
         for svc in &req.services {
-            match svc {
-                ServiceType::Nexus { .. }
-                | ServiceType::Ntp { boundary: true, .. }
-                | ServiceType::ExternalDns { .. } => {
-                    // TODO: Remove once Nexus traffic is transmitted over OPTE.
-                    match self
-                        .inner
-                        .sled_info
-                        .get()
-                        .ok_or_else(|| Error::SledAgentNotReady)?
-                        .physical_link_vnic_allocator
-                        .new_control(None)
-                    {
-                        Ok(n) => {
-                            return Ok(vec![n]);
-                        }
-                        Err(e) => {
-                            return Err(Error::NexusVnicCreation(e));
-                        }
-                    }
-                }
+            match &svc.details {
                 ServiceType::Tfport { pkt_source } => {
                     // The tfport service requires a MAC device to/from which sidecar
                     // packets may be multiplexed.  If the link isn't present, don't
                     // bother trying to start the zone.
                     match Dladm::verify_link(pkt_source) {
                         Ok(link) => {
-                            return Ok(vec![link]);
+                            // It's important that tfpkt does **not** receive a
+                            // link local address! See: https://github.com/oxidecomputer/stlouis/issues/391
+                            links.push((link, false));
                         }
                         Err(_) => {
                             return Err(Error::MissingDevice {
@@ -583,14 +663,12 @@ impl ServiceManager {
                 ServiceType::Maghemite { .. } => {
                     // If on a non-gimlet, sled-agent can be configured to map
                     // links into the switch zone. Validate those links here.
-                    let mut links = Vec::with_capacity(
-                        self.inner.switch_zone_maghemite_links.len(),
-                    );
-
                     for link in &self.inner.switch_zone_maghemite_links {
                         match Dladm::verify_link(&link.to_string()) {
                             Ok(link) => {
-                                links.push(link);
+                                // Link local addresses should be created in the
+                                // zone so that maghemite can listen on them.
+                                links.push((link, true));
                             }
 
                             Err(_) => {
@@ -600,14 +678,138 @@ impl ServiceManager {
                             }
                         }
                     }
-
-                    return Ok(links);
                 }
                 _ => (),
             }
         }
 
-        Ok(vec![])
+        Ok(links)
+    }
+
+    // Check the services intended to run in the zone to determine whether any
+    // OPTE ports need to be created and mapped into the zone when it is created.
+    async fn opte_ports_needed(
+        &self,
+        req: &ServiceZoneRequest,
+    ) -> Result<Vec<(Port, PortTicket)>, Error> {
+        // Only some services currently need OPTE ports
+        if !matches!(
+            req.zone_type,
+            ZoneType::ExternalDns | ZoneType::Nexus | ZoneType::Ntp
+        ) {
+            return Ok(vec![]);
+        }
+
+        let SledAgentInfo { port_manager, resolver, underlay_address, .. } =
+            &self.inner.sled_info.get().ok_or(Error::SledAgentNotReady)?;
+
+        let dpd_addr = resolver
+            .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
+            .await?;
+
+        let dpd_client = DpdClient::new(
+            &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
+            dpd_client::ClientState {
+                tag: "sled-agent".to_string(),
+                log: self.inner.log.new(o!(
+                    "component" => "DpdClient"
+                )),
+            },
+        );
+
+        let mut ports = vec![];
+        for svc in &req.services {
+            let external_ip;
+            let (nic, snat, external_ips) = match &svc.details {
+                ServiceType::Nexus { external_ip, nic, .. } => {
+                    (nic, None, std::slice::from_ref(external_ip))
+                }
+                ServiceType::ExternalDns { dns_address, nic, .. } => {
+                    external_ip = dns_address.ip();
+                    (nic, None, std::slice::from_ref(&external_ip))
+                }
+                ServiceType::BoundaryNtp { nic, snat_cfg, .. } => {
+                    (nic, Some(*snat_cfg), &[][..])
+                }
+                _ => continue,
+            };
+
+            // Create the OPTE port for the service.
+            // Note we don't plumb any firewall rules at this point,
+            // Nexus will plumb them down later but the default OPTE
+            // config allows outbound access which is enough for
+            // Boundary NTP which needs to come up before Nexus.
+            let port = port_manager
+                .create_port(nic, snat, external_ips, &[])
+                .map_err(|err| Error::ServicePortCreation {
+                service: svc.details.to_string(),
+                err: Box::new(err),
+            })?;
+
+            // We also need to update the switch with the NAT mappings
+            let nat_target = dpd_client::types::NatTarget {
+                inner_mac: dpd_client::types::MacAddr {
+                    a: port.0.mac().into_array(),
+                },
+                internal_ip: *underlay_address,
+                vni: port.0.vni().as_u32().into(),
+            };
+
+            let (target_ip, first_port, last_port) = match snat {
+                Some(s) => (s.ip, s.first_port, s.last_port),
+                None => (external_ips[0], 0, u16::MAX),
+            };
+
+            // TODO-correctness(#2933): If we fail part-way we need to
+            // clean up previous entries instead of leaking them.
+            let nat_create = || async {
+                info!(
+                    self.inner.log, "creating NAT entry for service";
+                    "service" => ?svc,
+                );
+                match &target_ip {
+                    IpAddr::V4(ip) => {
+                        dpd_client
+                            .nat_ipv4_create(
+                                ip,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
+                    IpAddr::V6(ip) => {
+                        dpd_client
+                            .nat_ipv6_create(
+                                ip,
+                                first_port,
+                                last_port,
+                                &nat_target,
+                            )
+                            .await
+                    }
+                }
+                .map_err(BackoffError::transient)?;
+                Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
+            };
+            let log_failure = |error, _| {
+                warn!(
+                    self.inner.log, "failed to create NAT entry for service";
+                    "error" => ?error,
+                    "service" => ?svc,
+                );
+            };
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                nat_create,
+                log_failure,
+            )
+            .await?;
+
+            ports.push(port);
+        }
+
+        Ok(ports)
     }
 
     // Check the services intended to run in the zone to determine whether any
@@ -615,12 +817,13 @@ impl ServiceManager {
     fn privs_needed(req: &ServiceZoneRequest) -> Vec<String> {
         let mut needed = Vec::new();
         for svc in &req.services {
-            match svc {
+            match &svc.details {
                 ServiceType::Tfport { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
-                ServiceType::Ntp { .. } => {
+                ServiceType::BoundaryNtp { .. }
+                | ServiceType::InternalNtp { .. } => {
                     needed.push("default".to_string());
                     needed.push("sys_time".to_string());
                     needed.push("proc_priocntl".to_string());
@@ -654,7 +857,7 @@ impl ServiceManager {
         let service = DnsClient {};
         let smfh = SmfHelper::new(&running_zone, &service);
 
-        let etc = PathBuf::from(running_zone.root()).join("etc");
+        let etc = running_zone.root().join("etc");
         let resolv_conf = etc.join("resolv.conf");
         let nsswitch_conf = etc.join("nsswitch.conf");
         let nsswitch_dns = etc.join("nsswitch.dns");
@@ -672,14 +875,14 @@ impl ServiceManager {
                 config.push_str(&format!("nameserver {s}\n"));
             }
 
-            debug!(self.inner.log, "creating {}", resolv_conf.display());
+            debug!(self.inner.log, "creating {resolv_conf}");
             tokio::fs::write(&resolv_conf, config)
                 .await
-                .map_err(|err| Error::Io { path: resolv_conf.clone(), err })?;
+                .map_err(|err| Error::io_path(&resolv_conf, err))?;
 
             tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
                 .await
-                .map_err(|err| Error::Io { path: nsswitch_dns.clone(), err })?;
+                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
 
             smfh.refresh()?;
             smfh.enable()?;
@@ -689,17 +892,38 @@ impl ServiceManager {
 
     async fn initialize_zone(
         &self,
-        request: &ServiceZoneRequest,
+        request: &ZoneRequest,
         filesystems: &[zone::Fs],
     ) -> Result<RunningZone, Error> {
-        let device_names = Self::devices_needed(request)?;
-        let (bootstrap_vnic, bootstrap_address) =
-            match self.bootstrap_address_needed(request)? {
-                Some((vnic, address)) => (Some(vnic), Some(address)),
+        let device_names = Self::devices_needed(&request.zone)?;
+        let (bootstrap_vnic, bootstrap_name_and_address) =
+            match self.bootstrap_address_needed(&request.zone)? {
+                Some((vnic, address)) => {
+                    let name = vnic.name().to_string();
+                    (Some(vnic), Some((name, address)))
+                }
                 None => (None, None),
             };
-        let links = self.links_needed(request)?;
-        let limit_priv = Self::privs_needed(request);
+        // Unzip here, then zip later - it's important that the InstalledZone
+        // owns the links, but it doesn't care about the boolean for requesting
+        // link local addresses.
+        let links: Vec<Link>;
+        let links_need_link_local: Vec<bool>;
+        (links, links_need_link_local) =
+            self.links_needed(&request.zone)?.into_iter().unzip();
+        let opte_ports = self.opte_ports_needed(&request.zone).await?;
+        let limit_priv = Self::privs_needed(&request.zone);
+
+        // If the zone is managing a particular dataset, plumb that
+        // dataset into the zone. Additionally, construct a "unique enough" name
+        // so we can create multiple zones of this type without collision.
+        let unique_name = request.zone.zone_name_unique_identifier();
+        let datasets = request
+            .zone
+            .dataset
+            .iter()
+            .map(|d| zone::Dataset { name: d.full() })
+            .collect::<Vec<_>>();
 
         let devices: Vec<zone::Device> = device_names
             .iter()
@@ -709,48 +933,268 @@ impl ServiceManager {
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
-            &request.zone_type.to_string(),
-            // unique_name=
-            None,
-            // dataset=
-            &[],
-            // filesystems=
+            &request.root,
+            &request.zone.zone_type.to_string(),
+            unique_name.as_deref(),
+            datasets.as_slice(),
             &filesystems,
             &devices,
-            // opte_ports=
-            vec![],
+            opte_ports,
             bootstrap_vnic,
             links,
             limit_priv,
         )
         .await?;
 
-        let running_zone = RunningZone::boot(installed_zone).await?;
+        // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
+        //
+        // These zones are self-assembling -- after they boot, there should
+        // be no "zlogin" necessary to initialize.
+        match request.zone.zone_type {
+            ZoneType::Clickhouse => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CLICKHOUSE_PORT.to_string();
 
-        for link in running_zone.links() {
-            info!(
-                self.inner.log,
-                "Ensuring {}/{} exists in zone",
-                link.name(),
-                IPV6_LINK_LOCAL_NAME
-            );
-            Zones::ensure_has_link_local_v6_address(
-                Some(running_zone.name()),
-                &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME).unwrap(),
-            )?;
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/clickhouse").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup clickhouse profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneType::CockroachDb => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let address = SocketAddr::new(
+                    IpAddr::V6(request.zone.addresses[0]),
+                    COCKROACH_PORT,
+                );
+                let listen_addr = &address.ip().to_string();
+                let listen_port = &address.port().to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/cockroachdb").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup CRDB profile", err)
+                    })?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
+
+                // TODO: The following lines are necessary to initialize CRDB
+                // in a single-node environment. They're bad! They're wrong!
+                // We definitely shouldn't be wiping the database every time
+                // we want to boot this zone.
+                //
+                // But they're also necessary to prevent the build from
+                // regressing.
+                //
+                // NOTE: In the (very short-term) future, this will be
+                // replaced by the following:
+                // 1. CRDB will simply "start", rather than "start-single-node".
+                // 2. The Sled Agent will expose an explicit API to "init" the
+                // Cockroach cluster, and populate it with the expected
+                // contents.
+                let format_crdb = || async {
+                    info!(self.inner.log, "Formatting CRDB");
+                    running_zone
+                        .run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                        ])
+                        .map_err(BackoffError::transient)?;
+                    running_zone
+                        .run_cmd(&[
+                            "/opt/oxide/cockroachdb/bin/cockroach",
+                            "sql",
+                            "--insecure",
+                            "--host",
+                            &address.to_string(),
+                            "--file",
+                            "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                        ])
+                        .map_err(BackoffError::transient)?;
+                    info!(self.inner.log, "Formatting CRDB - Completed");
+                    Ok::<
+                        (),
+                        BackoffError<
+                            illumos_utils::running_zone::RunCommandError,
+                        >,
+                    >(())
+                };
+                let log_failure = |error, _| {
+                    warn!(
+                        self.inner.log, "failed to format CRDB";
+                        "error" => ?error,
+                    );
+                };
+                retry_notify(retry_policy_local(), format_crdb, log_failure)
+                    .await
+                    .expect("expected an infinite retry loop waiting for crdb");
+                return Ok(running_zone);
+            }
+            ZoneType::Crucible => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CRUCIBLE_PORT.to_string();
+
+                let dataset = request
+                    .zone
+                    .dataset
+                    .as_ref()
+                    .expect("Crucible requires dataset");
+                let uuid = &Uuid::new_v4().to_string();
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("dataset", "astring", &dataset.full())
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("uuid", "astring", uuid)
+                    .add_property("store", "astring", "/data");
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup crucible profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneType::CruciblePantry => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let datalink = installed_zone.get_control_vnic_name();
+                let gateway = &info.underlay_address.to_string();
+                assert_eq!(request.zone.addresses.len(), 1);
+                let listen_addr = &request.zone.addresses[0].to_string();
+                let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property("datalink", "astring", datalink)
+                    .add_property("gateway", "astring", gateway)
+                    .add_property("listen_addr", "astring", listen_addr)
+                    .add_property("listen_port", "astring", listen_port);
+
+                let profile = ProfileBuilder::new("omicron").add_service(
+                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(config),
+                    ),
+                );
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| Error::io("crucible pantry profile", err))?;
+                let running_zone = RunningZone::boot(installed_zone).await?;
+                return Ok(running_zone);
+            }
+            _ => {}
         }
 
-        if let Some(bootstrap_address) = bootstrap_address {
+        let running_zone = RunningZone::boot(installed_zone).await?;
+
+        for (link, needs_link_local) in
+            running_zone.links().iter().zip(links_need_link_local)
+        {
+            if needs_link_local {
+                info!(
+                    self.inner.log,
+                    "Ensuring {}/{} exists in zone",
+                    link.name(),
+                    IPV6_LINK_LOCAL_NAME
+                );
+                Zones::ensure_has_link_local_v6_address(
+                    Some(running_zone.name()),
+                    &AddrObject::new(link.name(), IPV6_LINK_LOCAL_NAME)
+                        .unwrap(),
+                )?;
+            }
+        }
+
+        if let Some((bootstrap_name, bootstrap_address)) =
+            bootstrap_name_and_address.as_ref()
+        {
             info!(
                 self.inner.log,
                 "Ensuring bootstrap address {} exists in {} zone",
                 bootstrap_address.to_string(),
-                request.zone_type.to_string()
+                request.zone.zone_type.to_string()
             );
-            running_zone.ensure_bootstrap_address(bootstrap_address).await?;
+            running_zone.ensure_bootstrap_address(*bootstrap_address).await?;
+            info!(
+                self.inner.log,
+                "Forwarding bootstrap traffic via {} to {}",
+                bootstrap_name,
+                self.inner.global_zone_bootstrap_link_local_address,
+            );
+            running_zone
+                .add_bootstrap_route(
+                    BOOTSTRAP_PREFIX,
+                    self.inner.global_zone_bootstrap_link_local_address,
+                    bootstrap_name,
+                )
+                .map_err(|err| Error::ZoneCommand {
+                    intent: "add bootstrap network route".to_string(),
+                    err,
+                })?;
         }
 
-        for addr in &request.addresses {
+        for addr in &request.zone.addresses {
             if *addr == Ipv6Addr::LOCALHOST {
                 continue;
             }
@@ -769,8 +1213,8 @@ impl ServiceManager {
             );
         }
 
-        info!(self.inner.log, "GZ addresses: {:#?}", request.gz_addresses);
-        for &addr in &request.gz_addresses {
+        info!(self.inner.log, "GZ addresses: {:#?}", request.zone.gz_addresses);
+        for &addr in &request.zone.gz_addresses {
             info!(
                 self.inner.log,
                 "Ensuring GZ address {} exists",
@@ -778,7 +1222,7 @@ impl ServiceManager {
             );
 
             let addr_name =
-                request.zone_type.to_string().replace(&['-', '_'][..], "");
+                request.zone.zone_type.to_string().replace(&['-', '_'][..], "");
             Zones::ensure_has_global_zone_v6_address(
                 self.inner.underlay_vnic.clone(),
                 addr,
@@ -787,7 +1231,7 @@ impl ServiceManager {
             .map_err(|err| Error::GzAddress {
                 message: format!(
                     "adding address on behalf of service zone '{}'",
-                    request.zone_type
+                    request.zone.zone_type
                 ),
                 err,
             })?;
@@ -797,7 +1241,7 @@ impl ServiceManager {
             self.advertise_prefix_of_address(addr).await;
         }
 
-        let maybe_gateway = if !request.gz_addresses.is_empty() {
+        let maybe_gateway = if !request.zone.gz_addresses.is_empty() {
             // If this service supplies its own GZ address, add a route.
             //
             // This is currently being used for the DNS service.
@@ -806,7 +1250,7 @@ impl ServiceManager {
             // can be supplied - now that we're actively using it, we
             // aren't really handling the "many GZ addresses" case, and it
             // doesn't seem necessary now.
-            Some(request.gz_addresses[0])
+            Some(request.zone.gz_addresses[0])
         } else if let Some(info) = self.inner.sled_info.get() {
             // If the service has not supplied a GZ address, simply add
             // a route to the sled's underlay address.
@@ -817,66 +1261,46 @@ impl ServiceManager {
         };
 
         if let Some(gateway) = maybe_gateway {
-            running_zone.add_default_route(gateway).await.map_err(|err| {
+            running_zone.add_default_route(gateway).map_err(|err| {
                 Error::ZoneCommand { intent: "Adding Route".to_string(), err }
             })?;
         }
 
-        for service in &request.services {
+        for service in &request.zone.services {
             // TODO: Related to
             // https://github.com/oxidecomputer/omicron/pull/1124 , should we
             // avoid importing this manifest?
             debug!(self.inner.log, "importing manifest");
 
-            let smfh = SmfHelper::new(&running_zone, service);
+            let smfh = SmfHelper::new(&running_zone, &service.details);
             smfh.import_manifest()?;
 
-            match &service {
-                ServiceType::Nexus { internal_ip, external_ip } => {
+            match &service.details {
+                ServiceType::Nexus { internal_ip, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
-                    let sled_info =
-                        if let Some(info) = self.inner.sled_info.get() {
-                            info
-                        } else {
-                            return Err(Error::SledAgentNotReady);
-                        };
+                    let sled_info = self
+                        .inner
+                        .sled_info
+                        .get()
+                        .ok_or(Error::SledAgentNotReady)?;
 
-                    // The address of Nexus' external interface is a special
-                    // case; it may be an IPv4 address.
-                    let addr_request =
-                        AddressRequest::new_static(*external_ip, None);
-                    running_zone
-                        .ensure_external_address_with_name(
-                            addr_request,
-                            "public",
-                        )
-                        .await?;
-
-                    if let IpAddr::V4(_public_addr4) = *external_ip {
-                        // If requested, create a default route back through
-                        // the internet gateway.
-                        if let Some(ref gateway) =
-                            sled_info.config.gateway_address
-                        {
-                            running_zone
-                                .add_default_route4(*gateway)
-                                .await
-                                .map_err(|err| Error::ZoneCommand {
-                                    intent: "Adding Route".to_string(),
-                                    err,
-                                })?;
-                        }
-                    }
+                    // While Nexus will be reachable via `external_ip`, it communicates
+                    // atop an OPTE port which operates on a VPC private IP. OPTE will
+                    // map the private IP to the external IP automatically.
+                    let port_ip = running_zone
+                        .ensure_address_for_port("public", 0)
+                        .await?
+                        .ip();
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
                     let deployment_config = NexusDeploymentConfig {
-                        id: request.id,
+                        id: request.zone.id,
                         rack_id: sled_info.rack_id,
 
                         dropshot_external: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(*external_ip, 80),
+                            bind_address: SocketAddr::new(port_ip, 80),
                             // This has to be large enough to support:
                             // - bulk writes to disks
                             request_body_max_bytes: 8192 * 1024,
@@ -897,19 +1321,22 @@ impl ServiceManager {
                     };
 
                     // Copy the partial config file to the expected location.
-                    let config_dir = (sled_info.config.get_svc_config_dir)(
-                        running_zone.name(),
-                        &request.zone_type.to_string(),
-                    );
+                    let config_dir = Utf8PathBuf::from(format!(
+                        "{}/var/svc/manifest/site/nexus",
+                        running_zone.root()
+                    ));
+                    // The filename of a half-completed config, in need of parameters supplied at
+                    // runtime.
+                    const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
+                    // The filename of a completed config, merging the partial config with
+                    // additional appended parameters known at runtime.
+                    const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
                     let partial_config_path =
-                        config_dir.join(PARTIAL_CONFIG_FILENAME);
-                    let config_path = config_dir.join(COMPLETE_CONFIG_FILENAME);
+                        config_dir.join(PARTIAL_LEDGER_FILENAME);
+                    let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
                     tokio::fs::copy(partial_config_path, &config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
 
                     // Serialize the configuration and append it into the file.
                     let serialized_cfg =
@@ -924,50 +1351,26 @@ impl ServiceManager {
                         .append(true)
                         .open(&config_path)
                         .await
-                        .map_err(|err| Error::Io {
-                            path: config_path.clone(),
-                            err,
-                        })?;
-                    file.write_all(config_str.as_bytes()).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?;
+                        .map_err(|err| Error::io_path(&config_path, err))?;
+                    file.write_all(config_str.as_bytes())
+                        .await
+                        .map_err(|err| Error::io_path(&config_path, err))?;
                 }
-                ServiceType::ExternalDns { http_address, dns_address } => {
+                ServiceType::ExternalDns {
+                    http_address, dns_address, ..
+                } => {
                     info!(self.inner.log, "Setting up external-dns service");
 
-                    // Like Nexus, we have to set up a possible IPv4 address for
-                    // external connectivity.
-                    let sled_info =
-                        if let Some(info) = self.inner.sled_info.get() {
-                            info
-                        } else {
-                            return Err(Error::SledAgentNotReady);
-                        };
-
-                    let addr_request =
-                        AddressRequest::new_static(dns_address.ip(), None);
-                    running_zone
-                        .ensure_external_address_with_name(
-                            addr_request,
-                            "public",
-                        )
-                        .await?;
-
-                    if let IpAddr::V4(_public_addr4) = dns_address.ip() {
-                        // If requested, create a default route back through
-                        // the internet gateway.
-                        if let Some(ref gateway) =
-                            sled_info.config.gateway_address
-                        {
-                            running_zone
-                                .add_default_route4(*gateway)
-                                .await
-                                .map_err(|err| Error::ZoneCommand {
-                                    intent: "Adding Route".to_string(),
-                                    err,
-                                })?;
-                        }
-                    }
+                    // Like Nexus, we need to be reachable externally via
+                    // `dns_address` but we don't listen on that address
+                    // directly but instead on a VPC private IP. OPTE will
+                    // en/decapsulate as appropriate.
+                    let port_ip = running_zone
+                        .ensure_address_for_port("public", 0)
+                        .await?
+                        .ip();
+                    let dns_address =
+                        SocketAddr::new(port_ip, dns_address.port());
 
                     smfh.setprop(
                         "config/http_address",
@@ -1014,8 +1417,8 @@ impl ServiceManager {
                 ServiceType::Oximeter => {
                     info!(self.inner.log, "Setting up oximeter service");
 
-                    let address = request.addresses[0];
-                    smfh.setprop("config/id", request.id)?;
+                    let address = request.zone.addresses[0];
+                    smfh.setprop("config/id", request.zone.id)?;
                     smfh.setprop(
                         "config/address",
                         &format!("[{}]:{}", address, OXIMETER_PORT),
@@ -1024,7 +1427,7 @@ impl ServiceManager {
                 }
                 ServiceType::ManagementGatewayService => {
                     info!(self.inner.log, "Setting up MGS service");
-                    smfh.setprop("config/id", request.id)?;
+                    smfh.setprop("config/id", request.zone.id)?;
 
                     // Always tell MGS to listen on localhost so wicketd can
                     // contact it even before we have an underlay network.
@@ -1033,7 +1436,7 @@ impl ServiceManager {
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
 
-                    if let Some(address) = request.addresses.get(0) {
+                    if let Some(address) = request.zone.addresses.get(0) {
                         // Don't use localhost twice
                         if *address != Ipv6Addr::LOCALHOST {
                             smfh.addpropvalue(
@@ -1045,7 +1448,7 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
-                ServiceType::Wicketd => {
+                ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
 
                     smfh.setprop(
@@ -1059,7 +1462,9 @@ impl ServiceManager {
                     // address for the switch zone. If we _don't_ have a
                     // bootstrap address, someone has requested wicketd in a
                     // non-switch zone; return an error.
-                    let Some(bootstrap_address) = bootstrap_address else {
+                    let Some((_, bootstrap_address))
+                        = bootstrap_name_and_address
+                    else {
                         return Err(Error::BadServiceRequest {
                             service: "wicketd".to_string(),
                             message: concat!(
@@ -1079,17 +1484,48 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+                    smfh.setprop(
+                        "config/baseboard-identifier",
+                        baseboard.identifier(),
+                    )?;
+                    smfh.setprop("config/baseboard-model", baseboard.model())?;
+                    smfh.setprop(
+                        "config/baseboard-revision",
+                        baseboard.revision(),
+                    )?;
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
                     info!(self.inner.log, "Setting up dendrite service");
 
+                    if let Some(info) = self.inner.sled_info.get() {
+                        smfh.setprop("config/rack_id", info.rack_id)?;
+                        smfh.setprop("config/sled_id", info.config.sled_id)?;
+                    } else {
+                        info!(
+                            self.inner.log,
+                            "no rack_id/sled_id available yet"
+                        );
+                    }
+
                     smfh.delpropvalue("config/address", "*")?;
-                    for address in &request.addresses {
+                    smfh.delpropvalue("config/dns_server", "*")?;
+                    for address in &request.zone.addresses {
                         smfh.addpropvalue(
                             "config/address",
                             &format!("[{}]:{}", address, DENDRITE_PORT),
                         )?;
+                        if *address != Ipv6Addr::LOCALHOST {
+                            let az_prefix =
+                                Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                            for addr in Resolver::servers_from_subnet(az_prefix)
+                            {
+                                smfh.addpropvalue(
+                                    "config/dns_server",
+                                    &format!("{addr}"),
+                                )?;
+                            }
+                        }
                     }
                     match asic {
                         DendriteAsic::TofinoAsic => {
@@ -1143,23 +1579,21 @@ impl ServiceManager {
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
                     smfh.refresh()?;
                 }
-                ServiceType::CruciblePantry => {
-                    info!(self.inner.log, "Setting up Crucible pantry service");
-
-                    if let Some(address) = request.addresses.get(0) {
-                        smfh.setprop(
-                            "config/listen",
-                            &format!("[{}]:{}", address, CRUCIBLE_PANTRY_PORT),
-                        )?;
-                    }
-                    smfh.refresh()?;
-                }
-                ServiceType::Ntp {
+                ServiceType::BoundaryNtp {
                     ntp_servers,
-                    boundary,
+                    dns_servers,
+                    domain,
+                    ..
+                }
+                | ServiceType::InternalNtp {
+                    ntp_servers,
                     dns_servers,
                     domain,
                 } => {
+                    let boundary = matches!(
+                        service.details,
+                        ServiceType::BoundaryNtp { .. }
+                    );
                     info!(
                         self.inner.log,
                         "Set up NTP service boundary={}, Servers={:?}",
@@ -1182,8 +1616,15 @@ impl ServiceManager {
                     smfh.setprop("config/allow", &format!("{}", rack_net))?;
                     smfh.setprop(
                         "config/boundary",
-                        if *boundary { "true" } else { "false" },
+                        if boundary { "true" } else { "false" },
                     )?;
+
+                    if boundary {
+                        // Configure OPTE port for boundary NTP
+                        running_zone
+                            .ensure_address_for_port("public", 0)
+                            .await?;
+                    }
 
                     smfh.delpropvalue("config/server", "*")?;
                     for server in ntp_servers {
@@ -1204,42 +1645,43 @@ impl ServiceManager {
                     smfh.setprop("config/mode", &mode)?;
                     smfh.setprop("config/admin_host", "::")?;
 
-                    let maghemite_interfaces: Vec<AddrObject> =
-                        if is_gimlet().map_err(|e| {
-                            Error::Underlay(underlay::Error::SystemDetection(e))
-                        })? {
-                            (0..31)
-                                .map(|i| {
-                                    // See the `tfport_name` function for how
-                                    // tfportd names the addrconf it creates.
-                                    // Right now, that's `tfportrear[0-31]_0`
-                                    // for all rear ports, which is what we're
-                                    // directing ddmd to listen for
-                                    // advertisements on.
-                                    //
-                                    // This may grow in a multi-rack future to
-                                    // include a subset of "front" ports too,
-                                    // when racks are cabled together.
-                                    AddrObject::new(
-                                        &format!("tfportrear{}_0", i),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        } else {
-                            self.inner
-                                .switch_zone_maghemite_links
-                                .iter()
-                                .map(|i| {
-                                    AddrObject::new(
-                                        &i.to_string(),
-                                        IPV6_LINK_LOCAL_NAME,
-                                    )
-                                    .unwrap()
-                                })
-                                .collect()
-                        };
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
+
+                    let maghemite_interfaces: Vec<AddrObject> = if is_gimlet {
+                        (0..32)
+                            .map(|i| {
+                                // See the `tfport_name` function for how
+                                // tfportd names the addrconf it creates.
+                                // Right now, that's `tfportrear[0-31]_0`
+                                // for all rear ports, which is what we're
+                                // directing ddmd to listen for
+                                // advertisements on.
+                                //
+                                // This may grow in a multi-rack future to
+                                // include a subset of "front" ports too,
+                                // when racks are cabled together.
+                                AddrObject::new(
+                                    &format!("tfportrear{}_0", i),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    } else {
+                        self.inner
+                            .switch_zone_maghemite_links
+                            .iter()
+                            .map(|i| {
+                                AddrObject::new(
+                                    &i.to_string(),
+                                    IPV6_LINK_LOCAL_NAME,
+                                )
+                                .unwrap()
+                            })
+                            .collect()
+                    };
 
                     smfh.setprop(
                         "config/interfaces",
@@ -1252,7 +1694,24 @@ impl ServiceManager {
                         ),
                     )?;
 
+                    if is_gimlet {
+                        // Maghemite for a scrimlet needs to be configured to
+                        // talk to dendrite
+                        smfh.setprop("config/dendrite", "true")?;
+                        smfh.setprop("config/dpd_host", "[::1]")?;
+                        smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
+                    }
+
                     smfh.refresh()?;
+                }
+                ServiceType::Crucible
+                | ServiceType::CruciblePantry
+                | ServiceType::CockroachDb
+                | ServiceType::Clickhouse => {
+                    panic!(
+                        "{} is a service which exists as part of a self-assembling zone",
+                        service.details,
+                    )
                 }
             }
 
@@ -1271,7 +1730,7 @@ impl ServiceManager {
     async fn initialize_services_locked(
         &self,
         existing_zones: &mut Vec<RunningZone>,
-        requests: &Vec<ServiceZoneRequest>,
+        requests: &Vec<ZoneRequest>,
     ) -> Result<(), Error> {
         // TODO(https://github.com/oxidecomputer/omicron/issues/726):
         // As long as we ensure the requests don't overlap, we could
@@ -1279,22 +1738,22 @@ impl ServiceManager {
         for req in requests {
             info!(
                 self.inner.log,
-                "Ensuring service zone is initialized: {:?}", req.zone_type
+                "Ensuring service zone is initialized: {:?}",
+                req.zone.zone_type
             );
             // Before we bother allocating anything for this request, check if
             // this service has already been created.
-            let expected_zone_name =
-                InstalledZone::get_zone_name(&req.zone_type.to_string(), None);
+            let expected_zone_name = req.zone.zone_name();
             if existing_zones.iter().any(|z| z.name() == expected_zone_name) {
                 info!(
                     self.inner.log,
-                    "Service zone {} already exists", req.zone_type
+                    "Service zone {} already exists", req.zone.zone_type
                 );
                 continue;
             } else {
                 info!(
                     self.inner.log,
-                    "Service zone {} does not yet exist", req.zone_type
+                    "Service zone {} does not yet exist", req.zone.zone_type
                 );
             }
 
@@ -1315,67 +1774,126 @@ impl ServiceManager {
     /// These services will be instantiated by this function, and will be
     /// recorded to a local file to ensure they start automatically on next
     /// boot.
-    pub async fn ensure_persistent(
+    pub async fn ensure_all_services(
         &self,
         request: ServiceEnsureBody,
     ) -> Result<(), Error> {
+        let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
-        let config_path = self.services_config_path()?;
 
-        let services_to_initialize = {
-            if config_path.exists() {
-                let cfg: ServiceEnsureBody = toml::from_str(
-                    &tokio::fs::read_to_string(&config_path).await.map_err(
-                        |err| Error::Io { path: config_path.clone(), err },
-                    )?,
-                )
-                .map_err(|err| Error::TomlDeserialize {
-                    path: config_path.clone(),
-                    err,
-                })?;
-                let known_services = cfg.services;
+        // Read the existing set of services from the ledger.
+        let service_paths = self.all_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
+        let ledger_zone_requests = ledger.data_mut();
 
-                let known_set: HashSet<&ServiceZoneRequest> =
-                    HashSet::from_iter(known_services.iter());
-                let requested_set = HashSet::from_iter(request.services.iter());
+        let new_zone_requests: Vec<ServiceZoneRequest> = {
+            let known_set: HashSet<&ServiceZoneRequest> = HashSet::from_iter(
+                ledger_zone_requests.requests.iter().map(|r| &r.zone),
+            );
+            let requested_set = HashSet::from_iter(request.services.iter());
 
-                if !requested_set.is_superset(&known_set) {
-                    // The caller may only request services additively.
-                    //
-                    // We may want to use a different mechanism for zone removal, in
-                    // the case of changing configurations, rather than just doing
-                    // that removal implicitly.
-                    warn!(
-                        self.inner.log,
-                        "Cannot request services on this sled, differing configurations: {:#?}",
-                        known_set.symmetric_difference(&requested_set)
-                    );
-                    return Err(Error::ServicesAlreadyConfigured);
-                }
-                requested_set
-                    .difference(&known_set)
-                    .map(|s| (*s).clone())
-                    .collect::<Vec<ServiceZoneRequest>>()
-            } else {
-                request.services.clone()
+            // TODO: We probably want to handle this case.
+            if !requested_set.is_superset(&known_set) {
+                // The caller may only request services additively.
+                //
+                // We may want to use a different mechanism for zone removal, in
+                // the case of changing configurations, rather than just doing
+                // that removal implicitly.
+                warn!(
+                    log,
+                    "Cannot request services on this sled, differing configurations: {:#?}",
+                    known_set.symmetric_difference(&requested_set)
+                );
+                return Err(Error::ServicesAlreadyConfigured);
             }
+            requested_set
+                .difference(&known_set)
+                .map(|s| (*s).clone())
+                .collect::<Vec<ServiceZoneRequest>>()
         };
+
+        let mut zone_requests = AllZoneRequests::default();
+        for zone in new_zone_requests.into_iter() {
+            let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+            zone_requests.requests.push(ZoneRequest { zone, root });
+        }
 
         self.initialize_services_locked(
             &mut existing_zones,
-            &services_to_initialize,
+            &zone_requests.requests,
         )
         .await?;
 
-        let serialized_services = toml::Value::try_from(&request)
-            .expect("Cannot serialize service list");
-        let services_str =
-            toml::to_string(&serialized_services).map_err(|err| {
-                Error::TomlSerialize { path: config_path.clone(), err }
-            })?;
-        tokio::fs::write(&config_path, services_str)
-            .await
-            .map_err(|err| Error::Io { path: config_path.clone(), err })?;
+        // Update the services in the ledger and write it back to both M.2s
+        ledger_zone_requests.requests.append(&mut zone_requests.requests);
+        ledger.commit().await?;
+
+        Ok(())
+    }
+
+    /// Ensures that a storage zone be initialized.
+    ///
+    /// These services will be instantiated by this function, and will be
+    /// recorded to a local file to ensure they start automatically on next
+    /// boot.
+    pub async fn ensure_storage_service(
+        &self,
+        request: ServiceZoneRequest,
+    ) -> Result<(), Error> {
+        let log = &self.inner.log;
+        let mut existing_zones = self.inner.dataset_zones.lock().await;
+
+        // Read the existing set of services from the ledger.
+        let service_paths = self.all_storage_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
+        let ledger_zone_requests = ledger.data_mut();
+
+        if !ledger_zone_requests
+            .requests
+            .iter()
+            .any(|zone_request| zone_request.zone.id == request.id)
+        {
+            // If this is a new request, provision a zone filesystem on the same
+            // disk as the dataset.
+            let dataset = request
+                .dataset
+                .as_ref()
+                .expect("Storage services should have a dataset");
+            let root = dataset
+                .pool()
+                .dataset_mountpoint(sled_hardware::disk::ZONE_DATASET);
+            ledger_zone_requests
+                .requests
+                .push(ZoneRequest { zone: request, root });
+        }
+
+        self.initialize_services_locked(
+            &mut existing_zones,
+            &ledger_zone_requests.requests,
+        )
+        .await?;
+
+        ledger.commit().await?;
 
         Ok(())
     }
@@ -1397,13 +1915,11 @@ impl ServiceManager {
 
         info!(self.inner.log, "Setting boot time to {:?}", now);
 
-        let files: Vec<String> = zones
+        let files: Vec<Utf8PathBuf> = zones
             .iter()
             .map(|z| z.root())
-            .chain(iter::once("".to_string()))
-            .flat_map(|r| {
-                [format!("{r}/var/adm/utmpx"), format!("{r}/var/adm/wtmpx")]
-            })
+            .chain(iter::once(Utf8PathBuf::from("/")))
+            .flat_map(|r| [r.join("var/adm/utmpx"), r.join("var/adm/wtmpx")])
             .collect();
 
         for file in files {
@@ -1411,7 +1927,7 @@ impl ServiceManager {
             let cmd = command.args(&[
                 "/usr/platform/oxide/bin/tmpx",
                 &format!("{}", now.as_secs()),
-                &file,
+                &file.as_str(),
             ]);
             match execute(cmd) {
                 Err(e) => {
@@ -1480,6 +1996,7 @@ impl ServiceManager {
     pub async fn activate_switch(
         &self,
         switch_zone_ip: Option<Ipv6Addr>,
+        baseboard: Baseboard,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
         let mut filesystems: Vec<zone::Fs> = vec![];
@@ -1499,7 +2016,8 @@ impl ServiceManager {
                     ServiceType::Dendrite { asic: DendriteAsic::TofinoAsic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
+                    ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
 
@@ -1520,7 +2038,7 @@ impl ServiceManager {
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
-                    ServiceType::Wicketd,
+                    ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
                 ]
             }
@@ -1534,8 +2052,12 @@ impl ServiceManager {
             id: Uuid::new_v4(),
             zone_type: ZoneType::Switch,
             addresses,
+            dataset: None,
             gz_addresses: vec![],
-            services,
+            services: services
+                .into_iter()
+                .map(|s| ServiceZoneService { id: Uuid::new_v4(), details: s })
+                .collect(),
         };
 
         self.ensure_zone(
@@ -1655,18 +2177,18 @@ impl ServiceManager {
                 }
 
                 if let Some(info) = self.inner.sled_info.get() {
-                    zone.add_default_route(info.underlay_address)
-                        .await
-                        .map_err(|err| Error::ZoneCommand {
+                    zone.add_default_route(info.underlay_address).map_err(
+                        |err| Error::ZoneCommand {
                             intent: "Adding Route".to_string(),
                             err,
-                        })?;
+                        },
+                    )?;
                 }
 
                 for service in &request.services {
-                    let smfh = SmfHelper::new(&zone, service);
+                    let smfh = SmfHelper::new(&zone, &service.details);
 
-                    match service {
+                    match &service.details {
                         ServiceType::ManagementGatewayService => {
                             // Remove any existing `config/address` values
                             // without deleting the property itself.
@@ -1688,12 +2210,38 @@ impl ServiceManager {
                             smfh.refresh()?;
                         }
                         ServiceType::Dendrite { .. } => {
+                            info!(self.inner.log, "configuring dendrite zone");
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_id", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_id",
+                                    info.config.sled_id,
+                                )?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no rack_id/sled_id available yet"
+                                );
+                            }
                             smfh.delpropvalue("config/address", "*")?;
+                            smfh.delpropvalue("config/dns_server", "*")?;
                             for address in &request.addresses {
                                 smfh.addpropvalue(
                                     "config/address",
                                     &format!("[{}]:{}", address, DENDRITE_PORT),
                                 )?;
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_server",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                }
                             }
                             smfh.refresh()?;
                         }
@@ -1730,6 +2278,21 @@ impl ServiceManager {
         Ok(())
     }
 
+    async fn try_initialize_sled_local_zone(
+        &self,
+        sled_zone: &mut SledLocalZone,
+    ) -> Result<(), Error> {
+        let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
+            return Ok(())
+        };
+        let root = Utf8PathBuf::from(ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT);
+        let request = ZoneRequest { zone: request.clone(), root };
+        let zone = self.initialize_zone(&request, filesystems).await?;
+        *sled_zone =
+            SledLocalZone::Running { request: request.zone.clone(), zone };
+        Ok(())
+    }
+
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
     async fn initialize_zone_loop(
@@ -1746,31 +2309,13 @@ impl ServiceManager {
                     }
                     _ => panic!("Unhandled zone type"),
                 }
-                match &*sled_zone {
-                    SledLocalZone::Initializing {
-                        request,
-                        filesystems,
-                        ..
-                    } => {
-                        match self.initialize_zone(&request, filesystems).await
-                        {
-                            Ok(zone) => {
-                                *sled_zone = SledLocalZone::Running {
-                                    request: request.clone(),
-                                    zone,
-                                };
-                                return;
-                            }
-                            Err(err) => {
-                                warn!(
-                                    self.inner.log,
-                                    "Failed to initialize {} zone: {err}",
-                                    zone_type.to_string()
-                                );
-                            }
-                        }
-                    }
-                    _ => return,
+                match self.try_initialize_sled_local_zone(&mut sled_zone).await
+                {
+                    Ok(()) => return,
+                    Err(e) => warn!(
+                        self.inner.log,
+                        "Failed to initialize {zone_type}: {e}"
+                    ),
                 }
             }
 
@@ -1789,7 +2334,7 @@ impl ServiceManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::params::ZoneType;
+    use crate::params::{ServiceZoneService, ZoneType};
     use illumos_utils::{
         dladm::{
             Etherstub, MockDladm, BOOTSTRAP_ETHERSTUB_NAME,
@@ -1802,7 +2347,8 @@ mod test {
     use std::os::unix::process::ExitStatusExt;
     use uuid::Uuid;
 
-    // Just a placeholder. Not used.
+    // Just placeholders. Not used.
+    const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
     const EXPECTED_ZONE_NAME: &str = "oxz_oximeter";
@@ -1819,7 +2365,7 @@ mod test {
         );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, name, _, _, _, _, _, _| {
+        install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
             assert_eq!(name, EXPECTED_ZONE_NAME);
             Ok(())
         });
@@ -1864,13 +2410,17 @@ mod test {
     async fn ensure_new_service(mgr: &ServiceManager, id: Uuid) {
         let _expectations = expect_new_service();
 
-        mgr.ensure_persistent(ServiceEnsureBody {
+        mgr.ensure_all_services(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
                 gz_addresses: vec![],
-                services: vec![ServiceType::Oximeter],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Oximeter,
+                }],
             }],
         })
         .await
@@ -1880,13 +2430,17 @@ mod test {
     // Prepare to call "ensure" for a service which already exists. We should
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(mgr: &ServiceManager, id: Uuid) {
-        mgr.ensure_persistent(ServiceEnsureBody {
+        mgr.ensure_all_services(ServiceEnsureBody {
             services: vec![ServiceZoneRequest {
                 id,
                 zone_type: ZoneType::Oximeter,
                 addresses: vec![Ipv6Addr::LOCALHOST],
+                dataset: None,
                 gz_addresses: vec![],
-                services: vec![ServiceType::Oximeter],
+                services: vec![ServiceZoneService {
+                    id,
+                    details: ServiceType::Oximeter,
+                }],
             }],
         })
         .await
@@ -1911,33 +2465,19 @@ mod test {
     }
 
     struct TestConfig {
-        config_dir: tempfile::TempDir,
+        config_dir: camino_tempfile::Utf8TempDir,
     }
 
     impl TestConfig {
         async fn new() -> Self {
-            let config_dir = tempfile::TempDir::new().unwrap();
-            tokio::fs::File::create(
-                config_dir.path().join(PARTIAL_CONFIG_FILENAME),
-            )
-            .await
-            .unwrap();
+            let config_dir = camino_tempfile::Utf8TempDir::new().unwrap();
             Self { config_dir }
         }
 
         fn make_config(&self) -> Config {
-            let all_svcs_config_path =
-                self.config_dir.path().join(SERVICE_CONFIG_FILENAME);
-            let svc_config_dir = self.config_dir.path().to_path_buf();
             Config {
+                sled_id: Uuid::new_v4(),
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
-                gateway_address: None,
-                all_svcs_config_path,
-                get_svc_config_dir: Box::new(
-                    move |_zone_name: &str, _svc_name: &str| {
-                        svc_config_dir.clone()
-                    },
-                ),
             }
         }
     }
@@ -1951,22 +2491,32 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log,
+            log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            None, // skip_timesync
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -1990,22 +2540,32 @@ mod test {
         let test_config = TestConfig::new().await;
 
         let mgr = ServiceManager::new(
-            log,
+            log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None,
+            None, // skip_timesync
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2026,12 +2586,14 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_are_recreated_on_reboot",
         );
+        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2040,13 +2602,22 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2062,6 +2633,7 @@ mod test {
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2070,13 +2642,22 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
 
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2094,12 +2675,14 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_services_do_not_persist_without_config",
         );
+        let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2108,12 +2691,21 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )
@@ -2124,14 +2716,17 @@ mod test {
         ensure_new_service(&mgr, id).await;
         drop_service_manager(mgr);
 
-        // Next, delete the config. This means the service we just created will
+        // Next, delete the ledger. This means the service we just created will
         // not be remembered on the next initialization.
-        let config = test_config.make_config();
-        std::fs::remove_file(&config.all_svcs_config_path).unwrap();
+        std::fs::remove_file(
+            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
+        )
+        .unwrap();
 
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
+            GLOBAL_ZONE_BOOTSTRAP_IP,
             Etherstub(UNDERLAY_ETHERSTUB_NAME.to_string()),
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
@@ -2140,12 +2735,22 @@ mod test {
             "rev-test".to_string(),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
+            StorageManager::new(&log).await,
         )
         .await
         .unwrap();
+        mgr.override_ledger_directory(
+            test_config.config_dir.path().to_path_buf(),
+        )
+        .await;
+
+        let port_manager = PortManager::new(
+            logctx.log.new(o!("component" => "PortManager")),
+            Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
+        );
         mgr.sled_agent_started(
             test_config.make_config(),
-            PhysicalLink("link".to_string()),
+            port_manager,
             Ipv6Addr::LOCALHOST,
             Uuid::new_v4(),
         )

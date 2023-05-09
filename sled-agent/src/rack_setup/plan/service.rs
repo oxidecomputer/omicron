@@ -5,28 +5,36 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::SledAgentRequest;
+use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
-    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ZoneType,
+    DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
+    ZoneType,
 };
 use crate::rack_setup::config::SetupServiceConfig as Config;
+use crate::storage_manager::StorageResources;
+use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, RSS_RESERVED_ADDRESSES,
-    SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+};
+use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::internal::shared::{
+    NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
+    retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
 use slog::Logger;
-use std::collections::HashMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -55,10 +63,6 @@ const PANTRY_COUNT: usize = 1;
 // when Nexus provisions external DNS zones.
 const EXTERNAL_DNS_COUNT: usize = 1;
 
-fn rss_service_plan_path() -> PathBuf {
-    Path::new(omicron_common::OMICRON_CONFIG_PATH).join("rss-service-plan.toml")
-}
-
 /// Describes errors which may occur while generating a plan for services.
 #[derive(Error, Debug)]
 pub enum PlanError {
@@ -69,14 +73,17 @@ pub enum PlanError {
         err: std::io::Error,
     },
 
-    #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Error making HTTP request to Sled Agent: {0}")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
     #[error("Error initializing sled via sled-agent: {0}")]
     SledInitialization(String),
+
+    #[error("Failed to allocate service IP for service: {0}")]
+    ServiceIp(&'static str),
 
     #[error("Failed to construct an HTTP client: {0}")]
     HttpClient(reqwest::Error),
@@ -93,35 +100,39 @@ pub struct SledRequest {
     pub services: Vec<ServiceZoneRequest>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub services: HashMap<SocketAddrV6, SledRequest>,
     pub dns_config: DnsConfigParams,
 }
 
+impl Ledgerable for Plan {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
+}
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan.toml";
+
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Plan>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        storage: &StorageResources,
+    ) -> Result<Option<Plan>, PlanError> {
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
+            .collect();
+
         // If we already created a plan for this RSS to allocate
         // services to sleds, re-use that existing plan.
-        let rss_service_plan_path = rss_service_plan_path();
-        if rss_service_plan_path.exists() {
-            info!(log, "RSS plan already created, loading from file");
+        let ledger = Ledger::<Self>::new(log, paths.clone()).await;
 
-            let plan: Self = toml::from_str(
-                &tokio::fs::read_to_string(&rss_service_plan_path)
-                    .await
-                    .map_err(|err| PlanError::Io {
-                        message: format!(
-                            "Loading RSS plan {rss_service_plan_path:?}"
-                        ),
-                        err,
-                    })?,
-            )
-            .map_err(|err| PlanError::Toml {
-                path: rss_service_plan_path,
-                err,
-            })?;
-            Ok(Some(plan))
+        if let Some(ledger) = ledger {
+            info!(log, "RSS plan already created, loading from file");
+            Ok(Some(ledger.data().clone()))
         } else {
             Ok(None)
         }
@@ -195,10 +206,15 @@ impl Plan {
 
             Ok(zpools)
         };
-        let log_failure = |error, _| {
-            warn!(log, "failed to get zpools"; "error" => ?error);
+
+        let log_failure = |error, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to get zpools from {address}"; "error" => ?error);
+            } else if total_duration > std::time::Duration::from_secs(20) {
+                warn!(log, "failed to get zpools from {address}"; "error" => ?error, "total duration" => ?total_duration);
+            }
         };
-        let u2_zpools = retry_notify(
+        let u2_zpools = retry_notify_ext(
             retry_policy_internal_service_aggressive(),
             get_u2_zpools,
             log_failure,
@@ -211,6 +227,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
+        storage: &StorageResources,
         sleds: &HashMap<SocketAddrV6, SledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
@@ -232,6 +249,8 @@ impl Plan {
 
         let mut boundary_ntp_servers = vec![];
         let mut seen_any_scrimlet = false;
+
+        let mut svc_port_builder = ServicePortBuilder::new();
 
         for (idx, (_bootstrap_address, sled_request)) in
             sleds.iter().enumerate()
@@ -264,12 +283,6 @@ impl Plan {
             // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
             if idx < EXTERNAL_DNS_COUNT {
                 let internal_ip = addr_alloc.next().expect("Not enough addrs");
-                let external_ip = services_ip_pool.next().ok_or_else(|| {
-                    PlanError::SledInitialization(
-                        "no IP available in services IP pool for External DNS"
-                            .to_string(),
-                    )
-                })?;
                 let http_port = omicron_common::address::DNS_HTTP_PORT;
                 let dns_port = omicron_common::address::DNS_PORT;
                 let id = Uuid::new_v4();
@@ -281,19 +294,26 @@ impl Plan {
                         http_port,
                     )
                     .unwrap();
+                let (nic, external_ip) =
+                    svc_port_builder.next_dns(id, &mut services_ip_pool)?;
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::ExternalDns,
                     addresses: vec![internal_ip],
+                    dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::ExternalDns {
-                        http_address: SocketAddrV6::new(
-                            internal_ip,
-                            http_port,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddr::new(external_ip, dns_port),
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::ExternalDns {
+                            http_address: SocketAddrV6::new(
+                                internal_ip,
+                                http_port,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddr::new(external_ip, dns_port),
+                            nic,
+                        },
                     }],
                 })
             }
@@ -311,20 +331,21 @@ impl Plan {
                         omicron_common::address::NEXUS_INTERNAL_PORT,
                     )
                     .unwrap();
-                let external_ip = services_ip_pool.next().ok_or_else(|| {
-                    PlanError::SledInitialization(
-                        "no IP available in services IP pool for Nexus"
-                            .to_string(),
-                    )
-                })?;
+                let (nic, external_ip) =
+                    svc_port_builder.next_nexus(id, &mut services_ip_pool)?;
                 request.services.push(ServiceZoneRequest {
                     id,
                     zone_type: ZoneType::Nexus,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Nexus {
-                        internal_ip: address,
-                        external_ip,
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Nexus {
+                            internal_ip: address,
+                            external_ip,
+                            nic,
+                        },
                     }],
                 })
             }
@@ -345,8 +366,12 @@ impl Plan {
                     id,
                     zone_type: ZoneType::Oximeter,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::Oximeter],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::Oximeter,
+                    }],
                 })
             }
 
@@ -364,9 +389,7 @@ impl Plan {
                 request.datasets.push(DatasetEnsureBody {
                     id,
                     zpool_id: u2_zpools[0],
-                    dataset_kind: crate::params::DatasetKind::CockroachDb {
-                        all_addresses: vec![address],
-                    },
+                    dataset_kind: crate::params::DatasetKind::CockroachDb,
                     address,
                 });
             }
@@ -435,17 +458,21 @@ impl Plan {
                     id,
                     zone_type: ZoneType::InternalDns,
                     addresses: vec![dns_addr],
+                    dataset: None,
                     gz_addresses: vec![dns_subnet.gz_address().ip()],
-                    services: vec![ServiceType::InternalDns {
-                        http_address: SocketAddrV6::new(
-                            dns_addr,
-                            DNS_HTTP_PORT,
-                            0,
-                            0,
-                        ),
-                        dns_address: SocketAddrV6::new(
-                            dns_addr, DNS_PORT, 0, 0,
-                        ),
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::InternalDns {
+                            http_address: SocketAddrV6::new(
+                                dns_addr,
+                                DNS_HTTP_PORT,
+                                0,
+                                0,
+                            ),
+                            dns_address: SocketAddrV6::new(
+                                dns_addr, DNS_PORT, 0, 0,
+                            ),
+                        },
                     }],
                 });
             }
@@ -467,8 +494,12 @@ impl Plan {
                     id,
                     zone_type: ZoneType::CruciblePantry,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
-                    services: vec![ServiceType::CruciblePantry],
+                    services: vec![ServiceZoneService {
+                        id,
+                        details: ServiceType::CruciblePantry,
+                    }],
                 })
             }
 
@@ -483,26 +514,32 @@ impl Plan {
                 let (services, svcname) = if idx < BOUNDARY_NTP_COUNT {
                     boundary_ntp_servers
                         .push(format!("{}.host.{}", id, DNS_ZONE));
+                    let (nic, snat_cfg) = svc_port_builder
+                        .next_snat(id, &mut services_ip_pool)?;
                     (
-                        // XXXNTP - these boundary servers need a path to the
-                        // external network via OPTE.
-                        vec![ServiceType::Ntp {
-                            ntp_servers: config.ntp_servers.clone(),
-                            boundary: true,
-                            dns_servers: config.dns_servers.clone(),
-                            domain: None,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::BoundaryNtp {
+                                ntp_servers: config.ntp_servers.clone(),
+                                dns_servers: config.dns_servers.clone(),
+                                domain: None,
+                                nic,
+                                snat_cfg,
+                            },
                         }],
-                        ServiceName::BoundaryNTP,
+                        ServiceName::BoundaryNtp,
                     )
                 } else {
                     (
-                        vec![ServiceType::Ntp {
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            boundary: false,
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
+                        vec![ServiceZoneService {
+                            id,
+                            details: ServiceType::InternalNtp {
+                                ntp_servers: boundary_ntp_servers.clone(),
+                                dns_servers: rack_dns_servers.clone(),
+                                domain: None,
+                            },
                         }],
-                        ServiceName::InternalNTP,
+                        ServiceName::InternalNtp,
                     )
                 };
 
@@ -514,8 +551,9 @@ impl Plan {
                     id,
                     zone_type: ZoneType::Ntp,
                     addresses: vec![address],
+                    dataset: None,
                     gz_addresses: vec![],
-                    services: services,
+                    services,
                 });
             }
 
@@ -537,23 +575,15 @@ impl Plan {
         let plan = Self { services, dns_config };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan =
-            toml::Value::try_from(&plan).unwrap_or_else(|e| {
-                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
-            });
-        let plan_str = toml::to_string(&serialized_plan)
-            .expect("Cannot turn config to string");
-
-        info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_service_plan_path();
-        tokio::fs::write(&path, plan_str).await.map_err(|err| {
-            PlanError::Io {
-                message: format!("Storing RSS service plan to {path:?}"),
-                err,
-            }
-        })?;
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_FILENAME))
+            .collect();
+        let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
+        ledger.commit().await?;
         info!(log, "Service plan written to storage");
-
         Ok(plan)
     }
 }
@@ -575,6 +605,211 @@ impl AddressBumpAllocator {
         }
         self.last_addr = Ipv6Addr::from(segments);
         Some(self.last_addr)
+    }
+}
+
+struct ServicePortBuilder {
+    next_snat_ip: Option<IpAddr>,
+    next_snat_port: Wrapping<u16>,
+
+    dns_v4_ips: Box<dyn Iterator<Item = Ipv4Addr> + Send>,
+    dns_v6_ips: Box<dyn Iterator<Item = Ipv6Addr> + Send>,
+
+    nexus_v4_ips: Box<dyn Iterator<Item = Ipv4Addr> + Send>,
+    nexus_v6_ips: Box<dyn Iterator<Item = Ipv6Addr> + Send>,
+
+    ntp_v4_ips: Box<dyn Iterator<Item = Ipv4Addr> + Send>,
+    ntp_v6_ips: Box<dyn Iterator<Item = Ipv6Addr> + Send>,
+
+    used_macs: HashSet<MacAddr>,
+}
+
+impl ServicePortBuilder {
+    fn new() -> Self {
+        use omicron_common::address::{
+            DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET, NEXUS_OPTE_IPV4_SUBNET,
+            NEXUS_OPTE_IPV6_SUBNET, NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
+        };
+        use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+
+        let dns_v4_ips = Box::new(
+            DNS_OPTE_IPV4_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        let dns_v6_ips = Box::new(
+            DNS_OPTE_IPV6_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        let nexus_v4_ips = Box::new(
+            NEXUS_OPTE_IPV4_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        let nexus_v6_ips = Box::new(
+            NEXUS_OPTE_IPV6_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        let ntp_v4_ips = Box::new(
+            NTP_OPTE_IPV4_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        let ntp_v6_ips = Box::new(
+            NTP_OPTE_IPV6_SUBNET
+                .0
+                .iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+        );
+        Self {
+            next_snat_ip: None,
+            next_snat_port: Wrapping(0),
+            dns_v4_ips,
+            dns_v6_ips,
+            nexus_v4_ips,
+            nexus_v6_ips,
+            ntp_v4_ips,
+            ntp_v6_ips,
+            used_macs: HashSet::new(),
+        }
+    }
+
+    fn random_mac(&mut self) -> MacAddr {
+        let mut mac = MacAddr::random_system();
+        while !self.used_macs.insert(mac) {
+            mac = MacAddr::random_system();
+        }
+        mac
+    }
+
+    fn next_dns(
+        &mut self,
+        svc_id: Uuid,
+        ip_pool: &mut dyn Iterator<Item = IpAddr>,
+    ) -> Result<(NetworkInterface, IpAddr), PlanError> {
+        use omicron_common::address::{
+            DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET,
+        };
+        let external_ip = ip_pool
+            .next()
+            .ok_or_else(|| PlanError::ServiceIp("External DNS"))?;
+
+        let (ip, subnet) = match external_ip {
+            IpAddr::V4(_) => (
+                self.dns_v4_ips.next().unwrap().into(),
+                (*DNS_OPTE_IPV4_SUBNET).into(),
+            ),
+            IpAddr::V6(_) => (
+                self.dns_v6_ips.next().unwrap().into(),
+                (*DNS_OPTE_IPV6_SUBNET).into(),
+            ),
+        };
+
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: svc_id },
+            name: format!("external-dns-{svc_id}").parse().unwrap(),
+            ip,
+            mac: self.random_mac(),
+            subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        };
+
+        Ok((nic, external_ip))
+    }
+
+    fn next_nexus(
+        &mut self,
+        svc_id: Uuid,
+        ip_pool: &mut dyn Iterator<Item = IpAddr>,
+    ) -> Result<(NetworkInterface, IpAddr), PlanError> {
+        use omicron_common::address::{
+            NEXUS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV6_SUBNET,
+        };
+        let external_ip =
+            ip_pool.next().ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
+
+        let (ip, subnet) = match external_ip {
+            IpAddr::V4(_) => (
+                self.nexus_v4_ips.next().unwrap().into(),
+                (*NEXUS_OPTE_IPV4_SUBNET).into(),
+            ),
+            IpAddr::V6(_) => (
+                self.nexus_v6_ips.next().unwrap().into(),
+                (*NEXUS_OPTE_IPV6_SUBNET).into(),
+            ),
+        };
+
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: svc_id },
+            name: format!("nexus-{svc_id}").parse().unwrap(),
+            ip,
+            mac: self.random_mac(),
+            subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        };
+
+        Ok((nic, external_ip))
+    }
+
+    fn next_snat(
+        &mut self,
+        svc_id: Uuid,
+        ip_pool: &mut dyn Iterator<Item = IpAddr>,
+    ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
+        use omicron_common::address::{
+            NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
+        };
+        let snat_ip = self
+            .next_snat_ip
+            .or_else(|| ip_pool.next())
+            .ok_or_else(|| PlanError::ServiceIp("Boundary NTP"))?;
+        let first_port = self.next_snat_port.0;
+        let last_port = first_port + (NUM_SOURCE_NAT_PORTS - 1);
+
+        self.next_snat_port += NUM_SOURCE_NAT_PORTS;
+        if self.next_snat_port.0 == 0 {
+            self.next_snat_ip = None;
+        }
+
+        let snat_cfg = SourceNatConfig { ip: snat_ip, first_port, last_port };
+
+        let (ip, subnet) = match snat_ip {
+            IpAddr::V4(_) => (
+                self.ntp_v4_ips.next().unwrap().into(),
+                (*NTP_OPTE_IPV4_SUBNET).into(),
+            ),
+            IpAddr::V6(_) => (
+                self.ntp_v6_ips.next().unwrap().into(),
+                (*NTP_OPTE_IPV6_SUBNET).into(),
+            ),
+        };
+
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Service { id: svc_id },
+            name: format!("ntp-{svc_id}").parse().unwrap(),
+            ip,
+            mac: self.random_mac(),
+            subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        };
+
+        Ok((nic, snat_cfg))
     }
 }
 

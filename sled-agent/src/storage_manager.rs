@@ -6,34 +6,26 @@
 
 use crate::nexus::LazyNexusClient;
 use crate::params::DatasetKind;
+use crate::storage::dataset::DatasetName;
+use camino::Utf8PathBuf;
 use futures::stream::FuturesOrdered;
 use futures::FutureExt;
 use futures::StreamExt;
-use illumos_utils::dladm::Etherstub;
-use illumos_utils::link::VnicAllocator;
-use illumos_utils::running_zone::{InstalledZone, RunningZone};
-use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{ZpoolKind, ZpoolName};
-use illumos_utils::{zfs::Mountpoint, zone::ZONE_PREFIX, zpool::ZpoolInfo};
+use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
-use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::fs::{create_dir_all, File};
-use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
@@ -42,15 +34,6 @@ use uuid::Uuid;
 use illumos_utils::{zfs::MockZfs as Zfs, zpool::MockZpool as Zpool};
 #[cfg(not(test))]
 use illumos_utils::{zfs::Zfs, zpool::Zpool};
-
-const COCKROACH_SVC: &str = "svc:/system/illumos/cockroachdb";
-const COCKROACH_DEFAULT_SVC: &str = "svc:/system/illumos/cockroachdb:default";
-
-const CLICKHOUSE_SVC: &str = "svc:/system/illumos/clickhouse";
-const CLICKHOUSE_DEFAULT_SVC: &str = "svc:/system/illumos/clickhouse:default";
-
-const CRUCIBLE_AGENT_SVC: &str = "svc:/oxide/crucible/agent";
-const CRUCIBLE_AGENT_DEFAULT_SVC: &str = "svc:/oxide/crucible/agent:default";
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -88,6 +71,19 @@ pub enum Error {
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
 
+    #[error("No U.2 Zpools found")]
+    NoU2Zpool,
+
+    #[error("Failed to parse UUID from {path}: {err}")]
+    ParseUuid {
+        path: Utf8PathBuf,
+        #[source]
+        err: uuid::Error,
+    },
+
+    #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
+    UuidMismatch { name: DatasetName, old: Uuid, new: Uuid },
+
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {
         name: String,
@@ -107,14 +103,14 @@ pub enum Error {
 
     #[error("Failed to serialize toml (intended for {path:?}): {err}")]
     Serialize {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::ser::Error,
     },
 
     #[error("Failed to deserialize toml from {path:?}: {err}")]
     Deserialize {
-        path: PathBuf,
+        path: Utf8PathBuf,
         #[source]
         err: toml::de::Error,
     },
@@ -125,14 +121,15 @@ pub enum Error {
         #[source]
         err: std::io::Error,
     },
+
+    #[error("Underlay not yet initialized")]
+    UnderlayNotInitialized,
 }
 
 /// A ZFS storage pool.
 struct Pool {
     name: ZpoolName,
     info: ZpoolInfo,
-    // ZFS filesytem UUID -> Zone.
-    zones: HashMap<Uuid, RunningZone>,
     parent: DiskIdentity,
 }
 
@@ -142,398 +139,11 @@ impl Pool {
     /// Returns Ok if the pool exists.
     fn new(name: ZpoolName, parent: DiskIdentity) -> Result<Pool, Error> {
         let info = Zpool::get_info(&name.to_string())?;
-        Ok(Pool { name, info, zones: HashMap::new(), parent })
+        Ok(Pool { name, info, parent })
     }
 
-    /// Associate an already running zone with this pool object.
-    ///
-    /// Typically this is used when a dataset within the zone (identified
-    /// by ID) has a running zone (e.g. Crucible, Cockroach) operating on
-    /// behalf of that data.
-    fn add_zone(&mut self, id: Uuid, zone: RunningZone) {
-        self.zones.insert(id, zone);
-    }
-
-    /// Access a zone managing data within this pool.
-    fn get_zone(&self, id: Uuid) -> Option<&RunningZone> {
-        self.zones.get(&id)
-    }
-
-    /// Returns the ID of the pool itself.
-    fn id(&self) -> Uuid {
-        self.name.id()
-    }
-
-    /// Returns the path for the configuration of a particular
-    /// dataset within the pool. This configuration file provides
-    /// the necessary information for zones to "launch themselves"
-    /// after a reboot.
-    async fn dataset_config_path(
-        &self,
-        dataset_id: Uuid,
-    ) -> Result<PathBuf, Error> {
-        let path = std::path::Path::new(omicron_common::OMICRON_CONFIG_PATH)
-            .join(self.id().to_string());
-        create_dir_all(&path).await.map_err(|err| Error::Io {
-            message: format!("creating config dir {path:?}, which would contain config for {dataset_id}"),
-            err,
-        })?;
-        let mut path = path.join(dataset_id.to_string());
-        path.set_extension("toml");
-        Ok(path)
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
-struct DatasetName {
-    // A unique identifier for the Zpool on which the dataset is stored.
-    pool_name: String,
-    // A name for the dataset within the Zpool.
-    dataset_name: String,
-}
-
-impl DatasetName {
-    fn new(pool_name: &str, dataset_name: &str) -> Self {
-        Self {
-            pool_name: pool_name.to_string(),
-            dataset_name: dataset_name.to_string(),
-        }
-    }
-
-    fn full(&self) -> String {
-        format!("{}/{}", self.pool_name, self.dataset_name)
-    }
-}
-
-// Description of a dataset within a ZFS pool, which should be created
-// by the Sled Agent.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-struct DatasetInfo {
-    address: SocketAddrV6,
-    kind: DatasetKind,
-    name: DatasetName,
-}
-
-impl DatasetInfo {
-    fn new(
-        pool: &str,
-        kind: DatasetKind,
-        address: SocketAddrV6,
-    ) -> DatasetInfo {
-        match kind {
-            DatasetKind::CockroachDb { .. } => DatasetInfo {
-                name: DatasetName::new(pool, "cockroachdb"),
-                address,
-                kind,
-            },
-            DatasetKind::Clickhouse { .. } => DatasetInfo {
-                name: DatasetName::new(pool, "clickhouse"),
-                address,
-                kind,
-            },
-            DatasetKind::Crucible { .. } => DatasetInfo {
-                name: DatasetName::new(pool, "crucible"),
-                address,
-                kind,
-            },
-        }
-    }
-
-    fn zone_prefix(&self) -> String {
-        format!("{}{}_", ZONE_PREFIX, self.name.full())
-    }
-
-    async fn start_zone(
-        &self,
-        log: &Logger,
-        zone: &RunningZone,
-        address: SocketAddrV6,
-        do_format: bool,
-    ) -> Result<(), Error> {
-        match self.kind {
-            DatasetKind::CockroachDb { .. } => {
-                info!(log, "start_zone: Loading CRDB manifest");
-                // Load the CRDB manifest.
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/cockroachdb/manifest.xml",
-                ])?;
-
-                // Set parameters which are passed to the CRDB binary.
-                info!(
-                    log,
-                    "start_zone: setting CRDB's config/listen_addr: {}",
-                    address
-                );
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    &format!("config/listen_addr={}", address),
-                ])?;
-
-                info!(log, "start_zone: setting CRDB's config/store");
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    "config/store=/data",
-                ])?;
-                // TODO(https://github.com/oxidecomputer/omicron/issues/727)
-                //
-                // Set these addresses, use "start" instead of
-                // "start-single-node".
-                info!(log, "start_zone: setting CRDB's config/join_addrs");
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_SVC,
-                    "setprop",
-                    &format!("config/join_addrs={}", "unknown"),
-                ])?;
-
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                info!(log, "start_zone: refreshing manifest");
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    COCKROACH_DEFAULT_SVC,
-                    "refresh",
-                ])?;
-
-                info!(log, "start_zone: enabling CRDB service");
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    COCKROACH_DEFAULT_SVC,
-                ])?;
-
-                // Await liveness of the cluster.
-                info!(log, "start_zone: awaiting liveness of CRDB");
-                let check_health = || async {
-                    let http_addr =
-                        SocketAddrV6::new(*address.ip(), 8080, 0, 0);
-                    reqwest::get(format!("http://{}/health?ready=1", http_addr))
-                        .await
-                        .map_err(backoff::BackoffError::transient)
-                };
-                let log_failure = |_, _| {
-                    warn!(log, "cockroachdb not yet alive");
-                };
-                backoff::retry_notify(
-                    backoff::retry_policy_local(),
-                    check_health,
-                    log_failure,
-                )
-                .await
-                .expect("expected an infinite retry loop waiting for crdb");
-
-                info!(log, "CRDB is online");
-                // If requested, format the cluster with the initial tables.
-                if do_format {
-                    info!(log, "Formatting CRDB");
-                    zone.run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &address.to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                    ])?;
-                    zone.run_cmd(&[
-                        "/opt/oxide/cockroachdb/bin/cockroach",
-                        "sql",
-                        "--insecure",
-                        "--host",
-                        &address.to_string(),
-                        "--file",
-                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                    ])?;
-                    info!(log, "Formatting CRDB - Completed");
-                }
-
-                Ok(())
-            }
-            DatasetKind::Clickhouse { .. } => {
-                info!(log, "Initialiting Clickhouse");
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/clickhouse/manifest.xml",
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_SVC,
-                    "setprop",
-                    &format!("config/listen_host={}", address.ip()),
-                ])?;
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_SVC,
-                    "setprop",
-                    "config/store=/data",
-                ])?;
-
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CLICKHOUSE_DEFAULT_SVC,
-                    "refresh",
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    CLICKHOUSE_DEFAULT_SVC,
-                ])?;
-
-                Ok(())
-            }
-            DatasetKind::Crucible { .. } => {
-                info!(log, "Initializing Crucible");
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/crucible/agent.xml",
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "import",
-                    "/var/svc/manifest/site/crucible/downstairs.xml",
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/listen={}", address),
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/dataset={}", self.name.full()),
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_SVC,
-                    "setprop",
-                    &format!("config/uuid={}", Uuid::new_v4()),
-                ])?;
-
-                // Refresh the manifest with the new properties we set,
-                // so they become "effective" properties when the service is enabled.
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCCFG,
-                    "-s",
-                    CRUCIBLE_AGENT_DEFAULT_SVC,
-                    "refresh",
-                ])?;
-
-                zone.run_cmd(&[
-                    illumos_utils::zone::SVCADM,
-                    "enable",
-                    "-t",
-                    CRUCIBLE_AGENT_DEFAULT_SVC,
-                ])?;
-
-                Ok(())
-            }
-        }
-    }
-}
-
-// Ensures that a zone backing a particular dataset is running.
-async fn ensure_running_zone(
-    log: &Logger,
-    vnic_allocator: &VnicAllocator<Etherstub>,
-    dataset_info: &DatasetInfo,
-    dataset_name: &DatasetName,
-    do_format: bool,
-    underlay_address: Ipv6Addr,
-) -> Result<RunningZone, Error> {
-    let address_request = AddressRequest::new_static(
-        IpAddr::V6(*dataset_info.address.ip()),
-        None,
-    );
-
-    let err = RunningZone::get(
-        log,
-        &vnic_allocator,
-        &dataset_info.zone_prefix(),
-        address_request,
-    )
-    .await;
-    match err {
-        Ok(zone) => {
-            info!(log, "Zone for {} is already running", dataset_name.full());
-            return Ok(zone);
-        }
-        Err(illumos_utils::running_zone::GetZoneError::NotFound { .. }) => {
-            info!(log, "Zone for {} was not found", dataset_name.full());
-
-            let installed_zone = InstalledZone::install(
-                log,
-                vnic_allocator,
-                &dataset_info.name.dataset_name,
-                Some(&dataset_name.pool_name),
-                &[zone::Dataset { name: dataset_name.full() }],
-                &[],
-                &[],
-                vec![],
-                None,
-                vec![],
-                vec![],
-            )
-            .await?;
-
-            let zone = RunningZone::boot(installed_zone).await?;
-
-            zone.ensure_address(address_request).await?;
-
-            let gateway = underlay_address;
-            zone.add_default_route(gateway)
-                .await
-                .map_err(Error::ZoneCommand)?;
-
-            dataset_info
-                .start_zone(log, &zone, dataset_info.address, do_format)
-                .await?;
-
-            Ok(zone)
-        }
-        Err(illumos_utils::running_zone::GetZoneError::NotRunning {
-            name,
-            state,
-        }) => {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-            unimplemented!("Handle a zone which exists, but is not running: {name}, in {state:?}");
-        }
-        Err(err) => {
-            // TODO(https://github.com/oxidecomputer/omicron/issues/725):
-            unimplemented!(
-                "Handle a zone which exists, has some other problem: {err}"
-            );
-        }
+    fn parent(&self) -> &DiskIdentity {
+        &self.parent
     }
 }
 
@@ -543,15 +153,20 @@ type NotifyFut =
 
 #[derive(Debug)]
 struct NewFilesystemRequest {
+    dataset_id: Uuid,
     zpool_id: Uuid,
     dataset_kind: DatasetKind,
-    address: SocketAddrV6,
+    responder: oneshot::Sender<Result<DatasetName, Error>>,
+}
+
+struct UnderlayRequest {
+    underlay: UnderlayAccess,
     responder: oneshot::Sender<Result<(), Error>>,
 }
 
 #[derive(PartialEq, Eq, Clone)]
 enum DiskWrapper {
-    Real { disk: Disk, devfs_path: PathBuf },
+    Real { disk: Disk, devfs_path: Utf8PathBuf },
     Synthetic { zpool_name: ZpoolName },
 }
 
@@ -596,7 +211,7 @@ impl DiskWrapper {
 }
 
 #[derive(Clone)]
-struct StorageResources {
+pub struct StorageResources {
     // All disks, real and synthetic, being managed by this sled
     disks: Arc<Mutex<HashMap<DiskIdentity, DiskWrapper>>>,
 
@@ -604,15 +219,74 @@ struct StorageResources {
     pools: Arc<Mutex<HashMap<Uuid, Pool>>>,
 }
 
+impl StorageResources {
+    /// Returns the identity of the boot disk.
+    ///
+    /// If this returns `None`, we have not processed the boot disk yet.
+    pub async fn boot_disk(&self) -> Option<DiskIdentity> {
+        let disks = self.disks.lock().await;
+        disks.iter().find_map(|(id, disk)| {
+            match disk {
+                // This is the "real" use-case: if we have real disks, query
+                // their properties to identify if they truly are the boot disk.
+                DiskWrapper::Real { disk, .. } => {
+                    if disk.is_boot_disk() {
+                        return Some(id.clone());
+                    }
+                }
+                // This is the "less real" use-case: if we have synthetic disks,
+                // just label the first M.2-looking one as a "boot disk".
+                DiskWrapper::Synthetic { .. } => {
+                    if matches!(disk.variant(), DiskVariant::M2) {
+                        return Some(disk.identity());
+                    }
+                }
+            };
+            None
+        })
+    }
+
+    /// Returns all M.2 zpools
+    pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
+        self.all_zpools(DiskVariant::M2).await
+    }
+
+    /// Returns all mountpoints within all M.2s for a particular dataset.
+    pub async fn all_m2_mountpoints(&self, dataset: &str) -> Vec<Utf8PathBuf> {
+        let m2_zpools = self.all_m2_zpools().await;
+        m2_zpools
+            .iter()
+            .map(|zpool| zpool.dataset_mountpoint(dataset))
+            .collect()
+    }
+
+    /// Returns all zpools of a particular variant
+    pub async fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
+        let disks = self.disks.lock().await;
+        disks
+            .values()
+            .filter_map(|disk| {
+                if disk.variant() == variant {
+                    return Some(disk.zpool_name().clone());
+                }
+                None
+            })
+            .collect()
+    }
+}
+
+/// Describes the access to the underlay used by the StorageManager.
+pub struct UnderlayAccess {
+    pub lazy_nexus_client: LazyNexusClient,
+    pub sled_id: Uuid,
+}
+
 // A worker that starts zones for pools as they are received.
 struct StorageWorker {
     log: Logger,
-    sled_id: Uuid,
-    lazy_nexus_client: LazyNexusClient,
     nexus_notifications: FuturesOrdered<NotifyFut>,
     rx: mpsc::Receiver<StorageWorkerRequest>,
-    vnic_allocator: VnicAllocator<Etherstub>,
-    underlay_address: Ipv6Addr,
+    underlay: Arc<Mutex<Option<UnderlayAccess>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -626,84 +300,43 @@ impl StorageWorker {
     // creating it if `do_format` is true.
     //
     // Returns the UUID attached to the ZFS filesystem.
-    fn ensure_dataset_with_id(
+    fn ensure_dataset(
+        &mut self,
+        dataset_id: Uuid,
         dataset_name: &DatasetName,
-        do_format: bool,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<(), Error> {
+        let zoned = true;
         let fs_name = &dataset_name.full();
-        Zfs::ensure_zoned_filesystem(
-            &fs_name,
-            Mountpoint::Path(PathBuf::from("/data")),
+        let do_format = true;
+        Zfs::ensure_filesystem(
+            &dataset_name.full(),
+            Mountpoint::Path(Utf8PathBuf::from("/data")),
+            zoned,
             do_format,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
             if let Ok(id) = id_str.parse::<Uuid>() {
-                return Ok(id);
+                if id != dataset_id {
+                    return Err(Error::UuidMismatch {
+                        name: dataset_name.clone(),
+                        old: id,
+                        new: dataset_id,
+                    });
+                }
+                return Ok(());
             }
         }
-        let id = Uuid::new_v4();
-        Zfs::set_oxide_value(&fs_name, "uuid", &id.to_string())?;
-        Ok(id)
-    }
-
-    // Starts the zone for a dataset within a particular zpool.
-    //
-    // If requested via the `do_format` parameter, may also initialize
-    // these resources.
-    //
-    // Returns the UUID attached to the underlying ZFS dataset.
-    // Returns (was_inserted, Uuid).
-    async fn initialize_dataset_and_zone(
-        &mut self,
-        pool: &mut Pool,
-        dataset_info: &DatasetInfo,
-        do_format: bool,
-    ) -> Result<(bool, Uuid), Error> {
-        // Ensure the underlying dataset exists before trying to poke at zones.
-        let dataset_name = &dataset_info.name;
-        info!(&self.log, "Ensuring dataset {} exists", dataset_name.full());
-        let id =
-            StorageWorker::ensure_dataset_with_id(&dataset_name, do_format)?;
-
-        // If this zone has already been processed by us, return immediately.
-        if let Some(_) = pool.get_zone(id) {
-            return Ok((false, id));
-        }
-        // Otherwise, the zone may or may not exist.
-        // We need to either look up or create the zone.
-        info!(
-            &self.log,
-            "Ensuring zone for {} is running",
-            dataset_name.full()
-        );
-        let zone = ensure_running_zone(
-            &self.log,
-            &self.vnic_allocator,
-            dataset_info,
-            &dataset_name,
-            do_format,
-            self.underlay_address,
-        )
-        .await?;
-
-        info!(
-            &self.log,
-            "Zone {} with address {} is running",
-            zone.name(),
-            dataset_info.address,
-        );
-        pool.add_zone(id, zone);
-        Ok((true, id))
+        Zfs::set_oxide_value(&fs_name, "uuid", &dataset_id.to_string())?;
+        Ok(())
     }
 
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
     fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
         let pool_id = pool.name.id();
-        let sled_id = self.sled_id;
         let DiskIdentity { vendor, serial, model } = pool.parent.clone();
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
+        let underlay = self.underlay.clone();
 
         let notify_nexus = move || {
             let zpool_request = ZpoolPutRequest {
@@ -712,8 +345,17 @@ impl StorageWorker {
                 disk_serial: serial.clone(),
                 disk_model: model.clone(),
             };
-            let lazy_nexus_client = lazy_nexus_client.clone();
+            let underlay = underlay.clone();
+
             async move {
+                let underlay_guard = underlay.lock().await;
+                let Some(underlay) = underlay_guard.as_ref() else {
+                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                };
+                let sled_id = underlay.sled_id;
+                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                drop(underlay_guard);
+
                 lazy_nexus_client
                     .get()
                     .await
@@ -729,14 +371,18 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus, will retry in {:?}", delay;
-            );
+        let name = pool.name.clone();
+        let disk = pool.parent().clone();
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about a new pool {name} on disk {disk:?}";
+                    "total duration" => ?total_duration);
+            }
         };
         self.nexus_notifications.push_back(
-            backoff::retry_notify(
+            backoff::retry_notify_ext(
                 backoff::retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_post_failure,
@@ -876,6 +522,7 @@ impl StorageWorker {
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
+        sled_hardware::Disk::ensure_zpool_ready(&self.log, &zpool_name)?;
         let disk = DiskWrapper::Synthetic { zpool_name };
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }
@@ -906,7 +553,12 @@ impl StorageWorker {
         disk: UnparsedDisk,
     ) -> Result<(), Error> {
         info!(self.log, "Deleting disk: {disk:?}");
-
+        // TODO: Don't we need to do some accounting, e.g. for all the information
+        // that's no longer accessible? Or is that up to Nexus to figure out at
+        // a later point-in-time?
+        //
+        // If we're storing zone images on the M.2s for internal services, how
+        // do we reconcile them?
         let mut disks = resources.disks.lock().await;
         self.delete_disk_locked(resources, &mut disks, disk.identity()).await
     }
@@ -930,17 +582,25 @@ impl StorageWorker {
     // Adds a "notification to nexus" to `self.nexus_notifications`, informing it
     // about the addition/removal of a physical disk to this sled.
     fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
-        let sled_id = self.sled_id;
-        let lazy_nexus_client = self.lazy_nexus_client.clone();
+        let underlay = self.underlay.clone();
+        let disk2 = disk.clone();
         let notify_nexus = move || {
             let disk = disk.clone();
-            let lazy_nexus_client = lazy_nexus_client.clone();
+            let underlay = underlay.clone();
             async move {
+                let underlay_guard = underlay.lock().await;
+                let Some(underlay) = underlay_guard.as_ref() else {
+                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                };
+                let sled_id = underlay.sled_id;
+                let lazy_nexus_client = underlay.lazy_nexus_client.clone();
+                drop(underlay_guard);
+
                 let nexus = lazy_nexus_client.get().await.map_err(|e| {
                     backoff::BackoffError::transient(e.to_string())
                 })?;
 
-                match disk {
+                match &disk {
                     NotifyDiskRequest::Add { identity, variant } => {
                         let request = PhysicalDiskPutRequest {
                             model: identity.model.clone(),
@@ -972,14 +632,19 @@ impl StorageWorker {
             }
         };
         let log = self.log.clone();
-        let log_post_failure = move |_, delay| {
-            warn!(
-                log,
-                "failed to notify nexus, will retry in {:?}", delay;
-            );
+        // This notification is often invoked before Nexus has started
+        // running, so avoid flagging any errors as concerning until some
+        // time has passed.
+        let log_post_failure = move |_, call_count, total_duration| {
+            if call_count == 0 {
+                info!(log, "failed to notify nexus about {disk2:?}");
+            } else if total_duration > std::time::Duration::from_secs(30) {
+                warn!(log, "failed to notify nexus about {disk2:?}";
+                    "total duration" => ?total_duration);
+            }
         };
         self.nexus_notifications.push_back(
-            backoff::retry_notify(
+            backoff::retry_notify_ext(
                 backoff::retry_policy_internal_service_aggressive(),
                 notify_nexus,
                 log_post_failure,
@@ -1012,35 +677,6 @@ impl StorageWorker {
         })?;
         // Notify Nexus of the zpool.
         self.add_zpool_notify(&pool, size);
-
-        // If we find filesystems within our datasets, ensure their
-        // zones are up-and-running.
-        let mut datasets = vec![];
-        let existing_filesystems = Zfs::list_datasets(&pool_name.to_string())?;
-        for fs_name in existing_filesystems {
-            info!(
-                &self.log,
-                "StorageWorker loading fs {} on zpool {}",
-                fs_name,
-                pool_name.to_string()
-            );
-            // We intentionally do not exit on error here -
-            // otherwise, the failure of a single dataset would
-            // stop the storage manager from processing all storage.
-            //
-            // Instead, we opt to log the failure.
-            let dataset_name =
-                DatasetName::new(&pool_name.to_string(), &fs_name);
-            let result = self.load_dataset(pool, &dataset_name).await;
-            match result {
-                Ok(dataset) => datasets.push(dataset),
-                Err(e) => warn!(
-                    &self.log,
-                    "StorageWorker Failed to load dataset: {}", e
-                ),
-            }
-        }
-
         Ok(())
     }
 
@@ -1049,7 +685,7 @@ impl StorageWorker {
         &mut self,
         resources: &StorageResources,
         request: &NewFilesystemRequest,
-    ) -> Result<(), Error> {
+    ) -> Result<DatasetName, Error> {
         info!(self.log, "add_dataset: {:?}", request);
         let mut pools = resources.pools.lock().await;
         let pool = pools.get_mut(&request.zpool_id).ok_or_else(|| {
@@ -1058,81 +694,10 @@ impl StorageWorker {
                 request.zpool_id
             ))
         })?;
-
-        let pool_name = pool.info.name();
-        let dataset_info = DatasetInfo::new(
-            pool_name,
-            request.dataset_kind.clone(),
-            request.address,
-        );
-        let (is_new_dataset, id) = self
-            .initialize_dataset_and_zone(
-                pool,
-                &dataset_info,
-                // do_format=
-                true,
-            )
-            .await?;
-
-        if !is_new_dataset {
-            return Ok(());
-        }
-
-        // Now that the dataset has been initialized, record the configuration
-        // so it can re-initialize itself after a reboot.
-        let path = pool.dataset_config_path(id).await?;
-        let info_str = toml::to_string(&dataset_info)
-            .map_err(|err| Error::Serialize { path: path.clone(), err })?;
-        let pool_name = pool.info.name();
-        let mut file = File::create(&path).await.map_err(|err| Error::Io {
-            message: format!("Failed creating config file at {path:?} for pool {pool_name}, dataset: {id}"),
-            err,
-        })?;
-        file.write_all(info_str.as_bytes()).await.map_err(|err| Error::Io {
-            message: format!("Failed writing config to {path:?} for pool {pool_name}, dataset: {id}"),
-            err,
-        })?;
-
-        Ok(())
-    }
-
-    async fn load_dataset(
-        &mut self,
-        pool: &mut Pool,
-        dataset_name: &DatasetName,
-    ) -> Result<(Uuid, SocketAddrV6, DatasetKind), Error> {
-        let name = dataset_name.full();
-        let id = Zfs::get_oxide_value(&name, "uuid")?
-            .parse::<Uuid>()
-            .map_err(|err| Error::ParseDatasetUuid { name, err })?;
-        let config_path = pool.dataset_config_path(id).await?;
-        info!(
-            self.log,
-            "Loading Dataset from {}",
-            config_path.to_string_lossy()
-        );
-        let pool_name = pool.info.name();
-        let dataset_info: DatasetInfo =
-            toml::from_str(
-                &tokio::fs::read_to_string(&config_path).await.map_err(|err| Error::Io {
-                    message: format!("read config for pool {pool_name}, dataset {dataset_name:?} from {config_path:?}"),
-                    err,
-                })?
-            ).map_err(|err| {
-                Error::Deserialize {
-                    path: config_path,
-                    err,
-                }
-            })?;
-        self.initialize_dataset_and_zone(
-            pool,
-            &dataset_info,
-            // do_format=
-            false,
-        )
-        .await?;
-
-        Ok((id, dataset_info.address, dataset_info.kind))
+        let dataset_name =
+            DatasetName::new(pool.name.clone(), request.dataset_kind.clone());
+        self.ensure_dataset(request.dataset_id, &dataset_name)?;
+        Ok(dataset_name)
     }
 
     // Small wrapper around `Self::do_work_internal` that ensures we always
@@ -1184,6 +749,10 @@ impl StorageWorker {
                         DisksChanged(disks) => {
                             self.ensure_using_exactly_these_disks(&resources, disks).await?;
                         },
+                        SetupUnderlayAccess(UnderlayRequest { underlay, responder }) => {
+                            self.underlay.lock().await.replace(underlay);
+                            let _ = responder.send(Ok(()));
+                        }
                     }
                 },
             }
@@ -1191,17 +760,16 @@ impl StorageWorker {
     }
 }
 
-#[derive(Debug)]
 enum StorageWorkerRequest {
     AddDisk(UnparsedDisk),
     AddSyntheticDisk(ZpoolName),
     RemoveDisk(UnparsedDisk),
     DisksChanged(Vec<UnparsedDisk>),
     NewFilesystem(NewFilesystemRequest),
+    SetupUnderlayAccess(UnderlayRequest),
 }
 
-/// A sled-local view of all attached storage.
-pub struct StorageManager {
+struct StorageManagerInner {
     log: Logger,
 
     resources: StorageResources,
@@ -1212,39 +780,37 @@ pub struct StorageManager {
     task: JoinHandle<Result<(), Error>>,
 }
 
+/// A sled-local view of all attached storage.
+#[derive(Clone)]
+pub struct StorageManager {
+    inner: Arc<StorageManagerInner>,
+}
+
 impl StorageManager {
     /// Creates a new [`StorageManager`] which should manage local storage.
-    pub async fn new(
-        log: &Logger,
-        sled_id: Uuid,
-        lazy_nexus_client: LazyNexusClient,
-        etherstub: Etherstub,
-        underlay_address: Ipv6Addr,
-    ) -> Self {
+    pub async fn new(log: &Logger) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let resources = StorageResources {
             disks: Arc::new(Mutex::new(HashMap::new())),
             pools: Arc::new(Mutex::new(HashMap::new())),
         };
         let (tx, rx) = mpsc::channel(30);
-        let vnic_allocator = VnicAllocator::new("Storage", etherstub);
 
         StorageManager {
-            log: log.clone(),
-            resources: resources.clone(),
-            tx,
-            task: tokio::task::spawn(async move {
-                let mut worker = StorageWorker {
-                    log,
-                    sled_id,
-                    lazy_nexus_client,
-                    nexus_notifications: FuturesOrdered::new(),
-                    rx,
-                    vnic_allocator,
-                    underlay_address,
-                };
+            inner: Arc::new(StorageManagerInner {
+                log: log.clone(),
+                resources: resources.clone(),
+                tx,
+                task: tokio::task::spawn(async move {
+                    let mut worker = StorageWorker {
+                        log,
+                        nexus_notifications: FuturesOrdered::new(),
+                        rx,
+                        underlay: Arc::new(Mutex::new(None)),
+                    };
 
-                worker.do_work(resources).await
+                    worker.do_work(resources).await
+                }),
             }),
         }
     }
@@ -1261,41 +827,73 @@ impl StorageManager {
     where
         I: IntoIterator<Item = UnparsedDisk>,
     {
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::DisksChanged(
                 unparsed_disks.into_iter().collect::<Vec<_>>(),
             ))
             .await
-            .unwrap();
+            .map_err(|e| e.to_string())
+            .expect("Failed to send DisksChanged request");
     }
 
     /// Adds a disk and associated zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_disk].
     pub async fn upsert_disk(&self, disk: UnparsedDisk) {
-        info!(self.log, "Upserting disk: {disk:?}");
-        self.tx.send(StorageWorkerRequest::AddDisk(disk)).await.unwrap();
+        info!(self.inner.log, "Upserting disk: {disk:?}");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::AddDisk(disk))
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send AddDisk request");
     }
 
     /// Removes a disk, if it's tracked by the storage manager, as well
     /// as any associated zpools.
     // Receiver implemented by [StorageWorker::delete_disk].
     pub async fn delete_disk(&self, disk: UnparsedDisk) {
-        info!(self.log, "Deleting disk: {disk:?}");
-        self.tx.send(StorageWorkerRequest::RemoveDisk(disk)).await.unwrap();
+        info!(self.inner.log, "Deleting disk: {disk:?}");
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::RemoveDisk(disk))
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send RemoveDisk request");
     }
 
     /// Adds a synthetic zpool to the storage manager.
     // Receiver implemented by [StorageWorker::upsert_synthetic_disk].
     pub async fn upsert_synthetic_disk(&self, name: ZpoolName) {
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::AddSyntheticDisk(name))
             .await
-            .unwrap();
+            .map_err(|e| e.to_string())
+            .expect("Failed to send AddSyntheticDisk request");
+    }
+
+    /// Adds underlay access to the storage manager.
+    pub async fn setup_underlay_access(
+        &self,
+        underlay: UnderlayAccess,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(StorageWorkerRequest::SetupUnderlayAccess(UnderlayRequest {
+                underlay,
+                responder: tx,
+            }))
+            .await
+            .map_err(|e| e.to_string())
+            .expect("Failed to send SetupUnderlayAccess request");
+        rx.await.expect("Failed to await underlay setup")
     }
 
     pub async fn get_zpools(&self) -> Result<Vec<crate::params::Zpool>, Error> {
-        let disks = self.resources.disks.lock().await;
-        let pools = self.resources.pools.lock().await;
+        let disks = self.inner.resources.disks.lock().await;
+        let pools = self.inner.resources.pools.lock().await;
 
         let mut zpools = Vec::with_capacity(pools.len());
 
@@ -1318,31 +916,37 @@ impl StorageManager {
 
     pub async fn upsert_filesystem(
         &self,
+        dataset_id: Uuid,
         zpool_id: Uuid,
         dataset_kind: DatasetKind,
-        address: SocketAddrV6,
-    ) -> Result<(), Error> {
+    ) -> Result<DatasetName, Error> {
         let (tx, rx) = oneshot::channel();
         let request = NewFilesystemRequest {
+            dataset_id,
             zpool_id,
             dataset_kind,
-            address,
             responder: tx,
         };
 
-        self.tx
+        self.inner
+            .tx
             .send(StorageWorkerRequest::NewFilesystem(request))
             .await
+            .map_err(|e| e.to_string())
             .expect("Storage worker bug (not alive)");
-        rx.await.expect(
+        let dataset_name = rx.await.expect(
             "Storage worker bug (dropped responder without responding)",
         )?;
 
-        Ok(())
+        Ok(dataset_name)
+    }
+
+    pub fn resources(&self) -> &StorageResources {
+        &self.inner.resources
     }
 }
 
-impl Drop for StorageManager {
+impl Drop for StorageManagerInner {
     fn drop(&mut self) {
         // NOTE: Ideally, with async drop, we'd await completion of the worker
         // somehow.
@@ -1351,21 +955,5 @@ impl Drop for StorageManager {
         // task to ensure it does not remain alive beyond the StorageManager
         // itself.
         self.task.abort();
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn serialize_dataset_info() {
-        let dataset_info = DatasetInfo {
-            address: "[::1]:8080".parse().unwrap(),
-            kind: DatasetKind::Crucible,
-            name: DatasetName::new("pool", "dataset"),
-        };
-
-        toml::to_string(&dataset_info).unwrap();
     }
 }

@@ -2,11 +2,11 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-opte-0.21"
+#: target = "lab-opte-0.22"
 #: output_rules = [
-#:	"%/var/svc/log/system-illumos-sled-agent:default.log",
+#:	"%/var/svc/log/oxide-sled-agent:default.log",
+#:	"%/zone/oxz_*/root/var/svc/log/oxide-*.log",
 #:	"%/zone/oxz_*/root/var/svc/log/system-illumos-*.log",
-#:	"!/zone/oxz_propolis-server_*/root/var/svc/log/*.log",
 #: ]
 #: skip_clone = true
 #:
@@ -43,6 +43,14 @@ _exit_trap() {
 		--client /opt/oxide/softnpu/stuff/client \
 		standalone \
 		dump-state
+	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
+	for p in $PORTS; do
+		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
+		for l in $LAYERS; do
+			pfexec /opt/oxide/opte/bin/opteadm dump-layer -p $p $l
+		done
+	done
 
 	pfexec zfs list
 	pfexec zpool list
@@ -103,13 +111,6 @@ fi
 #
 pfexec /sbin/zfs create -o mountpoint=/zone rpool/zone
 
-#
-# The sled agent will ostensibly write things into /var/oxide, so make that a
-# tmpfs as well:
-#
-pfexec mkdir -p /var/oxide
-pfexec mount -F tmpfs -O swap /var/oxide
-
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
@@ -140,56 +141,71 @@ pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
 pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
-# XXX Right now, the Nexus external API is available on a specific IPv4 address
-# on a canned subnet.  We need to create an address in the global zone such
-# that we can, in the test below, reach Nexus.
-#
-# This must be kept in sync with the IP in "smf/sled-agent/non-gimlet/config-rss.toml" and
-# the prefix length which apparently defaults (in the Rust code) to /24.
-#
-pfexec ipadm create-addr -T static -a 192.168.1.199/24 igb0/sidehatch
-
-#
-# Modify config-rss.toml in the sled-agent zone to use our system's IP and MAC
-# address for upstream connectivity.
-#
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
-sed -e 's/^# address =.*$/address = "192.168.1.199"/' \
-	-e "s/^mac =.*$/mac = \"$(dladm show-phys -m -p -o ADDRESS | head -n 1)\"/" \
-	-i pkg/config-rss.toml
-tar rf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -rf pkg
-
-#
-# This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
-# before the install.  This doesn't work right now because, above, we made
-# /var/oxide a file system so you can't remove it (EBUSY) like a regular
-# directory.  The lab-netdev target is a ramdisk system that is always cleared
+# The lab-netdev target is a ramdisk system that is always cleared
 # out between runs, so it has not had any state yet that requires
 # uninstallation.
 #
 OMICRON_NO_UNINSTALL=1 \
     ptime -m pfexec ./target/release/omicron-package -t test install
 
-./tests/bootstrap
-
-# NOTE: this script configures softnpu's "rack network" settings using swadm
-GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
-
 # NOTE: this command configures proxy arp for softnpu. This is needed if you want to be
 # able to reach instances from the same L2 network segment.
-# /out/softnpu/scadm standalone add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+# Keep consistent with `get_system_ip_pool` in `end-to-end-tests`.
+IP_POOL_START="192.168.1.50"
+IP_POOL_END="192.168.1.90"
+# `dladm` won't return leading zeroes but `scadm` expects them, use sed to add any missing zeroes
+SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | sed -E 's/[ :]/&0/g; s/0([^:]{2}(:|$))/\1/g')
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
 	--client /opt/oxide/softnpu/stuff/client \
 	standalone \
-	add-proxy-arp 192.168.1.50 192.168.1.90 a8:e1:de:01:70:1d
+	add-proxy-arp $IP_POOL_START $IP_POOL_END $SOFTNPU_MAC
+
+# We also need to configure proxy arp for any services which use OPTE for external connectivity (e.g. Nexus)
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SERVICE_IP_POOL_START="$(sed -n 's/first = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+SERVICE_IP_POOL_END="$(sed -n 's/last = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -r pkg
+
+pfexec ./out/softnpu/scadm \
+	--server /opt/oxide/softnpu/stuff/server \
+	--client /opt/oxide/softnpu/stuff/client \
+	standalone \
+	add-proxy-arp $SERVICE_IP_POOL_START $SERVICE_IP_POOL_END $SOFTNPU_MAC
 
 pfexec ./out/softnpu/scadm \
 	--server /opt/oxide/softnpu/stuff/server \
 	--client /opt/oxide/softnpu/stuff/client \
 	standalone \
 	dump-state
+
+# Wait for switch zone to come up so that we can configure it
+retry=0
+until curl --head --silent -o /dev/null "http://[fd00:1122:3344:101::2]:12224/"
+do
+	if [[ $retry -gt 30 ]]; then
+		echo "Failed to reach switch zone after 30 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+
+# Nexus (and any instances using the above IP pool) are configured to use external
+# IPs from a fixed subnet (192.168.1.0/24). OPTE/SoftNPU/Boundary Services take care
+# of NATing between the private VPC networks and this "external network".
+# We create a static IP in this subnet in the global zone and configure the switch
+# to use it as the default gateway.
+# NOTE: Keep in sync with $[SERVICE_]IP_POOL_{START,END}
+export GATEWAY_IP=192.168.1.199
+export GATEWAY_MAC=$(dladm show-phys -m -p -o ADDRESS | head -n 1)
+pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
+
+# NOTE: this script configures softnpu's "rack network" settings using swadm
+./tools/scrimlet/softnpu-init.sh
+
+export RUST_BACKTRACE=1
+./tests/bootstrap
 
 rm ./tests/bootstrap
 for test_bin in tests/*; do

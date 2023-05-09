@@ -53,7 +53,6 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::to_list;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
@@ -63,7 +62,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::Saga;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -192,9 +190,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
 
-        api.register(saga_list)?;
-        api.register(saga_view)?;
-
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
 
@@ -258,7 +253,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::console_page)?;
+        api.register(console_api::console_projects)?;
+        api.register(console_api::console_projects_new)?;
+        api.register(console_api::console_silo_utilization)?;
+        api.register(console_api::console_silo_access)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
         api.register(console_api::console_system_page)?;
@@ -651,7 +649,7 @@ async fn silo_user_view(
 
 // Silo identity providers
 
-/// List a silo's IDPs_name
+/// List a silo's IdP's name
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers",
@@ -688,7 +686,7 @@ async fn silo_identity_provider_list(
 
 // Silo SAML identity providers
 
-/// Create a SAML IDP
+/// Create a SAML IdP
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
@@ -717,7 +715,7 @@ async fn saml_identity_provider_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a SAML IDP
+/// Fetch a SAML IdP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
@@ -1164,7 +1162,7 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the IP pool used for Oxide services.
+/// Fetch the IP pool used for Oxide services
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
@@ -1187,7 +1185,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
 /// List ranges for an IP pool
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for an IP pool. Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1279,9 +1277,10 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services.
+/// List ranges for the IP pool used for Oxide services
 ///
-/// Ranges are ordered by their first address.
+/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
+/// their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1322,7 +1321,7 @@ async fn ip_pool_service_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool used for Oxide services.
+/// Add a range to an IP pool used for Oxide services
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
@@ -1343,7 +1342,7 @@ async fn ip_pool_service_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool used for Oxide services.
+/// Remove a range from an IP pool used for Oxide services
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
@@ -1541,6 +1540,8 @@ async fn disk_metrics_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Start importing blocks into a disk
+///
 /// Start the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1601,6 +1602,8 @@ async fn disk_bulk_write_import(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Stop importing blocks into a disk
+///
 /// Stop the process of importing blocks into a disk
 #[endpoint {
     method = POST,
@@ -1630,7 +1633,7 @@ async fn disk_bulk_write_import_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Send request to import blocks from URL
+/// Request to import blocks from URL
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/import",
@@ -1663,7 +1666,7 @@ async fn disk_import_blocks_from_url(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Finalize disk when imports are done
+/// Confirm disk block import completion
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/finalize",
@@ -2088,12 +2091,12 @@ async fn instance_disk_detach(
     disk_to_detach: TypedBody<params::DiskPath>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let disk = disk_to_detach.into_inner().disk;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk = disk_to_detach.into_inner().disk;
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
@@ -2146,7 +2149,7 @@ async fn certificate_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new system-wide x.509 certificate.
+/// Create a new system-wide x.509 certificate
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
 /// external connections.
@@ -2401,6 +2404,8 @@ async fn image_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Promote a project image
+///
 /// Promote a project image to be visible to all projects in the silo
 #[endpoint {
     method = POST,
@@ -2910,7 +2915,7 @@ async fn vpc_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a subnet
+/// List subnets
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets",
@@ -3207,7 +3212,7 @@ async fn vpc_router_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get a router
+/// Fetch a router
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
@@ -4049,63 +4054,6 @@ async fn update_deployment_view(
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
-
-// Sagas
-
-/// List sagas
-#[endpoint {
-    method = GET,
-    path = "/v1/system/sagas",
-    tags = ["system"],
-}]
-async fn saga_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Saga>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let saga_stream = nexus.sagas_list(&opctx, &pagparams).await?;
-        let view_list = to_list(saga_stream).await;
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            view_list,
-            &|_, saga: &Saga| saga.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Saga requests
-#[derive(Deserialize, JsonSchema)]
-struct SagaPathParam {
-    saga_id: Uuid,
-}
-
-/// Fetch a saga
-#[endpoint {
-    method = GET,
-    path = "/v1/system/sagas/{saga_id}",
-    tags = ["system"],
-}]
-async fn saga_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SagaPathParam>,
-) -> Result<HttpResponseOk<Saga>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let saga = nexus.saga_get(&opctx, path.saga_id).await?;
-        Ok(HttpResponseOk(saga))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
 // Silo users
 
 /// List users

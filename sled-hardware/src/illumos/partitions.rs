@@ -6,10 +6,10 @@
 
 use crate::illumos::gpt;
 use crate::{DiskError, DiskPaths, DiskVariant, Partition};
+use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
 use slog::info;
 use slog::Logger;
-use std::path::Path;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -38,7 +38,7 @@ static U2_EXPECTED_PARTITIONS: [Partition; U2_EXPECTED_PARTITION_COUNT] =
     [Partition::ZfsPool];
 
 fn parse_partition_types<const N: usize>(
-    path: &Path,
+    path: &Utf8Path,
     partitions: &Vec<impl gpt::LibEfiPartition>,
     expected_partitions: &[Partition; N],
 ) -> Result<Vec<Partition>, DiskError> {
@@ -100,21 +100,13 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     let gpt = match GPT::read(&path) {
         Ok(gpt) => {
             // This should be the common steady-state case
-            info!(
-                log,
-                "Disk at {} already has a GPT",
-                paths.devfs_path.display()
-            );
+            info!(log, "Disk at {} already has a GPT", paths.devfs_path);
             gpt
         }
         Err(libefi_illumos::Error::LabelNotFound) => {
             // Fresh U.2 disks are an example of devices where "we don't expect
             // a GPT to exist".
-            info!(
-                log,
-                "Disk at {} does not have a GPT",
-                paths.devfs_path.display()
-            );
+            info!(log, "Disk at {} does not have a GPT", paths.devfs_path);
 
             // For ZFS-implementation-specific reasons, Zpool create can only
             // act on devices under the "/dev" hierarchy, rather than the device
@@ -126,11 +118,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
             };
             match variant {
                 DiskVariant::U2 => {
-                    info!(
-                        log,
-                        "Formatting zpool on disk {}",
-                        paths.devfs_path.display()
-                    );
+                    info!(log, "Formatting zpool on disk {}", paths.devfs_path);
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(Uuid::new_v4());
                     Zpool::create(zpool_name, dev_path)?;
@@ -169,9 +157,10 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
 mod test {
     use super::*;
     use crate::DiskPaths;
+    use camino::Utf8PathBuf;
     use illumos_utils::zpool::MockZpool;
     use omicron_test_utils::dev::test_setup_log;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     struct FakePartition {
         index: usize,
@@ -201,7 +190,7 @@ mod test {
         );
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         let result = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
             &DiskPaths { devfs_path, dev_path: None },
@@ -222,20 +211,23 @@ mod test {
             test_setup_log("ensure_partition_layout_u2_format_with_dev_path");
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         // We expect that formatting a zpool will involve calling
         // "Zpool::create" with the provided "dev_path".
         let create_ctx = MockZpool::create_context();
         create_ctx.expect().return_once(|_, observed_dev_path| {
-            assert_eq!(&PathBuf::from(DEV_PATH), observed_dev_path);
+            assert_eq!(&Utf8PathBuf::from(DEV_PATH), observed_dev_path);
             Ok(())
         });
 
         let partitions = internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
-            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            &DiskPaths {
+                devfs_path,
+                dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
+            },
             DiskVariant::U2,
         )
         .expect("Should have succeeded partitioning disk");
@@ -251,12 +243,15 @@ mod test {
         let logctx = test_setup_log("ensure_partition_layout_m2_cannot_format");
         let log = &logctx.log.clone();
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         assert!(internal_ensure_partition_layout::<LabelNotFoundGPT>(
             &log,
-            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            &DiskPaths {
+                devfs_path,
+                dev_path: Some(Utf8PathBuf::from(DEV_PATH))
+            },
             DiskVariant::M2,
         )
         .is_err());
@@ -285,12 +280,15 @@ mod test {
             test_setup_log("ensure_partition_layout_u2_with_expected_format");
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         let partitions = internal_ensure_partition_layout::<FakeU2GPT>(
             &log,
-            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            &DiskPaths {
+                devfs_path,
+                dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
+            },
             DiskVariant::U2,
         )
         .expect("Should be able to parse disk");
@@ -324,12 +322,15 @@ mod test {
             test_setup_log("ensure_partition_layout_m2_with_expected_format");
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         let partitions = internal_ensure_partition_layout::<FakeM2GPT>(
             &log,
-            &DiskPaths { devfs_path, dev_path: Some(PathBuf::from(DEV_PATH)) },
+            &DiskPaths {
+                devfs_path,
+                dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
+            },
             DiskVariant::M2,
         )
         .expect("Should be able to parse disk");
@@ -359,7 +360,7 @@ mod test {
             test_setup_log("ensure_partition_layout_m2_fails_with_empty_gpt");
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         assert!(matches!(
@@ -367,7 +368,7 @@ mod test {
                 &log,
                 &DiskPaths {
                     devfs_path,
-                    dev_path: Some(PathBuf::from(DEV_PATH)),
+                    dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::M2,
             )
@@ -384,7 +385,7 @@ mod test {
             test_setup_log("ensure_partition_layout_u2_fails_with_empty_gpt");
         let log = &logctx.log;
 
-        let devfs_path = PathBuf::from("/devfs/path");
+        let devfs_path = Utf8PathBuf::from("/devfs/path");
         const DEV_PATH: &'static str = "/dev/path";
 
         assert!(matches!(
@@ -392,7 +393,7 @@ mod test {
                 &log,
                 &DiskPaths {
                     devfs_path,
-                    dev_path: Some(PathBuf::from(DEV_PATH)),
+                    dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::U2,
             )

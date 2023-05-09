@@ -6,8 +6,9 @@
 
 use crate::params::{
     DatasetEnsureBody, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    ServiceEnsureBody, SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
+    InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, ServiceEnsureBody,
+    SledRole, TimeSync, VpcFirewallRulesEnsureBody, Zpool,
 };
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
@@ -32,6 +33,7 @@ pub fn api() -> SledApiDescription {
         api.register(disk_put)?;
         api.register(filesystem_put)?;
         api.register(instance_issue_disk_snapshot_request)?;
+        api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
@@ -101,6 +103,7 @@ async fn filesystem_put(
     let sa = rqctx.context();
     let body_args = body.into_inner();
     sa.filesystem_ensure(
+        body_args.id,
         body_args.zpool_id,
         body_args.dataset_kind,
         body_args.address,
@@ -168,6 +171,29 @@ async fn instance_put_state(
         sa.instance_ensure_state(instance_id, body_args.state)
             .await
             .map_err(Error::from)?,
+    ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/migration-ids",
+}]
+async fn instance_put_migration_ids(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstancePutMigrationIdsBody>,
+) -> Result<HttpResponseOk<InstanceRuntimeState>, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    Ok(HttpResponseOk(
+        sa.instance_put_migration_ids(
+            instance_id,
+            &body_args.old_runtime,
+            &body_args.migration_params,
+        )
+        .await
+        .map_err(Error::from)?,
     ))
 }
 

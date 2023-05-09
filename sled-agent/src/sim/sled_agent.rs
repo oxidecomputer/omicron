@@ -13,8 +13,9 @@ use super::storage::Storage;
 
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse,
+    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -324,7 +325,15 @@ impl SledAgent {
         instance_id: Uuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         let instance =
-            self.instances.sim_get_cloned_object(&instance_id).await?;
+            match self.instances.sim_get_cloned_object(&instance_id).await {
+                Ok(instance) => instance,
+                Err(Error::ObjectNotFound { .. }) => {
+                    return Ok(InstanceUnregisterResponse {
+                        updated_runtime: None,
+                    })
+                }
+                Err(e) => return Err(e),
+            };
 
         self.detach_disks_from_instance(instance_id).await?;
         Ok(InstanceUnregisterResponse {
@@ -410,6 +419,18 @@ impl SledAgent {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn instance_put_migration_ids(
+        self: &Arc<Self>,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<InstanceRuntimeState, Error> {
+        let instance =
+            self.instances.sim_get_cloned_object(&instance_id).await?;
+
+        instance.put_migration_ids(old_runtime, migration_ids).await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)

@@ -10,11 +10,14 @@ reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"] }
 serde.workspace = true
 slog.workspace = true
 regress.workspace = true
+uuid.workspace = true
+chrono.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
 omicron-zone-package.workspace = true
 progenitor.workspace = true
 quote.workspace = true
+rustfmt-wrapper.workspace = true
 serde_json.workspace = true
 toml.workspace = true

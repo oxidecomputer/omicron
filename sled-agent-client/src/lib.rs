@@ -416,6 +416,48 @@ impl From<omicron_common::api::external::VpcFirewallRuleProtocol>
     }
 }
 
+impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
+    for types::NetworkInterfaceKind
+{
+    fn from(
+        s: omicron_common::api::internal::shared::NetworkInterfaceKind,
+    ) -> Self {
+        use omicron_common::api::internal::shared::NetworkInterfaceKind::*;
+        match s {
+            Instance { id } => Self::Instance(id),
+            Service { id } => Self::Service(id),
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::NetworkInterface>
+    for types::NetworkInterface
+{
+    fn from(
+        s: omicron_common::api::internal::shared::NetworkInterface,
+    ) -> Self {
+        Self {
+            id: s.id,
+            kind: s.kind.into(),
+            name: (&s.name).into(),
+            ip: s.ip,
+            mac: s.mac.into(),
+            subnet: s.subnet.into(),
+            vni: s.vni.into(),
+            primary: s.primary,
+            slot: s.slot,
+        }
+    }
+}
+
+impl From<omicron_common::api::internal::shared::SourceNatConfig>
+    for types::SourceNatConfig
+{
+    fn from(s: omicron_common::api::internal::shared::SourceNatConfig) -> Self {
+        Self { ip: s.ip, first_port: s.first_port, last_port: s.last_port }
+    }
+}
+
 /// Exposes additional [`Client`] interfaces for use by the test suite. These
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]

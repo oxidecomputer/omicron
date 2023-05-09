@@ -12,9 +12,7 @@
   "paths": {
     "/device/auth": {
       "post": {
-        "tags": [
-          "hidden"
-        ],
+        "tags": ["hidden"],
         "summary": "Start an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed from an *unauthenticated* API client. It generates and records a `device_code` and `user_code` which must be verified and confirmed prior to a token being granted.",
         "operationId": "device_auth_request",
@@ -42,9 +40,7 @@
     },
     "/device/confirm": {
       "post": {
-        "tags": [
-          "hidden"
-        ],
+        "tags": ["hidden"],
         "summary": "Confirm an OAuth 2.0 Device Authorization Grant",
         "description": "This endpoint is designed to be accessed by the user agent (browser), not the client requesting the token. So we do not actually return the token here; it will be returned in response to the poll on `/device/token`.",
         "operationId": "device_auth_confirm",
@@ -73,9 +69,7 @@
     },
     "/device/token": {
       "post": {
-        "tags": [
-          "hidden"
-        ],
+        "tags": ["hidden"],
         "summary": "Request a device access token",
         "description": "This endpoint should be polled by the client until the user code is verified and the grant is confirmed.",
         "operationId": "device_access_token",
@@ -103,9 +97,7 @@
     },
     "/login": {
       "post": {
-        "tags": [
-          "hidden"
-        ],
+        "tags": ["hidden"],
         "operationId": "login_spoof",
         "requestBody": {
           "content": {
@@ -132,10 +124,8 @@
     },
     "/login/{silo_name}/local": {
       "post": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Authenticate a user (i.e., log in) via username and password",
+        "tags": ["login"],
+        "summary": "Authenticate a user via username and password",
         "operationId": "login_local",
         "parameters": [
           {
@@ -182,9 +172,7 @@
     },
     "/login/{silo_name}/saml/{provider_name}": {
       "get": {
-        "tags": [
-          "login"
-        ],
+        "tags": ["login"],
         "summary": "Prompt user login",
         "description": "Either display a page asking a user for their credentials, or redirect them to their identity provider.",
         "operationId": "login_saml_begin",
@@ -229,10 +217,8 @@
         }
       },
       "post": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Authenticate a user (i.e., log in) via SAML",
+        "tags": ["login"],
+        "summary": "Authenticate a user via SAML",
         "operationId": "login_saml",
         "parameters": [
           {
@@ -288,9 +274,7 @@
     },
     "/logout": {
       "post": {
-        "tags": [
-          "hidden"
-        ],
+        "tags": ["hidden"],
         "operationId": "logout",
         "responses": {
           "204": {
@@ -307,9 +291,7 @@
     },
     "/v1/disks": {
       "get": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "List disks",
         "operationId": "disk_list",
         "parameters": [
@@ -367,12 +349,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["project"]
+        }
       },
       "post": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "Create a disk",
         "operationId": "disk_create",
         "parameters": [
@@ -418,9 +400,7 @@
     },
     "/v1/disks/{disk}": {
       "get": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "Fetch a disk",
         "operationId": "disk_view",
         "parameters": [
@@ -462,9 +442,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "Delete a disk",
         "operationId": "disk_delete",
         "parameters": [
@@ -501,9 +479,7 @@
     },
     "/v1/disks/{disk}/bulk-write": {
       "post": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "Import blocks into a disk",
         "operationId": "disk_bulk_write_import",
         "parameters": [
@@ -550,10 +526,9 @@
     },
     "/v1/disks/{disk}/bulk-write-start": {
       "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Start the process of importing blocks into a disk",
+        "tags": ["disks"],
+        "summary": "Start importing blocks into a disk",
+        "description": "Start the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_start",
         "parameters": [
           {
@@ -589,10 +564,9 @@
     },
     "/v1/disks/{disk}/bulk-write-stop": {
       "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Stop the process of importing blocks into a disk",
+        "tags": ["disks"],
+        "summary": "Stop importing blocks into a disk",
+        "description": "Stop the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_stop",
         "parameters": [
           {
@@ -628,10 +602,8 @@
     },
     "/v1/disks/{disk}/finalize": {
       "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Finalize disk when imports are done",
+        "tags": ["disks"],
+        "summary": "Confirm disk block import completion",
         "operationId": "disk_finalize_import",
         "parameters": [
           {
@@ -677,10 +649,8 @@
     },
     "/v1/disks/{disk}/import": {
       "post": {
-        "tags": [
-          "disks"
-        ],
-        "summary": "Send request to import blocks from URL",
+        "tags": ["disks"],
+        "summary": "Request to import blocks from URL",
         "operationId": "disk_import_blocks_from_url",
         "parameters": [
           {
@@ -726,9 +696,7 @@
     },
     "/v1/disks/{disk}/metrics/{metric}": {
       "get": {
-        "tags": [
-          "disks"
-        ],
+        "tags": ["disks"],
         "summary": "Fetch disk metrics",
         "operationId": "disk_metrics_list",
         "parameters": [
@@ -813,14 +781,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["end_time", "start_time"]
+        }
       }
     },
     "/v1/groups": {
       "get": {
-        "tags": [
-          "silos"
-        ],
+        "tags": ["silos"],
         "summary": "List groups",
         "operationId": "group_list",
         "parameters": [
@@ -870,14 +838,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/groups/{group}": {
       "get": {
-        "tags": [
-          "silos"
-        ],
+        "tags": ["silos"],
         "summary": "Fetch group",
         "operationId": "group_view",
         "parameters": [
@@ -914,9 +882,7 @@
     },
     "/v1/images": {
       "get": {
-        "tags": [
-          "images"
-        ],
+        "tags": ["images"],
         "summary": "List images",
         "description": "List images which are global or scoped to the specified project. The images are returned sorted by creation date, with the most recent images appearing first.",
         "operationId": "image_list",
@@ -984,12 +950,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "images"
-        ],
+        "tags": ["images"],
         "summary": "Create an image",
         "description": "Create a new image in a project.",
         "operationId": "image_create",
@@ -1035,9 +1001,7 @@
     },
     "/v1/images/{image}": {
       "get": {
-        "tags": [
-          "images"
-        ],
+        "tags": ["images"],
         "summary": "Fetch an image",
         "description": "Fetch the details for a specific image in a project.",
         "operationId": "image_view",
@@ -1080,9 +1044,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "images"
-        ],
+        "tags": ["images"],
         "summary": "Delete an image",
         "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
         "operationId": "image_delete",
@@ -1120,10 +1082,9 @@
     },
     "/v1/images/{image}/promote": {
       "post": {
-        "tags": [
-          "images"
-        ],
-        "summary": "Promote a project image to be visible to all projects in the silo",
+        "tags": ["images"],
+        "summary": "Promote a project image",
+        "description": "Promote a project image to be visible to all projects in the silo",
         "operationId": "image_promote",
         "parameters": [
           {
@@ -1166,9 +1127,7 @@
     },
     "/v1/instances": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "List instances",
         "operationId": "instance_list",
         "parameters": [
@@ -1226,12 +1185,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["project"]
+        }
       },
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Create an instance",
         "operationId": "instance_create",
         "parameters": [
@@ -1277,9 +1236,7 @@
     },
     "/v1/instances/{instance}": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Fetch an instance",
         "operationId": "instance_view",
         "parameters": [
@@ -1321,9 +1278,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Delete an instance",
         "operationId": "instance_delete",
         "parameters": [
@@ -1360,9 +1315,7 @@
     },
     "/v1/instances/{instance}/disks": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "List an instance's disks",
         "operationId": "instance_disk_list",
         "parameters": [
@@ -1429,14 +1382,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/instances/{instance}/disks/attach": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Attach a disk to an instance",
         "operationId": "instance_disk_attach",
         "parameters": [
@@ -1490,9 +1443,7 @@
     },
     "/v1/instances/{instance}/disks/detach": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Detach a disk from an instance",
         "operationId": "instance_disk_detach",
         "parameters": [
@@ -1546,9 +1497,7 @@
     },
     "/v1/instances/{instance}/external-ips": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "List external IP addresses",
         "operationId": "instance_external_ip_list",
         "parameters": [
@@ -1592,9 +1541,7 @@
     },
     "/v1/instances/{instance}/migrate": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Migrate an instance",
         "operationId": "instance_migrate",
         "parameters": [
@@ -1648,9 +1595,7 @@
     },
     "/v1/instances/{instance}/reboot": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Reboot an instance",
         "operationId": "instance_reboot",
         "parameters": [
@@ -1694,9 +1639,7 @@
     },
     "/v1/instances/{instance}/serial-console": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Fetch an instance's serial console",
         "operationId": "instance_serial_console",
         "parameters": [
@@ -1773,9 +1716,7 @@
     },
     "/v1/instances/{instance}/serial-console/stream": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Stream an instance's serial console",
         "operationId": "instance_serial_console_stream",
         "parameters": [
@@ -1845,9 +1786,7 @@
     },
     "/v1/instances/{instance}/start": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Boot an instance",
         "operationId": "instance_start",
         "parameters": [
@@ -1891,9 +1830,7 @@
     },
     "/v1/instances/{instance}/stop": {
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Stop an instance",
         "operationId": "instance_stop",
         "parameters": [
@@ -1937,9 +1874,7 @@
     },
     "/v1/me": {
       "get": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "Fetch the user associated with the current session",
         "operationId": "current_user_view",
         "responses": {
@@ -1964,9 +1899,7 @@
     },
     "/v1/me/groups": {
       "get": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "Fetch the silo groups the current user belongs to",
         "operationId": "current_user_groups",
         "parameters": [
@@ -2016,14 +1949,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/me/ssh-keys": {
       "get": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "List SSH public keys",
         "description": "Lists SSH public keys for the currently authenticated user.",
         "operationId": "current_user_ssh_key_list",
@@ -2074,12 +2007,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "Create an SSH public key",
         "description": "Create an SSH public key for the currently authenticated user.",
         "operationId": "current_user_ssh_key_create",
@@ -2115,9 +2048,7 @@
     },
     "/v1/me/ssh-keys/{ssh_key}": {
       "get": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "Fetch an SSH public key",
         "description": "Fetch an SSH public key associated with the currently authenticated user.",
         "operationId": "current_user_ssh_key_view",
@@ -2152,9 +2083,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "session"
-        ],
+        "tags": ["session"],
         "summary": "Delete an SSH public key",
         "description": "Delete an SSH public key associated with the currently authenticated user.",
         "operationId": "current_user_ssh_key_delete",
@@ -2184,9 +2113,7 @@
     },
     "/v1/network-interfaces": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "List network interfaces",
         "operationId": "instance_network_interface_list",
         "parameters": [
@@ -2252,12 +2179,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["instance"]
+        }
       },
       "post": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Create a network interface",
         "operationId": "instance_network_interface_create",
         "parameters": [
@@ -2311,9 +2238,7 @@
     },
     "/v1/network-interfaces/{interface}": {
       "get": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Fetch a network interface",
         "operationId": "instance_network_interface_view",
         "parameters": [
@@ -2363,9 +2288,7 @@
         }
       },
       "put": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Update a network interface",
         "operationId": "instance_network_interface_update",
         "parameters": [
@@ -2425,9 +2348,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "instances"
-        ],
+        "tags": ["instances"],
         "summary": "Delete a network interface",
         "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interface_delete",
@@ -2473,9 +2394,7 @@
     },
     "/v1/policy": {
       "get": {
-        "tags": [
-          "silos"
-        ],
+        "tags": ["silos"],
         "summary": "Fetch the current silo's IAM policy",
         "operationId": "policy_view",
         "responses": {
@@ -2498,9 +2417,7 @@
         }
       },
       "put": {
-        "tags": [
-          "silos"
-        ],
+        "tags": ["silos"],
         "summary": "Update the current silo's IAM policy",
         "operationId": "policy_update",
         "requestBody": {
@@ -2535,9 +2452,7 @@
     },
     "/v1/projects": {
       "get": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "List projects",
         "operationId": "project_list",
         "parameters": [
@@ -2587,12 +2502,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Create a project",
         "operationId": "project_create",
         "requestBody": {
@@ -2627,9 +2542,7 @@
     },
     "/v1/projects/{project}": {
       "get": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Fetch a project",
         "operationId": "project_view",
         "parameters": [
@@ -2663,9 +2576,7 @@
         }
       },
       "put": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Update a project",
         "operationId": "project_update",
         "parameters": [
@@ -2709,9 +2620,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Delete a project",
         "operationId": "project_delete",
         "parameters": [
@@ -2740,9 +2649,7 @@
     },
     "/v1/projects/{project}/policy": {
       "get": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Fetch a project's IAM policy",
         "operationId": "project_policy_view",
         "parameters": [
@@ -2776,9 +2683,7 @@
         }
       },
       "put": {
-        "tags": [
-          "projects"
-        ],
+        "tags": ["projects"],
         "summary": "Update a project's IAM policy",
         "operationId": "project_policy_update",
         "parameters": [
@@ -2824,9 +2729,7 @@
     },
     "/v1/snapshots": {
       "get": {
-        "tags": [
-          "snapshots"
-        ],
+        "tags": ["snapshots"],
         "summary": "List snapshots",
         "operationId": "snapshot_list",
         "parameters": [
@@ -2884,12 +2787,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["project"]
+        }
       },
       "post": {
-        "tags": [
-          "snapshots"
-        ],
+        "tags": ["snapshots"],
         "summary": "Create a snapshot",
         "description": "Creates a point-in-time snapshot from a disk.",
         "operationId": "snapshot_create",
@@ -2936,9 +2839,7 @@
     },
     "/v1/snapshots/{snapshot}": {
       "get": {
-        "tags": [
-          "snapshots"
-        ],
+        "tags": ["snapshots"],
         "summary": "Fetch a snapshot",
         "operationId": "snapshot_view",
         "parameters": [
@@ -2980,9 +2881,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "snapshots"
-        ],
+        "tags": ["snapshots"],
         "summary": "Delete a snapshot",
         "operationId": "snapshot_delete",
         "parameters": [
@@ -3019,9 +2918,7 @@
     },
     "/v1/system/certificates": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List system-wide certificates",
         "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first.",
         "operationId": "certificate_list",
@@ -3072,13 +2969,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a new system-wide x.509 certificate.",
+        "tags": ["system"],
+        "summary": "Create a new system-wide x.509 certificate",
         "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
         "operationId": "certificate_create",
         "requestBody": {
@@ -3113,9 +3010,7 @@
     },
     "/v1/system/certificates/{certificate}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a certificate",
         "description": "Returns the details of a specific certificate",
         "operationId": "certificate_view",
@@ -3149,9 +3044,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Delete a certificate",
         "description": "Permanently delete a certificate. This operation cannot be undone.",
         "operationId": "certificate_delete",
@@ -3180,9 +3073,7 @@
     },
     "/v1/system/hardware/disks": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List physical disks",
         "operationId": "physical_disk_list",
         "parameters": [
@@ -3232,14 +3123,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/racks": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List racks",
         "operationId": "rack_list",
         "parameters": [
@@ -3289,14 +3180,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/racks/{rack_id}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a rack",
         "operationId": "rack_view",
         "parameters": [
@@ -3333,9 +3224,7 @@
     },
     "/v1/system/hardware/sleds": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List sleds",
         "operationId": "sled_list",
         "parameters": [
@@ -3385,14 +3274,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/hardware/sleds/{sled_id}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a sled",
         "operationId": "sled_view",
         "parameters": [
@@ -3429,9 +3318,7 @@
     },
     "/v1/system/hardware/sleds/{sled_id}/disks": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List physical disks attached to sleds",
         "operationId": "sled_physical_disk_list",
         "parameters": [
@@ -3491,15 +3378,15 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/identity-providers": {
       "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List a silo's IDPs_name",
+        "tags": ["system"],
+        "summary": "List a silo's IdP's name",
         "operationId": "silo_identity_provider_list",
         "parameters": [
           {
@@ -3556,14 +3443,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["silo"]
+        }
       }
     },
     "/v1/system/identity-providers/local/users": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Create a user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
         "operationId": "local_idp_user_create",
@@ -3610,9 +3497,7 @@
     },
     "/v1/system/identity-providers/local/users/{user_id}": {
       "delete": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Delete a user",
         "operationId": "local_idp_user_delete",
         "parameters": [
@@ -3651,9 +3536,7 @@
     },
     "/v1/system/identity-providers/local/users/{user_id}/set-password": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Set or invalidate a user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
         "operationId": "local_idp_user_set_password",
@@ -3703,10 +3586,8 @@
     },
     "/v1/system/identity-providers/saml": {
       "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a SAML IDP",
+        "tags": ["system"],
+        "summary": "Create a SAML IdP",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -3751,10 +3632,8 @@
     },
     "/v1/system/identity-providers/saml/{provider}": {
       "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a SAML IDP",
+        "tags": ["system"],
+        "summary": "Fetch a SAML IdP",
         "operationId": "saml_identity_provider_view",
         "parameters": [
           {
@@ -3798,9 +3677,7 @@
     },
     "/v1/system/ip-pools": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List IP pools",
         "operationId": "ip_pool_list",
         "parameters": [
@@ -3850,12 +3727,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Create an IP pool",
         "operationId": "ip_pool_create",
         "requestBody": {
@@ -3890,9 +3767,7 @@
     },
     "/v1/system/ip-pools/{pool}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch an IP pool",
         "operationId": "ip_pool_view",
         "parameters": [
@@ -3926,9 +3801,7 @@
         }
       },
       "put": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Update an IP Pool",
         "operationId": "ip_pool_update",
         "parameters": [
@@ -3972,9 +3845,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Delete an IP Pool",
         "operationId": "ip_pool_delete",
         "parameters": [
@@ -4003,11 +3874,9 @@
     },
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List ranges for an IP pool",
-        "description": "Ranges are ordered by their first address.",
+        "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -4058,14 +3927,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/ip-pools/{pool}/ranges/add": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Add a range to an IP pool",
         "operationId": "ip_pool_range_add",
         "parameters": [
@@ -4111,9 +3980,7 @@
     },
     "/v1/system/ip-pools/{pool}/ranges/remove": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Remove a range from an IP pool",
         "operationId": "ip_pool_range_remove",
         "parameters": [
@@ -4152,10 +4019,8 @@
     },
     "/v1/system/ip-pools-service": {
       "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch the IP pool used for Oxide services.",
+        "tags": ["system"],
+        "summary": "Fetch the IP pool used for Oxide services",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -4179,11 +4044,9 @@
     },
     "/v1/system/ip-pools-service/ranges": {
       "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List ranges for the IP pool used for Oxide services.",
-        "description": "Ranges are ordered by their first address.",
+        "tags": ["system"],
+        "summary": "List ranges for the IP pool used for Oxide services",
+        "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
@@ -4225,15 +4088,15 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/ip-pools-service/ranges/add": {
       "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Add a range to an IP pool used for Oxide services.",
+        "tags": ["system"],
+        "summary": "Add a range to an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -4267,10 +4130,8 @@
     },
     "/v1/system/ip-pools-service/ranges/remove": {
       "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Remove a range from an IP pool used for Oxide services.",
+        "tags": ["system"],
+        "summary": "Remove a range from an IP pool used for Oxide services",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -4297,9 +4158,7 @@
     },
     "/v1/system/metrics/{metric_name}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Access metrics data",
         "operationId": "system_metric",
         "parameters": [
@@ -4378,14 +4237,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["end_time", "start_time"]
+        }
       }
     },
     "/v1/system/policy": {
       "get": {
-        "tags": [
-          "policy"
-        ],
+        "tags": ["policy"],
         "summary": "Fetch the top-level IAM policy",
         "operationId": "system_policy_view",
         "responses": {
@@ -4408,9 +4267,7 @@
         }
       },
       "put": {
-        "tags": [
-          "policy"
-        ],
+        "tags": ["policy"],
         "summary": "Update the top-level IAM policy",
         "operationId": "system_policy_update",
         "requestBody": {
@@ -4445,9 +4302,7 @@
     },
     "/v1/system/roles": {
       "get": {
-        "tags": [
-          "roles"
-        ],
+        "tags": ["roles"],
         "summary": "List built-in roles",
         "operationId": "role_list",
         "parameters": [
@@ -4490,14 +4345,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/roles/{role_name}": {
       "get": {
-        "tags": [
-          "roles"
-        ],
+        "tags": ["roles"],
         "summary": "Fetch a built-in role",
         "operationId": "role_view",
         "parameters": [
@@ -4531,106 +4386,9 @@
         }
       }
     },
-    "/v1/system/sagas": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List sagas",
-        "operationId": "saga_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SagaResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": true
-      }
-    },
-    "/v1/system/sagas/{saga_id}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a saga",
-        "operationId": "saga_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "saga_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Saga"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/silos": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List silos",
         "description": "Lists silos that are discoverable based on the current permissions.",
         "operationId": "silo_list",
@@ -4681,12 +4439,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       },
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Create a silo",
         "operationId": "silo_create",
         "requestBody": {
@@ -4721,9 +4479,7 @@
     },
     "/v1/system/silos/{silo}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a silo",
         "description": "Fetch a silo by name.",
         "operationId": "silo_view",
@@ -4758,9 +4514,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Delete a silo",
         "description": "Delete a silo by name.",
         "operationId": "silo_delete",
@@ -4790,9 +4544,7 @@
     },
     "/v1/system/silos/{silo}/policy": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a silo's IAM policy",
         "operationId": "silo_policy_view",
         "parameters": [
@@ -4826,9 +4578,7 @@
         }
       },
       "put": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Update a silo's IAM policy",
         "operationId": "silo_policy_update",
         "parameters": [
@@ -4874,9 +4624,7 @@
     },
     "/v1/system/update/components": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "View version and update status of component tree",
         "operationId": "system_component_version_list",
         "parameters": [
@@ -4926,14 +4674,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/deployments": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List all update deployments",
         "operationId": "update_deployments_list",
         "parameters": [
@@ -4983,14 +4731,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/deployments/{id}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a system update deployment",
         "operationId": "update_deployment_view",
         "parameters": [
@@ -5026,9 +4774,7 @@
     },
     "/v1/system/update/refresh": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Refresh update data",
         "operationId": "system_update_refresh",
         "responses": {
@@ -5046,9 +4792,7 @@
     },
     "/v1/system/update/start": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Start system update",
         "operationId": "system_update_start",
         "requestBody": {
@@ -5083,9 +4827,7 @@
     },
     "/v1/system/update/stop": {
       "post": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Stop system update",
         "description": "If there is no update in progress, do nothing.",
         "operationId": "system_update_stop",
@@ -5104,9 +4846,7 @@
     },
     "/v1/system/update/updates": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List all updates",
         "operationId": "system_update_list",
         "parameters": [
@@ -5156,14 +4896,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/update/updates/{version}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "View system update",
         "operationId": "system_update_view",
         "parameters": [
@@ -5198,9 +4938,7 @@
     },
     "/v1/system/update/updates/{version}/components": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "View system update component tree",
         "operationId": "system_update_components_list",
         "parameters": [
@@ -5235,9 +4973,7 @@
     },
     "/v1/system/update/version": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "View system version and update status",
         "operationId": "system_version",
         "responses": {
@@ -5262,9 +4998,7 @@
     },
     "/v1/system/users": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List users in a silo",
         "operationId": "silo_user_list",
         "parameters": [
@@ -5322,14 +5056,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["silo"]
+        }
       }
     },
     "/v1/system/users/{user_id}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a user",
         "operationId": "silo_user_view",
         "parameters": [
@@ -5375,9 +5109,7 @@
     },
     "/v1/system/users-builtin": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "List built-in users",
         "operationId": "user_builtin_list",
         "parameters": [
@@ -5427,14 +5159,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/system/users-builtin/{user}": {
       "get": {
-        "tags": [
-          "system"
-        ],
+        "tags": ["system"],
         "summary": "Fetch a built-in user",
         "operationId": "user_builtin_view",
         "parameters": [
@@ -5469,9 +5201,7 @@
     },
     "/v1/users": {
       "get": {
-        "tags": [
-          "silos"
-        ],
+        "tags": ["silos"],
         "summary": "List users",
         "operationId": "user_list",
         "parameters": [
@@ -5530,14 +5260,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/vpc-firewall-rules": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "List firewall rules",
         "operationId": "vpc_firewall_rules_view",
         "parameters": [
@@ -5579,9 +5309,7 @@
         }
       },
       "put": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Replace firewall rules",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
@@ -5635,9 +5363,7 @@
     },
     "/v1/vpc-router-routes": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "List routes",
         "description": "List the routes associated with a router in a particular VPC.",
         "operationId": "vpc_router_route_list",
@@ -5712,12 +5438,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["router"]
+        }
       },
       "post": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Create a router",
         "operationId": "vpc_router_route_create",
         "parameters": [
@@ -5779,9 +5505,7 @@
     },
     "/v1/vpc-router-routes/{route}": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Fetch a route",
         "operationId": "vpc_router_route_view",
         "parameters": [
@@ -5840,9 +5564,7 @@
         }
       },
       "put": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Update a route",
         "operationId": "vpc_router_route_update",
         "parameters": [
@@ -5910,9 +5632,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Delete a route",
         "operationId": "vpc_router_route_delete",
         "parameters": [
@@ -5965,9 +5685,7 @@
     },
     "/v1/vpc-routers": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "List routers",
         "operationId": "vpc_router_list",
         "parameters": [
@@ -6033,12 +5751,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["vpc"]
+        }
       },
       "post": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Create a VPC router",
         "operationId": "vpc_router_create",
         "parameters": [
@@ -6092,10 +5810,8 @@
     },
     "/v1/vpc-routers/{router}": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Get a router",
+        "tags": ["vpcs"],
+        "summary": "Fetch a router",
         "operationId": "vpc_router_view",
         "parameters": [
           {
@@ -6144,9 +5860,7 @@
         }
       },
       "put": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Update a router",
         "operationId": "vpc_router_update",
         "parameters": [
@@ -6206,9 +5920,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Delete a router",
         "operationId": "vpc_router_delete",
         "parameters": [
@@ -6253,10 +5965,8 @@
     },
     "/v1/vpc-subnets": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Fetch a subnet",
+        "tags": ["vpcs"],
+        "summary": "List subnets",
         "operationId": "vpc_subnet_list",
         "parameters": [
           {
@@ -6321,12 +6031,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["vpc"]
+        }
       },
       "post": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Create a subnet",
         "operationId": "vpc_subnet_create",
         "parameters": [
@@ -6380,9 +6090,7 @@
     },
     "/v1/vpc-subnets/{subnet}": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Fetch a subnet",
         "operationId": "vpc_subnet_view",
         "parameters": [
@@ -6432,9 +6140,7 @@
         }
       },
       "put": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Update a subnet",
         "operationId": "vpc_subnet_update",
         "parameters": [
@@ -6494,9 +6200,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Delete a subnet",
         "operationId": "vpc_subnet_delete",
         "parameters": [
@@ -6541,9 +6245,7 @@
     },
     "/v1/vpc-subnets/{subnet}/network-interfaces": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "List network interfaces",
         "operationId": "vpc_subnet_list_network_interfaces",
         "parameters": [
@@ -6618,14 +6320,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": []
+        }
       }
     },
     "/v1/vpcs": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "List VPCs",
         "operationId": "vpc_list",
         "parameters": [
@@ -6683,12 +6385,12 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-dropshot-pagination": true
+        "x-dropshot-pagination": {
+          "required": ["project"]
+        }
       },
       "post": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Create a VPC",
         "operationId": "vpc_create",
         "parameters": [
@@ -6734,9 +6436,7 @@
     },
     "/v1/vpcs/{vpc}": {
       "get": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Fetch a VPC",
         "operationId": "vpc_view",
         "parameters": [
@@ -6778,9 +6478,7 @@
         }
       },
       "put": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Update a VPC",
         "operationId": "vpc_update",
         "parameters": [
@@ -6832,9 +6530,7 @@
         }
       },
       "delete": {
-        "tags": [
-          "vpcs"
-        ],
+        "tags": ["vpcs"],
         "summary": "Delete a VPC",
         "operationId": "vpc_delete",
         "parameters": [
@@ -6899,11 +6595,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "part",
-          "revision",
-          "serial"
-        ]
+        "required": ["part", "revision", "serial"]
       },
       "BinRangedouble": {
         "description": "A type storing a range over `T`.\n\nThis type supports ranges similar to the `RangeTo`, `Range` and `RangeFrom` types in the standard library. Those cover `(..end)`, `(start..end)`, and `(start..)` respectively.",
@@ -6918,15 +6610,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range_to"
-                ]
+                "enum": ["range_to"]
               }
             },
-            "required": [
-              "end",
-              "type"
-            ]
+            "required": ["end", "type"]
           },
           {
             "description": "A range bounded inclusively below and exclusively above, `start..end`.",
@@ -6942,16 +6629,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range"
-                ]
+                "enum": ["range"]
               }
             },
-            "required": [
-              "end",
-              "start",
-              "type"
-            ]
+            "required": ["end", "start", "type"]
           },
           {
             "description": "A range bounded inclusively below and unbounded above, `start..`.",
@@ -6963,15 +6644,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range_from"
-                ]
+                "enum": ["range_from"]
               }
             },
-            "required": [
-              "start",
-              "type"
-            ]
+            "required": ["start", "type"]
           }
         ]
       },
@@ -6988,15 +6664,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range_to"
-                ]
+                "enum": ["range_to"]
               }
             },
-            "required": [
-              "end",
-              "type"
-            ]
+            "required": ["end", "type"]
           },
           {
             "description": "A range bounded inclusively below and exclusively above, `start..end`.",
@@ -7012,16 +6683,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range"
-                ]
+                "enum": ["range"]
               }
             },
-            "required": [
-              "end",
-              "start",
-              "type"
-            ]
+            "required": ["end", "start", "type"]
           },
           {
             "description": "A range bounded inclusively below and unbounded above, `start..`.",
@@ -7033,15 +6698,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "range_from"
-                ]
+                "enum": ["range_from"]
               }
             },
-            "required": [
-              "start",
-              "type"
-            ]
+            "required": ["start", "type"]
           }
         ]
       },
@@ -7064,10 +6724,7 @@
             ]
           }
         },
-        "required": [
-          "count",
-          "range"
-        ]
+        "required": ["count", "range"]
       },
       "Binint64": {
         "description": "Type storing bin edges and a count of samples within it.",
@@ -7088,28 +6745,21 @@
             ]
           }
         },
-        "required": [
-          "count",
-          "range"
-        ]
+        "required": ["count", "range"]
       },
       "BlockSize": {
         "title": "disk block size in bytes",
         "type": "integer",
-        "enum": [
-          512,
-          2048,
-          4096
-        ]
+        "enum": [512, 2048, 4096]
       },
       "ByteCount": {
-        "description": "A count of bytes, typically used either for memory or storage capacity\n\nThe maximum supported byte count is [`i64::MAX`].  This makes it somewhat inconvenient to define constructors: a u32 constructor can be infallible, but an i64 constructor can fail (if the value is negative) and a u64 constructor can fail (if the value is larger than i64::MAX).  We provide all of these for consumers' convenience.",
+        "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
         "format": "uint64",
         "minimum": 0
       },
       "Certificate": {
-        "description": "Client view of a [`Certificate`]",
+        "description": "View of a Certificate",
         "type": "object",
         "properties": {
           "description": {
@@ -7153,7 +6803,7 @@
         ]
       },
       "CertificateCreate": {
-        "description": "Create-time parameters for a [`Certificate`](crate::external_api::views::Certificate)",
+        "description": "Create-time parameters for a `Certificate`",
         "type": "object",
         "properties": {
           "cert": {
@@ -7189,13 +6839,7 @@
             ]
           }
         },
-        "required": [
-          "cert",
-          "description",
-          "key",
-          "name",
-          "service"
-        ]
+        "required": ["cert", "description", "key", "name", "service"]
       },
       "CertificateResultsPage": {
         "description": "A single page of results",
@@ -7214,9 +6858,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "ComponentUpdate": {
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
@@ -7269,9 +6911,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "Cumulativedouble": {
         "description": "A cumulative or counter data type.",
@@ -7286,10 +6926,7 @@
             "format": "double"
           }
         },
-        "required": [
-          "start_time",
-          "value"
-        ]
+        "required": ["start_time", "value"]
       },
       "Cumulativeint64": {
         "description": "A cumulative or counter data type.",
@@ -7304,10 +6941,7 @@
             "format": "int64"
           }
         },
-        "required": [
-          "start_time",
-          "value"
-        ]
+        "required": ["start_time", "value"]
       },
       "CurrentUser": {
         "description": "Info about the current user",
@@ -7335,12 +6969,7 @@
             ]
           }
         },
-        "required": [
-          "display_name",
-          "id",
-          "silo_id",
-          "silo_name"
-        ]
+        "required": ["display_name", "id", "silo_id", "silo_name"]
       },
       "Datum": {
         "description": "A `Datum` is a single sampled data point from a metric.",
@@ -7353,15 +6982,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "bool"
-                ]
+                "enum": ["bool"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7372,15 +6996,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "i64"
-                ]
+                "enum": ["i64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7391,15 +7010,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "f64"
-                ]
+                "enum": ["f64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7409,15 +7023,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "string"
-                ]
+                "enum": ["string"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7432,15 +7041,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "bytes"
-                ]
+                "enum": ["bytes"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7450,15 +7054,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "cumulative_i64"
-                ]
+                "enum": ["cumulative_i64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7468,15 +7067,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "cumulative_f64"
-                ]
+                "enum": ["cumulative_f64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7486,15 +7080,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "histogram_i64"
-                ]
+                "enum": ["histogram_i64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           },
           {
             "type": "object",
@@ -7504,15 +7093,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "histogram_f64"
-                ]
+                "enum": ["histogram_f64"]
               }
             },
-            "required": [
-              "datum",
-              "type"
-            ]
+            "required": ["datum", "type"]
           }
         ]
       },
@@ -7528,10 +7112,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "private_key",
-          "public_cert"
-        ]
+        "required": ["private_key", "public_cert"]
       },
       "DeviceAccessTokenRequest": {
         "type": "object",
@@ -7547,11 +7128,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "client_id",
-          "device_code",
-          "grant_type"
-        ]
+        "required": ["client_id", "device_code", "grant_type"]
       },
       "DeviceAuthRequest": {
         "type": "object",
@@ -7561,9 +7138,7 @@
             "format": "uuid"
           }
         },
-        "required": [
-          "client_id"
-        ]
+        "required": ["client_id"]
       },
       "DeviceAuthVerify": {
         "type": "object",
@@ -7572,9 +7147,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "user_code"
-        ]
+        "required": ["user_code"]
       },
       "Digest": {
         "oneOf": [
@@ -7583,23 +7156,18 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "sha256"
-                ]
+                "enum": ["sha256"]
               },
               "value": {
                 "type": "string"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           }
         ]
       },
       "Disk": {
-        "description": "Client view of a [`Disk`]",
+        "description": "View of a Disk",
         "type": "object",
         "properties": {
           "block_size": {
@@ -7670,7 +7238,7 @@
         ]
       },
       "DiskCreate": {
-        "description": "Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)",
+        "description": "Create-time parameters for a `Disk`",
         "type": "object",
         "properties": {
           "description": {
@@ -7696,12 +7264,7 @@
             ]
           }
         },
-        "required": [
-          "description",
-          "disk_source",
-          "name",
-          "size"
-        ]
+        "required": ["description", "disk_source", "name", "size"]
       },
       "DiskPath": {
         "type": "object",
@@ -7715,9 +7278,7 @@
             ]
           }
         },
-        "required": [
-          "disk"
-        ]
+        "required": ["disk"]
       },
       "DiskResultsPage": {
         "description": "A single page of results",
@@ -7736,9 +7297,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "DiskSource": {
         "description": "Different sources for a disk",
@@ -7757,15 +7316,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "blank"
-                ]
+                "enum": ["blank"]
               }
             },
-            "required": [
-              "block_size",
-              "type"
-            ]
+            "required": ["block_size", "type"]
           },
           {
             "description": "Create a disk from a disk snapshot",
@@ -7777,15 +7331,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "snapshot"
-                ]
+                "enum": ["snapshot"]
               }
             },
-            "required": [
-              "snapshot_id",
-              "type"
-            ]
+            "required": ["snapshot_id", "type"]
           },
           {
             "description": "Create a disk from an image",
@@ -7797,15 +7346,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "image"
-                ]
+                "enum": ["image"]
               }
             },
-            "required": [
-              "image_id",
-              "type"
-            ]
+            "required": ["image_id", "type"]
           },
           {
             "description": "Create a blank disk that will accept bulk writes or pull blocks from an external source.",
@@ -7816,20 +7360,15 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "importing_blocks"
-                ]
+                "enum": ["importing_blocks"]
               }
             },
-            "required": [
-              "block_size",
-              "type"
-            ]
+            "required": ["block_size", "type"]
           }
         ]
       },
       "DiskState": {
-        "description": "State of a Disk (primarily: attached or not)",
+        "description": "State of a Disk",
         "oneOf": [
           {
             "description": "Disk is being initialized",
@@ -7837,14 +7376,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "creating"
-                ]
+                "enum": ["creating"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is ready but detached from any Instance",
@@ -7852,14 +7387,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "detached"
-                ]
+                "enum": ["detached"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is ready to receive blocks from an external source",
@@ -7867,14 +7398,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "import_ready"
-                ]
+                "enum": ["import_ready"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is importing blocks from a URL",
@@ -7882,14 +7409,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "importing_from_url"
-                ]
+                "enum": ["importing_from_url"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is importing blocks from bulk writes",
@@ -7897,14 +7420,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "importing_from_bulk_writes"
-                ]
+                "enum": ["importing_from_bulk_writes"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is being finalized to state Detached",
@@ -7912,14 +7431,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "finalizing"
-                ]
+                "enum": ["finalizing"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is undergoing maintenance",
@@ -7927,14 +7442,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "maintenance"
-                ]
+                "enum": ["maintenance"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is being attached to the given Instance",
@@ -7946,15 +7457,10 @@
               },
               "state": {
                 "type": "string",
-                "enum": [
-                  "attaching"
-                ]
+                "enum": ["attaching"]
               }
             },
-            "required": [
-              "instance",
-              "state"
-            ]
+            "required": ["instance", "state"]
           },
           {
             "description": "Disk is attached to the given Instance",
@@ -7966,15 +7472,10 @@
               },
               "state": {
                 "type": "string",
-                "enum": [
-                  "attached"
-                ]
+                "enum": ["attached"]
               }
             },
-            "required": [
-              "instance",
-              "state"
-            ]
+            "required": ["instance", "state"]
           },
           {
             "description": "Disk is being detached from the given Instance",
@@ -7986,15 +7487,10 @@
               },
               "state": {
                 "type": "string",
-                "enum": [
-                  "detaching"
-                ]
+                "enum": ["detaching"]
               }
             },
-            "required": [
-              "instance",
-              "state"
-            ]
+            "required": ["instance", "state"]
           },
           {
             "description": "Disk has been destroyed",
@@ -8002,14 +7498,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "destroyed"
-                ]
+                "enum": ["destroyed"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           },
           {
             "description": "Disk is unavailable",
@@ -8017,14 +7509,10 @@
             "properties": {
               "state": {
                 "type": "string",
-                "enum": [
-                  "faulted"
-                ]
+                "enum": ["faulted"]
               }
             },
-            "required": [
-              "state"
-            ]
+            "required": ["state"]
           }
         ]
       },
@@ -8042,10 +7530,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "message",
-          "request_id"
-        ]
+        "required": ["message", "request_id"]
       },
       "ExpectedDigest": {
         "oneOf": [
@@ -8056,9 +7541,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "sha256"
-            ],
+            "required": ["sha256"],
             "additionalProperties": false
           }
         ]
@@ -8074,10 +7557,7 @@
             "$ref": "#/components/schemas/IpKind"
           }
         },
-        "required": [
-          "ip",
-          "kind"
-        ]
+        "required": ["ip", "kind"]
       },
       "ExternalIpCreate": {
         "description": "Parameters for creating an external IP address for instances.",
@@ -8096,14 +7576,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "ephemeral"
-                ]
+                "enum": ["ephemeral"]
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           }
         ]
       },
@@ -8124,9 +7600,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "FinalizeDisk": {
         "description": "Parameters for finalizing a disk",
@@ -8145,14 +7619,10 @@
       },
       "FleetRole": {
         "type": "string",
-        "enum": [
-          "admin",
-          "collaborator",
-          "viewer"
-        ]
+        "enum": ["admin", "collaborator", "viewer"]
       },
       "FleetRolePolicy": {
-        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "description": "Policy for a particular resource\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
           "role_assignments": {
@@ -8163,12 +7633,10 @@
             }
           }
         },
-        "required": [
-          "role_assignments"
-        ]
+        "required": ["role_assignments"]
       },
       "FleetRoleRoleAssignment": {
-        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, `RoleAssignment`s are put into a `Policy` and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
           "identity_id": {
@@ -8182,14 +7650,10 @@
             "$ref": "#/components/schemas/FleetRole"
           }
         },
-        "required": [
-          "identity_id",
-          "identity_type",
-          "role_name"
-        ]
+        "required": ["identity_id", "identity_type", "role_name"]
       },
       "Group": {
-        "description": "Client view of a [`Group`]",
+        "description": "View of a Group",
         "type": "object",
         "properties": {
           "display_name": {
@@ -8206,11 +7670,7 @@
             "format": "uuid"
           }
         },
-        "required": [
-          "display_name",
-          "id",
-          "silo_id"
-        ]
+        "required": ["display_name", "id", "silo_id"]
       },
       "GroupResultsPage": {
         "description": "A single page of results",
@@ -8229,12 +7689,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "Histogramdouble": {
-        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
         "type": "object",
         "properties": {
           "bins": {
@@ -8253,14 +7711,10 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "bins",
-          "n_samples",
-          "start_time"
-        ]
+        "required": ["bins", "n_samples", "start_time"]
       },
       "Histogramint64": {
-        "description": "A simple type for managing a histogram metric.\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.\n\nExample ------- ```rust use oximeter::histogram::{BinRange, Histogram};\n\nlet edges = [0i64, 10, 20]; let mut hist = Histogram::new(&edges).unwrap(); assert_eq!(hist.n_bins(), 4); // One additional bin for the range (20..) assert_eq!(hist.n_samples(), 0); hist.sample(4); hist.sample(100); assert_eq!(hist.n_samples(), 2);\n\nlet data = hist.iter().collect::<Vec<_>>(); assert_eq!(data[0].range, BinRange::range(i64::MIN, 0)); // An additional bin for `..0` assert_eq!(data[0].count, 0); // Nothing is in this bin\n\nassert_eq!(data[1].range, BinRange::range(0, 10)); // The range `0..10` assert_eq!(data[1].count, 1); // 4 is sampled into this bin ```\n\nNotes -----\n\nHistograms may be constructed either from their left bin edges, or from a sequence of ranges. In either case, the left-most bin may be converted upon construction. In particular, if the left-most value is not equal to the minimum of the support, a new bin will be added from the minimum to that provided value. If the left-most value _is_ the support's minimum, because the provided bin was unbounded below, such as `(..0)`, then that bin will be converted into one bounded below, `(MIN..0)` in this case.\n\nThe short of this is that, most of the time, it shouldn't matter. If one specifies the extremes of the support as their bins, be aware that the left-most may be converted from a `BinRange::RangeTo` into a `BinRange::Range`. In other words, the first bin of a histogram is _always_ a `Bin::Range` or a `Bin::RangeFrom` after construction. In fact, every bin is one of those variants, the `BinRange::RangeTo` is only provided as a convenience during construction.",
+        "description": "Histogram metric\n\nA histogram maintains the count of any number of samples, over a set of bins. Bins are specified on construction via their _left_ edges, inclusive. There can't be any \"gaps\" in the bins, and an additional bin may be added to the left, right, or both so that the bins extend to the entire range of the support.\n\nNote that any gaps, unsorted bins, or non-finite values will result in an error.",
         "type": "object",
         "properties": {
           "bins": {
@@ -8279,14 +7733,10 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "bins",
-          "n_samples",
-          "start_time"
-        ]
+        "required": ["bins", "n_samples", "start_time"]
       },
       "IdentityProvider": {
-        "description": "Client view of an [`IdentityProvider`]",
+        "description": "View of an Identity Provider",
         "type": "object",
         "properties": {
           "description": {
@@ -8351,28 +7801,21 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "IdentityProviderType": {
         "oneOf": [
           {
             "description": "SAML identity provider",
             "type": "string",
-            "enum": [
-              "saml"
-            ]
+            "enum": ["saml"]
           }
         ]
       },
       "IdentityType": {
         "description": "Describes what kind of identity is described by an id",
         "type": "string",
-        "enum": [
-          "silo_user",
-          "silo_group"
-        ]
+        "enum": ["silo_user", "silo_group"]
       },
       "IdpMetadataSource": {
         "oneOf": [
@@ -8381,18 +7824,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "url"
-                ]
+                "enum": ["url"]
               },
               "url": {
                 "type": "string"
               }
             },
-            "required": [
-              "type",
-              "url"
-            ]
+            "required": ["type", "url"]
           },
           {
             "type": "object",
@@ -8402,20 +7840,15 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "base64_encoded_xml"
-                ]
+                "enum": ["base64_encoded_xml"]
               }
             },
-            "required": [
-              "data",
-              "type"
-            ]
+            "required": ["data", "type"]
           }
         ]
       },
       "Image": {
-        "description": "Client view of images",
+        "description": "View of an Image\n\nImages are local to their containing project.",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8503,7 +7936,7 @@
         ]
       },
       "ImageCreate": {
-        "description": "Create-time parameters for an [`Image`](crate::external_api::views::Image)",
+        "description": "Create-time parameters for an `Image`",
         "type": "object",
         "properties": {
           "block_size": {
@@ -8563,9 +7996,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "ImageSource": {
         "description": "The source of the underlying image.",
@@ -8575,18 +8006,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "url"
-                ]
+                "enum": ["url"]
               },
               "url": {
                 "type": "string"
               }
             },
-            "required": [
-              "type",
-              "url"
-            ]
+            "required": ["type", "url"]
           },
           {
             "type": "object",
@@ -8597,15 +8023,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "snapshot"
-                ]
+                "enum": ["snapshot"]
               }
             },
-            "required": [
-              "id",
-              "type"
-            ]
+            "required": ["id", "type"]
           },
           {
             "description": "Boot the Alpine ISO that ships with the Propolis zone. Intended for development purposes only.",
@@ -8613,14 +8034,10 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "you_can_boot_anything_as_long_as_its_alpine"
-                ]
+                "enum": ["you_can_boot_anything_as_long_as_its_alpine"]
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           }
         ]
       },
@@ -8637,10 +8054,7 @@
             "minimum": 0
           }
         },
-        "required": [
-          "base64_encoded_data",
-          "offset"
-        ]
+        "required": ["base64_encoded_data", "offset"]
       },
       "ImportBlocksFromUrl": {
         "description": "Parameters for importing blocks from a URL to a disk",
@@ -8660,12 +8074,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": ["url"]
       },
       "Instance": {
-        "description": "Client view of an [`Instance`]",
+        "description": "View of an Instance",
         "type": "object",
         "properties": {
           "description": {
@@ -8749,7 +8161,7 @@
         "minimum": 0
       },
       "InstanceCreate": {
-        "description": "Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)",
+        "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
           "description": {
@@ -8806,13 +8218,7 @@
             "format": "byte"
           }
         },
-        "required": [
-          "description",
-          "hostname",
-          "memory",
-          "name",
-          "ncpus"
-        ]
+        "required": ["description", "hostname", "memory", "name", "ncpus"]
       },
       "InstanceDiskAttachment": {
         "description": "Describe the instance's disks at creation time",
@@ -8845,18 +8251,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "create"
-                ]
+                "enum": ["create"]
               }
             },
-            "required": [
-              "description",
-              "disk_source",
-              "name",
-              "size",
-              "type"
-            ]
+            "required": ["description", "disk_source", "name", "size", "type"]
           },
           {
             "description": "During instance creation, attach this disk",
@@ -8872,20 +8270,15 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "attach"
-                ]
+                "enum": ["attach"]
               }
             },
-            "required": [
-              "name",
-              "type"
-            ]
+            "required": ["name", "type"]
           }
         ]
       },
       "InstanceMigrate": {
-        "description": "Migration parameters for an [`Instance`](omicron_common::api::external::Instance)",
+        "description": "Migration parameters for an `Instance`",
         "type": "object",
         "properties": {
           "dst_sled_id": {
@@ -8893,9 +8286,7 @@
             "format": "uuid"
           }
         },
-        "required": [
-          "dst_sled_id"
-        ]
+        "required": ["dst_sled_id"]
       },
       "InstanceNetworkInterface": {
         "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
@@ -8990,15 +8381,10 @@
               },
               "type": {
                 "type": "string",
-                "enum": [
-                  "create"
-                ]
+                "enum": ["create"]
               }
             },
-            "required": [
-              "params",
-              "type"
-            ]
+            "required": ["params", "type"]
           },
           {
             "description": "The default networking configuration for an instance is to create a single primary interface with an automatically-assigned IP address. The IP will be pulled from the Project's default VPC / VPC Subnet.",
@@ -9006,14 +8392,10 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "default"
-                ]
+                "enum": ["default"]
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           },
           {
             "description": "No network interfaces at all will be created for the instance.",
@@ -9021,19 +8403,15 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "none"
-                ]
+                "enum": ["none"]
               }
             },
-            "required": [
-              "type"
-            ]
+            "required": ["type"]
           }
         ]
       },
       "InstanceNetworkInterfaceCreate": {
-        "description": "Create-time parameters for an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).",
+        "description": "Create-time parameters for an `InstanceNetworkInterface`",
         "type": "object",
         "properties": {
           "description": {
@@ -9065,12 +8443,7 @@
             ]
           }
         },
-        "required": [
-          "description",
-          "name",
-          "subnet_name",
-          "vpc_name"
-        ]
+        "required": ["description", "name", "subnet_name", "vpc_name"]
       },
       "InstanceNetworkInterfaceResultsPage": {
         "description": "A single page of results",
@@ -9089,12 +8462,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "InstanceNetworkInterfaceUpdate": {
-        "description": "Parameters for updating an [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
+        "description": "Parameters for updating an `InstanceNetworkInterface`\n\nNote that modifying IP addresses for an interface is not yet supported, a new interface must be created instead.",
         "type": "object",
         "properties": {
           "description": {
@@ -9133,9 +8504,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "InstanceSerialConsoleData": {
         "description": "Contents of an Instance's serial console buffer.",
@@ -9157,10 +8526,7 @@
             "minimum": 0
           }
         },
-        "required": [
-          "data",
-          "last_byte_offset"
-        ]
+        "required": ["data", "last_byte_offset"]
       },
       "InstanceState": {
         "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
@@ -9168,82 +8534,59 @@
           {
             "description": "The instance is being created.",
             "type": "string",
-            "enum": [
-              "creating"
-            ]
+            "enum": ["creating"]
           },
           {
             "description": "The instance is currently starting up.",
             "type": "string",
-            "enum": [
-              "starting"
-            ]
+            "enum": ["starting"]
           },
           {
             "description": "The instance is currently running.",
             "type": "string",
-            "enum": [
-              "running"
-            ]
+            "enum": ["running"]
           },
           {
             "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
             "type": "string",
-            "enum": [
-              "stopping"
-            ]
+            "enum": ["stopping"]
           },
           {
             "description": "The instance is currently stopped.",
             "type": "string",
-            "enum": [
-              "stopped"
-            ]
+            "enum": ["stopped"]
           },
           {
             "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
             "type": "string",
-            "enum": [
-              "rebooting"
-            ]
+            "enum": ["rebooting"]
           },
           {
             "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
             "type": "string",
-            "enum": [
-              "migrating"
-            ]
+            "enum": ["migrating"]
           },
           {
             "description": "The instance is attempting to recover from a failure.",
             "type": "string",
-            "enum": [
-              "repairing"
-            ]
+            "enum": ["repairing"]
           },
           {
             "description": "The instance has encountered a failure.",
             "type": "string",
-            "enum": [
-              "failed"
-            ]
+            "enum": ["failed"]
           },
           {
             "description": "The instance has been deleted.",
             "type": "string",
-            "enum": [
-              "destroyed"
-            ]
+            "enum": ["destroyed"]
           }
         ]
       },
       "IpKind": {
         "description": "The kind of an external IP address for an instance",
         "type": "string",
-        "enum": [
-          "ephemeral",
-          "floating"
-        ]
+        "enum": ["ephemeral", "floating"]
       },
       "IpNet": {
         "oneOf": [
@@ -9306,7 +8649,7 @@
         ]
       },
       "IpPoolCreate": {
-        "description": "Create-time parameters for an IP Pool.\n\nSee [`IpPool`](crate::external_api::views::IpPool)",
+        "description": "Create-time parameters for an `IpPool`",
         "type": "object",
         "properties": {
           "description": {
@@ -9316,10 +8659,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "name"
-        ]
+        "required": ["description", "name"]
       },
       "IpPoolRange": {
         "type": "object",
@@ -9336,11 +8676,7 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "id",
-          "range",
-          "time_created"
-        ]
+        "required": ["id", "range", "time_created"]
       },
       "IpPoolRangeResultsPage": {
         "description": "A single page of results",
@@ -9359,9 +8695,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "IpPoolResultsPage": {
         "description": "A single page of results",
@@ -9380,9 +8714,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "IpPoolUpdate": {
         "description": "Parameters for updating an IP Pool",
@@ -9442,10 +8774,7 @@
             "format": "ipv4"
           }
         },
-        "required": [
-          "first",
-          "last"
-        ]
+        "required": ["first", "last"]
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
@@ -9467,10 +8796,7 @@
             "format": "ipv6"
           }
         },
-        "required": [
-          "first",
-          "last"
-        ]
+        "required": ["first", "last"]
       },
       "L4PortRange": {
         "example": "22",
@@ -9502,10 +8828,7 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "datum",
-          "timestamp"
-        ]
+        "required": ["datum", "timestamp"]
       },
       "MeasurementResultsPage": {
         "description": "A single page of results",
@@ -9524,9 +8847,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -9557,10 +8878,6 @@
           }
         ]
       },
-      "NodeName": {
-        "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
-        "type": "string"
-      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -9568,7 +8885,7 @@
         "maxLength": 512
       },
       "PhysicalDisk": {
-        "description": "Client view of a [`PhysicalDisk`]",
+        "description": "View of a Physical Disk\n\nPhysical disks reside in a particular sled and are used to store both Instance Disk data as well as internal metadata.",
         "type": "object",
         "properties": {
           "disk_type": {
@@ -9632,19 +8949,14 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "PhysicalDiskType": {
         "type": "string",
-        "enum": [
-          "internal",
-          "external"
-        ]
+        "enum": ["internal", "external"]
       },
       "Project": {
-        "description": "Client view of a [`Project`]",
+        "description": "View of a Project",
         "type": "object",
         "properties": {
           "description": {
@@ -9684,7 +8996,7 @@
         ]
       },
       "ProjectCreate": {
-        "description": "Create-time parameters for a [`Project`](crate::external_api::views::Project)",
+        "description": "Create-time parameters for a `Project`",
         "type": "object",
         "properties": {
           "description": {
@@ -9694,10 +9006,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "name"
-        ]
+        "required": ["description", "name"]
       },
       "ProjectResultsPage": {
         "description": "A single page of results",
@@ -9716,20 +9025,14 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "ProjectRole": {
         "type": "string",
-        "enum": [
-          "admin",
-          "collaborator",
-          "viewer"
-        ]
+        "enum": ["admin", "collaborator", "viewer"]
       },
       "ProjectRolePolicy": {
-        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "description": "Policy for a particular resource\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
           "role_assignments": {
@@ -9740,12 +9043,10 @@
             }
           }
         },
-        "required": [
-          "role_assignments"
-        ]
+        "required": ["role_assignments"]
       },
       "ProjectRoleRoleAssignment": {
-        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, `RoleAssignment`s are put into a `Policy` and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
           "identity_id": {
@@ -9759,14 +9060,10 @@
             "$ref": "#/components/schemas/ProjectRole"
           }
         },
-        "required": [
-          "identity_id",
-          "identity_type",
-          "role_name"
-        ]
+        "required": ["identity_id", "identity_type", "role_name"]
       },
       "ProjectUpdate": {
-        "description": "Updateable properties of a [`Project`](crate::external_api::views::Project)",
+        "description": "Updateable properties of a `Project`",
         "type": "object",
         "properties": {
           "description": {
@@ -9784,7 +9081,7 @@
         }
       },
       "Rack": {
-        "description": "Client view of an [`Rack`]",
+        "description": "View of an Rack",
         "type": "object",
         "properties": {
           "id": {
@@ -9803,11 +9100,7 @@
             "format": "date-time"
           }
         },
-        "required": [
-          "id",
-          "time_created",
-          "time_modified"
-        ]
+        "required": ["id", "time_created", "time_modified"]
       },
       "RackResultsPage": {
         "description": "A single page of results",
@@ -9826,12 +9119,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "Role": {
-        "description": "Client view of a [`Role`]",
+        "description": "View of a Role",
         "type": "object",
         "properties": {
           "description": {
@@ -9841,10 +9132,7 @@
             "$ref": "#/components/schemas/RoleName"
           }
         },
-        "required": [
-          "description",
-          "name"
-        ]
+        "required": ["description", "name"]
       },
       "RoleName": {
         "title": "A name for a built-in role",
@@ -9870,12 +9158,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "RouteDestination": {
-        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic will be forward to the [`RouteTarget`] for that rule.",
+        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
         "oneOf": [
           {
             "description": "Route applies to traffic destined for a specific IP address",
@@ -9883,19 +9169,14 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip"
-                ]
+                "enum": ["ip"]
               },
               "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Route applies to traffic destined for a specific IP subnet",
@@ -9903,18 +9184,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip_net"
-                ]
+                "enum": ["ip_net"]
               },
               "value": {
                 "$ref": "#/components/schemas/IpNet"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Route applies to traffic destined for the given VPC.",
@@ -9922,18 +9198,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "vpc"
-                ]
+                "enum": ["vpc"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Route applies to traffic",
@@ -9941,18 +9212,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "subnet"
-                ]
+                "enum": ["subnet"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           }
         ]
       },
@@ -9965,19 +9231,14 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip"
-                ]
+                "enum": ["ip"]
               },
               "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Forward traffic to a VPC",
@@ -9985,18 +9246,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "vpc"
-                ]
+                "enum": ["vpc"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Forward traffic to a VPC Subnet",
@@ -10004,18 +9260,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "subnet"
-                ]
+                "enum": ["subnet"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Forward traffic to a specific instance",
@@ -10023,18 +9274,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "instance"
-                ]
+                "enum": ["instance"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "Forward traffic to an internet gateway",
@@ -10042,18 +9288,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "internet_gateway"
-                ]
+                "enum": ["internet_gateway"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           }
         ]
       },
@@ -10103,7 +9344,7 @@
             "format": "date-time"
           },
           "vpc_router_id": {
-            "description": "The VPC Router to which the route belongs.",
+            "description": "The ID of the VPC Router to which the route belongs",
             "type": "string",
             "format": "uuid"
           }
@@ -10121,7 +9362,7 @@
         ]
       },
       "RouterRouteCreate": {
-        "description": "Create-time parameters for a [`omicron_common::api::external::RouterRoute`]",
+        "description": "Create-time parameters for a `RouterRoute`",
         "type": "object",
         "properties": {
           "description": {
@@ -10137,43 +9378,30 @@
             "$ref": "#/components/schemas/RouteTarget"
           }
         },
-        "required": [
-          "description",
-          "destination",
-          "name",
-          "target"
-        ]
+        "required": ["description", "destination", "name", "target"]
       },
       "RouterRouteKind": {
-        "description": "The classification of a [`RouterRoute`] as defined by the system. The kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.\n\nSee [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context",
+        "description": "The kind of a `RouterRoute`\n\nThe kind determines certain attributes such as if the route is modifiable and describes how or where the route was created.",
         "oneOf": [
           {
             "description": "Determines the default destination of traffic, such as whether it goes to the internet or not.\n\n`Destination: An Internet Gateway` `Modifiable: true`",
             "type": "string",
-            "enum": [
-              "default"
-            ]
+            "enum": ["default"]
           },
           {
             "description": "Automatically added for each VPC Subnet in the VPC\n\n`Destination: A VPC Subnet` `Modifiable: false`",
             "type": "string",
-            "enum": [
-              "vpc_subnet"
-            ]
+            "enum": ["vpc_subnet"]
           },
           {
             "description": "Automatically added when VPC peering is established\n\n`Destination: A different VPC` `Modifiable: false`",
             "type": "string",
-            "enum": [
-              "vpc_peering"
-            ]
+            "enum": ["vpc_peering"]
           },
           {
-            "description": "Created by a user See [`RouteTarget`]\n\n`Destination: User defined` `Modifiable: true`",
+            "description": "Created by a user; see `RouteTarget`\n\n`Destination: User defined` `Modifiable: true`",
             "type": "string",
-            "enum": [
-              "custom"
-            ]
+            "enum": ["custom"]
           }
         ]
       },
@@ -10194,12 +9422,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "RouterRouteUpdate": {
-        "description": "Updateable properties of a [`omicron_common::api::external::RouterRoute`]",
+        "description": "Updateable properties of a `RouterRoute`",
         "type": "object",
         "properties": {
           "description": {
@@ -10221,189 +9447,7 @@
             "$ref": "#/components/schemas/RouteTarget"
           }
         },
-        "required": [
-          "destination",
-          "target"
-        ]
-      },
-      "Saga": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "$ref": "#/components/schemas/SagaState"
-          }
-        },
-        "required": [
-          "id",
-          "state"
-        ]
-      },
-      "SagaErrorInfo": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "action_failed"
-                ]
-              },
-              "source_error": {}
-            },
-            "required": [
-              "error",
-              "source_error"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "deserialize_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "injected_error"
-                ]
-              }
-            },
-            "required": [
-              "error"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "serialize_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "subsaga_create_failed"
-                ]
-              },
-              "message": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "error",
-              "message"
-            ]
-          }
-        ]
-      },
-      "SagaResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Saga"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "SagaState": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "enum": [
-                  "succeeded"
-                ]
-              }
-            },
-            "required": [
-              "state"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error_info": {
-                "$ref": "#/components/schemas/SagaErrorInfo"
-              },
-              "error_node_name": {
-                "$ref": "#/components/schemas/NodeName"
-              },
-              "state": {
-                "type": "string",
-                "enum": [
-                  "failed"
-                ]
-              }
-            },
-            "required": [
-              "error_info",
-              "error_node_name",
-              "state"
-            ]
-          }
-        ]
+        "required": ["destination", "target"]
       },
       "SamlIdentityProvider": {
         "description": "Identity-related metadata that's included in nearly all public API objects",
@@ -10509,6 +9553,7 @@
           "signing_keypair": {
             "nullable": true,
             "description": "request signing key pair",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/DerEncodedKeyPair"
@@ -10549,14 +9594,12 @@
           {
             "description": "This certificate is intended for access to the external API.",
             "type": "string",
-            "enum": [
-              "external_api"
-            ]
+            "enum": ["external_api"]
           }
         ]
       },
       "Silo": {
-        "description": "Client view of a ['Silo']",
+        "description": "View of a Silo\n\nA Silo is the highest level unit of isolation.",
         "type": "object",
         "properties": {
           "description": {
@@ -10610,12 +9653,12 @@
         ]
       },
       "SiloCreate": {
-        "description": "Create-time parameters for a [`Silo`](crate::external_api::views::Silo)",
+        "description": "Create-time parameters for a `Silo`",
         "type": "object",
         "properties": {
           "admin_group_name": {
             "nullable": true,
-            "description": "If set, this group will be created during Silo creation and granted the \"Silo Admin\" role. Identity providers can assert that users belong to this group and those users can log in and further initialize the Silo.\n\nNote that if configuring a SAML based identity provider, group_attribute_name must be set for users to be considered part of a group. See [`SamlIdentityProviderCreate`] for more information.",
+            "description": "If set, this group will be created during Silo creation and granted the \"Silo Admin\" role. Identity providers can assert that users belong to this group and those users can log in and further initialize the Silo.\n\nNote that if configuring a SAML based identity provider, group_attribute_name must be set for users to be considered part of a group. See `SamlIdentityProviderCreate` for more information.",
             "type": "string"
           },
           "description": {
@@ -10631,12 +9674,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "discoverable",
-          "identity_mode",
-          "name"
-        ]
+        "required": ["description", "discoverable", "identity_mode", "name"]
       },
       "SiloIdentityMode": {
         "description": "Describes how identities are managed and users are authenticated in this Silo",
@@ -10644,16 +9682,12 @@
           {
             "description": "Users are authenticated with SAML using an external authentication provider.  The system updates information about users and groups only during successful authentication (i.e,. \"JIT provisioning\" of users and groups).",
             "type": "string",
-            "enum": [
-              "saml_jit"
-            ]
+            "enum": ["saml_jit"]
           },
           {
             "description": "The system is the source of truth about users.  There is no linkage to an external authentication provider or identity provider.",
             "type": "string",
-            "enum": [
-              "local_only"
-            ]
+            "enum": ["local_only"]
           }
         ]
       },
@@ -10674,20 +9708,14 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "SiloRole": {
         "type": "string",
-        "enum": [
-          "admin",
-          "collaborator",
-          "viewer"
-        ]
+        "enum": ["admin", "collaborator", "viewer"]
       },
       "SiloRolePolicy": {
-        "description": "Client view of a [`Policy`], which describes how this resource may be accessed\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
+        "description": "Policy for a particular resource\n\nNote that the Policy only describes access granted explicitly for this resource.  The policies of parent resources can also cause a user to have access to this resource.",
         "type": "object",
         "properties": {
           "role_assignments": {
@@ -10698,12 +9726,10 @@
             }
           }
         },
-        "required": [
-          "role_assignments"
-        ]
+        "required": ["role_assignments"]
       },
       "SiloRoleRoleAssignment": {
-        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, [`RoleAssignment`]s are put into a [`Policy`] and that Policy is applied to a particular resource.",
+        "description": "Describes the assignment of a particular role on a particular resource to a particular identity (user, group, etc.)\n\nThe resource is not part of this structure.  Rather, `RoleAssignment`s are put into a `Policy` and that Policy is applied to a particular resource.",
         "type": "object",
         "properties": {
           "identity_id": {
@@ -10717,11 +9743,7 @@
             "$ref": "#/components/schemas/SiloRole"
           }
         },
-        "required": [
-          "identity_id",
-          "identity_type",
-          "role_name"
-        ]
+        "required": ["identity_id", "identity_type", "role_name"]
       },
       "Sled": {
         "description": "An operator's view of a Sled.",
@@ -10792,12 +9814,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "Snapshot": {
-        "description": "Client view of a Snapshot",
+        "description": "View of a Snapshot",
         "type": "object",
         "properties": {
           "description": {
@@ -10855,7 +9875,7 @@
         ]
       },
       "SnapshotCreate": {
-        "description": "Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)",
+        "description": "Create-time parameters for a `Snapshot`",
         "type": "object",
         "properties": {
           "description": {
@@ -10873,11 +9893,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "disk",
-          "name"
-        ]
+        "required": ["description", "disk", "name"]
       },
       "SnapshotResultsPage": {
         "description": "A single page of results",
@@ -10896,18 +9912,11 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "SnapshotState": {
         "type": "string",
-        "enum": [
-          "creating",
-          "ready",
-          "faulted",
-          "destroyed"
-        ]
+        "enum": ["creating", "ready", "faulted", "destroyed"]
       },
       "SpoofLoginBody": {
         "type": "object",
@@ -10916,12 +9925,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "username"
-        ]
+        "required": ["username"]
       },
       "SshKey": {
-        "description": "Client view of a [`SshKey`]",
+        "description": "View of an SSH Key",
         "type": "object",
         "properties": {
           "description": {
@@ -10972,7 +9979,7 @@
         ]
       },
       "SshKeyCreate": {
-        "description": "Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)",
+        "description": "Create-time parameters for an `SshKey`",
         "type": "object",
         "properties": {
           "description": {
@@ -10986,11 +9993,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "description",
-          "name",
-          "public_key"
-        ]
+        "required": ["description", "name", "public_key"]
       },
       "SshKeyResultsPage": {
         "description": "A single page of results",
@@ -11009,9 +10012,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "SystemUpdate": {
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
@@ -11036,12 +10037,7 @@
             "$ref": "#/components/schemas/SemverVersion"
           }
         },
-        "required": [
-          "id",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
+        "required": ["id", "time_created", "time_modified", "version"]
       },
       "SystemUpdateResultsPage": {
         "description": "A single page of results",
@@ -11060,9 +10056,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "SystemUpdateStart": {
         "type": "object",
@@ -11071,9 +10065,7 @@
             "$ref": "#/components/schemas/SemverVersion"
           }
         },
-        "required": [
-          "version"
-        ]
+        "required": ["version"]
       },
       "SystemVersion": {
         "type": "object",
@@ -11085,10 +10077,7 @@
             "$ref": "#/components/schemas/VersionRange"
           }
         },
-        "required": [
-          "status",
-          "version_range"
-        ]
+        "required": ["status", "version_range"]
       },
       "UpdateDeployment": {
         "description": "Identity-related metadata that's included in \"asset\" public API objects (which generally have no name or description)",
@@ -11116,13 +10105,7 @@
             "$ref": "#/components/schemas/SemverVersion"
           }
         },
-        "required": [
-          "id",
-          "status",
-          "time_created",
-          "time_modified",
-          "version"
-        ]
+        "required": ["id", "status", "time_created", "time_modified", "version"]
       },
       "UpdateDeploymentResultsPage": {
         "description": "A single page of results",
@@ -11141,9 +10124,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "UpdateStatus": {
         "oneOf": [
@@ -11152,28 +10133,20 @@
             "properties": {
               "status": {
                 "type": "string",
-                "enum": [
-                  "updating"
-                ]
+                "enum": ["updating"]
               }
             },
-            "required": [
-              "status"
-            ]
+            "required": ["status"]
           },
           {
             "type": "object",
             "properties": {
               "status": {
                 "type": "string",
-                "enum": [
-                  "steady"
-                ]
+                "enum": ["steady"]
               }
             },
-            "required": [
-              "status"
-            ]
+            "required": ["status"]
           }
         ]
       },
@@ -11240,9 +10213,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "UpdateableComponentType": {
         "type": "string",
@@ -11262,7 +10233,7 @@
         ]
       },
       "User": {
-        "description": "Client view of a [`User`]",
+        "description": "View of a User",
         "type": "object",
         "properties": {
           "display_name": {
@@ -11279,14 +10250,10 @@
             "format": "uuid"
           }
         },
-        "required": [
-          "display_name",
-          "id",
-          "silo_id"
-        ]
+        "required": ["display_name", "id", "silo_id"]
       },
       "UserBuiltin": {
-        "description": "Client view of a [`UserBuiltin`]",
+        "description": "View of a Built-in User\n\nA Built-in User is explicitly created as opposed to being derived from an Identify Provider.",
         "type": "object",
         "properties": {
           "description": {
@@ -11342,12 +10309,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "UserCreate": {
-        "description": "Create-time parameters for a [`User`](crate::external_api::views::User)",
+        "description": "Create-time parameters for a `User`",
         "type": "object",
         "properties": {
           "external_id": {
@@ -11367,10 +10332,7 @@
             ]
           }
         },
-        "required": [
-          "external_id",
-          "password"
-        ]
+        "required": ["external_id", "password"]
       },
       "UserId": {
         "title": "A name unique within the parent collection",
@@ -11392,15 +10354,10 @@
               },
               "user_password_value": {
                 "type": "string",
-                "enum": [
-                  "password"
-                ]
+                "enum": ["password"]
               }
             },
-            "required": [
-              "details",
-              "user_password_value"
-            ]
+            "required": ["details", "user_password_value"]
           },
           {
             "description": "Invalidates any current password (disabling password authentication)",
@@ -11408,14 +10365,10 @@
             "properties": {
               "user_password_value": {
                 "type": "string",
-                "enum": [
-                  "invalid_password"
-                ]
+                "enum": ["invalid_password"]
               }
             },
-            "required": [
-              "user_password_value"
-            ]
+            "required": ["user_password_value"]
           }
         ]
       },
@@ -11436,9 +10389,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "UsernamePasswordCredentials": {
         "description": "Credentials for local user login",
@@ -11451,10 +10402,7 @@
             "$ref": "#/components/schemas/UserId"
           }
         },
-        "required": [
-          "password",
-          "username"
-        ]
+        "required": ["password", "username"]
       },
       "VersionRange": {
         "type": "object",
@@ -11466,13 +10414,10 @@
             "$ref": "#/components/schemas/SemverVersion"
           }
         },
-        "required": [
-          "high",
-          "low"
-        ]
+        "required": ["high", "low"]
       },
       "Vpc": {
-        "description": "Client view of a [`Vpc`]",
+        "description": "View of a VPC",
         "type": "object",
         "properties": {
           "description": {
@@ -11542,7 +10487,7 @@
         ]
       },
       "VpcCreate": {
-        "description": "Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)",
+        "description": "Create-time parameters for a `Vpc`",
         "type": "object",
         "properties": {
           "description": {
@@ -11553,7 +10498,7 @@
           },
           "ipv6_prefix": {
             "nullable": true,
-            "description": "The IPv6 prefix for this VPC.\n\nAll IPv6 subnets created from this VPC must be taken from this range, which sould be a Unique Local Address in the range `fd00::/48`. The default VPC Subnet will have the first `/64` range from this prefix.",
+            "description": "The IPv6 prefix for this VPC\n\nAll IPv6 subnets created from this VPC must be taken from this range, which should be a Unique Local Address in the range `fd00::/48`. The default VPC Subnet will have the first `/64` range from this prefix.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Ipv6Net"
@@ -11564,11 +10509,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "dns_name",
-          "name"
-        ]
+        "required": ["description", "dns_name", "name"]
       },
       "VpcFirewallRule": {
         "description": "A single rule in a VPC firewall",
@@ -11669,17 +10610,11 @@
       },
       "VpcFirewallRuleAction": {
         "type": "string",
-        "enum": [
-          "allow",
-          "deny"
-        ]
+        "enum": ["allow", "deny"]
       },
       "VpcFirewallRuleDirection": {
         "type": "string",
-        "enum": [
-          "inbound",
-          "outbound"
-        ]
+        "enum": ["inbound", "outbound"]
       },
       "VpcFirewallRuleFilter": {
         "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
@@ -11720,18 +10655,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "vpc"
-                ]
+                "enum": ["vpc"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to traffic from/to all instances in the VPC Subnet",
@@ -11739,18 +10669,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "subnet"
-                ]
+                "enum": ["subnet"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to traffic from/to this specific instance",
@@ -11758,18 +10683,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "instance"
-                ]
+                "enum": ["instance"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to traffic from/to a specific IP address",
@@ -11777,19 +10697,14 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip"
-                ]
+                "enum": ["ip"]
               },
               "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to traffic from/to a specific IP subnet",
@@ -11797,39 +10712,27 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip_net"
-                ]
+                "enum": ["ip_net"]
               },
               "value": {
                 "$ref": "#/components/schemas/IpNet"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           }
         ]
       },
       "VpcFirewallRuleProtocol": {
         "description": "The protocols that may be specified in a firewall rule's filter",
         "type": "string",
-        "enum": [
-          "TCP",
-          "UDP",
-          "ICMP"
-        ]
+        "enum": ["TCP", "UDP", "ICMP"]
       },
       "VpcFirewallRuleStatus": {
         "type": "string",
-        "enum": [
-          "disabled",
-          "enabled"
-        ]
+        "enum": ["disabled", "enabled"]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to which a firewall rule applies.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to which a firewall rule applies.",
         "oneOf": [
           {
             "description": "The rule applies to all instances in the VPC",
@@ -11837,18 +10740,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "vpc"
-                ]
+                "enum": ["vpc"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to all instances in the VPC Subnet",
@@ -11856,18 +10754,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "subnet"
-                ]
+                "enum": ["subnet"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to this specific instance",
@@ -11875,18 +10768,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "instance"
-                ]
+                "enum": ["instance"]
               },
               "value": {
                 "$ref": "#/components/schemas/Name"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to a specific IP address",
@@ -11894,19 +10782,14 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip"
-                ]
+                "enum": ["ip"]
               },
               "value": {
                 "type": "string",
                 "format": "ip"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           },
           {
             "description": "The rule applies to a specific IP subnet",
@@ -11914,18 +10797,13 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": [
-                  "ip_net"
-                ]
+                "enum": ["ip_net"]
               },
               "value": {
                 "$ref": "#/components/schemas/IpNet"
               }
             },
-            "required": [
-              "type",
-              "value"
-            ]
+            "required": ["type", "value"]
           }
         ]
       },
@@ -12013,9 +10891,7 @@
             }
           }
         },
-        "required": [
-          "rules"
-        ]
+        "required": ["rules"]
       },
       "VpcFirewallRules": {
         "description": "Collection of a Vpc's firewall rules",
@@ -12028,9 +10904,7 @@
             }
           }
         },
-        "required": [
-          "rules"
-        ]
+        "required": ["rules"]
       },
       "VpcResultsPage": {
         "description": "A single page of results",
@@ -12049,9 +10923,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "VpcRouter": {
         "description": "A VPC router defines a series of rules that indicate where traffic should be sent depending on its destination.",
@@ -12104,7 +10976,7 @@
         ]
       },
       "VpcRouterCreate": {
-        "description": "Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)",
+        "description": "Create-time parameters for a `VpcRouter`",
         "type": "object",
         "properties": {
           "description": {
@@ -12114,17 +10986,11 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "name"
-        ]
+        "required": ["description", "name"]
       },
       "VpcRouterKind": {
         "type": "string",
-        "enum": [
-          "system",
-          "custom"
-        ]
+        "enum": ["system", "custom"]
       },
       "VpcRouterResultsPage": {
         "description": "A single page of results",
@@ -12143,12 +11009,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "VpcRouterUpdate": {
-        "description": "Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)",
+        "description": "Updateable properties of a `VpcRouter`",
         "type": "object",
         "properties": {
           "description": {
@@ -12230,7 +11094,7 @@
         ]
       },
       "VpcSubnetCreate": {
-        "description": "Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)",
+        "description": "Create-time parameters for a `VpcSubnet`",
         "type": "object",
         "properties": {
           "description": {
@@ -12257,11 +11121,7 @@
             "$ref": "#/components/schemas/Name"
           }
         },
-        "required": [
-          "description",
-          "ipv4_block",
-          "name"
-        ]
+        "required": ["description", "ipv4_block", "name"]
       },
       "VpcSubnetResultsPage": {
         "description": "A single page of results",
@@ -12280,12 +11140,10 @@
             "type": "string"
           }
         },
-        "required": [
-          "items"
-        ]
+        "required": ["items"]
       },
       "VpcSubnetUpdate": {
-        "description": "Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)",
+        "description": "Updateable properties of a `VpcSubnet`",
         "type": "object",
         "properties": {
           "description": {
@@ -12303,7 +11161,7 @@
         }
       },
       "VpcUpdate": {
-        "description": "Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)",
+        "description": "Updateable properties of a `Vpc`",
         "type": "object",
         "properties": {
           "description": {
@@ -12334,23 +11192,17 @@
           {
             "description": "sort in increasing order of \"name\"",
             "type": "string",
-            "enum": [
-              "name_ascending"
-            ]
+            "enum": ["name_ascending"]
           },
           {
             "description": "sort in decreasing order of \"name\"",
             "type": "string",
-            "enum": [
-              "name_descending"
-            ]
+            "enum": ["name_descending"]
           },
           {
             "description": "sort in increasing order of \"id\"",
             "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
+            "enum": ["id_ascending"]
           }
         ]
       },
@@ -12371,9 +11223,7 @@
           {
             "description": "sort in increasing order of \"id\"",
             "type": "string",
-            "enum": [
-              "id_ascending"
-            ]
+            "enum": ["id_ascending"]
           }
         ]
       },
@@ -12391,9 +11241,7 @@
           {
             "description": "sort in increasing order of \"name\"",
             "type": "string",
-            "enum": [
-              "name_ascending"
-            ]
+            "enum": ["name_ascending"]
           }
         ]
       }

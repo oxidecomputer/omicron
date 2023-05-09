@@ -123,8 +123,6 @@ local_idp_user_set_password              POST     /v1/system/identity-providers/
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
-saga_list                                GET      /v1/system/sagas
-saga_view                                GET      /v1/system/sagas/{saga_id}
 saml_identity_provider_create            POST     /v1/system/identity-providers/saml
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
 silo_create                              POST     /v1/system/silos

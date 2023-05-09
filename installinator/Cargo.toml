@@ -23,6 +23,7 @@ ipcc-key-value.workspace = true
 itertools.workspace = true
 once_cell.workspace = true
 omicron-common.workspace = true
+pin-project-lite.workspace = true
 progenitor-client.workspace = true
 reqwest.workspace = true
 serde.workspace = true
@@ -35,6 +36,7 @@ smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
@@ -44,7 +46,7 @@ partial-io.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 test-strategy.workspace = true
-tokio = { workspace = true, features = [ "test-util" ] }
+tokio = { workspace = true, features = ["test-util"] }
 tokio-stream.workspace = true
 
 [features]

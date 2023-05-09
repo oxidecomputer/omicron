@@ -254,7 +254,7 @@ pub struct RouteSelector {
 
 // Silos
 
-/// Create-time parameters for a [`Silo`](crate::external_api::views::Silo)
+/// Create-time parameters for a `Silo`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloCreate {
     #[serde(flatten)]
@@ -270,11 +270,11 @@ pub struct SiloCreate {
     ///
     /// Note that if configuring a SAML based identity provider,
     /// group_attribute_name must be set for users to be considered part of a
-    /// group. See [`SamlIdentityProviderCreate`] for more information.
+    /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
 }
 
-/// Create-time parameters for a [`User`](crate::external_api::views::User)
+/// Create-time parameters for a `User`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct UserCreate {
     /// username used to log in
@@ -329,11 +329,11 @@ impl JsonSchema for UserId {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
-// We store both the raw String and nexus_passwords::Password forms of the
-// password.  That's because `nexus_passwords::Password` does not support
+// We store both the raw String and omicron_passwords::Password forms of the
+// password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, nexus_passwords::Password);
+pub struct Password(String, omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -346,7 +346,7 @@ impl FromStr for Password {
 impl TryFrom<String> for Password {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let inner = nexus_passwords::Password::new(&value)
+        let inner = omicron_passwords::Password::new(&value)
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
@@ -388,7 +388,7 @@ impl JsonSchema for Password {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(
-                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                    u32::try_from(omicron_passwords::MAX_PASSWORD_LENGTH)
                         .unwrap(),
                 ),
                 min_length: None,
@@ -400,8 +400,8 @@ impl JsonSchema for Password {
     }
 }
 
-impl AsRef<nexus_passwords::Password> for Password {
-    fn as_ref(&self) -> &nexus_passwords::Password {
+impl AsRef<omicron_passwords::Password> for Password {
+    fn as_ref(&self) -> &omicron_passwords::Password {
         &self.1
     }
 }
@@ -571,6 +571,7 @@ pub struct SamlIdentityProviderCreate {
     pub technical_contact_email: String,
 
     /// request signing key pair
+    #[serde(default)]
     #[serde(deserialize_with = "validate_key_pair")]
     pub signing_keypair: Option<DerEncodedKeyPair>,
 
@@ -645,14 +646,14 @@ where
 
 // PROJECTS
 
-/// Create-time parameters for a [`Project`](crate::external_api::views::Project)
+/// Create-time parameters for a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`Project`](crate::external_api::views::Project)
+/// Updateable properties of a `Project`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ProjectUpdate {
     #[serde(flatten)]
@@ -661,8 +662,7 @@ pub struct ProjectUpdate {
 
 // NETWORK INTERFACES
 
-/// Create-time parameters for an
-/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
+/// Create-time parameters for an `InstanceNetworkInterface`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceNetworkInterfaceCreate {
     #[serde(flatten)]
@@ -675,8 +675,7 @@ pub struct InstanceNetworkInterfaceCreate {
     pub ip: Option<IpAddr>,
 }
 
-/// Parameters for updating an
-/// [`InstanceNetworkInterface`](omicron_common::api::external::InstanceNetworkInterface).
+/// Parameters for updating an `InstanceNetworkInterface`
 ///
 /// Note that modifying IP addresses for an interface is not yet supported, a
 /// new interface must be created instead.
@@ -704,8 +703,7 @@ pub struct InstanceNetworkInterfaceUpdate {
 
 // CERTIFICATES
 
-/// Create-time parameters for a
-/// [`Certificate`](crate::external_api::views::Certificate)
+/// Create-time parameters for a `Certificate`
 #[derive(Clone, Deserialize, Serialize, JsonSchema)]
 pub struct CertificateCreate {
     /// common identifying metadata
@@ -731,9 +729,7 @@ impl std::fmt::Debug for CertificateCreate {
 
 // IP POOLS
 
-/// Create-time parameters for an IP Pool.
-///
-/// See [`IpPool`](crate::external_api::views::IpPool)
+/// Create-time parameters for an `IpPool`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]
@@ -819,7 +815,7 @@ pub enum ExternalIpCreate {
     // TODO: Add floating IPs: https://github.com/oxidecomputer/omicron/issues/1334
 }
 
-/// Create-time parameters for an [`Instance`](omicron_common::api::external::Instance)
+/// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
     #[serde(flatten)]
@@ -933,7 +929,7 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an [`Instance`](omicron_common::api::external::Instance)
+/// Migration parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceMigrate {
     pub dst_sled_id: Uuid,
@@ -973,23 +969,23 @@ pub struct InstanceSerialConsoleData {
 
 // VPCS
 
-/// Create-time parameters for a [`Vpc`](crate::external_api::views::Vpc)
+/// Create-time parameters for a `Vpc`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 
-    /// The IPv6 prefix for this VPC.
+    /// The IPv6 prefix for this VPC
     ///
     /// All IPv6 subnets created from this VPC must be taken from this range,
-    /// which sould be a Unique Local Address in the range `fd00::/48`. The
+    /// which should be a Unique Local Address in the range `fd00::/48`. The
     /// default VPC Subnet will have the first `/64` range from this prefix.
     pub ipv6_prefix: Option<Ipv6Net>,
 
     pub dns_name: Name,
 }
 
-/// Updateable properties of a [`Vpc`](crate::external_api::views::Vpc)
+/// Updateable properties of a `Vpc`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcUpdate {
     #[serde(flatten)]
@@ -997,7 +993,7 @@ pub struct VpcUpdate {
     pub dns_name: Option<Name>,
 }
 
-/// Create-time parameters for a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
+/// Create-time parameters for a `VpcSubnet`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetCreate {
     #[serde(flatten)]
@@ -1018,7 +1014,7 @@ pub struct VpcSubnetCreate {
     pub ipv6_block: Option<Ipv6Net>,
 }
 
-/// Updateable properties of a [`VpcSubnet`](crate::external_api::views::VpcSubnet)
+/// Updateable properties of a `VpcSubnet`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcSubnetUpdate {
     #[serde(flatten)]
@@ -1027,14 +1023,14 @@ pub struct VpcSubnetUpdate {
 
 // VPC ROUTERS
 
-/// Create-time parameters for a [`VpcRouter`](crate::external_api::views::VpcRouter)
+/// Create-time parameters for a `VpcRouter`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
 }
 
-/// Updateable properties of a [`VpcRouter`](crate::external_api::views::VpcRouter)
+/// Updateable properties of a `VpcRouter`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VpcRouterUpdate {
     #[serde(flatten)]
@@ -1043,7 +1039,7 @@ pub struct VpcRouterUpdate {
 
 // VPC ROUTER ROUTES
 
-/// Create-time parameters for a [`omicron_common::api::external::RouterRoute`]
+/// Create-time parameters for a `RouterRoute`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteCreate {
     #[serde(flatten)]
@@ -1052,7 +1048,7 @@ pub struct RouterRouteCreate {
     pub destination: RouteDestination,
 }
 
-/// Updateable properties of a [`omicron_common::api::external::RouterRoute`]
+/// Updateable properties of a `RouterRoute`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRouteUpdate {
     #[serde(flatten)]
@@ -1135,7 +1131,7 @@ pub enum DiskSource {
     ImportingBlocks { block_size: BlockSize },
 }
 
-/// Create-time parameters for a [`Disk`](omicron_common::api::external::Disk)
+/// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
     /// common identifying metadata
@@ -1208,8 +1204,7 @@ pub struct Distribution {
     pub version: String,
 }
 
-/// Create-time parameters for an
-/// [`Image`](crate::external_api::views::Image)
+/// Create-time parameters for an `Image`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ImageCreate {
     /// common identifying metadata
@@ -1231,7 +1226,7 @@ pub struct ImageCreate {
 
 // SNAPSHOTS
 
-/// Create-time parameters for a [`Snapshot`](crate::external_api::views::Snapshot)
+/// Create-time parameters for a `Snapshot`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SnapshotCreate {
     /// common identifying metadata
@@ -1255,7 +1250,7 @@ pub struct OptionalGroupSelector {
 // for creating them internally as we use for types that can be created in the
 // external API.
 
-/// Create-time parameters for a [`UserBuiltin`](crate::external_api::views::UserBuiltin)
+/// Create-time parameters for a `UserBuiltin`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UserBuiltinCreate {
     #[serde(flatten)]
@@ -1273,7 +1268,7 @@ pub struct UserBuiltinSelector {
 // and so have an implicit silo user ID which must be passed seperately
 // to the creation routine. Note that this disagrees with RFD 44.
 
-/// Create-time parameters for an [`SshKey`](crate::external_api::views::SshKey)
+/// Create-time parameters for an `SshKey`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SshKeyCreate {
     #[serde(flatten)]

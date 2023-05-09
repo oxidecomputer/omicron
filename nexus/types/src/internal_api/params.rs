@@ -4,8 +4,10 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Name;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -197,6 +199,7 @@ impl fmt::Display for ServiceKind {
 pub struct ServicePutRequest {
     pub service_id: Uuid,
     pub sled_id: Uuid,
+    pub zone_id: Option<Uuid>,
 
     /// Address on which a service is responding to requests.
     pub address: SocketAddrV6,
@@ -227,7 +230,7 @@ impl std::fmt::Debug for Certificate {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
@@ -240,12 +243,23 @@ pub struct RackInitializationRequest {
     pub certs: Vec<Certificate>,
     /// initial internal DNS config
     pub internal_dns_zone_config: dns_service_client::types::DnsConfigParams,
+    /// delegated DNS name for external DNS
+    pub external_dns_zone_name: String,
+    /// configuration for the initial (recovery) Silo
+    pub recovery_silo: RecoverySiloConfig,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
 pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
 pub type Srv = dns_service_client::types::Srv;
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RecoverySiloConfig {
+    pub silo_name: Name,
+    pub user_name: UserId,
+    pub user_password_hash: omicron_passwords::NewPasswordHash,
+}
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]

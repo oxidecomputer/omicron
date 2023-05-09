@@ -18,11 +18,11 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 pub use dropshot::PaginationOrder;
-use futures::future::ready;
 use futures::stream::BoxStream;
-use futures::stream::StreamExt;
 use parse_display::Display;
 use parse_display::FromStr;
+use rand::thread_rng;
+use rand::Rng;
 use schemars::JsonSchema;
 use semver;
 use serde::Deserialize;
@@ -490,18 +490,19 @@ impl JsonSchema for RoleName {
     }
 }
 
-/// A count of bytes, typically used either for memory or storage capacity
-///
-/// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
-/// inconvenient to define constructors: a u32 constructor can be infallible, but
-/// an i64 constructor can fail (if the value is negative) and a u64 constructor
-/// can fail (if the value is larger than i64::MAX).  We provide all of these for
-/// consumers' convenience.
-// TODO-cleanup This could benefit from a more complete implementation.
+/// Byte count to express memory or storage capacity.
 //
-// The maximum byte count of i64::MAX comes from the fact that this is stored in
-// the database as an i64.  Constraining it here ensures that we can't fail to
-// serialize the value.
+// The maximum supported byte count is [`i64::MAX`].  This makes it somewhat
+// inconvenient to define constructors: a u32 constructor can be infallible,
+// but an i64 constructor can fail (if the value is negative) and a u64
+// constructor can fail (if the value is larger than i64::MAX).  We provide
+// all of these for consumers' convenience.
+//
+// The maximum byte count of i64::MAX comes from the fact that this is stored
+// in the database as an i64.  Constraining it here ensures that we can't fail
+// to serialize the value.
+//
+// TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ByteCount(u64);
 
@@ -725,17 +726,6 @@ pub enum ResourceType {
     Zpool,
 }
 
-pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
-where
-    T: Into<U>,
-{
-    object_stream
-        .filter(|maybe_object| ready(maybe_object.is_ok()))
-        .map(|maybe_object| maybe_object.unwrap().into())
-        .collect::<Vec<U>>()
-        .await
-}
-
 // IDENTITY METADATA
 
 /// Identity-related metadata that's included in nearly all public API objects
@@ -900,7 +890,7 @@ impl From<&InstanceCpuCount> for i64 {
     }
 }
 
-/// Client view of an [`InstanceRuntimeState`]
+/// The state of an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
@@ -918,7 +908,7 @@ impl From<crate::api::internal::nexus::InstanceRuntimeState>
     }
 }
 
-/// Client view of an [`Instance`]
+/// View of an Instance
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Instance {
     // TODO is flattening here the intent in RFD 4?
@@ -941,7 +931,7 @@ pub struct Instance {
 
 // DISKS
 
-/// Client view of a [`Disk`]
+/// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
     #[serde(flatten)]
@@ -955,7 +945,7 @@ pub struct Disk {
     pub device_path: String,
 }
 
-/// State of a Disk (primarily: attached or not)
+/// State of a Disk
 #[derive(
     Clone,
     Debug,
@@ -1076,79 +1066,8 @@ impl DiskState {
     }
 }
 
-// Sagas
-//
-// These are currently only intended for observability by developers.  We will
-// eventually want to flesh this out into something more observable for end
-// users.
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-pub struct Saga {
-    pub id: Uuid,
-    pub state: SagaState,
-}
-
-impl From<steno::SagaView> for Saga {
-    fn from(s: steno::SagaView) -> Self {
-        Saga { id: Uuid::from(s.id), state: SagaState::from(s.state) }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum SagaState {
-    Running,
-    Succeeded,
-    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
-}
-
-#[derive(Clone, Debug, Serialize, JsonSchema)]
-#[serde(tag = "error", rename_all = "snake_case")]
-pub enum SagaErrorInfo {
-    ActionFailed { source_error: serde_json::Value },
-    DeserializeFailed { message: String },
-    InjectedError,
-    SerializeFailed { message: String },
-    SubsagaCreateFailed { message: String },
-}
-
-impl From<steno::SagaStateView> for SagaState {
-    fn from(st: steno::SagaStateView) -> Self {
-        match st {
-            steno::SagaStateView::Ready { .. } => SagaState::Running,
-            steno::SagaStateView::Running { .. } => SagaState::Running,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Ok(_), .. },
-                ..
-            } => SagaState::Succeeded,
-            steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Err(e), .. },
-                ..
-            } => SagaState::Failed {
-                error_node_name: e.error_node_name,
-                error_info: match e.error_source {
-                    steno::ActionError::ActionFailed { source_error } => {
-                        SagaErrorInfo::ActionFailed { source_error }
-                    }
-                    steno::ActionError::DeserializeFailed { message } => {
-                        SagaErrorInfo::DeserializeFailed { message }
-                    }
-                    steno::ActionError::InjectedError => {
-                        SagaErrorInfo::InjectedError
-                    }
-                    steno::ActionError::SerializeFailed { message } => {
-                        SagaErrorInfo::SerializeFailed { message }
-                    }
-                    steno::ActionError::SubsagaCreateFailed { message } => {
-                        SagaErrorInfo::SubsagaCreateFailed { message }
-                    }
-                },
-            },
-        }
-    }
-}
-
 /// An `Ipv4Net` represents a IPv4 subnetwork, including the address and network mask.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, PartialEq, Eq, Serialize)]
 pub struct Ipv4Net(pub ipnetwork::Ipv4Network);
 
 impl Ipv4Net {
@@ -1303,7 +1222,7 @@ impl JsonSchema for Ipv6Net {
 }
 
 /// An `IpNet` represents an IP network, either IPv4 or IPv6.
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IpNet {
     V4(Ipv4Net),
     V6(Ipv6Net),
@@ -1527,8 +1446,8 @@ pub enum RouteTarget {
 /// destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
-/// `RouteDestination`, the corresponding [`RouterRoute`] applies, and traffic
-/// will be forward to the [`RouteTarget`] for that rule.
+/// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
+/// will be forward to the `RouteTarget` for that rule.
 #[derive(
     Clone,
     Debug,
@@ -1552,18 +1471,20 @@ pub enum RouteDestination {
     Subnet(Name),
 }
 
-/// The classification of a [`RouterRoute`] as defined by the system.
+/// The kind of a `RouterRoute`
+///
 /// The kind determines certain attributes such as if the route is modifiable
 /// and describes how or where the route was created.
-///
-/// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
+//
+// See [RFD-21](https://rfd.shared.oxide.computer/rfd/0021#concept-router) for more context
 #[derive(
     Clone, Copy, Debug, PartialEq, Deserialize, Serialize, Display, JsonSchema,
 )]
 #[display("{}")]
 #[serde(rename_all = "snake_case")]
 pub enum RouterRouteKind {
-    /// Determines the default destination of traffic, such as whether it goes to the internet or not.
+    /// Determines the default destination of traffic, such as whether it goes
+    /// to the internet or not.
     ///
     /// `Destination: An Internet Gateway`
     /// `Modifiable: true`
@@ -1578,22 +1499,22 @@ pub enum RouterRouteKind {
     /// `Destination: A different VPC`
     /// `Modifiable: false`
     VpcPeering,
-    /// Created by a user
-    /// See [`RouteTarget`]
+    /// Created by a user; see `RouteTarget`
     ///
     /// `Destination: User defined`
     /// `Modifiable: true`
     Custom,
 }
 
-///  A route defines a rule that governs where traffic should be sent based on its destination.
+/// A route defines a rule that governs where traffic should be sent based on
+/// its destination.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouterRoute {
     /// common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// The VPC Router to which the route belongs.
+    /// The ID of the VPC Router to which the route belongs
     pub vpc_router_id: Uuid,
 
     /// Describes the kind of router. Set at creation. `read-only`
@@ -1722,7 +1643,7 @@ pub enum VpcFirewallRuleAction {
     Deny,
 }
 
-/// A `VpcFirewallRuleTarget` is used to specify the set of [`Instance`]s to
+/// A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to
 /// which a firewall rule applies.
 #[derive(
     Clone,
@@ -1909,9 +1830,74 @@ impl JsonSchema for L4PortRange {
 // NOTE: We're using the `macaddr` crate for the internal representation. But as with the `ipnet`,
 // this crate does not implement `JsonSchema`.
 #[derive(
-    Clone, Copy, Debug, DeserializeFromStr, PartialEq, SerializeDisplay,
+    Clone,
+    Copy,
+    Debug,
+    DeserializeFromStr,
+    PartialEq,
+    Eq,
+    SerializeDisplay,
+    Hash,
 )]
 pub struct MacAddr(pub macaddr::MacAddr6);
+
+impl MacAddr {
+    // Guest MAC addresses begin with the Oxide OUI A8:40:25. Further, guest
+    // address are constrained to be in the virtual address range
+    // A8:40:25:F_:__:__. Even further, the range F0:00:00 - FE:FF:FF is
+    // reserved for customer-visible addresses (FF:00:00-FF:FF:FF is for
+    // system MAC addresses). See RFD 174 for the discussion of the virtual
+    // range, and
+    // https://github.com/oxidecomputer/omicron/pull/955#discussion_r856432498
+    // for an initial discussion of the customer/system address range split.
+    // The system range is further split between FF:00:00-FF:7F:FF for
+    // fixed addresses (e.g., the OPTE virtual gateway MAC) and
+    // FF:80:00-FF:FF:FF for dynamically allocated addresses (e.g., service
+    // vNICs).
+    //
+    // F0:00:00 - FF:FF:FF    Oxide Virtual Address Range
+    //     F0:00:00 - FE:FF:FF    Guest Addresses
+    //     FF:00:00 - FF:FF:FF    System Addresses
+    //         FF:00:00 - FF:7F:FF    Reserved Addresses
+    //         FF:80:00 - FF:FF:FF    Runtime allocatable
+    pub const MIN_GUEST_ADDR: i64 = 0xA8_40_25_F0_00_00;
+    pub const MAX_GUEST_ADDR: i64 = 0xA8_40_25_FE_FF_FF;
+    pub const MIN_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_00_00;
+    pub const MAX_SYSTEM_RESV: i64 = 0xA8_40_25_FF_7F_FF;
+    pub const MAX_SYSTEM_ADDR: i64 = 0xA8_40_25_FF_FF_FF;
+
+    /// Generate a random MAC address for a guest network interface
+    pub fn random_guest() -> Self {
+        let value =
+            thread_rng().gen_range(Self::MIN_GUEST_ADDR..=Self::MAX_GUEST_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Generate a random MAC address in the system address range
+    pub fn random_system() -> Self {
+        let value = thread_rng()
+            .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
+        Self::from_i64(value)
+    }
+
+    /// Construct a MAC address from its i64 big-endian byte representation.
+    // NOTE: This is the representation used in the database.
+    pub fn from_i64(value: i64) -> Self {
+        let bytes = value.to_be_bytes();
+        Self(macaddr::MacAddr6::new(
+            bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ))
+    }
+
+    /// Convert a MAC address to its i64 big-endian byte representation
+    // NOTE: This is the representation used in the database.
+    pub fn to_i64(self) -> i64 {
+        let bytes = self.0.as_bytes();
+        i64::from_be_bytes([
+            0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+        ])
+    }
+}
 
 impl From<macaddr::MacAddr6> for MacAddr {
     fn from(mac: macaddr::MacAddr6) -> Self {
@@ -2005,12 +1991,14 @@ impl Vni {
     /// Virtual Network Identifiers are constrained to be 24-bit values.
     pub const MAX_VNI: u32 = 0xFF_FFFF;
 
+    /// The VNI for the builtin services VPC.
+    pub const SERVICES_VNI: Self = Self(100);
+
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
 
     /// Create a new random VNI.
     pub fn random() -> Self {
-        use rand::Rng;
         Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
 }
@@ -2817,5 +2805,15 @@ mod test {
         let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
         // Too many characters
         let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
+    }
+
+    #[test]
+    fn test_mac_to_int_conversions() {
+        use super::MacAddr;
+        let original: i64 = 0xa8_40_25_ff_00_01;
+        let mac = MacAddr::from_i64(original);
+        assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
+        let conv = mac.to_i64();
+        assert_eq!(original, conv);
     }
 }

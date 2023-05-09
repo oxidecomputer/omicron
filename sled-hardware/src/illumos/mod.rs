@@ -6,6 +6,7 @@ use crate::{
     Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
     SledMode, UnparsedDisk,
 };
+use camino::Utf8PathBuf;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use slog::debug;
 use slog::error;
@@ -14,17 +15,16 @@ use slog::o;
 use slog::warn;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-mod disk;
 mod gpt;
+mod partitions;
 mod sysconf;
 
-pub use disk::ensure_partition_layout;
+pub use partitions::ensure_partition_layout;
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -34,8 +34,14 @@ enum Error {
     #[error("Device does not appear to be an Oxide Gimlet: {0}")]
     NotAGimlet(String),
 
+    #[error("Invalid Utf8 path: {0}")]
+    FromPathBuf(#[from] camino::FromPathBufError),
+
     #[error("Node {node} missing device property {name}")]
     MissingDeviceProperty { node: String, name: String },
+
+    #[error("Invalid value for boot-storage-unit property: {0}")]
+    InvalidBootStorageUnitValue(i64),
 
     #[error("Unrecognized slot for device {slot}")]
     UnrecognizedSlot { slot: i64 },
@@ -44,7 +50,7 @@ enum Error {
     UnexpectedPropertyType { name: String, ty: String },
 
     #[error("Could not translate {0} to '/dev' path: no links")]
-    NoDevLinks(PathBuf),
+    NoDevLinks(Utf8PathBuf),
 
     #[error("Failed to issue request to sysconf: {0}")]
     SysconfError(#[from] sysconf::Error),
@@ -75,6 +81,25 @@ impl TofinoSnapshot {
     }
 }
 
+// Which BSU (i.e., host flash rom) slot did we boot from?
+#[derive(Debug, Clone, Copy)]
+enum BootStorageUnit {
+    A,
+    B,
+}
+
+impl TryFrom<i64> for BootStorageUnit {
+    type Error = Error;
+
+    fn try_from(raw: i64) -> Result<Self, Self::Error> {
+        match raw {
+            0x41 => Ok(Self::A),
+            0x42 => Ok(Self::B),
+            _ => Err(Error::InvalidBootStorageUnitValue(raw)),
+        }
+    }
+}
+
 // A snapshot of information about the underlying hardware
 struct HardwareSnapshot {
     tofino: TofinoSnapshot,
@@ -101,13 +126,20 @@ impl HardwareSnapshot {
 
         let properties = find_properties(
             &root,
-            ["baseboard-identifier", "baseboard-model", "baseboard-revision"],
+            [
+                "baseboard-identifier",
+                "baseboard-model",
+                "baseboard-revision",
+                "boot-storage-unit",
+            ],
         )?;
         let baseboard = Baseboard::new(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             i64_from_property(&properties[2])?,
         );
+        let boot_storage_unit =
+            BootStorageUnit::try_from(i64_from_property(&properties[3])?)?;
 
         // Monitor for the Tofino device and driver.
         let tofino = get_tofino_snapshot(log, &mut device_info);
@@ -118,7 +150,7 @@ impl HardwareSnapshot {
         while let Some(node) =
             node_walker.next().transpose().map_err(Error::DevInfo)?
         {
-            poll_blkdev_node(&log, &mut disks, node)?;
+            poll_blkdev_node(&log, &mut disks, node, boot_storage_unit)?;
         }
 
         Ok(Self { tofino, disks, baseboard })
@@ -240,6 +272,14 @@ fn slot_to_disk_variant(slot: i64) -> Option<DiskVariant> {
     }
 }
 
+fn slot_is_boot_disk(slot: i64, boot_storage_unit: BootStorageUnit) -> bool {
+    match (boot_storage_unit, slot) {
+        // See reference for these values in `slot_to_disk_variant` above.
+        (BootStorageUnit::A, 0x11) | (BootStorageUnit::B, 0x12) => true,
+        _ => false,
+    }
+}
+
 fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
     let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
     {
@@ -262,7 +302,7 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
 
 fn get_dev_path_of_whole_disk(
     node: &Node<'_>,
-) -> Result<Option<PathBuf>, Error> {
+) -> Result<Option<Utf8PathBuf>, Error> {
     let mut wm = node.minors();
     while let Some(m) = wm.next().transpose().map_err(Error::DevInfo)? {
         // "wd" stands for "whole disk"
@@ -298,9 +338,9 @@ fn get_dev_path_of_whole_disk(
             .collect::<Vec<_>>();
 
         if paths.is_empty() {
-            return Err(Error::NoDevLinks(PathBuf::from(devfs_path)));
+            return Err(Error::NoDevLinks(Utf8PathBuf::from(devfs_path)));
         }
-        return Ok(Some(paths[0].path().to_path_buf()));
+        return Ok(Some(paths[0].path().to_path_buf().try_into()?));
     }
     Ok(None)
 }
@@ -377,6 +417,7 @@ fn poll_blkdev_node(
     log: &Logger,
     disks: &mut HashSet<UnparsedDisk>,
     node: Node<'_>,
+    boot_storage_unit: BootStorageUnit,
 ) -> Result<(), Error> {
     let Some(driver_name) = node.driver_name() else {
         return Ok(());
@@ -443,11 +484,12 @@ fn poll_blkdev_node(
     };
 
     let disk = UnparsedDisk::new(
-        PathBuf::from(&devfs_path),
+        Utf8PathBuf::from(&devfs_path),
         dev_path,
         slot,
         variant,
         device_id,
+        slot_is_boot_disk(slot, boot_storage_unit),
     );
     disks.insert(disk);
     Ok(())

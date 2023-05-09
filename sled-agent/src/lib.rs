@@ -22,14 +22,17 @@ pub mod config;
 mod http_entrypoints;
 mod instance;
 mod instance_manager;
+mod ledger;
 mod nexus;
 pub mod params;
+mod profile;
 pub mod rack_setup;
 pub mod server;
 mod services;
 mod sled_agent;
 mod smf_helper;
 pub mod sp;
+pub(crate) mod storage;
 mod storage_manager;
 mod updates;
 
