@@ -264,7 +264,7 @@ impl<S: StepSpec> EventStore<S> {
             return;
         }
 
-        if let Some(key) = self.recurse_for_progress_event(&event) {
+        if let Some(key) = Self::step_key_for_progress_event(&event) {
             if let Some(value) = self.map.get_mut(&key) {
                 value.set_progress(event);
             }
@@ -446,8 +446,7 @@ impl<S: StepSpec> EventStore<S> {
         RecurseActions { new_execution, step_key, progress_key }
     }
 
-    fn recurse_for_progress_event<S2: StepSpec>(
-        &mut self,
+    fn step_key_for_progress_event<S2: StepSpec>(
         event: &ProgressEvent<S2>,
     ) -> Option<StepKey> {
         match &event.kind {
@@ -460,7 +459,7 @@ impl<S: StepSpec> EventStore<S> {
                 Some(key)
             }
             ProgressEventKind::Nested { event: nested_event, .. } => {
-                self.recurse_for_progress_event(nested_event)
+                Self::step_key_for_progress_event(nested_event)
             }
             ProgressEventKind::Unknown => None,
         }
@@ -634,7 +633,7 @@ impl<'buf, S: StepSpec> EventBufferSteps<'buf, S> {
         by_execution_id
             .into_iter()
             .map(|(execution_id, steps)| {
-                let summary = ExecutionSummary::new(execution_id, &*steps);
+                let summary = ExecutionSummary::new(execution_id, &steps);
                 (execution_id, summary)
             })
             .collect()

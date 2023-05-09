@@ -144,17 +144,20 @@ impl UpdatePane {
             StepStatus::Running { progress_event, .. } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
-                    Span::styled("Running", style::bold()),
+                    Span::styled("Running", style::successful_update_bold()),
                 ];
                 if let Some(attempt) = progress_event.kind.leaf_attempt() {
                     if attempt > 1 {
                         // Display the attempt number.
-                        spans.push(Span::raw(" (attempt "));
+                        spans.push(Span::styled(
+                            " (attempt ",
+                            style::plain_text(),
+                        ));
                         spans.push(Span::styled(
                             format!("{attempt}"),
-                            style::bold(),
+                            style::plain_text_bold(),
                         ));
-                        spans.push(Span::raw(")"));
+                        spans.push(Span::styled(")", style::plain_text()));
                     }
                 }
                 body.lines.push(Spans::from(spans));
@@ -168,13 +171,14 @@ impl UpdatePane {
                     let current = progress.current;
                     progress_spans.push(Span::styled(
                         format!("{current}"),
-                        style::bold(),
+                        style::plain_text_bold(),
                     ));
                     if let Some(total) = progress.total {
-                        progress_spans.push(Span::raw("/"));
+                        progress_spans
+                            .push(Span::styled("/", style::plain_text()));
                         progress_spans.push(Span::styled(
                             format!("{total}"),
-                            style::bold(),
+                            style::plain_text_bold(),
                         ));
                     }
                     // TODO: progress units
@@ -185,8 +189,10 @@ impl UpdatePane {
                 if let Some(step_elapsed) =
                     progress_event.kind.leaf_step_elapsed()
                 {
-                    progress_spans
-                        .push(Span::raw(format!(" (at {step_elapsed:.2?})")));
+                    progress_spans.push(Span::styled(
+                        format!(" (at {step_elapsed:.2?})"),
+                        style::plain_text(),
+                    ));
                 }
 
                 body.lines.push(Spans::from(progress_spans));
@@ -223,25 +229,25 @@ impl UpdatePane {
 
                 if info.attempt > 1 {
                     // Display the attempt number.
-                    spans.push(Span::raw(" (attempt "));
+                    spans.push(Span::styled(" (attempt ", style::plain_text()));
                     spans.push(Span::styled(
                         format!("{}", info.attempt),
-                        style::bold(),
+                        style::plain_text_bold(),
                     ));
-                    spans.push(Span::raw(")"));
+                    spans.push(Span::styled(")", style::plain_text()));
                 }
 
-                spans.push(Span::raw(format!(
-                    " after {:.2?}",
-                    info.step_elapsed
-                )));
+                spans.push(Span::styled(
+                    format!(" after {:.2?}", info.step_elapsed),
+                    style::plain_text(),
+                ));
                 body.lines.push(Spans::from(spans));
 
                 if let Some(message) = message {
                     body.lines.push(Spans::default());
                     let message_spans = vec![
                         Span::styled("Message: ", style::selected()),
-                        Span::raw(message.as_ref()),
+                        Span::styled(message.as_ref(), style::plain_text()),
                     ];
                     body.lines.push(Spans::from(message_spans));
                 }
@@ -1044,10 +1050,8 @@ impl ComponentUpdateListState {
 
         if selected_needs_reset {
             // To reset, select the first step key.
-            self.selected = self
-                .list_items
-                .get_index(0)
-                .map(|(step_key, _)| step_key.clone());
+            self.selected =
+                self.list_items.get_index(0).map(|(step_key, _)| *step_key);
         }
 
         // Update the tui state to be in sync with the selected element.
