@@ -139,7 +139,15 @@ impl UpdatePane {
 
         match value.step_status() {
             StepStatus::NotStarted => {
-                body.lines.push(Spans::from("Step has not started yet"));
+                let spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Not started", style::plain_text_bold()),
+                    Span::styled(
+                        ", waiting for prior steps to complete",
+                        style::plain_text(),
+                    ),
+                ];
+                body.lines.push(Spans(spans));
             }
             StepStatus::Running { progress_event, .. } => {
                 let mut spans = vec![

@@ -11,6 +11,7 @@ use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
 use crate::sp::SpHandle;
+use crate::storage_manager::StorageResources;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -49,12 +50,14 @@ impl RssHandle {
         our_bootstrap_address: Ipv6Addr,
         sp: Option<SpHandle>,
         member_device_id_certs: Vec<Ed25519Certificate>,
+        storage_resources: StorageResources,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
+            storage_resources,
             tx,
             member_device_id_certs,
         );
