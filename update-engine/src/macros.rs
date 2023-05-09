@@ -60,5 +60,7 @@ macro_rules! define_update_engine {
             ::update_engine::events::EventReport<S>;
         $v type StepHandle<T, S = $spec_type> =
             ::update_engine::StepHandle<T, S>;
+        $v type SharedStepHandle<T, S = $spec_type> =
+            ::update_engine::SharedStepHandle<T, S>;
     };
 }

@@ -9,8 +9,8 @@ use argon2::Argon2;
 use argon2::Params;
 use argon2::Version;
 use criterion::{criterion_group, criterion_main, Criterion};
-use nexus_passwords::Hasher;
-use nexus_passwords::Password;
+use omicron_passwords::Hasher;
+use omicron_passwords::Password;
 
 fn password_benchmark(c: &mut Criterion) {
     let password = Password::new("hunter2").unwrap();
@@ -22,7 +22,7 @@ fn password_benchmark(c: &mut Criterion) {
     let configs = vec![
         Config {
             name: "our parameters",
-            params: nexus_passwords::external_password_argon(),
+            params: omicron_passwords::external_password_argon(),
         },
         Config { name: "argon2 crate default", params: Argon2::default() },
         // These OWASP parameters come from the Password Storage Cheat Sheet.

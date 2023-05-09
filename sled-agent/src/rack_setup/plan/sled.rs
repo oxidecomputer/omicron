@@ -9,8 +9,10 @@ use crate::bootstrap::{
     params::SledAgentRequest,
     trust_quorum::{RackSecret, ShareDistribution},
 };
+use crate::ledger::{Ledger, Ledgerable};
 use crate::rack_setup::config::SetupServiceConfig as Config;
-use camino::{Utf8Path, Utf8PathBuf};
+use crate::storage_manager::StorageResources;
+use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use slog::Logger;
 use sprockets_host::Ed25519Certificate;
@@ -18,11 +20,6 @@ use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use uuid::Uuid;
-
-fn rss_sled_plan_path() -> Utf8PathBuf {
-    Utf8Path::new(omicron_common::OMICRON_CONFIG_PATH)
-        .join("rss-sled-plan.toml")
-}
 
 pub fn generate_rack_secret<'a>(
     rack_secret_threshold: usize,
@@ -75,14 +72,22 @@ pub enum PlanError {
         err: std::io::Error,
     },
 
-    #[error("Cannot deserialize TOML file at {path}: {err}")]
-    Toml { path: Utf8PathBuf, err: toml::de::Error },
+    #[error("Failed to access ledger: {0}")]
+    Ledger(#[from] crate::ledger::Error),
 
     #[error("Failed to split rack secret: {0:?}")]
     SplitRackSecret(vsss_rs::Error),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+impl Ledgerable for Plan {
+    fn is_newer_than(&self, _other: &Self) -> bool {
+        true
+    }
+    fn generation_bump(&mut self) {}
+}
+const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.toml";
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub rack_id: Uuid,
     pub sleds: HashMap<SocketAddrV6, SledAgentRequest>,
@@ -93,25 +98,23 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub async fn load(log: &Logger) -> Result<Option<Self>, PlanError> {
+    pub async fn load(
+        log: &Logger,
+        storage: &StorageResources,
+    ) -> Result<Option<Self>, PlanError> {
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
+            .collect();
+
         // If we already created a plan for this RSS to allocate
         // subnets/requests to sleds, re-use that existing plan.
-        let rss_sled_plan_path = rss_sled_plan_path();
-        if rss_sled_plan_path.exists() {
+        let ledger = Ledger::<Self>::new(log, paths.clone()).await;
+        if let Some(ledger) = ledger {
             info!(log, "RSS plan already created, loading from file");
-
-            let plan: Self = toml::from_str(
-                &tokio::fs::read_to_string(&rss_sled_plan_path).await.map_err(
-                    |err| PlanError::Io {
-                        message: format!(
-                            "Loading RSS plan {rss_sled_plan_path:?}"
-                        ),
-                        err,
-                    },
-                )?,
-            )
-            .map_err(|err| PlanError::Toml { path: rss_sled_plan_path, err })?;
-            Ok(Some(plan))
+            Ok(Some(ledger.data().clone()))
         } else {
             Ok(None)
         }
@@ -120,6 +123,7 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
+        storage: &StorageResources,
         bootstrap_addrs: HashSet<Ipv6Addr>,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
@@ -159,23 +163,16 @@ impl Plan {
         let plan = Self { rack_id, sleds, config: config.clone() };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let serialized_plan =
-            toml::Value::try_from(&plan).unwrap_or_else(|e| {
-                panic!("Cannot serialize configuration: {:#?}: {}", plan, e)
-            });
-        let plan_str = toml::to_string(&serialized_plan)
-            .expect("Cannot turn config to string");
+        let paths: Vec<Utf8PathBuf> = storage
+            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .await
+            .into_iter()
+            .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
+            .collect();
 
-        info!(log, "Plan serialized as: {}", plan_str);
-        let path = rss_sled_plan_path();
-        tokio::fs::write(&path, plan_str).await.map_err(|err| {
-            PlanError::Io {
-                message: format!("Storing RSS sled plan to {path:?}"),
-                err,
-            }
-        })?;
+        let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
+        ledger.commit().await?;
         info!(log, "Sled plan written to storage");
-
         Ok(plan)
     }
 }
