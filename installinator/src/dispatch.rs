@@ -9,8 +9,8 @@ use buf_list::Cursor;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
-    InstallinatorCompletionMetadata, InstallinatorComponent,
-    InstallinatorStepId, StepContext, StepHandle, UpdateEngine,
+    InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
+    InstallinatorStepId, StepContext, StepHandle, StepProgress, UpdateEngine,
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
@@ -244,21 +244,8 @@ impl InstallOpts {
                     InstallinatorComponent::Both,
                     InstallinatorStepId::Scan,
                     "Scanning hardware to find M.2 disks",
-                    move |_cx| async move {
-                        let destination =
-                            tokio::task::spawn_blocking(move || {
-                                WriteDestination::from_hardware(&log)
-                            })
-                            .await
-                            .unwrap()?;
-
-                        let disks_found = destination.num_target_disks();
-                        StepResult::success(
-                            destination,
-                            InstallinatorCompletionMetadata::HardwareScan {
-                                disks_found,
-                            },
-                        )
+                    move |cx| async move {
+                        scan_hardware_with_retries(&cx, &log).await
                     },
                 )
                 .register()
@@ -357,6 +344,51 @@ impl InstallOpts {
 
         Ok(())
     }
+}
+
+async fn scan_hardware_with_retries(
+    cx: &StepContext,
+    log: &slog::Logger,
+) -> Result<StepResult<WriteDestination, InstallinatorSpec>> {
+    // Scanning for our disks is inherently racy: we have to wait for the disks
+    // to attach. This should take milliseconds in general; we'll set a hard cap
+    // at retrying for ~30 seconds.
+    const HARDWARE_RETRIES: usize = 60;
+    const HARDWARE_RETRY_DELAY: Duration = Duration::from_millis(500);
+
+    let mut retry = 0;
+    let result = loop {
+        let log = log.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            WriteDestination::from_hardware(&log)
+        })
+        .await
+        .unwrap();
+
+        match result {
+            Ok(destination) => break Ok(destination),
+            Err(error) => {
+                if retry < HARDWARE_RETRIES {
+                    cx.send_progress(StepProgress::retry(format!(
+                        "hardware scan {retry} failed: {error:#}"
+                    )))
+                    .await;
+                    retry += 1;
+                    tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
+                    continue;
+                } else {
+                    break Err(error);
+                }
+            }
+        }
+    };
+
+    let destination = result?;
+    let disks_found = destination.num_target_disks();
+    StepResult::success(
+        destination,
+        InstallinatorCompletionMetadata::HardwareScan { disks_found },
+    )
 }
 
 async fn fetch_artifact(
