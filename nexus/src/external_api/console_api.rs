@@ -89,16 +89,10 @@ pub async fn login_spoof(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                http::HeaderValue::from_str(&session_cookie_header_value(
+                session_cookie_header_value(
                     &session.token,
-                    apictx.session_idle_timeout(),
-                ))
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
+                    apictx.session_absolute_timeout(),
+                )?,
             );
         };
         Ok(response)
@@ -448,16 +442,13 @@ async fn login_finish(
         let headers = response_with_headers.headers_mut();
         headers.append(
             header::SET_COOKIE,
-            http::HeaderValue::from_str(&session_cookie_header_value(
+            session_cookie_header_value(
                 &session.token,
-                apictx.session_idle_timeout(),
-            ))
-            .map_err(|error| {
-                HttpError::for_internal_error(format!(
-                    "unsupported cookie value: {:#}",
-                    error
-                ))
-            })?,
+                // use absolute timeout even though session might idle out first.
+                // browser expiration is mostly for convenience, as the API will
+                // reject requests with an expired session regardless
+                apictx.session_absolute_timeout(),
+            )?,
         );
     }
     Ok(response_with_headers)
@@ -503,15 +494,7 @@ pub async fn logout(
             let headers = response.headers_mut();
             headers.append(
                 header::SET_COOKIE,
-                http::HeaderValue::from_str(
-                    &clear_session_cookie_header_value(),
-                )
-                .map_err(|error| {
-                    HttpError::for_internal_error(format!(
-                        "unsupported cookie value: {:#}",
-                        error
-                    ))
-                })?,
+                clear_session_cookie_header_value()?,
             );
         };
 
