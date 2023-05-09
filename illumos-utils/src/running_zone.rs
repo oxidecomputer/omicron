@@ -565,7 +565,7 @@ pub enum InstallZoneError {
         err: crate::zone::AdmError,
     },
 
-    #[error("Failed to find zone image '{image}' from `{paths:?}'")]
+    #[error("Failed to find zone image '{image}' from {paths:?}")]
     ImageNotFound { image: String, paths: Vec<Utf8PathBuf> },
 }
 
