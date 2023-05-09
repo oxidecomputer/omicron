@@ -133,6 +133,37 @@ done
 ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
+# Generate a self-signed certificate to use as the initial TLS certificate for
+# the recovery Silo.  Its DNS name is determined by the silo name and the
+# delegated external DNS name, both of which are in the RSS config file.  In a
+# real system, the certificate would come from the customer during initial rack
+# setup on the technician port.
+#
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -f pkg/config-rss.toml
+
+TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DOMAIN"
+openssl req -newkey rsa:4096 \
+    -x509 \
+    -sha256 \
+    -days 3 \
+    -nodes \
+    -out "pkg/initial-tls-cert.pem" \
+    -keyout "pkg/initial-tls-key.pem" \
+    -subj "/CN=$TLS_NAME"
+tar rvf out/omicron-sled-agent.tar \
+    pkg/initial-tls-cert.pem \
+    pkg/initial-tls-key.pem
+rm -f pkg/initial-tls-cert.pem pkg/initial-tls-key.pem
+rmdir pkg
+# The actual end-to-end tests need the certificate.  This is where that file
+# will end up once installed.
+E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
+
+
+#
 # Image-related tests use images served by catacomb. The lab network is
 # IPv4-only; the propolis zones are IPv6-only. These steps set up tcpproxy
 # configured to proxy to catacomb via port 54321 in the global zone.
@@ -218,6 +249,7 @@ export RUST_BACKTRACE=1
 ./tests/bootstrap
 
 rm ./tests/bootstrap
+export E2E_TLS_CERT
 for test_bin in tests/*; do
 	./"$test_bin"
 done

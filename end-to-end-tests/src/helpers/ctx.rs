@@ -23,6 +23,9 @@ const RSS_CONFIG_STR: &str = include_str!(concat!(
     "/../smf/sled-agent/non-gimlet/config-rss.toml"
 ));
 
+// Environment variable containing the path to a cert that we should trust.
+const E2E_TLS_CERT_ENV: &str = "E2E_TLS_CERT";
+
 #[derive(Clone)]
 pub struct Context {
     pub client: Client,
@@ -161,7 +164,12 @@ pub async fn nexus_addr() -> Result<SocketAddr> {
 }
 
 async fn get_base_url() -> Result<String> {
-    Ok(format!("http://{}", nexus_addr().await?))
+    let proto = if std::env::var(E2E_TLS_CERT_ENV).is_ok() {
+        "http"
+    } else {
+        "https"
+    };
+    Ok(format!("{}://{}", proto, nexus_addr().await?))
 }
 
 async fn build_authenticated_client() -> Result<oxide_client::Client> {
@@ -184,11 +192,29 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
     // Do not have reqwest follow redirects.  That's because our login response
     // includes both a redirect and the session cookie header.  If reqwest
     // follows the redirect, we won't have a chance to get the cookie.
-    let reqwest_login_client = reqwest::ClientBuilder::new()
+    let mut builder = reqwest::ClientBuilder::new()
         .connect_timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(60))
-        .build()?;
+        .timeout(Duration::from_secs(60));
+
+    // If we were provided with a path to a certificate in the environment, add
+    // it as a trusted one.
+    let extra_root_cert = std::env::var(E2E_TLS_CERT_ENV)
+        .ok()
+        .map(|path| {
+            let cert_bytes = std::fs::read(&path).with_context(|| {
+                format!("reading certificate from {:?}", &path)
+            })?;
+            reqwest::tls::Certificate::from_pem(&cert_bytes).with_context(
+                || format!("parsing certificate from {:?}", &path),
+            )
+        })
+        .transpose()?;
+    if let Some(cert) = &extra_root_cert {
+        builder = builder.add_root_certificate(cert.clone());
+    }
+
+    let reqwest_login_client = builder.build()?;
     let login_url = format!("{}/login/{}/local", base_url, silo_name);
 
     // By the time we get here, we generally would have successfully resolved
@@ -241,10 +267,15 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
         HeaderValue::from_str(session_token).unwrap(),
     );
 
-    let reqwest_client = reqwest::ClientBuilder::new()
+    let mut builder = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60))
-        .build()?;
+        .timeout(Duration::from_secs(60));
+
+    if let Some(cert) = extra_root_cert {
+        builder = builder.add_root_certificate(cert);
+    }
+
+    let reqwest_client = builder.build()?;
     Ok(Client::new_with_client(&base_url, reqwest_client))
 }
