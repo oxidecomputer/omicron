@@ -238,16 +238,6 @@ impl SledAgent {
                 sled_id: request.id,
             })
             .await?;
-        if let Some(pools) = &config.zpools {
-            for pool in pools {
-                info!(
-                    log,
-                    "Sled Agent upserting zpool to Storage Manager: {}",
-                    pool.to_string()
-                );
-                storage.upsert_synthetic_disk(pool.clone()).await;
-            }
-        }
 
         let instances = InstanceManager::new(
             parent_log.clone(),
