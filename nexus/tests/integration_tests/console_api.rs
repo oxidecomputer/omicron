@@ -240,6 +240,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
         .expect_status(Some(StatusCode::OK))
+        .expect_response_header(
+            http::header::CACHE_CONTROL,
+            "max-age=31536000, immutable",
+        )
         .execute()
         .await
         .expect("failed to get existing file");
@@ -255,6 +259,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
         "/assets/a_directory/another_file.txt",
     )
     .expect_status(Some(StatusCode::OK))
+    .expect_response_header(
+        http::header::CACHE_CONTROL,
+        "max-age=31536000, immutable",
+    )
     .execute()
     .await
     .expect("failed to get existing file");
@@ -288,6 +296,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::ACCEPT_ENCODING, "gzip")
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .expect_response_header(
+                http::header::CACHE_CONTROL,
+                "max-age=31536000, immutable",
+            )
             .execute()
             .await
             .expect("failed to get existing file");
