@@ -183,6 +183,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
                 http::header::CONTENT_TYPE,
                 "text/html; charset=UTF-8",
             )
+            .expect_response_header(http::header::CACHE_CONTROL, "no-store")
             .execute()
             .await
             .expect("failed to get console index");
