@@ -164,11 +164,8 @@ pub async fn nexus_addr() -> Result<SocketAddr> {
 }
 
 async fn get_base_url() -> Result<String> {
-    let proto = if std::env::var(E2E_TLS_CERT_ENV).is_ok() {
-        "http"
-    } else {
-        "https"
-    };
+    let proto =
+        if std::env::var(E2E_TLS_CERT_ENV).is_ok() { "http" } else { "https" };
     Ok(format!("{}://{}", proto, nexus_addr().await?))
 }
 
