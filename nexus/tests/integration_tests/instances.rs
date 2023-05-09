@@ -500,7 +500,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     // Create a second sled to migrate to/from.
     let default_sled_id: Uuid =
         nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
-    let update_dir = std::path::Path::new("/should/be/unused");
+    let update_dir = Utf8Path::new("/should/be/unused");
     let other_sled_id = Uuid::new_v4();
     let _other_sa = nexus_test_utils::start_sled_agent(
         cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
