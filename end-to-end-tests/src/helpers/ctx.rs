@@ -1,5 +1,6 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
+use chrono::Utc;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate, UsernamePasswordCredentials};
@@ -227,12 +228,14 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
             // Use a raw reqwest client because it's not clear that Progenitor
             // is intended to support endpoints that return 300-level response
             // codes.  See progenitor#451.
+            eprintln!("{}: attempting to log into API", Utc::now());
             reqwest_login_client
                 .post(&login_url)
                 .body(login_request_body.clone())
                 .send()
                 .await
                 .map_err(|e| {
+                    eprintln!("{}: login failed: {:?}", Utc::now(), e);
                     if e.is_connect() {
                         CondCheckError::NotYet
                     } else {
@@ -248,6 +251,7 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
     .await
     .context("logging in")?;
 
+    eprintln!("{}: login succeeded", Utc::now());
     let session_cookie = response
         .headers()
         .get(http::header::SET_COOKIE)
