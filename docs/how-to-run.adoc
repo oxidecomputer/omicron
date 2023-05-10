@@ -397,7 +397,7 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
 
  b. Or an ISO / raw disk image / etc hosted at a URL:
 
-    oxide api /v1/images?project=<proj> --method POST --input - <<EOF
+    oxide api /v1/images --method POST --input - <<EOF
     {
       "name": "crucible-tester-sparse",
       "description": "boot from a url!",
@@ -413,7 +413,7 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
     }
     EOF
 
-4. Create a disk from that global image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
+4. Create a disk from that image (note that disk size must be greater than or equal to image size and a 1GiB multiple!). The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
     oxide api /v1/disks?project=myproj --method POST --input - <<EOF
     {
@@ -422,8 +422,8 @@ $ pfexec /opt/oxide/softnpu/stuff/scadm \
       "block_size": 512,
       "size": 1073741824,
       "disk_source": {
-          "type": "global_image",
-          "image_id": "$(oxide api /system/images/alpine | jq -r .id)"
+          "type": "image",
+          "image_id": "$(oxide api /v1/images/alpine | jq -r .id)"
       }
     }
     EOF

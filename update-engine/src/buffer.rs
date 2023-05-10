@@ -178,7 +178,18 @@ impl<S: StepSpec> Default for EventBuffer<S> {
 
 #[derive_where(Clone, Debug, Default)]
 struct EventStore<S: StepSpec> {
-    // A tree where edges are from parent event keys to child nested event keys.
+    // A tree which has the general structure:
+    //
+    // root execution id ───> root step 0
+    //     │      │
+    //     │      └─────────> root step 1 ───> nested execution id
+    //     │                                       │        │
+    //     │                                       v        v
+    //     │                             nested step 0    nested step 1
+    //     │
+    //     └────────────────> root step 2
+    //
+    // and so on.
     //
     // While petgraph seems like overkill at first, it results in really
     // straightforward algorithms below compared to alternatives like storing
@@ -249,10 +260,16 @@ impl<S: StepSpec> EventStore<S> {
 
         if let Some(key) = actions.step_key {
             if let Some(value) = self.map.get_mut(&key) {
-                if event.kind.priority() == StepEventPriority::High {
-                    value.add_high_priority_step_event(event);
-                } else {
-                    value.add_low_priority_step_event(event, max_low_priority);
+                match event.kind.priority() {
+                    StepEventPriority::High => {
+                        value.add_high_priority_step_event(event);
+                    }
+                    StepEventPriority::Low => {
+                        value.add_low_priority_step_event(
+                            event,
+                            max_low_priority,
+                        );
+                    }
                 }
             }
         }
@@ -479,7 +496,8 @@ impl<S: StepSpec> EventStore<S> {
         info: CompletionInfo,
     ) {
         if let Some(value) = self.map.get_mut(&root_key) {
-            // Completion status only applies to the root key.
+            // Completion status only applies to the root key. Nodes reachable
+            // from this node are still marked as complete, but without status.
             value.mark_completed(Some(info));
         }
 
