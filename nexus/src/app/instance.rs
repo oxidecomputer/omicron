@@ -37,7 +37,6 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
-use propolis_client::support::tungstenite::protocol::Role as WebSocketRole;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::WebSocketStream;
 use sled_agent_client::types::InstanceMigrationSourceParams;
@@ -1395,38 +1394,61 @@ impl super::Nexus {
 
     pub(crate) async fn instance_serial_console_stream(
         &self,
-        conn: dropshot::WebsocketConnection,
+        mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         instance_lookup: &lookup::Instance<'_>,
         params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
-        let client = self
+        let client = match self
             .propolis_client_for_instance(
                 instance_lookup,
                 authz::Action::Modify,
             )
-            .await?;
+            .await
+        {
+            Ok(x) => x,
+            Err(e) => {
+                let _ = client_stream
+                    .close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: e.to_string().into(),
+                    }))
+                    .await
+                    .is_ok();
+                return Err(e);
+            }
+        };
+
         let mut req = client.instance_serial();
         if let Some(most_recent) = params.most_recent {
             req = req.most_recent(most_recent);
         }
-        let propolis_upgraded = req
-            .send()
-            .await
-            .map_err(|_| {
-                Error::internal_error(
-                    "failed to connect to instance's propolis server",
+        match req.send().await {
+            Ok(response) => {
+                let propolis_upgraded = response.into_inner();
+                let log = self.log.clone();
+                Self::proxy_instance_serial_ws(
+                    client_stream,
+                    propolis_upgraded,
+                    Some(log),
                 )
-            })?
-            .into_inner();
-
-        let log = self.log.clone();
-        Self::proxy_instance_serial_ws(
-            conn.into_inner(),
-            propolis_upgraded,
-            Some(log),
-        )
-        .await
-        .map_err(|e| Error::internal_error(&format!("{}", e)))
+                .await
+                .map_err(|e| Error::internal_error(&format!("{}", e)))
+            }
+            Err(e) => {
+                let message = format!(
+                    "Failed to connect to instance's propolis server: {}",
+                    e
+                );
+                let _ = client_stream
+                    .close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: message.clone().into(),
+                    }))
+                    .await
+                    .is_ok();
+                Err(Error::internal_error(&message))
+            }
+        }
     }
 
     async fn propolis_client_for_instance(
@@ -1449,7 +1471,7 @@ impl super::Nexus {
     }
 
     async fn proxy_instance_serial_ws(
-        client_upgraded: impl AsyncRead + AsyncWrite + Unpin,
+        client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
         propolis_upgraded: impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
         log: Option<Logger>,
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
@@ -1460,14 +1482,7 @@ impl super::Nexus {
             )
             .await;
 
-        let (mut nexus_sink, mut nexus_stream) =
-            WebSocketStream::from_raw_socket(
-                client_upgraded,
-                WebSocketRole::Server,
-                None,
-            )
-            .await
-            .split();
+        let (mut nexus_sink, mut nexus_stream) = client_stream.split();
 
         let mut buffered_output = None;
         let mut buffered_input = None;
@@ -1595,22 +1610,26 @@ impl super::Nexus {
 #[cfg(test)]
 mod tests {
     use super::super::Nexus;
+    use super::{CloseCode, CloseFrame, WebSocketMessage, WebSocketStream};
     use core::time::Duration;
     use futures::{SinkExt, StreamExt};
-    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-    use tokio_tungstenite::tungstenite::protocol::Role;
-    use tokio_tungstenite::tungstenite::Message;
-    use tokio_tungstenite::WebSocketStream;
+    use propolis_client::support::tungstenite::protocol::Role;
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
         let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
         let (propolis_client_conn, propolis_server_conn) =
             tokio::io::duplex(1024);
+
         let jh = tokio::spawn(async move {
-            Nexus::proxy_instance_serial_ws(
+            let nexus_client_stream = WebSocketStream::from_raw_socket(
                 nexus_server_conn,
+                Role::Server,
+                None,
+            )
+            .await;
+            Nexus::proxy_instance_serial_ws(
+                nexus_client_stream,
                 propolis_client_conn,
                 None,
             )
@@ -1629,17 +1648,17 @@ mod tests {
         )
         .await;
 
-        let sent = Message::Binary(vec![1, 2, 3, 42, 5]);
+        let sent = WebSocketMessage::Binary(vec![1, 2, 3, 42, 5]);
         nexus_client_ws.send(sent.clone()).await.unwrap();
         let received = propolis_server_ws.next().await.unwrap().unwrap();
         assert_eq!(sent, received);
 
-        let sent = Message::Binary(vec![6, 7, 8, 90]);
+        let sent = WebSocketMessage::Binary(vec![6, 7, 8, 90]);
         propolis_server_ws.send(sent.clone()).await.unwrap();
         let received = nexus_client_ws.next().await.unwrap().unwrap();
         assert_eq!(sent, received);
 
-        let sent = Message::Close(Some(CloseFrame {
+        let sent = WebSocketMessage::Close(Some(CloseFrame {
             code: CloseCode::Normal,
             reason: std::borrow::Cow::from("test done"),
         }));

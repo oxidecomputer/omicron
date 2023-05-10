@@ -69,6 +69,11 @@ use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
 use parse_display::Display;
+use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
+use propolis_client::support::tungstenite::protocol::{
+    CloseFrame, Role as WebSocketRole,
+};
+use propolis_client::support::WebSocketStream;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -2006,11 +2011,34 @@ async fn instance_serial_console_stream(
         project: query.project.clone(),
         instance: path.instance,
     };
-    let instance_lookup = nexus.instance_lookup(&opctx, instance_selector)?;
-    nexus
-        .instance_serial_console_stream(conn, &instance_lookup, &query)
-        .await?;
-    Ok(())
+    let mut client_stream = WebSocketStream::from_raw_socket(
+        conn.into_inner(),
+        WebSocketRole::Server,
+        None,
+    )
+    .await;
+    match nexus.instance_lookup(&opctx, instance_selector) {
+        Ok(instance_lookup) => {
+            nexus
+                .instance_serial_console_stream(
+                    client_stream,
+                    &instance_lookup,
+                    &query,
+                )
+                .await?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = client_stream
+                .close(Some(CloseFrame {
+                    code: CloseCode::Error,
+                    reason: e.to_string().into(),
+                }))
+                .await
+                .is_ok();
+            Err(e.into())
+        }
+    }
 }
 
 /// List an instance's disks
