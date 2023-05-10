@@ -723,7 +723,8 @@ fn with_gz_ext(path: &PathBuf) -> PathBuf {
 /// Fetch a static asset from `<static_dir>/assets`. 404 on virtually all
 /// errors. No auth. NO SENSITIVE FILES. Will serve a gzipped version if the
 /// `.gz` file is present in the directory and `Accept-Encoding: gzip` is
-/// present on the request.
+/// present on the request. Cache in browser for a year because assets have
+/// content hash in filename.
 #[endpoint {
    method = GET,
    path = "/assets/{path:.*}",
@@ -780,18 +781,13 @@ pub async fn asset(
     let mut resp = Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, content_type)
-        .header(http::header::CACHE_CONTROL, cache_control_value(apictx));
+        .header(http::header::CACHE_CONTROL, "max-age=31536000, immutable"); // 1 year
 
     if set_content_encoding_gzip {
         resp = resp.header(http::header::CONTENT_ENCODING, "gzip");
     }
 
     Ok(resp.body(file_contents.into())?)
-}
-
-fn cache_control_value(apictx: &ServerContext) -> String {
-    let max_age = apictx.console_config.cache_control_max_age.num_seconds();
-    format!("max-age={max_age}")
 }
 
 pub async fn serve_console_index(
@@ -809,7 +805,8 @@ pub async fn serve_console_index(
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(http::header::CONTENT_TYPE, "text/html; charset=UTF-8")
-        .header(http::header::CACHE_CONTROL, cache_control_value(apictx))
+        // do not cache this response in browser
+        .header(http::header::CACHE_CONTROL, "no-store")
         .body(file_contents.into())?)
 }
 

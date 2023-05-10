@@ -68,20 +68,6 @@ resource: authz::DeviceAuthRequestList
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: authz::GlobalImageList
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
-  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
 resource: authz::IpPoolList
 
   USER                             Q  R LC RP  M MP CC  D
@@ -752,20 +738,6 @@ resource: PhysicalDisk id "vendor-serial-model"
   silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
-  unauthenticated                  !  !  !  !  !  !  !  !
-
-resource: GlobalImage id "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc"
-
-  USER                             Q  R LC RP  M MP CC  D
-  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
-  silo1-admin                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-collaborator               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-viewer                     ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-admin                ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
-  silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
 resource: Certificate id "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc"

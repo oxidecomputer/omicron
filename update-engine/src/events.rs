@@ -72,8 +72,16 @@ pub struct StepEvent<S: StepSpec> {
     /// This is typically the name of the type `S` for which `StepSpec` is
     /// implemented.
     ///
-    /// This can be used with `Self::from_generic` to deserialize generic
-    /// metadata.
+    /// This can be used along with `Self::from_generic` to identify which
+    /// specification to deserialize generic metadata against. For example:
+    ///
+    /// ```rust,ignore
+    /// if event.spec == "MySpec" {
+    ///     // event is likely generated from a MySpec engine.
+    ///     let event = Event::<MySpec>::from_generic(event)?;
+    ///     // ...
+    /// }
+    /// ```
     pub spec: String,
 
     /// The execution ID.
