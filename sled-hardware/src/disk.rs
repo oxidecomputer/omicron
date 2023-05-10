@@ -19,6 +19,12 @@ use tokio::fs::{remove_file, File};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
 use uuid::Uuid;
 
+/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
+/// and to ensure it goes away on power off.
+///
+/// We want minimize the time the key files are in memory, and so we rederive
+/// the keys and recreate the files on demand when creating and mounting
+/// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 cfg_if::cfg_if! {
@@ -555,8 +561,11 @@ impl KeyFile {
         Ok(KeyFile { path, file, log: log.clone() })
     }
 
-    // It'd be nice to `impl Drop for `KeyFile` and then call `zero`
-    // from within the drop handler, but async `Drop` isn't supported.
+    /// These keyfiles live on a tmpfs and we zero the file so the data doesn't
+    /// linger on the page in memory.
+    ///
+    /// It'd be nice to `impl Drop for `KeyFile` and then call `zero`
+    /// from within the drop handler, but async `Drop` isn't supported.
     pub async fn zero_and_unlink(&mut self) -> std::io::Result<()> {
         let zeroes = [0u8; 32];
         let _ = self.file.seek(SeekFrom::Start(0)).await?;
