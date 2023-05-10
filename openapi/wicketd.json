@@ -210,6 +210,17 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "test_step_seconds",
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -2750,6 +2761,20 @@
       },
       "UpdateStepId": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
           {
             "type": "object",
             "properties": {
