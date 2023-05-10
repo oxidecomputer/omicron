@@ -416,7 +416,7 @@ impl Disk {
                     // Note that `Zfs::get_oxide_value` will succeed even if
                     // the epoch is missing. `epoch_str` will show up as a dash
                     // (`-`) and will not parse into a `u64`. So we don't have
-                    // to worry about that  case here as it is handled above.
+                    // to worry about that case here as it is handled above.
                     //
                     // If the error indicated that the command failed for some
                     // other reason, but the dataset actually existed, we will
