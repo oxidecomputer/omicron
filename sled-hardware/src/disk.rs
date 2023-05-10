@@ -409,11 +409,19 @@ impl Disk {
                         ));
                     }
                 } else {
-                    // We assume the error indicates that the dataset doesn't
-                    // exist here. Use the latest secret to create it. If the
-                    // error did not actually indicate that the dataset didn't
-                    // exist the creation will fail, so we don't need to do any
-                    // special handling.
+                    // We got an error trying to call `Zfs::get_oxide_value`
+                    // which indicates that the dataset doesn't exist or there
+                    // was a problem  running the command.
+                    //
+                    // Note that `Zfs::get_oxide_value` will succeed even if
+                    // the epoch is missing. `epoch_str` will show up as a dash
+                    // (`-`) and will not parse into a `u64`. So we don't have
+                    // to worry about that  case here as it is handled above.
+                    //
+                    // If the error indicated that the command failed for some
+                    // other reason, but the dataset actually existed, we will
+                    // try to create the dataset below and that will fail. So
+                    // there is no harm in just loading the latest secret here.
                     key_requester.load_latest_secret().await?
                 };
 
