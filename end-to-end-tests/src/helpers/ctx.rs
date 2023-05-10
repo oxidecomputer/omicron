@@ -256,12 +256,12 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     Ok(Client::new_with_client(&base_url, reqwest_client))
 }
 
-// XXX-dap TODO-cleanup the lifetime constraints on the `Resolve` trait make it
-// hard to avoid an Arc here.
 /// Wrapper around a `TokioAsyncResolver` so that we can impl
 /// `reqwest::dns::Resolve` for it.
 struct CustomDnsResolver {
     dns_addr: SocketAddr,
+    // The lifetime constraints on the `Resolve` trait make it hard to avoid an
+    // Arc here.
     resolver: Arc<TokioAsyncResolver>,
 }
 

@@ -144,12 +144,14 @@ SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 rm -f pkg/config-rss.toml
 
+#
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
 # implementation used by reqwest rejects endpoint certificates that are also CA
 # certificates.  So in order to use the certificate, we need one without
 # "CA:true".  There doesn't seem to be a way to do this on the command line.
 # Instead, we must override the system configuration with our own configuration
 # file.  There's virtually nothing in it.
+#
 TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DNS_DOMAIN"
 openssl req \
     -newkey rsa:4096 \

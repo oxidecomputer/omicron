@@ -37,7 +37,6 @@ impl SetupServiceConfig {
             let key_bytes = std::fs::read(&key_path);
             match (cert_bytes, key_bytes) {
                 (Ok(cert), Ok(key)) => {
-                    // XXX-dap could validate better
                     raw_config
                         .external_certificates
                         .push(Certificate { key, cert });
