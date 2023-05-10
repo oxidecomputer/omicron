@@ -1,13 +1,16 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
+use futures::future::FutureExt;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate, UsernamePasswordCredentials};
 use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
+use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use trust_dns_resolver::config::{
     NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
@@ -72,38 +75,21 @@ impl Context {
     }
 }
 
-pub async fn build_client() -> Result<oxide_client::Client> {
-    build_authenticated_client().await
-}
-
 fn rss_config() -> Result<SetupServiceConfig> {
     toml::from_str(RSS_CONFIG_STR)
         .with_context(|| format!("parsing {:?} as TOML", RSS_CONFIG_PATH))
 }
 
-pub async fn nexus_addr() -> Result<SocketAddr> {
-    // Check $OXIDE_HOST first.
-    if let Ok(host) =
-        std::env::var("OXIDE_HOST").map_err(anyhow::Error::from).and_then(|s| {
-            Ok(Url::parse(&s)?
-                .host_str()
-                .context("no host in OXIDE_HOST url")?
-                .parse()?)
-        })
-    {
-        return Ok(host);
-    }
+fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
+    format!(
+        "{}.sys.{}",
+        config.recovery_silo.silo_name.as_str(),
+        config.external_dns_zone_name
+    )
+}
 
-    let port = if std::env::var(E2E_TLS_CERT_ENV).is_ok() { 80 } else { 443 };
-
-    // Otherwise, use the RSS configuration to find the DNS server, silo name,
-    // and delegated DNS zone name.  Use this to look up Nexus's IP in the
-    // external DNS server.
-    //
-    // First, load the RSS configuration file.
-    let config = rss_config()?;
-
-    // From config-rss.toml, grab the first address from the configured services
+fn external_dns_addr(config: &SetupServiceConfig) -> Result<SocketAddr> {
+    // From the RSS config, grab the first address from the configured services
     // IP pool as the DNS server's IP address.
     let dns_ip = config
         .internal_services_ip_pool_ranges
@@ -113,74 +99,92 @@ pub async fn nexus_addr() -> Result<SocketAddr> {
         .ok_or_else(|| {
             anyhow!(
                 "failed to get first IP from internal service \
-                pool in {}",
-                RSS_CONFIG_PATH,
+                pool in RSS configuration"
             )
         })?;
-    let dns_addr = SocketAddr::from((dns_ip, 53));
-
-    // Resolve the DNS name of the recovery Silo that ought to have been created
-    // already.  This could take a few seconds, since it's asynchronous with the
-    // rack initialization request.
-    let silo_name = &config.recovery_silo.silo_name;
-    let dns_name = format!(
-        "{}.sys.{}",
-        silo_name.as_str(),
-        &config.external_dns_zone_name
-    );
-
-    let mut resolver_config = ResolverConfig::new();
-    resolver_config.add_name_server(NameServerConfig {
-        socket_addr: dns_addr,
-        protocol: Protocol::Udp,
-        tls_dns_name: None,
-        trust_nx_responses: false,
-        bind_addr: None,
-    });
-
-    let resolver =
-        TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-            .context("failed to create resolver")?;
-
-    wait_for_condition::<_, anyhow::Error, _, _>(
-        || async {
-            let addr = resolver
-                .lookup_ip(&dns_name)
-                .await
-                .map_err(|e| match e.kind() {
-                    ResolveErrorKind::NoRecordsFound { .. }
-                    | ResolveErrorKind::Timeout => CondCheckError::NotYet,
-                    _ => CondCheckError::Failed(anyhow::Error::new(e).context(
-                        format!("resolving {:?} from {}", dns_name, dns_addr),
-                    )),
-                })?
-                .iter()
-                .next()
-                .ok_or(CondCheckError::NotYet)?;
-            Ok(SocketAddr::from((addr, port)))
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(300),
-    )
-    .await
-    .context("failed to get Nexus addr")
+    Ok(SocketAddr::from((dns_ip, 53)))
 }
 
-async fn get_base_url() -> Result<String> {
-    let proto =
-        if std::env::var(E2E_TLS_CERT_ENV).is_ok() { "http" } else { "https" };
-    Ok(format!("{}://{}", proto, nexus_addr().await?))
-}
+pub async fn nexus_addr() -> Result<IpAddr> {
+    // Check $OXIDE_HOST first.
+    if let Ok(host) =
+        std::env::var("OXIDE_HOST").map_err(anyhow::Error::from).and_then(|s| {
+            Ok(Url::parse(&s)?
+                .host_str()
+                .context("no host in OXIDE_HOST url")?
+                .parse::<SocketAddr>()?
+                .ip())
+        })
+    {
+        return Ok(host);
+    }
 
-async fn build_authenticated_client() -> Result<oxide_client::Client> {
+    // Otherwise, use the RSS configuration to find the DNS server, silo name,
+    // and delegated DNS zone name.  Use this to look up Nexus's IP in the
+    // external DNS server.  This could take a few seconds, since it's
+    // asynchronous with the rack initialization request.
     let config = rss_config()?;
-    let base_url = get_base_url().await?;
+    let dns_addr = external_dns_addr(&config)?;
+    let dns_name = nexus_external_dns_name(&config);
+    let resolver = CustomDnsResolver::new(dns_addr)?;
+    resolver
+        .wait_for_records(
+            &dns_name,
+            Duration::from_secs(1),
+            Duration::from_secs(300),
+        )
+        .await
+}
+
+pub async fn build_client() -> Result<oxide_client::Client> {
+    // Make a reqwest client that we can use to make the initial login request.
+    // To do this, we need to find the IP of the external DNS server in the RSS
+    // configuration and then set up a custom resolver to use this DNS server.
+    let config = rss_config()?;
+    let dns_addr = external_dns_addr(&config)?;
+    let dns_name = nexus_external_dns_name(&config);
+    let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
+
+    // Do not have reqwest follow redirects.  That's because our login response
+    // includes both a redirect and the session cookie header.  If reqwest
+    // follows the redirect, we won't have a chance to get the cookie.
+    let mut builder = reqwest::ClientBuilder::new()
+        .connect_timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .dns_resolver(resolver.clone())
+        .timeout(Duration::from_secs(60));
+
+    // If we were provided with a path to a certificate in the environment, add
+    // it as a trusted one.
+    let (proto, extra_root_cert) = match std::env::var(E2E_TLS_CERT_ENV) {
+        Err(_) => ("http", None),
+        Ok(path) => {
+            let cert_bytes = std::fs::read(&path).with_context(|| {
+                format!("reading certificate from {:?}", &path)
+            })?;
+            let cert = reqwest::tls::Certificate::from_pem(&cert_bytes)
+                .with_context(|| {
+                    format!("parsing certificate from {:?}", &path)
+                })?;
+            ("https", Some(cert))
+        }
+    };
+
+    if let Some(cert) = &extra_root_cert {
+        builder = builder.add_root_certificate(cert.clone());
+    }
+
+    let reqwest_login_client = builder.build()?;
+
+    // Prepare to make a login request.
+    let base_url = format!("{}://{}", proto, dns_name);
     let silo_name = config.recovery_silo.silo_name.as_str();
+    let login_url = format!("{}/login/{}/local", base_url, silo_name);
     let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
             anyhow!("parsing configured recovery user name: {:?}", s)
         })?;
-    // See the comment in the config file.
+    // See the comment in the config file about this password.
     let password: oxide_client::types::Password = "oxide".parse().unwrap();
     let login_request_body =
         serde_json::to_string(&UsernamePasswordCredentials {
@@ -189,42 +193,10 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
         })
         .context("serializing login request body")?;
 
-    // Do not have reqwest follow redirects.  That's because our login response
-    // includes both a redirect and the session cookie header.  If reqwest
-    // follows the redirect, we won't have a chance to get the cookie.
-    let mut builder = reqwest::ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(60));
-
-    // If we were provided with a path to a certificate in the environment, add
-    // it as a trusted one.
-    let extra_root_cert = std::env::var(E2E_TLS_CERT_ENV)
-        .ok()
-        .map(|path| {
-            let cert_bytes = std::fs::read(&path).with_context(|| {
-                format!("reading certificate from {:?}", &path)
-            })?;
-            reqwest::tls::Certificate::from_pem(&cert_bytes).with_context(
-                || format!("parsing certificate from {:?}", &path),
-            )
-        })
-        .transpose()?;
-    if let Some(cert) = &extra_root_cert {
-        builder = builder.add_root_certificate(cert.clone());
-    }
-
-    let reqwest_login_client = builder.build()?;
-    let login_url = format!("{}/login/{}/local", base_url, silo_name);
-
-    // By the time we get here, we generally would have successfully resolved
-    // Nexus's external IP address from the external DNS server.  So we'd
-    // expect Nexus to be up.  But that's not necessarily true: external DNS can
-    // be set up during rack initialization, before Nexus has opened its
-    // external listening socket.  This is arguably a bug, advertising a service
-    // before it's ready, but a pretty niche corner case (rack initialization)
-    // and anyway DNS is always best-effort.  The point is: let's retry a little
-    // while if we can't immediately connect.
+    // By the time we get here, Nexus might not be up yet.  It may not have
+    // published its names to external DNS, and even if it has, it may not have
+    // opened its external listening socket.  So we have to retry a bit until we
+    // succeed.
     let response = wait_for_condition(
         || async {
             // Use a raw reqwest client because it's not clear that Progenitor
@@ -248,7 +220,7 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
                 })
         },
         &Duration::from_secs(1),
-        &Duration::from_secs(30),
+        &Duration::from_secs(300),
     )
     .await
     .context("logging in")?;
@@ -273,6 +245,7 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
     let mut builder = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .connect_timeout(Duration::from_secs(15))
+        .dns_resolver(resolver)
         .timeout(Duration::from_secs(60));
 
     if let Some(cert) = extra_root_cert {
@@ -281,4 +254,88 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
 
     let reqwest_client = builder.build()?;
     Ok(Client::new_with_client(&base_url, reqwest_client))
+}
+
+// XXX-dap TODO-cleanup the lifetime constraints on the `Resolve` trait make it
+// hard to avoid an Arc here.
+/// Wrapper around a `TokioAsyncResolver` so that we can impl
+/// `reqwest::dns::Resolve` for it.
+struct CustomDnsResolver {
+    dns_addr: SocketAddr,
+    resolver: Arc<TokioAsyncResolver>,
+}
+
+impl CustomDnsResolver {
+    fn new(dns_addr: SocketAddr) -> Result<CustomDnsResolver> {
+        let mut resolver_config = ResolverConfig::new();
+        resolver_config.add_name_server(NameServerConfig {
+            socket_addr: dns_addr,
+            protocol: Protocol::Udp,
+            tls_dns_name: None,
+            trust_nx_responses: false,
+            bind_addr: None,
+        });
+
+        let resolver = Arc::new(
+            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
+                .context("failed to create resolver")?,
+        );
+        Ok(CustomDnsResolver { dns_addr, resolver })
+    }
+
+    async fn wait_for_records(
+        &self,
+        dns_name: &str,
+        check_period: Duration,
+        max: Duration,
+    ) -> Result<IpAddr> {
+        wait_for_condition::<_, anyhow::Error, _, _>(
+            || async {
+                self.resolver
+                    .lookup_ip(dns_name)
+                    .await
+                    .map_err(|e| match e.kind() {
+                        ResolveErrorKind::NoRecordsFound { .. }
+                        | ResolveErrorKind::Timeout => CondCheckError::NotYet,
+                        _ => CondCheckError::Failed(
+                            anyhow::Error::new(e).context(format!(
+                                "resolving {:?} from {}",
+                                dns_name, self.dns_addr
+                            )),
+                        ),
+                    })?
+                    .iter()
+                    .next()
+                    .ok_or(CondCheckError::NotYet)
+            },
+            &check_period,
+            &max,
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "failed to resolve {:?} from {:?} within {:?}",
+                dns_name, self.dns_addr, max
+            )
+        })
+    }
+}
+
+impl reqwest::dns::Resolve for CustomDnsResolver {
+    fn resolve(
+        &self,
+        name: hyper::client::connect::dns::Name,
+    ) -> reqwest::dns::Resolving {
+        let resolver = self.resolver.clone();
+        async move {
+            let list = resolver.lookup_ip(name.as_str()).await?;
+            Ok(Box::new(list.into_iter().map(|s| {
+                // reqwest does not appear to use the port number here.
+                // (See the docs for `ClientBuilder::resolve()`, which isn't
+                // the same thing, but is related.)
+                SocketAddr::from((s, 0))
+            })) as Box<dyn Iterator<Item = SocketAddr> + Send>)
+        }
+        .boxed()
+    }
 }

@@ -144,15 +144,31 @@ SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 rm -f pkg/config-rss.toml
 
-TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DOMAIN"
-openssl req -newkey rsa:4096 \
+# By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
+# implementation used by reqwest rejects endpoint certificates that are also CA
+# certificates.  So in order to use the certificate, we need one without
+# "CA:true".  There doesn't seem to be a way to do this on the command line.
+# Instead, we must override the system configuration with our own configuration
+# file.  There's virtually nothing in it.
+TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DNS_DOMAIN"
+openssl req \
+    -newkey rsa:4096 \
     -x509 \
     -sha256 \
     -days 3 \
     -nodes \
     -out "pkg/initial-tls-cert.pem" \
     -keyout "pkg/initial-tls-key.pem" \
-    -subj "/CN=$TLS_NAME"
+    -subj "/CN=$TLS_NAME" \
+    -addext "subjectAltName=DNS:$TLS_NAME" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -config /dev/stdin <<EOF
+[req]
+prompt = no
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+EOF
 tar rvf out/omicron-sled-agent.tar \
     pkg/initial-tls-cert.pem \
     pkg/initial-tls-key.pem
