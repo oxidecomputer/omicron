@@ -94,6 +94,8 @@ pub async fn nexus_addr() -> Result<SocketAddr> {
         return Ok(host);
     }
 
+    let port = if std::env::var(E2E_TLS_CERT_ENV).is_ok() { 80 } else { 443 };
+
     // Otherwise, use the RSS configuration to find the DNS server, silo name,
     // and delegated DNS zone name.  Use this to look up Nexus's IP in the
     // external DNS server.
@@ -155,7 +157,7 @@ pub async fn nexus_addr() -> Result<SocketAddr> {
                 .iter()
                 .next()
                 .ok_or(CondCheckError::NotYet)?;
-            Ok(SocketAddr::from((addr, 80)))
+            Ok(SocketAddr::from((addr, port)))
         },
         &Duration::from_secs(1),
         &Duration::from_secs(300),
