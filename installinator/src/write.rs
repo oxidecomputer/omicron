@@ -504,7 +504,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                 .new_step(
                     WriteComponent::ControlPlane,
                     ControlPlaneZonesStepId::Zone { name: name.clone() },
-                    "Writing zone",
+                    format!("Writing zone {name}"),
                     move |cx| async move {
                         let transport = transport.into_value(cx.token()).await;
                         write_artifact_impl(

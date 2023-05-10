@@ -196,7 +196,7 @@ impl InstallOpts {
             .new_step(
                 InstallinatorComponent::HostPhase2,
                 InstallinatorStepId::Download,
-                "Downloading artifact",
+                "Downloading host phase 2 artifact",
                 |cx| async move {
                     let host_phase_2_artifact =
                         fetch_artifact(&cx, &host_phase_2_id, discovery, log)
@@ -221,7 +221,7 @@ impl InstallOpts {
             .new_step(
                 InstallinatorComponent::ControlPlane,
                 InstallinatorStepId::Download,
-                "Downloading artifact",
+                "Downloading control plane artifact",
                 |cx| async move {
                     let control_plane_artifact =
                         fetch_artifact(&cx, &control_plane_id, discovery, log)
