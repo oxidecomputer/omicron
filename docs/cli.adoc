@@ -7,16 +7,16 @@
 The `oxide` CLI is used to access Nexus' external API, which is
 the public interface to Omicron.
 
-For more detail, refer to https://docs.oxide.computer/cli/manual[oxide's CLI Manual].
+For more detail, refer to https://docs.oxide.computer/cli[oxide's CLI Manual].
 
 == Quick demo
 
-The `oxide` CLI can be installed from the https://github.com/oxidecomputer/cli/releases[latest release].
+The `oxide` CLI can be built from the https://github.com/oxidecomputer/oxide.rs[repo]. We are not building and releasing binaries yet.
 
 Run `oxide auth login` to authenticate with your Oxide account. Alternatively,
 `oxide` will respect the `OXIDE_TOKEN` and `OXIDE_HOST` environment variables.
 
-If you find bugs or have feedback, leave it on the https://github.com/oxidecomputer/cli/issues[cli repo].
+If you find bugs or have feedback, leave it on the https://github.com/oxidecomputer/oxide.rs/issues[CLI repo].
 
 Here's a small demo that creates a project, creates an instance, and attaches a disk to it:
 
