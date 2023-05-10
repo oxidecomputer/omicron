@@ -8,13 +8,13 @@ use crate::{
 };
 use camino::Utf8PathBuf;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
+use omicron_common::disk::DiskIdentity;
 use slog::debug;
 use slog::error;
 use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
-use omicron_common::disk::DiskIdentity;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
