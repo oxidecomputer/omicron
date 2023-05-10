@@ -108,17 +108,19 @@ impl RunnerCore {
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::UpdateArtifacts { system_version, artifacts } => {
+            Event::ArtifactsAndEventReports {
+                system_version,
+                artifacts,
+                event_reports,
+            } => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                self.state
-                    .update_state
-                    .update_artifacts(system_version, artifacts);
-                self.screen.draw(&self.state, &mut self.terminal)?;
-            }
-            Event::EventReportAll(reports) => {
-                self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", reports);
-                self.state.update_state.update_logs(&self.log, reports);
+                debug!(self.log, "{:#?}", event_reports);
+                self.state.update_state.update_artifacts_and_reports(
+                    &self.log,
+                    system_version,
+                    artifacts,
+                    event_reports,
+                );
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
             Event::Shutdown => return Ok(true),
@@ -141,9 +143,23 @@ impl RunnerCore {
             }
             Action::Update(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    wicketd.tx.blocking_send(wicketd::Request::StartUpdate(
-                        component_id,
-                    ))?;
+                    // This is a debug environment variable used to add a test
+                    // step.
+                    let test_step_seconds =
+                        std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS")
+                            .ok()
+                            .map(|v| {
+                                v.parse().expect(
+                                    "parsed WICKET_UPDATE_TEST_STEP_SECONDS \
+                                        as a u64",
+                                )
+                            });
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate {
+                            component_id,
+                            test_step_seconds,
+                        },
+                    )?;
                 }
             }
             Action::Ignition(component_id, ignition_command) => {

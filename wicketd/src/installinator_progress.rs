@@ -240,10 +240,12 @@ mod tests {
 
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
-        InstallinatorStepId, M2Slot, StepEvent, StepEventKind, StepInfo,
-        StepInfoWithMetadata, StepOutcome, WriteOutput,
+        InstallinatorSpec, InstallinatorStepId, M2Slot, StepEvent,
+        StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
+        WriteOutput,
     };
     use omicron_test_utils::dev::test_setup_log;
+    use schemars::JsonSchema;
     use update_engine::ExecutionId;
 
     use super::*;
@@ -296,6 +298,7 @@ mod tests {
         // Send a completion report.
         let completion_report = installinator_common::EventReport {
             step_events: vec![StepEvent {
+                spec: InstallinatorSpec::schema_name(),
                 execution_id,
                 event_index: 0,
                 total_elapsed: Duration::from_secs(2),

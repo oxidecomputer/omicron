@@ -14,6 +14,7 @@ use wicketd_client::types::{
     SpType,
 };
 
+use crate::events::EventReportMap;
 use crate::state::ComponentId;
 use crate::Event;
 
@@ -45,7 +46,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[allow(unused)]
 #[derive(Debug)]
 pub enum Request {
-    StartUpdate(ComponentId),
+    StartUpdate { component_id: ComponentId, test_step_seconds: Option<u64> },
     IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
@@ -92,16 +93,15 @@ impl WicketdManager {
         let (poll_interval_now_tx, poll_interval_now_rx) = mpsc::channel(1);
 
         self.poll_inventory(poll_interval_now_rx).await;
-        self.poll_event_report().await;
-        self.poll_artifacts().await;
+        self.poll_artifacts_and_event_reports().await;
 
         loop {
             tokio::select! {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     match request {
-                        Request::StartUpdate(component_id) => {
-                            self.start_update(component_id);
+                        Request::StartUpdate { component_id, test_step_seconds } => {
+                            self.start_update(component_id, test_step_seconds);
                         }
                         Request::IgnitionCommand(component_id, command) => {
                             self.start_ignition_command(
@@ -120,14 +120,20 @@ impl WicketdManager {
         }
     }
 
-    fn start_update(&self, component_id: ComponentId) {
+    fn start_update(
+        &self,
+        component_id: ComponentId,
+        test_step_seconds: Option<u64>,
+    ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
-            let res = update_client.post_start_update(sp.type_, sp.slot).await;
+            let res = update_client
+                .post_start_update(sp.type_, sp.slot, test_step_seconds)
+                .await;
             // We don't return errors or success values, as there's nobody to
             // return them to. Instead, all updates are periodically polled
             // and global state mutated. This allows the update pane to
@@ -166,7 +172,7 @@ impl WicketdManager {
         });
     }
 
-    async fn poll_artifacts(&self) {
+    async fn poll_artifacts_and_event_reports(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
         let addr = self.wicketd_addr;
@@ -177,42 +183,18 @@ impl WicketdManager {
             loop {
                 ticker.tick().await;
                 // TODO: We should really be using ETAGs here
-                match client.get_artifacts().await {
+                match client.get_artifacts_and_event_reports().await {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
                         let artifacts = rsp.artifacts;
                         let system_version = rsp.system_version;
-                        let _ = tx.send(Event::UpdateArtifacts {
+                        let event_reports: EventReportMap = rsp.event_reports;
+                        let _ = tx.send(Event::ArtifactsAndEventReports {
                             system_version,
                             artifacts,
+                            event_reports,
                         });
-                    }
-                    Err(e) => {
-                        warn!(log, "{e}");
-                    }
-                }
-            }
-        });
-    }
-
-    async fn poll_event_report(&self) {
-        let log = self.log.clone();
-        let tx = self.events_tx.clone();
-        let addr = self.wicketd_addr;
-
-        tokio::spawn(async move {
-            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
-            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            loop {
-                ticker.tick().await;
-                // TODO: We should really be using ETAGs here
-                match client.get_update_all().await {
-                    Ok(val) => {
-                        // TODO: Only send on changes
-                        let reports = val.into_inner();
-                        let _ = tx.send(Event::EventReportAll(reports));
                     }
                     Err(e) => {
                         warn!(log, "{e}");

@@ -480,7 +480,7 @@ impl super::Nexus {
         let password_hash = match password_value {
             params::UserPassword::InvalidPassword => None,
             params::UserPassword::Password(password) => {
-                let mut hasher = nexus_passwords::Hasher::default();
+                let mut hasher = omicron_passwords::Hasher::default();
                 let password_hash = hasher
                     .create_password(password.as_ref())
                     .map_err(|e| {
@@ -516,7 +516,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         maybe_authz_silo_user: Option<&authz::SiloUser>,
-        password: &nexus_passwords::Password,
+        password: &omicron_passwords::Password,
     ) -> Result<bool, Error> {
         let maybe_hash = match maybe_authz_silo_user {
             None => None,
@@ -527,7 +527,7 @@ impl super::Nexus {
             }
         };
 
-        let mut hasher = nexus_passwords::Hasher::default();
+        let mut hasher = omicron_passwords::Hasher::default();
         match maybe_hash {
             None => {
                 // If the user or their password hash does not exist, create a

@@ -10,18 +10,18 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/artifacts": {
+    "/artifacts-and-event-reports": {
       "get": {
-        "summary": "An endpoint used to report all available artifacts.",
+        "summary": "An endpoint used to report all available artifacts and event reports.",
         "description": "The order of the returned artifacts is unspecified, and may change between calls even if the total set of artifacts has not.",
-        "operationId": "get_artifacts",
+        "operationId": "get_artifacts_and_event_reports",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GetArtifactsResponse"
+                  "$ref": "#/components/schemas/GetArtifactsAndEventReportsResponse"
                 }
               }
             }
@@ -169,31 +169,6 @@
         }
       }
     },
-    "/update": {
-      "get": {
-        "summary": "An endpoint to get the status of all updates being performed or recently",
-        "description": "completed on all SPs.",
-        "operationId": "get_update_all",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EventReportAll"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/update/{type}/{slot}": {
       "get": {
         "summary": "An endpoint to get the status of any update being performed or recently",
@@ -258,6 +233,17 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/SpType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "test_step_seconds",
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
             }
           }
         ],
@@ -423,24 +409,6 @@
           "request_id"
         ]
       },
-      "EventReportAll": {
-        "description": "The response to a `get_update_all` call: the list of all updates (in-flight or completed) known by wicketd.",
-        "type": "object",
-        "properties": {
-          "sps": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "additionalProperties": {
-                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
-              }
-            }
-          }
-        },
-        "required": [
-          "sps"
-        ]
-      },
       "EventReportForWicketdEngineSpec": {
         "description": "A report produced from an [`EventBuffer`](crate::EventBuffer).\n\nRemote reports can be passed into a [`StepContext`](crate::StepContext), in which case they show up as nested events.",
         "type": "object",
@@ -472,7 +440,7 @@
           "step_events"
         ]
       },
-      "GetArtifactsResponse": {
+      "GetArtifactsAndEventReportsResponse": {
         "description": "The response to a `get_artifacts` call: the system version, and the list of all artifacts currently held by wicketd.",
         "type": "object",
         "properties": {
@@ -480,6 +448,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ArtifactId"
+            }
+          },
+          "event_reports": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/components/schemas/EventReportForWicketdEngineSpec"
+              }
             }
           },
           "system_version": {
@@ -492,7 +469,8 @@
           }
         },
         "required": [
-          "artifacts"
+          "artifacts",
+          "event_reports"
         ]
       },
       "GetBaseboardResponse": {
@@ -636,6 +614,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -648,6 +630,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -667,6 +650,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -679,6 +666,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1517,7 +1505,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
@@ -1625,6 +1615,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1638,6 +1632,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1663,6 +1658,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1676,6 +1675,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -2873,6 +2873,20 @@
               "id": {
                 "type": "string",
                 "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
                   "set_host_power_state"
                 ]
               },
@@ -2891,7 +2905,35 @@
               "id": {
                 "type": "string",
                 "enum": [
-                  "resetting_sp"
+                  "interrogate_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_rot"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "reset_sp"
                 ]
               }
             },

@@ -166,10 +166,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let console_paths = &[
         "/",
         "/projects/irrelevant-path",
+        "/projects-new",
         "/settings/irrelevant-path",
         "/sys/irrelevant-path",
         "/device/success",
         "/device/verify",
+        "/utilization",
+        "/access",
     ];
 
     for path in console_paths {
@@ -180,6 +183,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
                 http::header::CONTENT_TYPE,
                 "text/html; charset=UTF-8",
             )
+            .expect_response_header(http::header::CACHE_CONTROL, "no-store")
             .execute()
             .await
             .expect("failed to get console index");
@@ -236,6 +240,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
     // existing file is returned
     let resp = RequestBuilder::new(&testctx, Method::GET, "/assets/hello.txt")
         .expect_status(Some(StatusCode::OK))
+        .expect_response_header(
+            http::header::CACHE_CONTROL,
+            "max-age=31536000, immutable",
+        )
         .execute()
         .await
         .expect("failed to get existing file");
@@ -251,6 +259,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
         "/assets/a_directory/another_file.txt",
     )
     .expect_status(Some(StatusCode::OK))
+    .expect_response_header(
+        http::header::CACHE_CONTROL,
+        "max-age=31536000, immutable",
+    )
     .execute()
     .await
     .expect("failed to get existing file");
@@ -284,6 +296,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::ACCEPT_ENCODING, "gzip")
             .expect_status(Some(StatusCode::OK))
             .expect_response_header(http::header::CONTENT_ENCODING, "gzip")
+            .expect_response_header(
+                http::header::CACHE_CONTROL,
+                "max-age=31536000, immutable",
+            )
             .execute()
             .await
             .expect("failed to get existing file");
@@ -452,7 +468,7 @@ async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
 
     assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=3600");
+    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=28800");
 
     session_token.to_string()
 }

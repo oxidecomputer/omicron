@@ -329,11 +329,11 @@ impl JsonSchema for UserId {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(try_from = "String")]
 #[serde(into = "String")]
-// We store both the raw String and nexus_passwords::Password forms of the
-// password.  That's because `nexus_passwords::Password` does not support
+// We store both the raw String and omicron_passwords::Password forms of the
+// password.  That's because `omicron_passwords::Password` does not support
 // getting the String back out (by design), but we may need to do that in order
 // to impl Serialize.  See the `From<Password> for String` impl below.
-pub struct Password(String, nexus_passwords::Password);
+pub struct Password(String, omicron_passwords::Password);
 
 impl FromStr for Password {
     type Err = String;
@@ -346,7 +346,7 @@ impl FromStr for Password {
 impl TryFrom<String> for Password {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let inner = nexus_passwords::Password::new(&value)
+        let inner = omicron_passwords::Password::new(&value)
             .map_err(|e| format!("unsupported password: {:#}", e))?;
         // TODO-security If we want to apply password policy rules, this seems
         // like the place.  We presumably want to also document them in the
@@ -388,7 +388,7 @@ impl JsonSchema for Password {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(
-                    u32::try_from(nexus_passwords::MAX_PASSWORD_LENGTH)
+                    u32::try_from(omicron_passwords::MAX_PASSWORD_LENGTH)
                         .unwrap(),
                 ),
                 min_length: None,
@@ -400,8 +400,8 @@ impl JsonSchema for Password {
     }
 }
 
-impl AsRef<nexus_passwords::Password> for Password {
-    fn as_ref(&self) -> &nexus_passwords::Password {
+impl AsRef<omicron_passwords::Password> for Password {
+    fn as_ref(&self) -> &omicron_passwords::Password {
         &self.1
     }
 }
@@ -1124,10 +1124,8 @@ pub enum DiskSource {
     },
     /// Create a disk from a disk snapshot
     Snapshot { snapshot_id: Uuid },
-    /// Create a disk from a project image
+    /// Create a disk from an image
     Image { image_id: Uuid },
-    /// Create a disk from a global image
-    GlobalImage { image_id: Uuid },
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
     ImportingBlocks { block_size: BlockSize },
@@ -1204,23 +1202,6 @@ pub struct Distribution {
     pub name: Name,
     /// The version of the distribution (e.g. "3.10" or "18.04")
     pub version: String,
-}
-
-/// Create-time parameters for a `GlobalImage`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImageCreate {
-    /// common identifying metadata
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-
-    /// OS image distribution
-    pub distribution: Distribution,
-
-    /// block size in bytes
-    pub block_size: BlockSize,
-
-    /// The source of the image's contents.
-    pub source: ImageSource,
 }
 
 /// Create-time parameters for an `Image`

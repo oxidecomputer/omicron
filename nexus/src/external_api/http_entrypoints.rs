@@ -7,9 +7,9 @@
 use super::{
     console_api, device_auth, params,
     views::{
-        self, Certificate, GlobalImage, Group, IdentityProvider, Image, IpPool,
-        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot,
-        SshKey, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
+        self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
+        PhysicalDisk, Project, Rack, Role, Silo, Sled, Snapshot, SshKey, User,
+        UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::authz;
@@ -225,12 +225,6 @@ pub fn external_api() -> NexusApiDescription {
         api.register(certificate_view)?;
         api.register(certificate_delete)?;
 
-        api.register(system_image_list)?;
-        api.register(system_image_create)?;
-        api.register(system_image_view)?;
-        api.register(system_image_view_by_id)?;
-        api.register(system_image_delete)?;
-
         api.register(system_metric)?;
 
         api.register(system_update_refresh)?;
@@ -259,7 +253,10 @@ pub fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
-        api.register(console_api::console_page)?;
+        api.register(console_api::console_projects)?;
+        api.register(console_api::console_projects_new)?;
+        api.register(console_api::console_silo_utilization)?;
+        api.register(console_api::console_silo_access)?;
         api.register(console_api::console_root)?;
         api.register(console_api::console_settings_page)?;
         api.register(console_api::console_system_page)?;
@@ -2094,12 +2091,12 @@ async fn instance_disk_detach(
     disk_to_detach: TypedBody<params::DiskPath>,
 ) -> Result<HttpResponseAccepted<Disk>, HttpError> {
     let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let query = query_params.into_inner();
-    let disk = disk_to_detach.into_inner().disk;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let disk = disk_to_detach.into_inner().disk;
         let instance_selector = params::InstanceSelector {
             project: query.project,
             instance: path.instance,
@@ -2235,149 +2232,6 @@ async fn certificate_delete(
 }
 
 // Images
-
-/// List system-wide images
-///
-/// Returns a list of all the system-wide images. System-wide images are returned sorted
-/// by creation date, with the most recent images appearing first.
-#[endpoint {
-    method = GET,
-    path = "/system/images",
-    tags = ["system"],
-}]
-async fn system_image_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByName>,
-) -> Result<HttpResponseOk<ResultsPage<GlobalImage>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let images = nexus
-            .global_images_list(
-                &opctx,
-                &data_page_params_for(&rqctx, &query)?
-                    .map_name(|n| Name::ref_cast(n)),
-            )
-            .await?
-            .into_iter()
-            .map(|d| d.into())
-            .collect();
-        Ok(HttpResponseOk(ScanByName::results_page(
-            &query,
-            images,
-            &marker_for_name,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Create a system-wide image
-///
-/// Create a new system-wide image. This image can then be used by any user in any silo as a
-/// base for instances.
-#[endpoint {
-    method = POST,
-    path = "/system/images",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn system_image_create(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    new_image: TypedBody<params::GlobalImageCreate>,
-) -> Result<HttpResponseCreated<GlobalImage>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let new_image_params = new_image.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let image = nexus.global_image_create(&opctx, new_image_params).await?;
-        Ok(HttpResponseCreated(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Image requests
-#[derive(Deserialize, JsonSchema)]
-struct GlobalImagePathParam {
-    image_name: Name,
-}
-
-/// Fetch a system-wide image
-///
-/// Returns the details of a specific system-wide image.
-#[endpoint {
-    method = GET,
-    path = "/system/images/{image_name}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn system_image_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<GlobalImagePathParam>,
-) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let image_name = &path.image_name;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let image = nexus.global_image_fetch(&opctx, &image_name).await?;
-        Ok(HttpResponseOk(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a system-wide image by id
-#[endpoint {
-    method = GET,
-    path = "/system/by-id/images/{id}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn system_image_view_by_id(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<GlobalImage>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let image = nexus.global_image_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(image.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Delete a system-wide image
-///
-/// Permanently delete a system-wide image. This operation cannot be undone. Any
-/// instances using the system-wide image will continue to run, however new instances
-/// can not be created with this image.
-#[endpoint {
-    method = DELETE,
-    path = "/system/images/{image_name}",
-    tags = ["system"],
-    deprecated = true,
-}]
-async fn system_image_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<GlobalImagePathParam>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let image_name = &path.image_name;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.global_image_delete(&opctx, &image_name).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 /// List images
 ///
