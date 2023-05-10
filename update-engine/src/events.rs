@@ -957,6 +957,48 @@ pub enum ProgressEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> ProgressEventKind<S> {
+    /// Returns the progress counter for this event, if available.
+    pub fn progress_counter(&self) -> Option<ProgressCounter> {
+        match self {
+            ProgressEventKind::Progress { progress, .. } => *progress,
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.progress_counter()
+            }
+            ProgressEventKind::WaitingForProgress { .. }
+            | ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `attempt` for the leaf event, recursing into nested events as
+    /// necessary.
+    ///
+    /// Returns None for unknown events.
+    pub fn leaf_attempt(&self) -> Option<usize> {
+        match self {
+            ProgressEventKind::WaitingForProgress { attempt, .. }
+            | ProgressEventKind::Progress { attempt, .. } => Some(*attempt),
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_attempt()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `step_elapsed` for the leaf event, recursing into nested events
+    /// as necessary.
+    pub fn leaf_step_elapsed(&self) -> Option<Duration> {
+        match self {
+            ProgressEventKind::WaitingForProgress { step_elapsed, .. }
+            | ProgressEventKind::Progress { step_elapsed, .. } => {
+                Some(*step_elapsed)
+            }
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_step_elapsed()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -1259,7 +1301,9 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 /// number of bytes. There is no guarantee that the counter won't go back in
 /// subsequent events; that can happen e.g. if a fetch happens from multiple
 /// peers within a single attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ProgressCounter {
     pub current: u64,
