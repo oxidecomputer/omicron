@@ -76,12 +76,13 @@ pub enum SledMode {
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
 )]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Baseboard {
     Gimlet { identifier: String, model: String, revision: i64 },
 
     Unknown,
 
-    Pc { identifier: String, model: String, revision: i64 },
+    Pc { identifier: String, model: String },
 }
 
 impl Baseboard {
@@ -94,8 +95,8 @@ impl Baseboard {
         Self::Gimlet { identifier, model, revision }
     }
 
-    pub fn new_pc(identifier: String, model: String, revision: i64) -> Self {
-        Self::Pc { identifier, model, revision }
+    pub fn new_pc(identifier: String, model: String) -> Self {
+        Self::Pc { identifier, model }
     }
 
     // XXX This should be removed, but it requires a refactor in how devices are
@@ -131,7 +132,7 @@ impl Baseboard {
     pub fn revision(&self) -> i64 {
         match self {
             Self::Gimlet { revision, .. } => *revision,
-            Self::Pc { revision, .. } => *revision,
+            Self::Pc { .. } => 0,
             Self::Unknown => 0,
         }
     }

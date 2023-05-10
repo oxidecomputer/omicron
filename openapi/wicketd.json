@@ -306,68 +306,67 @@
         "description": "Describes properties that should uniquely identify a Gimlet.",
         "oneOf": [
           {
-            "type": "string",
-            "enum": [
-              "Unknown"
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
             ]
           },
           {
             "type": "object",
             "properties": {
-              "Gimlet": {
-                "type": "object",
-                "properties": {
-                  "identifier": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": "integer",
-                    "format": "int64"
-                  }
-                },
-                "required": [
-                  "identifier",
-                  "model",
-                  "revision"
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
                 ]
               }
             },
             "required": [
-              "Gimlet"
-            ],
-            "additionalProperties": false
+              "type"
+            ]
           },
           {
             "type": "object",
             "properties": {
-              "Pc": {
-                "type": "object",
-                "properties": {
-                  "identifier": {
-                    "type": "string"
-                  },
-                  "model": {
-                    "type": "string"
-                  },
-                  "revision": {
-                    "type": "integer",
-                    "format": "int64"
-                  }
-                },
-                "required": [
-                  "identifier",
-                  "model",
-                  "revision"
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
                 ]
               }
             },
             "required": [
-              "Pc"
-            ],
-            "additionalProperties": false
+              "identifier",
+              "model",
+              "type"
+            ]
           }
         ]
       },

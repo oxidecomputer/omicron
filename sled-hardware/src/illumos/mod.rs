@@ -520,7 +520,6 @@ fn poll_device_tree(
                             let pc_baseboard = Baseboard::new_pc(
                                 Uuid::new_v4().simple().to_string(),
                                 root_node.clone(),
-                                0,
                             );
 
                             info!(
