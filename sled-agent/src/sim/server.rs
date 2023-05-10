@@ -15,10 +15,12 @@ use crucible_agent_client::types::State as RegionState;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
+use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use slog::{info, Drain, Logger};
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -50,15 +52,15 @@ async fn get_nexus_address(
             let resolver = Resolver::new_from_addrs(
                 log.new(o!("component" => "DNS Resolver")),
                 vec![internal_dns_address],
-            ).map_err(|error| anyhow!("creating DNS resolver: {}", error))?;
-            let address = resolver.lookup_socket_v6(
-                ServiceName::Nexus,
-            ).await.map_err(|error| anyhow!("looking up Nexus address: {}", error))?;
+            )
+            .map_err(|error| anyhow!("creating DNS resolver: {}", error))?;
+            let address =
+                resolver.lookup_socket_v6(ServiceName::Nexus).await.map_err(
+                    |error| anyhow!("looking up Nexus address: {}", error),
+                )?;
             Ok(SocketAddr::V6(address))
-        },
-        NexusAddressSource::Direct { address } => {
-            Ok(address)
-        },
+        }
+        NexusAddressSource::Direct { address } => Ok(address),
     }
 }
 
@@ -184,22 +186,17 @@ impl Server {
                 .await;
         }
 
-        Ok(
-            Server {
-                config: config.clone(),
-                log: log.clone(),
-                sled_agent,
-                http_server,
-                pantry_server: None,
-            },
-        )
+        Ok(Server {
+            config: config.clone(),
+            log: log.clone(),
+            sled_agent,
+            http_server,
+            pantry_server: None,
+        })
     }
 
     /// Starts the pantry service and add it to the DNS config builder
-    pub async fn start_pantry(
-        &mut self,
-        dns: &mut internal_dns::DnsConfigBuilder,
-    ) {
+    pub async fn start_pantry(&mut self) -> &PantryServer {
         // Create the simulated Pantry
         let pantry_server = PantryServer::new(
             self.log.new(o!("kind" => "pantry")),
@@ -207,147 +204,9 @@ impl Server {
             self.sled_agent.clone(),
         )
         .await;
-
-        // Insert SRV and AAAA record for Crucible Pantry
-        let pantry_zone_id = pantry_server.server.app_private().id;
-        let pantry_addr = match pantry_server.addr() {
-            SocketAddr::V6(v6) => v6,
-            SocketAddr::V4(_) => {
-                panic!("pantry address must be IPv6");
-            }
-        };
-        let pantry_zone = dns
-            .host_zone(pantry_zone_id, *pantry_addr.ip())
-            .expect("failed to set up DNS");
-        dns.service_backend_zone(
-            ServiceName::CruciblePantry,
-            &pantry_zone,
-            pantry_addr.port(),
-        )
-        .expect("failed to set up DNS");
-
         self.pantry_server = Some(pantry_server);
+        self.pantry_server.as_ref().unwrap()
     }
-
-/*
-    #[deprecated]
-    pub async fn start_deprecated(
-        config: &Config,
-        log: &Logger,
-        // TODO: remove this arg
-        // Why: because the sled agent shouldn't be doing RSS work - that's up
-        // to the caller.
-//        rss_args: &RssArgs,
-    ) -> Result<Server, String> {
-        let mut server = Server::start(config, log).await?;
-        let dns = InternalDnsServer::new(&log).await?;
-
-        let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
-        server.start_pantry(&mut dns_config_builder).await;
-
-        dns.initialize_with_config(log, dns_config_builder).await?;
-
-        // Record the internal DNS server as though RSS had provisioned it so
-        // that Nexus knows about it.
-        let dns_bound = match dns.dns_server.local_address() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
-            SocketAddr::V6(a) => *a,
-        };
-        let http_bound = match dns.dns_dropshot_server.local_addr() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
-            SocketAddr::V6(a) => a,
-        };
-        let mut services = vec![
-            NexusTypes::ServicePutRequest {
-                address: dns_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDns,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-            NexusTypes::ServicePutRequest {
-                address: http_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDnsConfig,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-        ];
-
-        let mut internal_services_ip_pool_ranges = vec![];
-        if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
-            let ip = nexus_external_addr.ip();
-
-            services.push(NexusTypes::ServicePutRequest {
-                address: nexus_address.to_string(),
-                kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            });
-
-            internal_services_ip_pool_ranges.push(match ip {
-                IpAddr::V4(addr) => {
-                    IpRange::V4(Ipv4Range { first: addr, last: addr })
-                }
-                IpAddr::V6(addr) => {
-                    IpRange::V6(Ipv6Range { first: addr, last: addr })
-                }
-            });
-        }
-
-        if let Some(external_dns_internal_addr) =
-            rss_args.external_dns_internal_addr
-        {
-            services.push(NexusTypes::ServicePutRequest {
-                address: external_dns_internal_addr.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDnsConfig,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            });
-        }
-
-        let recovery_silo = NexusTypes::RecoverySiloConfig {
-            silo_name: "demo-silo".parse().unwrap(),
-            user_name: "demo-privileged".parse().unwrap(),
-            // The following is a hash for the password "oxide".  This is
-            // (obviously) only intended for transient deployments in
-            // development with no sensitive data or resources.  You can change
-            // this value to any other supported hash.  The only thing that
-            // needs to be changed with this hash are the instructions given to
-            // individuals running this program who then want to log in as this
-            // user.  For more on what's supported, see the API docs for this
-            // type and the specific constraints in the omicron-passwords crate.
-            user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$\
-            RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
-                .parse()
-                .unwrap(),
-        };
-
-        let rack_init_request = NexusTypes::RackInitializationRequest {
-            services,
-            datasets,
-            internal_services_ip_pool_ranges,
-            certs: vec![],
-            internal_dns_zone_config: d2n_params(&dns_config),
-            external_dns_zone_name:
-                internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
-            recovery_silo,
-        };
-
-        Ok(
-            Server {
-                sled_agent,
-                http_server,
-                pantry_server,
-//                dns_server_storage_dir,
-//                dns_server,
-//                dns_dropshot_server,
-            },
-        )
-    }
-*/
 
     /// Wait for the given server to shut down
     ///
@@ -400,8 +259,17 @@ pub struct RssArgs {
     pub external_dns_internal_addr: Option<SocketAddrV6>,
 }
 
-/// Run an instance of the `Server`
-pub async fn run_server(
+/// Run an instance of the `Server` which is able to handoff to Nexus.
+///
+/// This starts:
+/// - A Sled Agent
+/// - An Internal DNS server
+/// - A Crucible Pantry
+///
+/// And performs the following actions, similar to the Rack Setup Service:
+/// - Populates the Internal DNS server with records
+/// - Performs handoff to Nexus
+pub async fn run_standalone_server(
     config: &Config,
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
@@ -429,11 +297,96 @@ pub async fn run_server(
     let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
-    server.start_pantry(&mut dns_config_builder).await;
+    let pantry_server = server.start_pantry().await;
+
+    // Insert SRV and AAAA record for Crucible Pantry
+    let pantry_zone_id = pantry_server.server.app_private().id;
+    let pantry_addr = match pantry_server.addr() {
+        SocketAddr::V6(v6) => v6,
+        SocketAddr::V4(_) => {
+            panic!("pantry address must be IPv6");
+        }
+    };
+    let pantry_zone = dns_config_builder
+        .host_zone(pantry_zone_id, *pantry_addr.ip())
+        .expect("failed to set up DNS");
+    dns_config_builder
+        .service_backend_zone(
+            ServiceName::CruciblePantry,
+            &pantry_zone,
+            pantry_addr.port(),
+        )
+        .expect("failed to set up DNS");
 
     // Initialize the internal DNS entries
     let dns_config = dns_config_builder.build();
     dns.initialize_with_config(&log, &dns_config).await?;
+    drop(pantry_server);
+
+    // Record the internal DNS server as though RSS had provisioned it so
+    // that Nexus knows about it.
+    let dns_bound = match dns.server.local_address() {
+        SocketAddr::V4(_) => panic!("did not expect v4 address"),
+        SocketAddr::V6(a) => *a,
+    };
+    let http_bound = match dns.dropshot_server.local_addr() {
+        SocketAddr::V4(_) => panic!("did not expect v4 address"),
+        SocketAddr::V6(a) => a,
+    };
+    let mut services = vec![
+        NexusTypes::ServicePutRequest {
+            address: dns_bound.to_string(),
+            kind: NexusTypes::ServiceKind::InternalDns,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        },
+        NexusTypes::ServicePutRequest {
+            address: http_bound.to_string(),
+            kind: NexusTypes::ServiceKind::InternalDnsConfig,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        },
+    ];
+
+    let mut internal_services_ip_pool_ranges = vec![];
+    if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
+        let ip = nexus_external_addr.ip();
+
+        let NexusAddressSource::Direct { address } = config.nexus_address_source else {
+            panic!("Cannot run standalone server with Nexus Address: {:?}", config.nexus_address_source);
+        };
+
+        services.push(NexusTypes::ServicePutRequest {
+            address: address.to_string(),
+            kind: NexusTypes::ServiceKind::Nexus { external_address: ip },
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        });
+
+        internal_services_ip_pool_ranges.push(match ip {
+            IpAddr::V4(addr) => {
+                IpRange::V4(Ipv4Range { first: addr, last: addr })
+            }
+            IpAddr::V6(addr) => {
+                IpRange::V6(Ipv6Range { first: addr, last: addr })
+            }
+        });
+    }
+
+    if let Some(external_dns_internal_addr) =
+        rss_args.external_dns_internal_addr
+    {
+        services.push(NexusTypes::ServicePutRequest {
+            address: external_dns_internal_addr.to_string(),
+            kind: NexusTypes::ServiceKind::ExternalDnsConfig,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        });
+    }
 
     let recovery_silo = NexusTypes::RecoverySiloConfig {
         silo_name: "demo-silo".parse().unwrap(),
@@ -452,17 +405,30 @@ pub async fn run_server(
             .unwrap(),
     };
 
-    // TODO: These values are not quite right.
-    // TODO: Specifically:
-    // - The "services" previously contained: DNS servers, nexus, external DNS
-    // - internal services came from Nexus
+    let mut datasets = vec![];
+    for zpool_id in server.sled_agent.get_zpools().await {
+        for (dataset_id, address) in
+            server.sled_agent.get_datasets(zpool_id).await
+        {
+            datasets.push(NexusTypes::DatasetCreateRequest {
+                zpool_id,
+                dataset_id,
+                request: NexusTypes::DatasetPutRequest {
+                    address: address.to_string(),
+                    kind: NexusTypes::DatasetKind::Crucible,
+                },
+            });
+        }
+    }
+
     let rack_init_request = NexusTypes::RackInitializationRequest {
-        services: vec![],
-        datasets: vec![],
-        internal_services_ip_pool_ranges: vec![],
+        services,
+        datasets,
+        internal_services_ip_pool_ranges,
         certs: vec![],
         internal_dns_zone_config: d2n_params(&dns_config),
-        external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
+        external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
+            .to_owned(),
         recovery_silo,
     };
 

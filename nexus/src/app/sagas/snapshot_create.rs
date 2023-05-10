@@ -748,6 +748,11 @@ async fn ssc_get_pantry_address(
         &params.serialized_authn,
     );
 
+    info!(
+        log,
+        "looking up pantry address to use with disk: {}", params.disk_id
+    );
+
     // If the disk is already attached to a Pantry, use that, otherwise get a
     // random one. Return boolean indicating if additional saga nodes need to
     // attach this disk to that random pantry.

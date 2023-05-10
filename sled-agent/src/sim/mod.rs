@@ -17,6 +17,9 @@ mod sled_agent;
 mod storage;
 
 pub use crate::updates::ConfigUpdates;
-pub use config::{Config, ConfigHardware, ConfigStorage, ConfigZpool, NexusAddressSource, SimMode};
-pub use server::{run_server, RssArgs, Server};
+pub use config::{
+    Config, ConfigHardware, ConfigStorage, ConfigZpool, NexusAddressSource,
+    SimMode,
+};
+pub use server::{run_standalone_server, RssArgs, Server};
 pub use sled_agent::SledAgent;

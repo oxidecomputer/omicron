@@ -55,7 +55,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
         sas.push(
             start_sled_agent(
                 log,
-                sim::NexusAddressSource::Direct { address: addr},
+                sim::NexusAddressSource::Direct { address: addr },
                 sa_id,
                 &update_directory,
                 sim::SimMode::Explicit,

@@ -126,20 +126,15 @@ impl InMemoryServer {
         let (server, dropshot_server) = start_servers(
             dns_log,
             store,
-            &dns_server::Config {
-                bind_address: "[::1]:0".parse().unwrap(),
-            },
+            &dns_server::Config { bind_address: "[::1]:0".parse().unwrap() },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
+                request_body_max_bytes: 4 * 1024 * 1024,
                 ..Default::default()
             },
         )
         .await?;
-        Ok(Self {
-            storage_dir,
-            server,
-            dropshot_server,
-        })
+        Ok(Self { storage_dir, server, dropshot_server })
     }
 
     pub async fn initialize_with_config(

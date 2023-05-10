@@ -50,6 +50,8 @@ pub trait NexusServer {
         internal_server: Self::InternalServer,
         config: &Config,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
+        internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
     ) -> Self;

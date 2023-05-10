@@ -4151,6 +4151,7 @@ dependencies = [
  "chrono",
  "crucible-agent-client",
  "dns-server",
+ "dns-service-client",
  "dropshot",
  "headers",
  "http",

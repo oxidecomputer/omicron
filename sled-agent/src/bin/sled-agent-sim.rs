@@ -14,8 +14,8 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    run_server, Config, ConfigHardware, ConfigStorage, ConfigUpdates,
-    ConfigZpool, NexusAddressSource, SimMode,
+    run_standalone_server, Config, ConfigHardware, ConfigStorage,
+    ConfigUpdates, ConfigZpool, NexusAddressSource, SimMode,
 };
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -79,7 +79,9 @@ async fn do_run() -> Result<(), CmdError> {
     let config = Config {
         id: args.uuid,
         sim_mode: args.sim_mode,
-        nexus_address_source: NexusAddressSource::Direct { address: args.nexus_addr },
+        nexus_address_source: NexusAddressSource::Direct {
+            address: args.nexus_addr,
+        },
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,
@@ -103,5 +105,7 @@ async fn do_run() -> Result<(), CmdError> {
         external_dns_internal_addr: args.rss_external_dns_internal_addr,
     };
 
-    run_server(&config, &rss_args).await.map_err(|e| CmdError::Failure(e.to_string()))
+    run_standalone_server(&config, &rss_args)
+        .await
+        .map_err(|e| CmdError::Failure(e.to_string()))
 }
