@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{
-    Baseboard, DendriteAsic, DiskIdentity, DiskVariant, HardwareUpdate,
-    SledMode, UnparsedDisk,
+    Baseboard, DendriteAsic, DiskVariant, HardwareUpdate, SledMode,
+    UnparsedDisk,
 };
 use camino::Utf8PathBuf;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
