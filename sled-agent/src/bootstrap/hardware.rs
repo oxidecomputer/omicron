@@ -147,6 +147,7 @@ pub(crate) struct HardwareMonitor {
 impl HardwareMonitor {
     // Spawns a new task which monitors for hardware and launches the switch
     // zone if the necessary Tofino drivers are detected.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,

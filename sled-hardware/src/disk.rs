@@ -435,9 +435,8 @@ impl Disk {
                     key_requester.load_latest_secret().await?
                 };
 
-            let key = key_requester
-                .get_key(epoch, disk_identity.clone().into())
-                .await?;
+            let key =
+                key_requester.get_key(epoch, disk_identity.clone()).await?;
 
             let mut keyfile =
                 KeyFile::create(keypath.clone(), key.expose_secret(), log)
