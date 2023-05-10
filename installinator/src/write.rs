@@ -518,7 +518,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         )
                         .await?;
 
-                        StepResult::success(transport, Default::default())
+                        StepResult::success(transport, ())
                     },
                 )
                 .register();
@@ -815,8 +815,6 @@ mod tests {
         data2: Vec<Vec<u8>>,
         write_ops: WriteOps,
     ) -> Result<()> {
-        static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
-
         let logctx = test_setup_log("test_write_artifact");
         let tempdir = tempdir()?;
         let tempdir_path: &Utf8Path = tempdir.path().try_into()?;
@@ -874,7 +872,7 @@ mod tests {
         // images.
         let control_plane_zone_images = ControlPlaneZoneImages {
             zones: vec![(
-                CONTROL_PLANE_FILE_NAME.to_string(),
+                destination_control_plane.file_name().unwrap().to_string(),
                 artifact_control_plane.iter().flatten().copied().collect(),
             )],
         };
