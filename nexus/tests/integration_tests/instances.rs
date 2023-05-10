@@ -491,6 +491,85 @@ async fn test_instances_create_reboot_halt(
 }
 
 #[nexus_test]
+async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let nexus = &apictx.nexus;
+    let instance_name = "bird-ecology";
+
+    // Create a second sled to migrate to/from.
+    let default_sled_id: Uuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = Uuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    create_org_and_project(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+    )
+    .await;
+    let instance_id = instance.identity.id;
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let original_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+    let _ = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &migrate_url)
+            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    assert_eq!(current_sled, original_sled);
+
+    // Explicitly simulate the migration action on the target. Simulated
+    // migrations always succeed. The state transition on the target is
+    // sufficient to move the instance back into a Running state (strictly
+    // speaking no further updates from the source are required if the target
+    // successfully takes over).
+    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    let current_sled = nexus.instance_sled_id(&instance_id).await.unwrap();
+    assert_eq!(current_sled, dst_sled_id);
+}
+
+#[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Normally, Nexus is not registered as a producer for tests.
     // Turn this bit on so we can also test some metrics from Nexus itself.
@@ -3237,4 +3316,19 @@ fn instances_eq(instance1: &Instance, instance2: &Instance) {
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
     let sa = nexus.instance_sled_by_id(id).await.unwrap();
     sa.instance_finish_transition(*id).await;
+}
+
+/// Simulates state transitions for the incarnation of the instance on the
+/// supplied sled (which may not be the sled ID currently stored in the
+/// instance's CRDB record).
+async fn instance_simulate_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: Uuid,
+    instance_id: Uuid,
+) {
+    info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
+          "instance_id" => %instance_id, "sled_id" => %sled_id);
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.instance_finish_transition(instance_id).await;
 }

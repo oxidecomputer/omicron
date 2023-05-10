@@ -38,6 +38,7 @@ pub enum UpdateComponent {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "id", rename_all = "snake_case")]
 pub enum UpdateStepId {
+    TestStep,
     SetHostPowerState { state: PowerState },
     InterrogateRot,
     ResetRot,

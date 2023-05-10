@@ -12,6 +12,7 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
+use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
@@ -139,6 +140,14 @@ async fn get_artifacts_and_event_reports(
     Ok(HttpResponseOk(response))
 }
 
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct StartUpdateOptions {
+    /// If passed in, creates a test step that lasts these many seconds long.
+    ///
+    /// This is used for testing.
+    pub(crate) test_step_seconds: Option<u64>,
+}
+
 /// An endpoint to start updating a sled.
 #[endpoint {
     method = POST,
@@ -147,6 +156,7 @@ async fn get_artifacts_and_event_reports(
 async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
+    opts: Query<StartUpdateOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
     let target = target.into_inner();
@@ -232,7 +242,8 @@ async fn post_start_update(
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target, update_id).await {
+    match rqctx.update_tracker.start(target, update_id, opts.into_inner()).await
+    {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }

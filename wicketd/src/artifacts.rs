@@ -765,7 +765,7 @@ fn unpack_rot_artifact(
 mod tests {
     use super::*;
 
-    use std::{collections::BTreeSet, io::BufReader};
+    use std::collections::BTreeSet;
 
     use anyhow::{Context, Result};
     use camino_tempfile::Utf8TempDir;
@@ -822,7 +822,7 @@ mod tests {
         Ok(())
     }
 
-    fn make_random_bytes() -> Bytes {
+    fn make_random_bytes() -> Vec<u8> {
         thread_rng().sample_iter(Standard).take(128).collect()
     }
 
@@ -833,39 +833,22 @@ mod tests {
     }
 
     fn make_random_host_os_image() -> RandomHostOsImage {
-        use tar::{Builder, Header};
+        use tufaceous_lib::CompositeHostArchiveBuilder;
 
         let phase1 = make_random_bytes();
         let phase2 = make_random_bytes();
 
-        let mut ar = Builder::new(Vec::new());
+        let mut builder = CompositeHostArchiveBuilder::new(Vec::new()).unwrap();
+        builder.append_phase_1(phase1.len(), phase1.as_slice()).unwrap();
+        builder.append_phase_2(phase2.len(), phase2.as_slice()).unwrap();
 
-        let mut header = Header::new_gnu();
+        let tarball = builder.finish().unwrap();
 
-        header.set_size(phase1.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "image/rom", &*phase1).unwrap();
-
-        header.set_size(phase1.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "image/zfs.img", &*phase2).unwrap();
-
-        let oxide_json = br#"{"v": "1","t":"os"}"#;
-        header.set_size(oxide_json.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "oxide.json", oxide_json.as_slice())
-            .unwrap();
-
-        let tarball = ar.into_inner().unwrap();
-        let mut gz = flate2::bufread::GzEncoder::new(
-            BufReader::new(io::Cursor::new(tarball)),
-            flate2::Compression::fast(),
-        );
-        let mut tarball = Vec::new();
-        gz.read_to_end(&mut tarball).unwrap();
-        let tarball = Bytes::from(tarball);
-
-        RandomHostOsImage { phase1, phase2, tarball }
+        RandomHostOsImage {
+            phase1: Bytes::from(phase1),
+            phase2: Bytes::from(phase2),
+            tarball: Bytes::from(tarball),
+        }
     }
 
     struct RandomRotImage {
@@ -875,39 +858,26 @@ mod tests {
     }
 
     fn make_random_rot_image() -> RandomRotImage {
-        use tar::{Builder, Header};
+        use tufaceous_lib::CompositeRotArchiveBuilder;
 
         let archive_a = make_random_bytes();
         let archive_b = make_random_bytes();
 
-        let mut ar = Builder::new(Vec::new());
-
-        let mut header = Header::new_gnu();
-
-        header.set_size(archive_a.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "archive-a.zip", &*archive_a).unwrap();
-
-        header.set_size(archive_a.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "archive-b.zip", &*archive_b).unwrap();
-
-        let oxide_json = br#"{"v": "1","t":"rot"}"#;
-        header.set_size(oxide_json.len() as u64);
-        header.set_cksum();
-        ar.append_data(&mut header, "oxide.json", oxide_json.as_slice())
+        let mut builder = CompositeRotArchiveBuilder::new(Vec::new()).unwrap();
+        builder
+            .append_archive_a(archive_a.len(), archive_a.as_slice())
+            .unwrap();
+        builder
+            .append_archive_b(archive_b.len(), archive_b.as_slice())
             .unwrap();
 
-        let tarball = ar.into_inner().unwrap();
-        let mut gz = flate2::bufread::GzEncoder::new(
-            BufReader::new(io::Cursor::new(tarball)),
-            flate2::Compression::fast(),
-        );
-        let mut tarball = Vec::new();
-        gz.read_to_end(&mut tarball).unwrap();
-        let tarball = Bytes::from(tarball);
+        let tarball = builder.finish().unwrap();
 
-        RandomRotImage { archive_a, archive_b, tarball }
+        RandomRotImage {
+            archive_a: Bytes::from(archive_a),
+            archive_b: Bytes::from(archive_b),
+            tarball: Bytes::from(tarball),
+        }
     }
 
     #[test]
@@ -924,7 +894,7 @@ mod tests {
             KnownArtifactKind::PscSp,
             KnownArtifactKind::SwitchSp,
         ] {
-            let data = make_random_bytes();
+            let data = Bytes::from(make_random_bytes());
             let hash = Sha256::digest(&data);
             let id = ArtifactId {
                 name: format!("{kind:?}"),

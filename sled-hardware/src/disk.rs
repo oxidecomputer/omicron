@@ -183,6 +183,10 @@ impl UnparsedDisk {
     pub fn identity(&self) -> &DiskIdentity {
         &self.identity
     }
+
+    pub fn is_boot_disk(&self) -> bool {
+        self.is_boot_disk
+    }
 }
 
 /// A physical disk conforming to the expected partition layout.

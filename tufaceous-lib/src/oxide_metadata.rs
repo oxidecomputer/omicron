@@ -25,6 +25,7 @@ pub enum ArchiveType {
     Layer,
     Os,
     Rot,
+    ControlPlane,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

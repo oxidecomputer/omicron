@@ -143,9 +143,23 @@ impl RunnerCore {
             }
             Action::Update(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    wicketd.tx.blocking_send(wicketd::Request::StartUpdate(
-                        component_id,
-                    ))?;
+                    // This is a debug environment variable used to add a test
+                    // step.
+                    let test_step_seconds =
+                        std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS")
+                            .ok()
+                            .map(|v| {
+                                v.parse().expect(
+                                    "parsed WICKET_UPDATE_TEST_STEP_SECONDS \
+                                        as a u64",
+                                )
+                            });
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::StartUpdate {
+                            component_id,
+                            test_step_seconds,
+                        },
+                    )?;
                 }
             }
             Action::Ignition(component_id, ignition_command) => {

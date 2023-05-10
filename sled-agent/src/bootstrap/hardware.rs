@@ -6,7 +6,7 @@
 
 use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
-use crate::storage_manager::StorageManager;
+use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
 use key_manager::StorageKeyRequester;
 use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
@@ -124,6 +124,10 @@ impl HardwareMonitorWorker {
                 warn!(self.log, "Failed to deactivate switch: {e}");
             }
         }
+
+        self.storage
+            .ensure_using_exactly_these_disks(self.hardware.disks())
+            .await;
     }
 }
 
@@ -137,6 +141,7 @@ pub(crate) struct HardwareMonitor {
     handle: JoinHandle<
         Result<(HardwareManager, ServiceManager, StorageManager), Error>,
     >,
+    storage_resources: StorageResources,
 }
 
 impl HardwareMonitor {
@@ -189,6 +194,18 @@ impl HardwareMonitor {
         let storage_manager =
             StorageManager::new(&log, storage_key_requester).await;
 
+        // If our configuration asks for synthetic zpools, insert them now.
+        if let Some(pools) = &sled_config.zpools {
+            for pool in pools {
+                info!(
+                    log,
+                    "Upserting synthetic zpool to Storage Manager: {}",
+                    pool.to_string()
+                );
+                storage_manager.upsert_synthetic_disk(pool.clone()).await;
+            }
+        }
+
         let service_manager = ServiceManager::new(
             log.clone(),
             global_zone_bootstrap_link_local_address,
@@ -215,6 +232,7 @@ impl HardwareMonitor {
         storage: StorageManager,
     ) -> Self {
         let (exit_tx, exit_rx) = oneshot::channel();
+        let storage_resources = storage.resources().clone();
         let worker = HardwareMonitorWorker::new(
             log.clone(),
             exit_rx,
@@ -224,7 +242,11 @@ impl HardwareMonitor {
         );
         let handle = tokio::spawn(async move { worker.run().await });
 
-        Self { exit_tx, handle }
+        Self { exit_tx, handle, storage_resources }
+    }
+
+    pub fn storage(&self) -> &StorageResources {
+        &self.storage_resources
     }
 
     // Stops the task from executing

@@ -222,6 +222,32 @@ pub struct StorageResources {
 }
 
 impl StorageResources {
+    /// Returns the identity of the boot disk.
+    ///
+    /// If this returns `None`, we have not processed the boot disk yet.
+    pub async fn boot_disk(&self) -> Option<(DiskIdentity, ZpoolName)> {
+        let disks = self.disks.lock().await;
+        disks.iter().find_map(|(id, disk)| {
+            match disk {
+                // This is the "real" use-case: if we have real disks, query
+                // their properties to identify if they truly are the boot disk.
+                DiskWrapper::Real { disk, .. } => {
+                    if disk.is_boot_disk() {
+                        return Some((id.clone(), disk.zpool_name().clone()));
+                    }
+                }
+                // This is the "less real" use-case: if we have synthetic disks,
+                // just label the first M.2-looking one as a "boot disk".
+                DiskWrapper::Synthetic { .. } => {
+                    if matches!(disk.variant(), DiskVariant::M2) {
+                        return Some((id.clone(), disk.zpool_name().clone()));
+                    }
+                }
+            };
+            None
+        })
+    }
+
     /// Returns all M.2 zpools
     pub async fn all_m2_zpools(&self) -> Vec<ZpoolName> {
         self.all_zpools(DiskVariant::M2).await
@@ -236,6 +262,7 @@ impl StorageResources {
             .collect()
     }
 
+    /// Returns all zpools of a particular variant
     pub async fn all_zpools(&self, variant: DiskVariant) -> Vec<ZpoolName> {
         let disks = self.disks.lock().await;
         disks
