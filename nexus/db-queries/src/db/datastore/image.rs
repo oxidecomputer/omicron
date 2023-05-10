@@ -220,4 +220,33 @@ impl DataStore {
             })?;
         Ok(image)
     }
+
+    pub async fn silo_image_demote(
+        &self,
+        opctx: &OpContext,
+        authz_silo_image: &authz::SiloImage,
+        authz_project: &authz::Project,
+    ) -> UpdateResult<Image> {
+        opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
+        opctx.authorize(authz::Action::Modify, authz_project).await?;
+
+        use db::schema::image::dsl;
+        let image: Image = diesel::update(dsl::image)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_silo_image.id()))
+            .set((
+                dsl::project_id.eq(Some(authz_project.id())),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .returning(Image::as_returning())
+            .get_result_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_silo_image),
+                )
+            })?;
+        Ok(image)
+    }
 }
