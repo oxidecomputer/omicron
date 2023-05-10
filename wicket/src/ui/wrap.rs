@@ -145,8 +145,8 @@ fn wrap_single_line_slow_path<'a>(
     }
 }
 
-fn find_words_in_line<'a, 'b>(
-    line: &'a Spans<'b>,
+fn find_words_in_line<'a>(
+    line: &'a Spans<'_>,
 ) -> impl Iterator<Item = StyledWord<'a>> {
     line.0.iter().flat_map(|span| find_words_in_span(span))
 }
@@ -155,8 +155,8 @@ fn find_words_in_line<'a, 'b>(
 ///
 /// This assumes the only word breaks are ASCII spaces. In particular, it
 /// assume that there are no newlines anywhere within a span.
-fn find_words_in_span<'a, 'b>(
-    span: &'a Span<'b>,
+fn find_words_in_span<'a>(
+    span: &'a Span<'_>,
 ) -> impl Iterator<Item = StyledWord<'a>> {
     let mut start = 0;
     let mut in_whitespace = false;
