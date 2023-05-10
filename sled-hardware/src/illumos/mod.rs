@@ -14,6 +14,7 @@ use slog::info;
 use slog::o;
 use slog::warn;
 use slog::Logger;
+use omicron_common::disk::DiskIdentity;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
