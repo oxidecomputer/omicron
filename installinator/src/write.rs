@@ -496,6 +496,12 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
+
+        // Dealing with the `&mut impl WriteTransport` is tricky. Every step in
+        // the loop below needs access to it, but we can't move it into every
+        // closure. Instead, we put it into a `StepHandle`, and have each step
+        // return it on completion. This way each step passes it forward to its
+        // successor.
         let mut transport = StepHandle::ready(transport);
 
         for (name, data) in &self.zones.zones {

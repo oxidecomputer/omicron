@@ -67,6 +67,15 @@ pub enum InstallinatorStepId {
     Download,
     Format,
     Scan,
+    // There are multiple "composite" artifacts in the tuf repository the user
+    // gives to wicketd: the RoT (A/B images), the host (phase1/phase2), and the
+    // control plane (the collection of zones). wicketd handles unpacking the
+    // RoT and host composite artifacts, because it needs to give pieces from
+    // inside them to MGS. However, it does not unpack the control plane
+    // artifact: only installinator needs access to the zone images inside, so
+    // we have an explicit step here for that unpacking. If the user uploads a
+    // tuf repository with a malformed control plane composite artifact, this
+    // step is the point at which we'd discover that and fail.
     UnpackControlPlaneArtifact,
     Write,
 }
