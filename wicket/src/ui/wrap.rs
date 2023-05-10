@@ -81,7 +81,7 @@ fn wrap_single_line_slow_path<'a>(
     lines: &mut Vec<Spans<'a>>,
 ) {
     // Span::width (options.initial_indent.width() etc) use the Unicode display
-    // width, which is what we expect it.
+    // width, which is what we expect.
     let initial_width =
         options.width.saturating_sub(options.initial_indent.width());
     let subsequent_width =
