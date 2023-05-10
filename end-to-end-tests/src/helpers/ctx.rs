@@ -237,7 +237,7 @@ async fn build_authenticated_client() -> Result<oxide_client::Client> {
                 .send()
                 .await
                 .map_err(|e| {
-                    eprintln!("{}: login failed: {:?}", Utc::now(), e);
+                    eprintln!("{}: login failed: {:#}", Utc::now(), e);
                     if e.is_connect() {
                         CondCheckError::NotYet
                     } else {
