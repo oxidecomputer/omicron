@@ -4,12 +4,11 @@
 
 //! The bootstrap agent's view into hardware
 
-use crate::bootstrap::secret_retriever::LocalSecretRetriever;
 use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
-use key_manager::KeyManager;
+use key_manager::StorageKeyRequester;
 use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -151,6 +150,7 @@ impl HardwareMonitor {
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
         switch_zone_bootstrap_address: Ipv6Addr,
+        storage_key_requester: StorageKeyRequester,
     ) -> Result<Self, Error> {
         // Combine the `sled_mode` config with the build-time
         // switch type to determine the actual sled mode.
@@ -185,20 +185,6 @@ impl HardwareMonitor {
         info!(log, "Starting hardware monitor"; "sled_mode" => ?sled_mode);
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
-
-        // Spawn the `KeyManager` which is needed by the the StorageManager to
-        // retrieve encryption keys.
-        //
-        // TODO: Eventually other things are going to want access to "key
-        // requesters" returned by the key manager. We should probably move the
-        // creation and initialization upwards in the call stack along with the
-        // call to `StorageManager::new`.
-        let (mut key_manager, storage_key_requester) =
-            KeyManager::new(LocalSecretRetriever {});
-
-        // TODO: Should we keep a handle to the key_manager? It shouldn't ever
-        // actually be stopped.
-        tokio::spawn(async move { key_manager.run().await });
 
         let storage_manager =
             StorageManager::new(&log, storage_key_requester).await;

@@ -95,6 +95,13 @@ enum StorageKeyRequest {
 }
 
 /// A client of [`KeyManager`] that can request generation of storage related keys
+///
+/// The StorageKeyRequester only derives `Clone` because the `HardwareMonitor`
+/// requires it to get passed in and the `HardwareMonitor` gets recreated when
+/// the sled-agent starts. The `HardwareMonitor` gets the StorageKeyRequester
+/// from the bootstrap agent. If this changes, we should remove the `Clone` to
+/// limit who has access to the storage keys.
+#[derive(Clone)]
 pub struct StorageKeyRequester {
     tx: mpsc::Sender<StorageKeyRequest>,
 }

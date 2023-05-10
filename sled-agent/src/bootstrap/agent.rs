@@ -12,6 +12,7 @@ use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
+use super::secret_retriever::LocalSecretRetriever;
 use super::server::TrustQuorumMembership;
 use super::trust_quorum::{
     RackSecret, SerializableShareDistribution, ShareDistribution,
@@ -35,6 +36,7 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::backoff::{
@@ -50,6 +52,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 /// Describes errors which may occur while operating the bootstrap service.
 #[derive(Error, Debug)]
@@ -199,6 +202,16 @@ pub struct Agent {
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
+
+    // We maintain the handle just to show ownership, but don't use it
+    // as the KeyManager task should run forever
+    #[allow(unused)]
+    key_manager_handle: JoinHandle<()>,
+
+    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
+    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
+    // gets recreated.
+    storage_key_requester: StorageKeyRequester,
 }
 
 fn get_sled_agent_request_path() -> Utf8PathBuf {
@@ -389,6 +402,13 @@ impl Agent {
         ]);
         execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
 
+        // Spawn the `KeyManager` which is needed by the the StorageManager to
+        // retrieve encryption keys.
+        let (mut key_manager, storage_key_requester) =
+            KeyManager::new(LocalSecretRetriever {});
+
+        let handle = tokio::spawn(async move { key_manager.run().await });
+
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
@@ -405,6 +425,8 @@ impl Agent {
             sp,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
+            key_manager_handle: handle,
+            storage_key_requester,
         };
 
         let hardware_monitor = agent.start_hardware_monitor().await?;
@@ -448,6 +470,7 @@ impl Agent {
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let switch_zone_bootstrap_address =
             BootstrapInterface::SwitchZone.ip(&self.config.link)?;
+        let storage_key_requester = self.storage_key_requester.clone();
         let hardware_monitor = HardwareMonitor::new(
             &self.log,
             &self.sled_config,
@@ -456,6 +479,7 @@ impl Agent {
             underlay_etherstub_vnic,
             bootstrap_etherstub,
             switch_zone_bootstrap_address,
+            storage_key_requester,
         )
         .await?;
         Ok(hardware_monitor)

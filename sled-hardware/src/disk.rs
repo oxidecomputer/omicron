@@ -54,7 +54,7 @@ pub enum DiskError {
     #[error("Missing StorageKeyRequester when creating U.2 disk")]
     MissingStorageKeyRequester,
     #[error("Encrypted filesystem '{0}' missing 'oxide:epoch' property")]
-    MissingEpochProperty(String),
+    CannotParseEpochProperty(String),
 }
 
 /// A partition (or 'slice') of a disk.
@@ -404,7 +404,7 @@ impl Disk {
                     if let Ok(epoch) = epoch_str.parse::<u64>() {
                         epoch
                     } else {
-                        return Err(DiskError::MissingEpochProperty(
+                        return Err(DiskError::CannotParseEpochProperty(
                             dataset.to_string(),
                         ));
                     }
