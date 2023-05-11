@@ -233,6 +233,48 @@
           {
             "type": "object",
             "properties": {
+              "disks_found": {
+                "description": "Number of disks found.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "hardware_scan"
+                ]
+              }
+            },
+            "required": [
+              "disks_found",
+              "reason"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "control_plane_zones"
+                ]
+              },
+              "zones_to_install": {
+                "description": "Number of zone images that will be installed.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "reason",
+              "zones_to_install"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
               "address": {
                 "description": "The address the artifact was downloaded from.",
                 "type": "string"
@@ -366,6 +408,8 @@
         "enum": [
           "download",
           "format",
+          "scan",
+          "unpack_control_plane_artifact",
           "write"
         ]
       },

@@ -16,12 +16,15 @@ use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::dkio::MediaInfoExtended;
 use installinator_common::{
-    M2Slot, StepContext, StepProgress, StepResult, UpdateEngine,
-    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
+    StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
+    WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tufaceous_lib::ControlPlaneZoneImages;
+use update_engine::StepSpec;
 
 use crate::{block_size_writer::BlockSizeBufWriter, hardware::Hardware};
 
@@ -32,12 +35,13 @@ struct ArtifactDestination {
     // runs on non-gimlets, we want to write the host phase 2 to a new file we
     // create.
     create_host_phase_2: bool,
+
+    // Path to write the host image; either a raw device corresponding to an M.2
+    // partition (real gimlet) or a file (test).
     host_phase_2: Utf8PathBuf,
 
-    // TODO-completeness This SHOULD NOT be optional, but at the time of this
-    // writing we don't know how to write the control plane artifacts on a real
-    // gimlet, so we leave it optional for now. This should be fixed very soon!
-    control_plane: Option<Utf8PathBuf>,
+    // Directory in which we unpack the control plane zone images.
+    control_plane_dir: Utf8PathBuf,
 }
 
 #[derive(Clone, Debug)]
@@ -50,11 +54,6 @@ pub(crate) struct WriteDestination {
 ///
 /// Exposed for testing.
 pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
-
-/// The name of the control plane image written to disk.
-///
-/// Exposed for testing.
-pub static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
 
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
@@ -69,7 +68,7 @@ impl WriteDestination {
             ArtifactDestination {
                 create_host_phase_2: true,
                 host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
-                control_plane: Some(dir.join(CONTROL_PLANE_FILE_NAME)),
+                control_plane_dir: dir.into(),
             },
         );
 
@@ -105,15 +104,16 @@ impl WriteDestination {
                         "zpool" => %disk.zpool_name(),
                     );
 
+                    let control_plane_dir = disk
+                        .zpool_name()
+                        .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
+
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
                                 create_host_phase_2: false,
                                 host_phase_2: path,
-                                // TODO-completeness Fix this once we know how
-                                // to write the control plane image to this
-                                // disk's zpool.
-                                control_plane: None,
+                                control_plane_dir,
                             });
                         }
                         Entry::Occupied(_) => {
@@ -146,6 +146,10 @@ impl WriteDestination {
 
         Ok(Self { drives, is_host_phase_2_block_device: true })
     }
+
+    pub(crate) fn num_target_disks(&self) -> usize {
+        self.drives.len()
+    }
 }
 
 /// State machine for our progress writing to one of the M.2 drives.
@@ -174,7 +178,7 @@ impl<'a> ArtifactWriter<'a> {
         host_phase_2_id: &'a ArtifactHashId,
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
-        control_plane_data: &'a BufList,
+        control_plane_zones: &'a ControlPlaneZoneImages,
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -190,7 +194,7 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_id,
                 host_phase_2_data,
                 control_plane_id,
-                control_plane_data,
+                control_plane_zones,
             },
         }
     }
@@ -408,7 +412,7 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_id: &'a ArtifactHashId,
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
-    control_plane_data: &'a BufList,
+    control_plane_zones: &'a ControlPlaneZoneImages,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -448,29 +452,83 @@ impl ArtifactsToWrite<'_> {
         transport: &mut impl WriteTransport,
         cx: &StepContext<WriteSpec>,
     ) -> Result<StepResult<(), WriteSpec>, WriteError> {
-        // Temporary workaround while we may not know how to write the control
-        // plane image: if we don't know where to put it, we're done.
-        let Some(control_plane_dest) = destinations.control_plane.as_ref() else
-        {
-            return StepResult::skipped((), (), "We don't yet know how to write the control plane");
-        };
-
-        write_artifact_impl(
-            WriteComponent::ControlPlane,
+        // Register a nested engine to write the set of zones, each zone as its
+        // own step.
+        let inner_cx = ControlPlaneZoneWriteContext {
             slot,
-            self.control_plane_data.clone(),
-            control_plane_dest,
-            true,
-            transport,
-            cx,
-        )
+            output_directory: &destinations.control_plane_dir,
+            zones: self.control_plane_zones,
+        };
+        cx.with_nested_engine(|engine| {
+            inner_cx.register_steps(engine, transport);
+            Ok(())
+        })
         .await
         .map_err(|error| {
-            info!(log, "{error:?}"; "artifact_id" => ?self.control_plane_id);
+            warn!(
+                log, "{error:?}";
+                "artifact_id" => ?self.control_plane_id,
+            );
             error
         })?;
 
+        info!(
+            log,
+            "finished writing {} control plane zones",
+            self.control_plane_zones.zones.len()
+        );
         StepResult::success((), ())
+    }
+}
+
+struct ControlPlaneZoneWriteContext<'a> {
+    slot: M2Slot,
+    output_directory: &'a Utf8Path,
+    zones: &'a ControlPlaneZoneImages,
+}
+
+impl ControlPlaneZoneWriteContext<'_> {
+    fn register_steps<'b>(
+        &'b self,
+        engine: &UpdateEngine<'b, ControlPlaneZonesSpec>,
+        transport: &'b mut impl WriteTransport,
+    ) {
+        use update_engine::StepHandle;
+
+        let slot = self.slot;
+
+        // Dealing with the `&mut impl WriteTransport` is tricky. Every step in
+        // the loop below needs access to it, but we can't move it into every
+        // closure. Instead, we put it into a `StepHandle`, and have each step
+        // return it on completion. This way each step passes it forward to its
+        // successor.
+        let mut transport = StepHandle::ready(transport);
+
+        for (name, data) in &self.zones.zones {
+            let out_path = self.output_directory.join(name);
+            transport = engine
+                .new_step(
+                    WriteComponent::ControlPlane,
+                    ControlPlaneZonesStepId::Zone { name: name.clone() },
+                    format!("Writing zone {name}"),
+                    move |cx| async move {
+                        let transport = transport.into_value(cx.token()).await;
+                        write_artifact_impl(
+                            WriteComponent::ControlPlane,
+                            slot,
+                            data.clone().into(),
+                            &out_path,
+                            true,
+                            transport,
+                            &cx,
+                        )
+                        .await?;
+
+                        StepResult::success(transport, ())
+                    },
+                )
+                .register();
+        }
     }
 }
 
@@ -582,14 +640,14 @@ impl WriteTransport for BlockDeviceTransport {
     }
 }
 
-async fn write_artifact_impl(
+async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     component: WriteComponent,
     slot: M2Slot,
     mut artifact: BufList,
     destination: &Utf8Path,
     create: bool,
     transport: &mut impl WriteTransport,
-    cx: &StepContext<WriteSpec>,
+    cx: &StepContext<S>,
 ) -> Result<(), WriteError> {
     let mut writer = transport
         .make_writer(
@@ -810,17 +868,26 @@ mod tests {
             ArtifactDestination {
                 create_host_phase_2: true,
                 host_phase_2: destination_host.clone(),
-                control_plane: Some(destination_control_plane.clone()),
+                control_plane_dir: tempdir_path.into(),
             },
         );
         let destination =
             WriteDestination { drives, is_host_phase_2_block_device: false };
 
+        // Assemble our one control plane artifact into a 1-long list of zone
+        // images.
+        let control_plane_zone_images = ControlPlaneZoneImages {
+            zones: vec![(
+                destination_control_plane.file_name().unwrap().to_string(),
+                artifact_control_plane.iter().flatten().copied().collect(),
+            )],
+        };
+
         let mut writer = ArtifactWriter::new(
             &host_id,
             &artifact_host,
             &control_plane_id,
-            &artifact_control_plane,
+            &control_plane_zone_images,
             destination,
         );
 

@@ -36,6 +36,7 @@ smf.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
 
