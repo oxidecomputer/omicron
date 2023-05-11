@@ -23,6 +23,7 @@ use crate::db::model::IncompleteExternalIp;
 use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
@@ -62,6 +63,76 @@ pub struct RackInit {
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
+}
+
+/// Possible errors while trying to initialize rack
+#[derive(Debug)]
+enum RackInitError {
+    AddingIp(Error),
+    ServiceInsert(Error),
+    DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    RackUpdate { err: PoolError, rack_id: Uuid },
+    DnsSerialization(Error),
+    Silo(Error),
+    RoleAssignment(Error),
+}
+type TxnError = TransactionError<RackInitError>;
+
+impl From<TxnError> for Error {
+    fn from(e: TxnError) -> Self {
+        match e {
+            TxnError::CustomError(RackInitError::AddingIp(err)) => err,
+            TxnError::CustomError(RackInitError::DatasetInsert {
+                err,
+                zpool_id,
+            }) => match err {
+                AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    lookup_type: LookupType::ById(zpool_id),
+                },
+                AsyncInsertError::DatabaseError(e) => {
+                    public_error_from_diesel_pool(e, ErrorHandler::Server)
+                }
+            },
+            TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
+                Error::internal_error(&format!(
+                    "failed to insert Service record: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::RackUpdate {
+                err,
+                rack_id,
+            }) => public_error_from_diesel_pool(
+                err,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Rack,
+                    LookupType::ById(rack_id),
+                ),
+            ),
+            TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
+                Error::internal_error(&format!(
+                    "failed to serialize initial DNS records: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::Silo(err)) => {
+                Error::internal_error(&format!(
+                    "failed to create recovery Silo: {:#}",
+                    err
+                ))
+            }
+            TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
+                Error::internal_error(&format!(
+                    "failed to assign role to initial user: {:#}",
+                    err
+                ))
+            }
+            TxnError::Pool(e) => {
+                Error::internal_error(&format!("Transaction error: {}", e))
+            }
+        }
+    }
 }
 
 impl DataStore {
@@ -109,6 +180,126 @@ impl DataStore {
             })
     }
 
+    async fn rack_create_recovery_silo<ConnError>(
+        &self,
+        opctx: &OpContext,
+        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        log: &slog::Logger,
+        recovery_silo: external_params::SiloCreate,
+        recovery_user_id: external_params::UserId,
+        recovery_user_password_hash: omicron_passwords::PasswordHashString,
+        dns_update: DnsVersionUpdateBuilder,
+    ) -> Result<(), TxnError>
+    where
+        ConnError: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnError>,
+        TransactionError<Error>: From<ConnError>,
+        TxnError: From<ConnError>,
+        async_bb8_diesel::Connection<DbConnection>:
+            AsyncConnection<DbConnection, ConnError>,
+    {
+        let db_silo = self
+            .silo_create_conn(conn, opctx, opctx, recovery_silo, dns_update)
+            .await
+            .map_err(RackInitError::Silo)
+            .map_err(TxnError::CustomError)?;
+        info!(log, "Created recovery silo");
+
+        // Create the first user in the initial Recovery Silo
+        let silo_user_id = Uuid::new_v4();
+        let silo_user = SiloUser::new(
+            db_silo.id(),
+            silo_user_id,
+            recovery_user_id.as_ref().to_owned(),
+        );
+        {
+            use db::schema::silo_user::dsl;
+            diesel::insert_into(dsl::silo_user)
+                .values(silo_user)
+                .execute_async(conn)
+                .await?;
+        }
+        info!(log, "Created recovery user");
+
+        // Set that user's password.
+        let hash = SiloUserPasswordHash::new(
+            silo_user_id,
+            PasswordHashString::from(recovery_user_password_hash),
+        );
+        {
+            use db::schema::silo_user_password_hash::dsl;
+            diesel::insert_into(dsl::silo_user_password_hash)
+                .values(hash)
+                .execute_async(conn)
+                .await?;
+        }
+        info!(log, "Created recovery user's password");
+
+        // Grant that user "Fleet Admin" privileges and Admin privileges
+        // on the Recovery Silo.
+        //
+        // First, fetch the current set of role assignments for the
+        // Fleet so that we can modify it.
+        let old_fleet_role_asgns = self
+            .role_assignment_fetch_visible_conn(opctx, &authz::FLEET, conn)
+            .await
+            .map_err(RackInitError::RoleAssignment)
+            .map_err(TxnError::CustomError)?
+            .into_iter()
+            .map(|r| r.try_into())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RackInitError::RoleAssignment)
+            .map_err(TxnError::CustomError)?;
+        let new_fleet_role_asgns = old_fleet_role_asgns
+            .into_iter()
+            .chain(std::iter::once(shared::RoleAssignment {
+                identity_type: IdentityType::SiloUser,
+                identity_id: silo_user_id,
+                role_name: FleetRole::Admin,
+            }))
+            .collect::<Vec<_>>();
+
+        // This is very subtle: we must generate both of these pairs of
+        // queries before we execute any of them, and we must not
+        // attempt to do any authz checks after this in the same
+        // transaction because they may deadlock with our query.
+        let (q1, q2) = Self::role_assignment_replace_visible_queries(
+            opctx,
+            &authz::FLEET,
+            &new_fleet_role_asgns,
+        )
+        .await
+        .map_err(RackInitError::RoleAssignment)
+        .map_err(TxnError::CustomError)?;
+        let authz_silo = authz::Silo::new(
+            authz::FLEET,
+            db_silo.id(),
+            LookupType::ById(db_silo.id()),
+        );
+        let (q3, q4) = Self::role_assignment_replace_visible_queries(
+            opctx,
+            &authz_silo,
+            &[shared::RoleAssignment {
+                identity_type: IdentityType::SiloUser,
+                identity_id: silo_user_id,
+                role_name: SiloRole::Admin,
+            }],
+        )
+        .await
+        .map_err(RackInitError::RoleAssignment)
+        .map_err(TxnError::CustomError)?;
+        debug!(log, "Generated role assignment queries");
+
+        q1.execute_async(conn).await?;
+        q2.execute_async(conn).await?;
+        info!(log, "Granted Fleet privileges");
+        q3.execute_async(conn).await?;
+        q4.execute_async(conn).await?;
+        info!(log, "Granted Silo privileges");
+
+        Ok(())
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -126,25 +317,13 @@ impl DataStore {
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
-        #[derive(Debug)]
-        enum RackInitError {
-            AddingIp(Error),
-            ServiceInsert(Error),
-            DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
-            RackUpdate(PoolError),
-            DnsSerialization(Error),
-            Silo(Error),
-            RoleAssignment(Error),
-        }
-        type TxnError = TransactionError<RackInitError>;
-
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
-        self.pool_authorized(opctx)
+        let rack = self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -155,9 +334,10 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         warn!(log, "Initializing Rack: Rack UUID not found");
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
                 if rack.initialized {
                     info!(log, "Early exit: Rack already initialized");
@@ -283,115 +463,16 @@ impl DataStore {
                 info!(log, "Populated DNS tables for external DNS");
 
                 // Create the initial Recovery Silo
-                let db_silo = self.silo_create_conn(
+                self.rack_create_recovery_silo(
+                    &opctx,
                     &conn,
-                    opctx,
-                    opctx,
+                    &log,
                     rack_init.recovery_silo,
-                    rack_init.dns_update
+                    rack_init.recovery_user_id,
+                    rack_init.recovery_user_password_hash,
+                    rack_init.dns_update,
                 )
-                    .await
-                    .map_err(RackInitError::Silo)
-                    .map_err(TxnError::CustomError)?;
-                info!(log, "Created recovery silo");
-
-                // Create the first user in the initial Recovery Silo
-                let silo_user_id = Uuid::new_v4();
-                let silo_user = SiloUser::new(
-                    db_silo.id(),
-                    silo_user_id,
-                    rack_init.recovery_user_id.as_ref().to_owned(),
-                );
-                {
-                    use db::schema::silo_user::dsl;
-                    diesel::insert_into(dsl::silo_user)
-                        .values(silo_user)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Created recovery user");
-
-                // Set that user's password.
-                let hash = SiloUserPasswordHash::new(
-                    silo_user_id,
-                    PasswordHashString::from(
-                        rack_init.recovery_user_password_hash
-                    )
-                );
-                {
-                    use db::schema::silo_user_password_hash::dsl;
-                    diesel::insert_into(dsl::silo_user_password_hash)
-                        .values(hash)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Created recovery user's password");
-
-                // Grant that user "Fleet Admin" privileges and Admin privileges
-                // on the Recovery Silo.
-                //
-                // First, fetch the current set of role assignments for the
-                // Fleet so that we can modify it.
-                let old_fleet_role_asgns = self
-                    .role_assignment_fetch_visible_conn(
-                        opctx,
-                        &authz::FLEET,
-                        &conn
-                    )
-                    .await
-                    .map_err(RackInitError::RoleAssignment)
-                    .map_err(TxnError::CustomError)?
-                    .into_iter()
-                    .map(|r| r.try_into())
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(RackInitError::RoleAssignment)
-                    .map_err(TxnError::CustomError)?;
-                let new_fleet_role_asgns = old_fleet_role_asgns
-                    .into_iter()
-                    .chain(std::iter::once(shared::RoleAssignment {
-                        identity_type: IdentityType::SiloUser,
-                        identity_id: silo_user_id,
-                        role_name: FleetRole::Admin,
-                    }))
-                    .collect::<Vec<_>>();
-
-                // This is very subtle: we must generate both of these pairs of
-                // queries before we execute any of them, and we must not
-                // attempt to do any authz checks after this in the same
-                // transaction because they may deadlock with our query.
-                let (q1, q2) = Self::role_assignment_replace_visible_queries(
-                    opctx,
-                    &authz::FLEET,
-                    &new_fleet_role_asgns
-                )
-                    .await
-                    .map_err(RackInitError::RoleAssignment)
-                    .map_err(TxnError::CustomError)?;
-                let authz_silo = authz::Silo::new(
-                    authz::FLEET,
-                    db_silo.id(),
-                    LookupType::ById(db_silo.id())
-                );
-                let (q3, q4) = Self::role_assignment_replace_visible_queries(
-                    opctx,
-                    &authz_silo,
-                    &[shared::RoleAssignment {
-                        identity_type: IdentityType::SiloUser,
-                        identity_id: silo_user_id,
-                        role_name: SiloRole::Admin,
-                    }]
-                )
-                    .await
-                    .map_err(RackInitError::RoleAssignment)
-                    .map_err(TxnError::CustomError)?;
-                debug!(log, "Generated role assignment queries");
-
-                q1.execute_async(&conn).await?;
-                q2.execute_async(&conn).await?;
-                info!(log, "Granted Fleet privileges");
-                q3.execute_async(&conn).await?;
-                q4.execute_async(&conn).await?;
-                info!(log, "Granted Silo privileges");
+                .await?;
 
                 let rack = diesel::update(rack_dsl::rack)
                     .filter(rack_dsl::id.eq(rack_id))
@@ -403,62 +484,15 @@ impl DataStore {
                     .get_result_async::<Rack>(&conn)
                     .await
                     .map_err(|e| {
-                        TxnError::CustomError(RackInitError::RackUpdate(
-                            PoolError::from(e),
-                        ))
+                        TxnError::CustomError(RackInitError::RackUpdate {
+                            err: PoolError::from(e),
+                            rack_id,
+                        })
                     })?;
-                Ok(rack)
+                Ok::<_, TxnError>(rack)
             })
-            .await
-            .map_err(|e| match e {
-                TxnError::CustomError(RackInitError::AddingIp(err)) => err,
-                TxnError::CustomError(RackInitError::DatasetInsert {
-                    err,
-                    zpool_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Zpool,
-                            lookup_type: LookupType::ById(zpool_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(e, ErrorHandler::Server)
-                    }
-                },
-                TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to insert Service record: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::RackUpdate(err)) => {
-                    public_error_from_diesel_pool(
-                        err,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::Rack,
-                            LookupType::ById(rack_id),
-                        ),
-                    )
-                }
-                TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to serialize initial DNS records: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::Silo(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to create recovery Silo: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to assign role to initial user: {:#}", err
-                    ))
-                },
-                TxnError::Pool(e) => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
-            })
+            .await?;
+        Ok(rack)
     }
 
     pub async fn load_builtin_rack_data(
