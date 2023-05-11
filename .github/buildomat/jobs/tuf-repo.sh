@@ -29,6 +29,12 @@ rustc --version
 COMMIT=$(git rev-parse HEAD)
 VERSION="1.0.0-alpha+git${COMMIT:0:11}"
 
+#
+# The package job builds two switch zones. The one we need should be named "switch.tar.gz" so sled-agent can find it.
+#
+mv /input/package/work/zones/{switch-asic,switch}.tar.gz
+rm /input/package/work/zones/switch-softnpu.tar.gz
+
 cargo build --locked --release --bin tufaceous
 
 # Generate a throwaway repository key.
