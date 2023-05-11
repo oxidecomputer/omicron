@@ -12,6 +12,12 @@
 #: [dependencies.package]
 #: job = "helios / package"
 #:
+#: [dependencies.host]
+#: job = "helios / build OS image"
+#:
+#: [dependencies.trampoline]
+#: job = "helios / build trampoline OS image"
+#:
 
 set -o errexit
 set -o pipefail
@@ -45,6 +51,24 @@ for zone in /input/package/work/zones/*; do
 [[artifact.control_plane.source.zones]]
 kind = "file"
 path = "$zone"
+EOF
+done
+
+for kind in host trampoline; do
+    mkdir -p /work/os/$kind
+    pushd /work/os/$kind
+    # https://github.com/oxidecomputer/helios#os-image-archives
+    tar xf /input/$kind/work/helios/image/output/os.tar.gz image/rom image/zfs.img
+    popd
+
+    cat >>/work/manifest.toml <<EOF
+[artifact.$kind]
+name = "$kind"
+version = "$VERSION"
+[artifact.$kind.source]
+kind = "composite-host"
+phase_1 = { kind = "file", path = "/work/os/$kind/image/rom" }
+phase_2 = { kind = "file", path = "/work/os/$kind/image/zfs.img" }
 EOF
 done
 
