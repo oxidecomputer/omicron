@@ -94,6 +94,7 @@ function main
             echo "  $CURRENT_COMMIT"
             echo "Either check out the expected commit or pass -f to this"
             echo "script to disable this check."
+            exit 1
         fi
     fi
 
