@@ -260,6 +260,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(console_api::console_projects)?;
         api.register(console_api::console_projects_new)?;
+        api.register(console_api::console_silo_images)?;
         api.register(console_api::console_silo_utilization)?;
         api.register(console_api::console_silo_access)?;
         api.register(console_api::console_root)?;
