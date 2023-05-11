@@ -192,10 +192,11 @@ mod test {
             });
 
         // Write the configuration file.
-        let cfg_bytes = std::fs::read(&path).unwrap();
         let cfg_path = tempdir.path().join("config-rss.toml");
-        std::fs::write(&cfg_path, &cfg_bytes)
-            .with_context(|| format!("failed to write to {:?}", &tempdir))
+        let _ = std::fs::copy(&path, &cfg_path)
+            .with_context(|| {
+                format!("failed to copy file {:?} to {:?}", &path, &cfg_path)
+            })
             .unwrap();
 
         // Write the certificate.
