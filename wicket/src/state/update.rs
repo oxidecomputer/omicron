@@ -5,7 +5,6 @@
 use tui::style::Style;
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
-    UpdateStepId,
 };
 
 use crate::{events::EventReportMap, ui::defaults::style};
@@ -222,24 +221,20 @@ impl UpdateItem {
                 | StepEventKind::ExecutionStarted { .. }
                 | StepEventKind::ProgressReset { .. }
                 | StepEventKind::AttemptRetry { .. }
-                | StepEventKind::ExecutionCompleted { .. }
                 | StepEventKind::Nested { .. }
                 | StepEventKind::Unknown => (),
 
-                StepEventKind::StepCompleted { step, .. } => {
-                    let updated_component = match step.info.id {
-                        UpdateStepId::ResetRot => Some(UpdateComponent::Rot),
-                        UpdateStepId::ResetSp => Some(UpdateComponent::Sp),
-                        UpdateStepId::RunningInstallinator => {
-                            Some(UpdateComponent::Host)
-                        }
-                        _ => None,
-                    };
-                    update_component_state(
-                        components,
-                        updated_component,
-                        UpdateRunningState::Updated,
-                    );
+                StepEventKind::ExecutionCompleted {
+                    last_step: step, ..
+                }
+                | StepEventKind::StepCompleted { step, .. } => {
+                    if step.info.is_last_step_in_component() {
+                        update_component_state(
+                            components,
+                            Some(step.info.component),
+                            UpdateRunningState::Updated,
+                        );
+                    }
                 }
                 StepEventKind::ExecutionFailed { failed_step, .. } => {
                     update_component_state(

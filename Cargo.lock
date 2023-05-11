@@ -2596,7 +2596,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2d8598404cc3fd86104681ae25a86a17fe5a0773#2d8598404cc3fd86104681ae25a86a17fe5a0773"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2611,7 +2611,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=2d8598404cc3fd86104681ae25a86a17fe5a0773#2d8598404cc3fd86104681ae25a86a17fe5a0773"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
 dependencies = [
  "async-trait",
  "backoff",
