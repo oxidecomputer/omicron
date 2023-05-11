@@ -13,6 +13,7 @@ use crate::ui::defaults::style;
 use crate::ui::widgets::{
     BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
 };
+use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
 use indexmap::IndexMap;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
@@ -342,9 +343,18 @@ impl UpdatePane {
             }
         }
 
+        // Wrap the text to the maximum popup width.
+        let options = crate::ui::wrap::Options {
+            width: Popup::max_content_width(state.screen_width) as usize,
+            initial_indent: Span::raw(""),
+            subsequent_indent: Span::raw(""),
+            break_words: true,
+        };
+        let wrapped_body = wrap_text(&body, options);
+
         let popup = Popup {
             header,
-            body,
+            body: wrapped_body,
             buttons: vec![ButtonText {
                 instruction: "NAVIGATE",
                 key: "LEFT/RIGHT",
