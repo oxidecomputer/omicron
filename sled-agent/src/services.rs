@@ -94,11 +94,8 @@ use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Cannot serialize TOML to file {path}: {err}")]
+    #[error("Cannot serialize TOML to file: {path}: {err}")]
     TomlSerialize { path: Utf8PathBuf, err: toml::ser::Error },
-
-    #[error("Cannot deserialize TOML from file {path}: {err}")]
-    TomlDeserialize { path: Utf8PathBuf, err: toml::de::Error },
 
     #[error("Failed to perform I/O: {message}: {err}")]
     Io {
@@ -176,6 +173,9 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
+
+    #[error("Serde error: {0}")]
+    SerdeError(#[from] serde_json::Error),
 }
 
 impl Error {
@@ -315,6 +315,7 @@ pub struct ServiceManagerInner {
     // rather than simply placing them on the ramdisk.
     storage: StorageManager,
     ledger_directory_override: OnceCell<Utf8PathBuf>,
+    image_directory_override: OnceCell<Utf8PathBuf>,
 }
 
 // Late-binding information, only known once the sled agent is up and
@@ -390,14 +391,20 @@ impl ServiceManager {
                 switch_zone_bootstrap_address,
                 storage,
                 ledger_directory_override: OnceCell::new(),
+                image_directory_override: OnceCell::new(),
             }),
         };
         Ok(mgr)
     }
 
     #[cfg(test)]
-    async fn override_ledger_directory(&self, path: Utf8PathBuf) {
+    fn override_ledger_directory(&self, path: Utf8PathBuf) {
         self.inner.ledger_directory_override.set(path).unwrap();
+    }
+
+    #[cfg(test)]
+    fn override_image_directory(&self, path: Utf8PathBuf) {
+        self.inner.image_directory_override.set(path).unwrap();
     }
 
     pub fn switch_zone_bootstrap_address(&self) -> Ipv6Addr {
@@ -436,15 +443,14 @@ impl ServiceManager {
     pub async fn load_non_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.zones.lock().await;
-        let ledger = Ledger::<AllZoneRequests>::new(
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
             self.all_service_ledgers().await,
         )
-        .await?;
-        let services = ledger.data();
-        if services.requests.is_empty() {
+        .await else {
             return Ok(());
-        }
+        };
+        let services = ledger.data();
 
         // Initialize and DNS and NTP services first as they are required
         // for time synchronization, which is a pre-requisite for the other
@@ -513,15 +519,14 @@ impl ServiceManager {
     pub async fn load_storage_services(&self) -> Result<(), Error> {
         let log = &self.inner.log;
         let mut existing_zones = self.inner.dataset_zones.lock().await;
-        let ledger = Ledger::<AllZoneRequests>::new(
+        let Some(ledger) = Ledger::<AllZoneRequests>::new(
             log,
             self.all_storage_service_ledgers().await,
         )
-        .await?;
-        let services = ledger.data();
-        if services.requests.is_empty() {
+        .await else {
             return Ok(());
-        }
+        };
+        let services = ledger.data();
         self.initialize_services_locked(
             &mut existing_zones,
             &services.requests,
@@ -935,10 +940,29 @@ impl ServiceManager {
             .map(|d| zone::Device { name: d.to_string() })
             .collect();
 
+        // Look for the image in the ramdisk first
+        let mut zone_image_paths = vec![Utf8PathBuf::from("/opt/oxide")];
+        // Inject an image path if requested by a test.
+        if let Some(path) = self.inner.image_directory_override.get() {
+            zone_image_paths.push(path.clone());
+        };
+
+        // If the boot disk exists, look for the image in the "install" dataset
+        // there too.
+        if let Some((_, boot_zpool)) =
+            self.inner.storage.resources().boot_disk().await
+        {
+            zone_image_paths.push(
+                boot_zpool
+                    .dataset_mountpoint(sled_hardware::disk::INSTALL_DATASET),
+            );
+        }
+
         let installed_zone = InstalledZone::install(
             &self.inner.log,
             &self.inner.underlay_vnic_allocator,
             &request.root,
+            zone_image_paths.as_slice(),
             &request.zone.zone_type.to_string(),
             unique_name.as_deref(),
             datasets.as_slice(),
@@ -1316,7 +1340,11 @@ impl ServiceManager {
                                 IpAddr::V6(*internal_ip),
                                 NEXUS_INTERNAL_PORT,
                             ),
-                            request_body_max_bytes: 1048576,
+                            // This has to be large enough to support, among
+                            // other things, the initial list of TLS
+                            // certificates provided by the customer during rack
+                            // setup.
+                            request_body_max_bytes: 10 * 1024 * 1024,
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
@@ -1489,15 +1517,26 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    let serialized_baseboard =
+                        serde_json::to_string_pretty(&baseboard)?;
+                    let serialized_baseboard_path = Utf8PathBuf::from(format!(
+                        "{}/opt/oxide/baseboard.json",
+                        running_zone.root()
+                    ));
+                    tokio::fs::write(
+                        &serialized_baseboard_path,
+                        &serialized_baseboard,
+                    )
+                    .await
+                    .map_err(|err| {
+                        Error::io_path(&serialized_baseboard_path, err)
+                    })?;
                     smfh.setprop(
-                        "config/baseboard-identifier",
-                        baseboard.identifier(),
+                        "config/baseboard-file",
+                        String::from("/opt/oxide/baseboard.json"),
                     )?;
-                    smfh.setprop("config/baseboard-model", baseboard.model())?;
-                    smfh.setprop(
-                        "config/baseboard-revision",
-                        baseboard.revision(),
-                    )?;
+
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {
@@ -1787,11 +1826,18 @@ impl ServiceManager {
         let mut existing_zones = self.inner.zones.lock().await;
 
         // Read the existing set of services from the ledger.
-        let mut ledger = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_service_ledgers().await,
-        )
-        .await?;
+        let service_paths = self.all_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
         let ledger_zone_requests = ledger.data_mut();
 
         let new_zone_requests: Vec<ServiceZoneRequest> = {
@@ -1852,11 +1898,18 @@ impl ServiceManager {
         let mut existing_zones = self.inner.dataset_zones.lock().await;
 
         // Read the existing set of services from the ledger.
-        let mut ledger = Ledger::<AllZoneRequests>::new(
-            log,
-            self.all_storage_service_ledgers().await,
-        )
-        .await?;
+        let service_paths = self.all_storage_service_ledgers().await;
+        let mut ledger =
+            match Ledger::<AllZoneRequests>::new(log, service_paths.clone())
+                .await
+            {
+                Some(ledger) => ledger,
+                None => Ledger::<AllZoneRequests>::new_with(
+                    log,
+                    service_paths.clone(),
+                    AllZoneRequests::default(),
+                ),
+            };
         let ledger_zone_requests = ledger.data_mut();
 
         if !ledger_zone_requests
@@ -2471,6 +2524,18 @@ mod test {
                 sidecar_revision: "rev_whatever_its_a_test".to_string(),
             }
         }
+
+        fn override_paths(&self, mgr: &ServiceManager) {
+            let dir = self.config_dir.path();
+            mgr.override_ledger_directory(dir.to_path_buf());
+            mgr.override_image_directory(dir.to_path_buf());
+
+            // We test launching "fake" versions of the zones, but the
+            // logic to find paths relies on checking the existence of
+            // files.
+            std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
+                .unwrap();
+        }
     }
 
     #[tokio::test]
@@ -2496,10 +2561,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2545,10 +2607,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2597,10 +2656,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2637,10 +2693,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
@@ -2686,10 +2739,8 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
+
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
@@ -2730,10 +2781,7 @@ mod test {
         )
         .await
         .unwrap();
-        mgr.override_ledger_directory(
-            test_config.config_dir.path().to_path_buf(),
-        )
-        .await;
+        test_config.override_paths(&mgr);
 
         let port_manager = PortManager::new(
             logctx.log.new(o!("component" => "PortManager")),

@@ -45,6 +45,7 @@ mod session;
 mod silo;
 mod sled;
 mod snapshot;
+mod switch;
 pub mod test_interfaces;
 mod update;
 mod volume;

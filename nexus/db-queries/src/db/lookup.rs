@@ -346,6 +346,11 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Switch, identified by its id
+    pub fn switch_id(self, id: Uuid) -> Switch<'a> {
+        Switch::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
@@ -424,23 +429,6 @@ impl<'a> LookupPath<'a> {
         'b: 'c,
     {
         UserBuiltin::Name(Root { lookup_root: self }, name)
-    }
-
-    /// Select a resource of type GlobalImage, identified by its name
-    pub fn global_image_name<'b, 'c>(self, name: &'b Name) -> GlobalImage<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        GlobalImage::Name(Root { lookup_root: self }, name)
-    }
-
-    /// Select a resource of type GlobalImage, identified by its id
-    pub fn global_image_id<'b>(self, id: Uuid) -> GlobalImage<'b>
-    where
-        'a: 'b,
-    {
-        GlobalImage::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Certificate, identified by its name
@@ -743,6 +731,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "Switch",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
     children = [],
@@ -792,15 +789,6 @@ lookup_resource! {
     children = [],
     lookup_by_name = true,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "GlobalImage",
-    ancestors = [],
-    children = [],
-    lookup_by_name = true,
-    soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 

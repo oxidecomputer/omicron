@@ -87,6 +87,10 @@ impl Metadata {
         matches!(&self.t, ArchiveType::Rot)
     }
 
+    pub fn is_control_plane(&self) -> bool {
+        matches!(&self.t, ArchiveType::ControlPlane)
+    }
+
     pub fn archive_type(&self) -> ArchiveType {
         self.t
     }

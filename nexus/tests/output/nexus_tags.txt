@@ -23,6 +23,7 @@ API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
 image_create                             POST     /v1/images
 image_delete                             DELETE   /v1/images/{image}
+image_demote                             POST     /v1/images/{image}/demote
 image_list                               GET      /v1/images
 image_promote                            POST     /v1/images/{image}/promote
 image_view                               GET      /v1/images/{image}
@@ -87,7 +88,7 @@ current_user_view                        GET      /v1/me
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
 group_list                               GET      /v1/groups
-group_view                               GET      /v1/groups/{group}
+group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
@@ -137,12 +138,9 @@ silo_view                                GET      /v1/system/silos/{silo}
 sled_list                                GET      /v1/system/hardware/sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
+switch_list                              GET      /v1/system/hardware/switches
+switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 system_component_version_list            GET      /v1/system/update/components
-system_image_create                      POST     /system/images
-system_image_delete                      DELETE   /system/images/{image_name}
-system_image_list                        GET      /system/images
-system_image_view                        GET      /system/images/{image_name}
-system_image_view_by_id                  GET      /system/by-id/images/{id}
 system_metric                            GET      /v1/system/metrics/{metric_name}
 system_update_components_list            GET      /v1/system/update/updates/{version}/components
 system_update_list                       GET      /v1/system/update/updates

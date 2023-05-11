@@ -12,7 +12,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --baseboard-identifier %{config/baseboard-identifier} --baseboard-model %{config/baseboard-model} --baseboard-revision %{config/baseboard-revision} &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --baseboard-file %{config/baseboard-file} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
@@ -24,9 +24,7 @@
     <propval name='address' type='astring' value='unknown' />
     <propval name='artifact-address' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
-    <propval name='baseboard-identifier' type='astring' value='unknown' />
-    <propval name='baseboard-model' type='astring' value='unknown' />
-    <propval name='baseboard-revision' type='astring' value='unknown' />
+    <propval name='baseboard-file' type='astring' value='unknown' />
   </property_group>
 
   <stability value='Unstable' />

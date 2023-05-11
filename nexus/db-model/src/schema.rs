@@ -89,24 +89,6 @@ table! {
 }
 
 table! {
-    global_image (id) {
-        id -> Uuid,
-        name -> Text,
-        description -> Text,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-        volume_id -> Uuid,
-        url -> Nullable<Text>,
-        distribution -> Text,
-        version -> Text,
-        digest -> Nullable<Text>,
-        block_size -> crate::BlockSizeEnum,
-        size_bytes -> Int8,
-    }
-}
-
-table! {
     snapshot (id) {
         id -> Uuid,
         name -> Text,
@@ -494,6 +476,21 @@ table! {
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
+    }
+}
+
+table! {
+    switch (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        rcgen -> Int8,
+
+        rack_id -> Uuid,
+        serial_number -> Text,
+        part_number -> Text,
+        revision -> Int8,
     }
 }
 

@@ -111,13 +111,6 @@ fi
 #
 pfexec /sbin/zfs create -o mountpoint=/zone rpool/zone
 
-#
-# The sled agent will ostensibly write things into /var/oxide, so make that a
-# tmpfs as well:
-#
-pfexec mkdir -p /var/oxide
-pfexec mount -F tmpfs -O swap /var/oxide
-
 pfexec mkdir /opt/oxide/work
 pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
@@ -131,6 +124,55 @@ for p in /input/build-end-to-end-tests/work/*.gz; do
 done
 
 ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+#
+# Generate a self-signed certificate to use as the initial TLS certificate for
+# the recovery Silo.  Its DNS name is determined by the silo name and the
+# delegated external DNS name, both of which are in the RSS config file.  In a
+# real system, the certificate would come from the customer during initial rack
+# setup on the technician port.
+#
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -f pkg/config-rss.toml
+
+#
+# By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
+# implementation used by reqwest rejects endpoint certificates that are also CA
+# certificates.  So in order to use the certificate, we need one without
+# "CA:true".  There doesn't seem to be a way to do this on the command line.
+# Instead, we must override the system configuration with our own configuration
+# file.  There's virtually nothing in it.
+#
+TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DNS_DOMAIN"
+openssl req \
+    -newkey rsa:4096 \
+    -x509 \
+    -sha256 \
+    -days 3 \
+    -nodes \
+    -out "pkg/initial-tls-cert.pem" \
+    -keyout "pkg/initial-tls-key.pem" \
+    -subj "/CN=$TLS_NAME" \
+    -addext "subjectAltName=DNS:$TLS_NAME" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -config /dev/stdin <<EOF
+[req]
+prompt = no
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+EOF
+tar rvf out/omicron-sled-agent.tar \
+    pkg/initial-tls-cert.pem \
+    pkg/initial-tls-key.pem
+rm -f pkg/initial-tls-cert.pem pkg/initial-tls-key.pem
+rmdir pkg
+# The actual end-to-end tests need the certificate.  This is where that file
+# will end up once installed.
+E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
+
 
 #
 # Image-related tests use images served by catacomb. The lab network is
@@ -148,10 +190,7 @@ pfexec curl -sSfL -o /var/svc/manifest/site/tcpproxy.xml \
 pfexec svccfg import /var/svc/manifest/site/tcpproxy.xml
 
 #
-# This OMICRON_NO_UNINSTALL hack here is so that there is no implicit uninstall
-# before the install.  This doesn't work right now because, above, we made
-# /var/oxide a file system so you can't remove it (EBUSY) like a regular
-# directory.  The lab-netdev target is a ramdisk system that is always cleared
+# The lab-netdev target is a ramdisk system that is always cleared
 # out between runs, so it has not had any state yet that requires
 # uninstallation.
 #
@@ -218,6 +257,7 @@ export RUST_BACKTRACE=1
 ./tests/bootstrap
 
 rm ./tests/bootstrap
+export E2E_TLS_CERT
 for test_bin in tests/*; do
 	./"$test_bin"
 done
