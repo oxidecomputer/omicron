@@ -622,92 +622,42 @@ pub async fn login_spoof_begin(
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping
-// route definitions, so we cannot have a catchall `/*` route for console pages
-// and then also define, e.g., `/api/blah/blah` and give the latter priority
-// because it's a more specific match. So for now we simply give the console
-// catchall route a prefix to avoid overlap. Long-term, if a route prefix is
-// part of the solution, we would probably prefer it to be on the API endpoints,
-// not on the console pages.
-//
-#[endpoint {
-   method = GET,
-   path = "/",
-   unpublished = true,
-}]
-pub async fn console_root(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
+// route definitions, so we cannot use a catchall `/*` route for console pages
+// because it would overlap with the API routes definitions. So instead we have
+// to manually define more specific routes.
+
+macro_rules! console_page {
+    ($name:ident, $path:literal) => {
+        #[endpoint { method = GET, path = $path, unpublished = true, }]
+        pub async fn $name(
+            rqctx: RequestContext<Arc<ServerContext>>,
+        ) -> Result<Response<Body>, HttpError> {
+            console_index_or_login_redirect(rqctx).await
+        }
+    };
 }
 
-#[endpoint {
-   method = GET,
-   path = "/projects/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_projects(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
+// only difference is the _path_params arg
+macro_rules! console_page_wildcard {
+    ($name:ident, $path:literal) => {
+        #[endpoint { method = GET, path = $path, unpublished = true, }]
+        pub async fn $name(
+            rqctx: RequestContext<Arc<ServerContext>>,
+            _path_params: Path<RestPathParam>,
+        ) -> Result<Response<Body>, HttpError> {
+            console_index_or_login_redirect(rqctx).await
+        }
+    };
 }
 
-#[endpoint {
-   method = GET,
-   path = "/projects-new",
-   unpublished = true,
-}]
-pub async fn console_projects_new(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-#[endpoint {
-   method = GET,
-   path = "/settings/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_settings_page(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-#[endpoint {
-   method = GET,
-   path = "/system/{path:.*}",
-   unpublished = true,
-}]
-pub async fn console_system_page(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    _path_params: Path<RestPathParam>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-#[endpoint {
-   method = GET,
-   path = "/utilization",
-   unpublished = true,
-}]
-pub async fn console_silo_utilization(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
-
-#[endpoint {
-   method = GET,
-   path = "/access",
-   unpublished = true,
-}]
-pub async fn console_silo_access(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    console_index_or_login_redirect(rqctx).await
-}
+console_page_wildcard!(console_projects, "/projects/{path:.*}");
+console_page_wildcard!(console_settings_page, "/settings/{path:.*}");
+console_page_wildcard!(console_system_page, "/system/{path:.*}");
+console_page!(console_root, "/");
+console_page!(console_projects_new, "/projects-new");
+console_page!(console_silo_images, "/images");
+console_page!(console_silo_utilization, "/utilization");
+console_page!(console_silo_access, "/access");
 
 /// Make a new PathBuf with `.gz` on the end
 fn with_gz_ext(path: &PathBuf) -> PathBuf {
