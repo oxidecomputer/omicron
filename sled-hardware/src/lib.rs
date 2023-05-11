@@ -141,8 +141,8 @@ impl Baseboard {
 impl From<Baseboard> for nexus_client::types::Baseboard {
     fn from(b: Baseboard) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {
-            identifier: b.identifier().to_string(),
-            model: b.model().to_string(),
+            serial_number: b.identifier().to_string(),
+            part_number: b.model().to_string(),
             revision: b.revision(),
         }
     }

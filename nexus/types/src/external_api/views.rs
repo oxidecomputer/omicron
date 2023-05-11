@@ -252,15 +252,17 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
-// SLEDS
+// FRUs
 
-/// Properties that should uniquely identify a Sled.
+/// Properties that uniquely identify an Oxide hardware component
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: i64,
 }
+
+// SLEDS
 
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -274,6 +276,18 @@ pub struct Sled {
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+// SWITCHES
+
+/// An operator's view of a Switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Switch {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub baseboard: Baseboard,
+    /// The rack to which this Switch is currently attached
+    pub rack_id: Uuid,
 }
 
 // PHYSICAL DISKS

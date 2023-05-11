@@ -346,6 +346,11 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Switch, identified by its id
+    pub fn switch_id(self, id: Uuid) -> Switch<'a> {
+        Switch::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
@@ -709,6 +714,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Sled",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Switch",
     ancestors = [],
     children = [],
     lookup_by_name = false,

@@ -150,6 +150,37 @@ CREATE INDEX ON omicron.public.sled_resource (
 );
 
 /*
+ * Switches
+ */
+
+CREATE TABLE omicron.public.switch (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Rack table */
+    rack_id UUID NOT NULL,
+
+    /* Baseboard information about the switch */
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL
+);
+
+/* Add an index which lets us look up switches on a rack */
+CREATE INDEX ON omicron.public.switch (
+    rack_id
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.switch (
+    id
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Services
  */
 
