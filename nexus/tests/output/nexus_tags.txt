@@ -140,11 +140,6 @@ sled_view                                GET      /v1/system/hardware/sleds/{sle
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 system_component_version_list            GET      /v1/system/update/components
-system_image_create                      POST     /system/images
-system_image_delete                      DELETE   /system/images/{image_name}
-system_image_list                        GET      /system/images
-system_image_view                        GET      /system/images/{image_name}
-system_image_view_by_id                  GET      /system/by-id/images/{id}
 system_metric                            GET      /v1/system/metrics/{metric_name}
 system_update_components_list            GET      /v1/system/update/updates/{version}/components
 system_update_list                       GET      /v1/system/update/updates

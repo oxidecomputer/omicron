@@ -203,7 +203,7 @@ async fn test_delete_snapshot_then_disk(cptestctx: &ControlPlaneTestContext) {
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    // Define a global image
+    // Define an image
     let image = create_image(&client).await;
     // Create a disk from this image
     let base_disk =
@@ -969,21 +969,20 @@ async fn test_multiple_layers_of_snapshots_random_delete_order(
 
 #[nexus_test]
 async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
-    // 1. Create a disk from a global image that uses a URL source
+    // 1. Create a disk from an image that uses a URL source
     // 2. Take a snapshot of that disk
-    // 3. Create a global image from that snapshot
+    // 3. Create an image from that snapshot
 
     let client = &cptestctx.external_client;
     let _disk_test = DiskTest::new(&cptestctx).await;
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_image(&client).await;
+    let image = create_image(&client).await;
 
     // Create a disk from this image
     let _base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
@@ -1002,39 +1001,34 @@ async fn test_create_image_from_snapshot(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Create an image from the snapshot
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "debian-11".parse().unwrap(),
             description: String::from("debian's cool too"),
         },
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
-        distribution: params::Distribution {
-            name: "debian".parse().unwrap(),
-            version: "11".into(),
-        },
+        os: "debian".parse().unwrap(),
+        version: "11".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let _global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let _image: views::Image =
+        NexusRequest::objects_post(client, "/v1/images", &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
 }
 
 #[nexus_test]
 async fn test_create_image_from_snapshot_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // 1. Create a disk from a global image that uses a URL source
+    // 1. Create a disk from an image that uses a URL source
     // 2. Take a snapshot of that disk
-    // 3. Create a global image from that snapshot
+    // 3. Create an image from that snapshot
     // 4. Delete the disk
     // 5. Delete the snapshot
     // 6. Delete the image.
@@ -1044,12 +1038,11 @@ async fn test_create_image_from_snapshot_delete(
     let disks_url = get_disks_url();
     let base_disk_name: Name = "base-disk".parse().unwrap();
 
-    let global_image = create_image(&client).await;
+    let image = create_image(&client).await;
 
     // Create a disk from this image
     let _base_disk =
-        create_base_disk(&client, &global_image, &disks_url, &base_disk_name)
-            .await;
+        create_base_disk(&client, &image, &disks_url, &base_disk_name).await;
 
     // Issue snapshot request
     let snapshots_url = format!("/v1/snapshots?project={}", PROJECT_NAME);
@@ -1068,30 +1061,25 @@ async fn test_create_image_from_snapshot_delete(
     .await;
 
     // Create an image from the snapshot
-    let image_create_params = params::GlobalImageCreate {
+    let image_create_params = params::ImageCreate {
         identity: IdentityMetadataCreateParams {
             name: "debian-11".parse().unwrap(),
             description: String::from("debian's cool too"),
         },
         source: params::ImageSource::Snapshot { id: snapshot.identity.id },
-        distribution: params::Distribution {
-            name: "debian".parse().unwrap(),
-            version: "11".into(),
-        },
+        os: "debian".parse().unwrap(),
+        version: "11".into(),
         block_size: params::BlockSize::try_from(512).unwrap(),
     };
 
-    let _global_image: views::GlobalImage = NexusRequest::objects_post(
-        client,
-        "/system/images",
-        &image_create_params,
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    let _image: views::Image =
+        NexusRequest::objects_post(client, "/v1/images", &image_create_params)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
 
     // Delete the disk
     NexusRequest::object_delete(client, &get_disk_url("base-disk"))
@@ -1111,14 +1099,14 @@ async fn test_create_image_from_snapshot_delete(
         .await
         .expect("failed to delete snapshot");
 
-    // Still some Crucible resources - importantly, the global image has
+    // Still some Crucible resources - importantly, the image has
     // incremented the resource counts associated with its own volume
     assert!(!disk_test.crucible_resources_deleted().await);
 
-    // Delete the global image
+    // Delete the image
     // TODO-unimplemented
     /*
-    let image_url = "/system/images/debian-11";
+    let image_url = "/v1/images/debian-11";
     NexusRequest::object_delete(client, &image_url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()

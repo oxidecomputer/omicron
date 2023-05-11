@@ -201,30 +201,6 @@ impl super::Nexus {
                     });
                 }
             }
-            params::DiskSource::GlobalImage { image_id } => {
-                let (.., db_global_image) =
-                    LookupPath::new(opctx, &self.db_datastore)
-                        .global_image_id(*image_id)
-                        .fetch()
-                        .await?;
-
-                validate_disk_create_params(
-                    &params,
-                    db_global_image.block_size.to_bytes().into(),
-                )?;
-
-                // If the size of the image is greater than the size of the
-                // disk, return an error.
-                if db_global_image.size.to_bytes() > params.size.to_bytes() {
-                    return Err(Error::invalid_request(
-                        &format!(
-                            "disk size {} must be greater than or equal to image size {}",
-                            params.size.to_bytes(),
-                            db_global_image.size.to_bytes(),
-                        ),
-                    ));
-                }
-            }
             params::DiskSource::ImportingBlocks { block_size } => {
                 validate_disk_create_params(&params, (*block_size).into())?;
             }
