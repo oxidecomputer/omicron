@@ -677,7 +677,7 @@ pub async fn console_settings_page(
 
 #[endpoint {
    method = GET,
-   path = "/sys/{path:.*}",
+   path = "/system/{path:.*}",
    unpublished = true,
 }]
 pub async fn console_system_page(
