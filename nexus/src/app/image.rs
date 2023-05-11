@@ -8,6 +8,7 @@ use super::Unimpl;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
+use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use nexus_db_queries::context::OpContext;
@@ -401,6 +402,29 @@ impl super::Nexus {
             }
             ImageLookup::SiloImage(_) => Err(Error::InvalidRequest {
                 message: "Cannot promote a silo image".to_string(),
+            }),
+        }
+    }
+
+    /// Converts a silo scoped image into a project scoped image
+    pub async fn image_demote(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        image_lookup: &ImageLookup<'_>,
+        project_lookup: &lookup::Project<'_>,
+    ) -> UpdateResult<db::model::Image> {
+        match image_lookup {
+            ImageLookup::SiloImage(lookup) => {
+                let (_, authz_silo_image) =
+                    lookup.lookup_for(authz::Action::Modify).await?;
+                let (_, authz_project) =
+                    project_lookup.lookup_for(authz::Action::Modify).await?;
+                self.db_datastore
+                    .silo_image_demote(opctx, &authz_silo_image, &authz_project)
+                    .await
+            }
+            ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {
+                message: "Cannot demote a project image".to_string(),
             }),
         }
     }

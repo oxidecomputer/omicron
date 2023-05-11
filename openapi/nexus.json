@@ -1133,6 +1133,54 @@
         }
       }
     },
+    "/v1/images/{image}/demote": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Demote a silo image",
+        "description": "Demote a silo image to be visible only to a specified project",
+        "operationId": "image_demote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "description": "Name or ID of the image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/images/{image}/promote": {
       "post": {
         "tags": [
