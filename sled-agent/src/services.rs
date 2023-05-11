@@ -1340,7 +1340,11 @@ impl ServiceManager {
                                 IpAddr::V6(*internal_ip),
                                 NEXUS_INTERNAL_PORT,
                             ),
-                            request_body_max_bytes: 1048576,
+                            // This has to be large enough to support, among
+                            // other things, the initial list of TLS
+                            // certificates provided by the customer during rack
+                            // setup.
+                            request_body_max_bytes: 10 * 1024 * 1024,
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(

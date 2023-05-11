@@ -746,13 +746,7 @@ impl ServiceInner {
             services,
             datasets,
             internal_services_ip_pool_ranges,
-            // TODO(https://github.com/oxidecomputer/omicron/issues/1959): Plumb
-            // these paths through RSS's API.
-            //
-            // These certificates CAN be updated through Nexus' HTTP API, but
-            // should be bootstrapped during the rack setup process to avoid
-            // the need for unencrypted communication.
-            certs: vec![],
+            certs: config.external_certificates.clone(),
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
