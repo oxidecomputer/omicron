@@ -228,7 +228,7 @@ impl DataStore {
         authz_project: &authz::Project,
     ) -> UpdateResult<Image> {
         opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
-        opctx.authorize(authz::Action::Modify, authz_project).await?;
+        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         use db::schema::image::dsl;
         let image: Image = diesel::update(dsl::image)
