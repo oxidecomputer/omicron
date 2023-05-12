@@ -21,7 +21,6 @@ use crate::db::identity::Asset;
 use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
-use crate::db::model::NexusService;
 use crate::db::model::Rack;
 use crate::db::model::Service;
 use crate::db::model::Sled;
@@ -244,18 +243,6 @@ impl DataStore {
                             TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
                         assert_eq!(allocated_ip.ip.ip(), external_address);
-
-                        // Add a service record for Nexus.
-                        let nexus_service = NexusService::new(service.service_id, allocated_ip.id);
-                        use db::schema::nexus_service::dsl;
-                        diesel::insert_into(dsl::nexus_service)
-                            .values(nexus_service)
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                warn!(log, "Initializing Rack: Failed to insert Nexus Service record");
-                                e
-                            })?;
                     }
                 }
                 info!(log, "Inserted services");
@@ -574,7 +561,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
         use crate::db::schema::external_ip::dsl as extip_dsl;
-        use crate::db::schema::nexus_service::dsl as nexus_dsl;
+        use crate::db::schema::service::dsl as service_dsl;
         type TxnError = TransactionError<()>;
         self.pool_authorized(opctx)
             .await?
@@ -585,7 +572,13 @@ impl DataStore {
                 let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
                 conn.batch_execute_async(sql).await?;
                 Ok(extip_dsl::external_ip
-                    .inner_join(nexus_dsl::nexus_service)
+                    .inner_join(
+                        service_dsl::service.on(service_dsl::id
+                            .eq(extip_dsl::parent_id.assume_not_null())),
+                    )
+                    .filter(extip_dsl::parent_id.is_not_null())
+                    .filter(extip_dsl::is_service)
+                    .filter(service_dsl::kind.eq(ServiceKind::Nexus))
                     .select(ExternalIp::as_select())
                     .get_results_async(&conn)
                     .await?
@@ -836,7 +829,6 @@ mod test {
     }
 
     fn_to_get_all!(service, Service);
-    fn_to_get_all!(nexus_service, NexusService);
     fn_to_get_all!(external_ip, ExternalIp);
     fn_to_get_all!(ip_pool_range, IpPoolRange);
     fn_to_get_all!(dataset, Dataset);
@@ -879,7 +871,6 @@ mod test {
         assert!(rack.initialized);
 
         let observed_services = get_all_services(&datastore).await;
-        let observed_nexus_services = get_all_nexus_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
         // We should only see the one nexus we inserted earlier
@@ -889,17 +880,13 @@ mod test {
         assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
         assert_eq!(*observed_services[0].port, 123);
 
-        // It should have a corresponding "Nexus service record"
-        assert_eq!(observed_nexus_services.len(), 1);
-        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
-
         // We should also see the single external IP allocated for this nexus
         // interface.
         let observed_external_ips = get_all_external_ips(&datastore).await;
         assert_eq!(observed_external_ips.len(), 1);
         assert_eq!(
-            observed_external_ips[0].id,
-            observed_nexus_services[0].external_ip_id
+            observed_external_ips[0].parent_id,
+            Some(observed_services[0].id())
         );
         assert!(observed_external_ips[0].is_service);
         assert_eq!(observed_external_ips[0].kind, IpKind::Floating);
@@ -920,8 +907,6 @@ mod test {
             observed_external_ips[0].ip_pool_range_id,
             observed_ip_pool_ranges[0].id
         );
-        assert!(observed_external_ips[0].is_service);
-        assert_eq!(observed_external_ips[0].kind, IpKind::Floating);
         assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip);
 
         assert!(observed_datasets.is_empty());
@@ -1014,8 +999,6 @@ mod test {
         assert!(rack.initialized);
 
         let mut observed_services = get_all_services(&datastore).await;
-        let mut observed_nexus_services =
-            get_all_nexus_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
         // We should see both of the Nexus services we provisioned.
@@ -1031,27 +1014,22 @@ mod test {
         assert_eq!(*observed_services[0].port, services[0].address.port());
         assert_eq!(*observed_services[1].port, services[1].address.port());
 
-        // It should have a corresponding "Nexus service record"
-        assert_eq!(observed_nexus_services.len(), 2);
-        observed_nexus_services
-            .sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
-        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
-        assert_eq!(observed_services[1].id(), observed_nexus_services[1].id);
-
         // We should see both IPs allocated for these services.
-        let observed_external_ips: HashMap<_, _> =
-            get_all_external_ips(&datastore)
-                .await
-                .into_iter()
-                .map(|ip| (ip.id, ip))
-                .collect();
+        let observed_external_ips = get_all_external_ips(&datastore).await;
+        for external_ip in &observed_external_ips {
+            assert!(external_ip.is_service);
+            assert!(external_ip.parent_id.is_some());
+            assert_eq!(external_ip.kind, IpKind::Floating);
+        }
+        let observed_external_ips: HashMap<_, _> = observed_external_ips
+            .into_iter()
+            .map(|ip| (ip.parent_id.unwrap(), ip))
+            .collect();
         assert_eq!(observed_external_ips.len(), 2);
 
-        // The address referenced by the "NexusService" should match the input.
+        // The address allocated for the service should match the input.
         assert_eq!(
-            observed_external_ips[&observed_nexus_services[0].external_ip_id]
-                .ip
-                .ip(),
+            observed_external_ips[&observed_services[0].id()].ip.ip(),
             if let internal_params::ServiceKind::Nexus { external_address } =
                 services[0].kind
             {
@@ -1061,9 +1039,7 @@ mod test {
             }
         );
         assert_eq!(
-            observed_external_ips[&observed_nexus_services[1].external_ip_id]
-                .ip
-                .ip(),
+            observed_external_ips[&observed_services[1].id()].ip.ip(),
             if let internal_params::ServiceKind::Nexus { external_address } =
                 services[1].kind
             {
@@ -1155,7 +1131,6 @@ mod test {
         );
 
         assert!(get_all_services(&datastore).await.is_empty());
-        assert!(get_all_nexus_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
@@ -1218,7 +1193,6 @@ mod test {
         );
 
         assert!(get_all_services(&datastore).await.is_empty());
-        assert!(get_all_nexus_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
