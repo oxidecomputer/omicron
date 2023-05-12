@@ -31,6 +31,24 @@ VERSION="1.0.0-alpha+git${COMMIT:0:11}"
 ptime -m gunzip < /input/ci-tools/work/tufaceous.gz > /work/tufaceous
 chmod a+x /work/tufaceous
 
+#
+# We do two things here:
+# 1. Run `omicron-package stamp` on all the zones.
+# 2. Run `omicron-package unpack` to switch from "package-name.tar.gz" to "service_name.tar.gz".
+#
+mkdir /work/package
+pushd /work/package
+tar xf /input/package/work/package.tar.gz out package-manifest.toml target/release/omicron-package
+target/release/omicron-package -t default target create -i standard -m gimlet -s asic
+ln -s /input/package/work/zones/* out/
+rm out/switch-softnpu.tar.gz  # not used when target switch=asic
+for zone in out/*.tar.gz; do
+    target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
+done
+mv out/versioned/* out/
+OMICRON_NO_UNINSTALL=1 target/release/omicron-package unpack --out install
+popd
+
 # Generate a throwaway repository key.
 python3 -c 'import secrets; open("/work/key.txt", "w").write("ed25519:%s\n" % secrets.token_hex(32))'
 read -r TUFACEOUS_KEY </work/key.txt
@@ -46,23 +64,13 @@ version = "$VERSION"
 kind = "composite-control-plane"
 EOF
 
-# switch-asic needs to be named "switch", skip here.
-# switch-softnpu does not go in TUF repos.
-for zone in $(ls /input/package/work/zones/* | grep -v switch); do
+for zone in /work/package/install/*.tar.gz; do
     cat >>/work/manifest.toml <<EOF
 [[artifact.control_plane.source.zones]]
 kind = "file"
 path = "$zone"
 EOF
 done
-
-# Add switch-asic, but call it switch so sled-agent can find it.
-cp /input/package/work/zones/switch-asic.tar.gz /work/switch.tar.gz
-cat >>/work/manifest.toml <<EOF
-[[artifact.control_plane.source.zones]]
-kind = "file"
-path = "/work/switch.tar.gz"
-EOF
 
 for kind in host trampoline; do
     mkdir -p /work/os/$kind
