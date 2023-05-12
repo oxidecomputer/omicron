@@ -311,9 +311,9 @@ fn get_dev_path_of_whole_disk(
             continue;
         }
         let links = {
-            match DevLinks::new(true) {
+            match DevLinks::new(false) {
                 Ok(links) => links,
-                Err(_) => DevLinks::new(false).map_err(Error::DevInfo)?,
+                Err(_) => DevLinks::new(true).map_err(Error::DevInfo)?,
             }
         };
         let devfs_path = m.devfs_path().map_err(Error::DevInfo)?;
