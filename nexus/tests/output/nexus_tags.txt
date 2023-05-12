@@ -102,10 +102,10 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             METHOD   URL PATH
-certificate_create                       POST     /v1/system/certificates
-certificate_delete                       DELETE   /v1/system/certificates/{certificate}
-certificate_list                         GET      /v1/system/certificates
-certificate_view                         GET      /v1/system/certificates/{certificate}
+certificate_create                       POST     /certificates
+certificate_delete                       DELETE   /certificates/{certificate}
+certificate_list                         GET      /certificates
+certificate_view                         GET      /certificates/{certificate}
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools

@@ -326,9 +326,9 @@ lazy_static! {
     pub static ref DEMO_CERTIFICATE_NAME: Name =
         "demo-certificate".parse().unwrap();
     pub static ref DEMO_CERTIFICATES_URL: String =
-        format!("/v1/system/certificates");
+        format!("/certificates");
     pub static ref DEMO_CERTIFICATE_URL: String =
-        format!("/v1/system/certificates/demo-certificate");
+        format!("/certificates/demo-certificate");
     pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {

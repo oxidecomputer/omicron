@@ -204,6 +204,30 @@ has_relation(silo: Silo, "parent_silo", project: Project)
 # macro.  Some resources require custom Polar code.  Those appear here.
 #
 
+resource Certificate {
+	permissions = [
+	    "read",
+	    "modify",
+	    "create_child",
+	    "list_children",
+	];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Fleet-level and silo-level roles both grant privileges on certificates.
+	"read" if "admin" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_silo";
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+	"list_children" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", certificate: Certificate)
+	if certificate.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", certificate: Certificate)
+	if certificate.silo.fleet = fleet;
+
 resource SiloUser {
 	permissions = [
 	    "list_children",
@@ -386,6 +410,25 @@ resource DeviceAuthRequestList {
 }
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
+
+# Describes the policy for creating and managing Silo certificates
+resource SiloCertificateList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Both Fleet and Silo administrators can see and modify the Silo's
+	# certificates.
+	"list_children" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloCertificateList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloCertificateList)
+	if collection.silo.fleet = fleet;
 
 # Describes the policy for creating and managing Silo identity providers
 resource SiloIdentityProviderList {

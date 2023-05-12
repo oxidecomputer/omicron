@@ -100,6 +100,7 @@ pub struct Certificate {
     #[diesel(embed)]
     identity: CertificateIdentity,
 
+    pub silo_id: Uuid,
     pub service: ServiceKind,
 
     pub cert: Vec<u8>,
@@ -119,6 +120,7 @@ impl std::fmt::Debug for Certificate {
 
 impl Certificate {
     pub fn new(
+        silo_id: Uuid,
         id: Uuid,
         service: ServiceKind,
         params: params::CertificateCreate,
@@ -128,6 +130,7 @@ impl Certificate {
 
         Ok(Self {
             identity: CertificateIdentity::new(id, params.identity),
+            silo_id,
             service,
             cert: params.cert,
             key: params.key,
