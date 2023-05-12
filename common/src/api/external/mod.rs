@@ -2025,6 +2025,11 @@ impl Vni {
     pub fn random() -> Self {
         Self(rand::thread_rng().gen_range(Self::MIN_GUEST_VNI..=Self::MAX_VNI))
     }
+
+    /// Create a new random VNI in the Oxide-reserved space.
+    pub fn random_system() -> Self {
+        Self(rand::thread_rng().gen_range(0..Self::MIN_GUEST_VNI))
+    }
 }
 
 impl From<Vni> for u32 {

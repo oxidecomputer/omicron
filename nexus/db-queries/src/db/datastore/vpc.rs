@@ -14,6 +14,7 @@ use crate::db::error::diesel_pool_result_optional;
 use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
+use crate::db::fixed_data::vpc::SERVICES_VPC_ID;
 use crate::db::identity::Resource;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
@@ -26,6 +27,7 @@ use crate::db::model::Vni;
 use crate::db::model::Vpc;
 use crate::db::model::VpcFirewallRule;
 use crate::db::model::VpcRouter;
+use crate::db::model::VpcRouterKind;
 use crate::db::model::VpcRouterUpdate;
 use crate::db::model::VpcSubnet;
 use crate::db::model::VpcSubnetUpdate;
@@ -44,16 +46,117 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::RouteDestination;
+use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::api::external::Vni as ExternalVni;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
 impl DataStore {
+    /// Load built-in VPCs into the database.
+    pub async fn load_builtin_vpcs(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use crate::db::fixed_data::project::SERVICES_PROJECT_ID;
+        use crate::db::fixed_data::vpc::SERVICES_VPC;
+        use crate::db::fixed_data::vpc::SERVICES_VPC_DEFAULT_ROUTE_ID;
+
+        opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
+
+        debug!(opctx.log, "attempting to create built-in VPCs");
+
+        // Create built-in VPC for Oxide Services
+
+        let (_, authz_project) = db::lookup::LookupPath::new(opctx, self)
+            .project_id(*SERVICES_PROJECT_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .internal_context("lookup built-in services project")?;
+        let vpc_query = InsertVpcQuery::new_system(
+            SERVICES_VPC.clone(),
+            Some(Vni(ExternalVni::SERVICES_VNI)),
+        );
+        let authz_vpc = self
+            .project_create_vpc_raw(opctx, &authz_project, vpc_query)
+            .await
+            .map(|(authz_vpc, _)| authz_vpc)
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(authz::Vpc::new(
+                    authz_project.clone(),
+                    *SERVICES_VPC_ID,
+                    LookupType::ByName(SERVICES_VPC.identity.name.to_string()),
+                )),
+                _ => Err(e),
+            })?;
+
+        // Also add the system router and internet gateway route
+
+        let system_router = db::lookup::LookupPath::new(opctx, self)
+            .vpc_router_id(SERVICES_VPC.system_router_id)
+            .lookup_for(authz::Action::CreateChild)
+            .await;
+        let authz_router = if let Ok((_, _, _, authz_router)) = system_router {
+            authz_router
+        } else {
+            let router = VpcRouter::new(
+                SERVICES_VPC.system_router_id,
+                *SERVICES_VPC_ID,
+                VpcRouterKind::System,
+                nexus_types::external_api::params::VpcRouterCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: "system".parse().unwrap(),
+                        description: "Built-in VPC Router for Oxide Services"
+                            .to_string(),
+                    },
+                },
+            );
+            self.vpc_create_router(opctx, &authz_vpc, router.clone())
+                .await
+                .map(|(authz_router, _)| authz_router)?
+        };
+
+        let route = RouterRoute::new(
+            *SERVICES_VPC_DEFAULT_ROUTE_ID,
+            SERVICES_VPC.system_router_id,
+            RouterRouteKind::Default,
+            nexus_types::external_api::params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description:
+                        "Default internet gateway route for Oxide Services"
+                            .to_string(),
+                },
+                target: RouteTarget::InternetGateway(
+                    "outbound".parse().unwrap(),
+                ),
+                destination: RouteDestination::Vpc(
+                    SERVICES_VPC.identity.name.clone().into(),
+                ),
+            },
+        );
+        self.router_create_route(opctx, &authz_router, route)
+            .await
+            .map(|_| ())
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            })?;
+
+        info!(opctx.log, "created built-in services vpc");
+
+        Ok(())
+    }
+
     pub async fn vpc_list(
         &self,
         opctx: &OpContext,
@@ -87,18 +190,31 @@ impl DataStore {
         authz_project: &authz::Project,
         vpc: IncompleteVpc,
     ) -> Result<(authz::Vpc, Vpc), Error> {
+        self.project_create_vpc_raw(
+            opctx,
+            authz_project,
+            InsertVpcQuery::new(vpc),
+        )
+        .await
+    }
+
+    async fn project_create_vpc_raw(
+        &self,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        vpc_query: InsertVpcQuery,
+    ) -> Result<(authz::Vpc, Vpc), Error> {
         use db::schema::vpc::dsl;
 
-        assert_eq!(authz_project.id(), vpc.project_id);
+        assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let name = vpc.identity.name.clone();
-        let project_id = vpc.project_id;
-        let query = InsertVpcQuery::new(vpc);
+        let name = vpc_query.vpc.identity.name.clone();
+        let project_id = vpc_query.vpc.project_id;
 
         let vpc: Vpc = Project::insert_resource(
             project_id,
-            diesel::insert_into(dsl::vpc).values(query),
+            diesel::insert_into(dsl::vpc).values(vpc_query),
         )
         .insert_and_get_result_async(self.pool())
         .await

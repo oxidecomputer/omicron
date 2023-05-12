@@ -237,6 +237,23 @@ impl Populator for PopulateBuiltinProjects {
     }
 }
 
+/// Populates the built-in vpcs
+#[derive(Debug)]
+struct PopulateBuiltinVpcs;
+impl Populator for PopulateBuiltinVpcs {
+    fn populate<'a, 'b>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        _args: &'a PopulateArgs,
+    ) -> BoxFuture<'b, Result<(), Error>>
+    where
+        'a: 'b,
+    {
+        async { datastore.load_builtin_vpcs(opctx).await }.boxed()
+    }
+}
+
 /// Populates the "test-privileged" and "test-unprivileged" silo users
 // TODO-security Once we have a proper bootstrapping mechanism, we should not
 // need to do this.  But right now, if you don't do this, then there will be no
@@ -319,12 +336,13 @@ impl Populator for PopulateRack {
 }
 
 lazy_static! {
-    static ref ALL_POPULATORS: [&'static dyn Populator; 9] = [
+    static ref ALL_POPULATORS: [&'static dyn Populator; 10] = [
         &PopulateBuiltinUsers,
         &PopulateBuiltinRoles,
         &PopulateBuiltinRoleAssignments,
         &PopulateBuiltinSilos,
         &PopulateBuiltinProjects,
+        &PopulateBuiltinVpcs,
         &PopulateSiloUsers,
         &PopulateSiloUserRoleAssignments,
         &PopulateFleet,

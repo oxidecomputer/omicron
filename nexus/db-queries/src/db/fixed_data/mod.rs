@@ -28,6 +28,7 @@
 //    001de000-1334   built-in fleet ("1334" looks like the "leet" in "fleet")
 //    001de000-5110   built-in silo ("5110" looks like "silo")
 //    001de000-4401   built-in services project
+//    001de000-074c   built-in services vpc
 
 use lazy_static::lazy_static;
 
@@ -37,6 +38,7 @@ pub mod role_builtin;
 pub mod silo;
 pub mod silo_user;
 pub mod user_builtin;
+pub mod vpc;
 
 lazy_static! {
     /* See above for where this uuid comes from. */

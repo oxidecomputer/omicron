@@ -3,12 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::db;
+use crate::db::datastore::SERVICES_DB_NAME;
 use lazy_static::lazy_static;
 use nexus_types::external_api::params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-
-/// The name of the built-in project for Oxide services.
-pub const SERVICES_PROJECT_NAME: &str = "oxide-services";
 
 lazy_static! {
     /// UUID of built-in project for internal services on the rack.
@@ -22,7 +20,7 @@ lazy_static! {
         *super::silo::INTERNAL_SILO_ID,
         params::ProjectCreate {
             identity: IdentityMetadataCreateParams {
-                name: SERVICES_PROJECT_NAME.parse().unwrap(),
+                name: SERVICES_DB_NAME.parse().unwrap(),
                 description: "Built-in project for Oxide Services".to_string(),
             },
         },

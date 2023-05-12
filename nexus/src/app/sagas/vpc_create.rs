@@ -444,7 +444,8 @@ pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::vpc_create::Params,
         app::sagas::vpc_create::SagaVpcCreate, authn::saga::Serialized, authz,
-        db::datastore::DataStore, db::lookup::LookupPath, external_api::params,
+        db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
+        db::lookup::LookupPath, external_api::params,
     };
     use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -593,6 +594,8 @@ pub(crate) mod test {
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::id.ne(*SERVICES_VPC_ID))
             .select(Vpc::as_select())
             .first_async::<Vpc>(datastore.pool_for_tests().await.unwrap())
             .await
@@ -610,6 +613,8 @@ pub(crate) mod test {
 
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcRouter::as_select())
             .first_async::<VpcRouter>(datastore.pool_for_tests().await.unwrap())
             .await
@@ -624,9 +629,19 @@ pub(crate) mod test {
     async fn no_routes_exist(datastore: &DataStore) -> bool {
         use crate::db::model::RouterRoute;
         use crate::db::schema::router_route::dsl;
+        use crate::db::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(
+                dsl::vpc_router_id.ne_all(
+                    vpc_router_dsl::vpc_router
+                        .select(vpc_router_dsl::id)
+                        .filter(vpc_router_dsl::vpc_id.eq(*SERVICES_VPC_ID))
+                        .filter(vpc_router_dsl::time_deleted.is_null()),
+                ),
+            )
             .select(RouterRoute::as_select())
             .first_async::<RouterRoute>(
                 datastore.pool_for_tests().await.unwrap(),
@@ -646,6 +661,8 @@ pub(crate) mod test {
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
+            // ignore built-in services VPC
+            .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcSubnet::as_select())
             .first_async::<VpcSubnet>(datastore.pool_for_tests().await.unwrap())
             .await
