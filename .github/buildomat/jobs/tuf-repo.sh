@@ -84,9 +84,8 @@ for kind in host trampoline; do
 name = "$kind"
 version = "$VERSION"
 [artifact.$kind.source]
-kind = "composite-host"
-phase_1 = { kind = "file", path = "/work/os/$kind/image/rom" }
-phase_2 = { kind = "file", path = "/work/os/$kind/image/zfs.img" }
+kind = "file"
+path = "/input/$kind/work/helios/image/output/os.tar.gz"
 EOF
 done
 
