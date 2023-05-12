@@ -106,7 +106,6 @@ pem.workspace = true
 petgraph.workspace = true
 rcgen.workspace = true
 regex.workspace = true
-# XXX-dap can this be removed?  why do we need `dangerous_configuration`?
 rustls = { workspace = true, features = ["dangerous_configuration"] }
 subprocess.workspace = true
 term.workspace = true
