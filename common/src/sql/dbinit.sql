@@ -150,6 +150,37 @@ CREATE INDEX ON omicron.public.sled_resource (
 );
 
 /*
+ * Switches
+ */
+
+CREATE TABLE omicron.public.switch (
+    /* Identity metadata (asset) */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    rcgen INT NOT NULL,
+
+    /* FK into the Rack table */
+    rack_id UUID NOT NULL,
+
+    /* Baseboard information about the switch */
+    serial_number STRING(63) NOT NULL,
+    part_number STRING(63) NOT NULL,
+    revision INT8 NOT NULL
+);
+
+/* Add an index which lets us look up switches on a rack */
+CREATE INDEX ON omicron.public.switch (
+    rack_id
+) WHERE time_deleted IS NULL;
+
+CREATE INDEX ON omicron.public.switch (
+    id
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Services
  */
 
@@ -258,13 +289,16 @@ CREATE TABLE omicron.public.certificate (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    -- which Silo this certificate is used for
+    silo_id UUID NOT NULL,
+
     -- The service type which should use this certificate
     service omicron.public.service_kind NOT NULL,
 
-    -- cert.pem file as a binary blob
+    -- cert.pem file (certificate chain in PEM format) as a binary blob
     cert BYTES NOT NULL,
 
-    -- key.pem file as a binary blob
+    -- key.pem file (private key in PEM format) as a binary blob
     key BYTES NOT NULL
 );
 
@@ -279,6 +313,7 @@ CREATE INDEX ON omicron.public.certificate (
 -- Add an index which enforces that certificates have unique names, and which
 -- allows pagination-by-name.
 CREATE UNIQUE INDEX ON omicron.public.certificate (
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;
@@ -986,32 +1021,6 @@ WHERE
 CREATE UNIQUE INDEX on omicron.public.image (
     silo_id,
     project_id,
-    name
-) WHERE
-    time_deleted is NULL;
-
-/* TODO-v1: Delete this after migration */
-CREATE TABLE omicron.public.global_image (
-    /* Identity metadata (resource) */
-    id UUID PRIMARY KEY,
-    name STRING(63) NOT NULL,
-    description STRING(512) NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    /* Indicates that the object has been deleted */
-    time_deleted TIMESTAMPTZ,
-
-    volume_id UUID NOT NULL,
-
-    url STRING(8192),
-    distribution STRING(64) NOT NULL,
-    version STRING(64) NOT NULL,
-    digest TEXT,
-    block_size omicron.public.block_size NOT NULL,
-    size_bytes INT NOT NULL
-);
-
-CREATE UNIQUE INDEX on omicron.public.global_image (
     name
 ) WHERE
     time_deleted is NULL;

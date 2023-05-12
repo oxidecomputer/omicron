@@ -164,8 +164,6 @@ pub struct AuthnConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConsoleConfig {
     pub static_dir: PathBuf,
-    /// how long the browser can cache static assets
-    pub cache_control_max_age_minutes: u32,
     /// how long a session can be idle before expiring
     pub session_idle_timeout_minutes: u32,
     /// how long a session can exist before expiring
@@ -517,7 +515,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -592,7 +589,6 @@ mod test {
                 pkg: PackageConfig {
                     console: ConsoleConfig {
                         static_dir: "tests/static".parse().unwrap(),
-                        cache_control_max_age_minutes: 10,
                         session_idle_timeout_minutes: 60,
                         session_absolute_timeout_minutes: 480
                     },
@@ -641,7 +637,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -695,7 +690,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]
@@ -746,7 +740,6 @@ mod test {
             r##"
             [console]
             static_dir = "tests/static"
-            cache_control_max_age_minutes = 10
             session_idle_timeout_minutes = 60
             session_absolute_timeout_minutes = 480
             [authn]

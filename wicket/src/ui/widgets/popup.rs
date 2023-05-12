@@ -9,7 +9,7 @@ use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Span, Spans, Text},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
 use crate::ui::defaults::dimensions::RectExt;
@@ -69,6 +69,28 @@ impl Popup<'_> {
         });
         u16::try_from(width).unwrap()
     }
+
+    /// Returns the maximum width that this popup can have, including outer
+    /// borders.
+    ///
+    /// This is currently 80% of screen width.
+    pub fn max_width(full_screen_width: u16) -> u16 {
+        (full_screen_width as u32 * 4 / 5) as u16
+    }
+
+    /// Returns the maximum width that this popup can have, not including outer
+    /// borders.
+    pub fn max_content_width(full_screen_width: u16) -> u16 {
+        Self::max_width(full_screen_width).saturating_sub(2)
+    }
+
+    /// Returns the maximum height that this popup can have, including outer
+    /// borders.
+    ///
+    /// This is currently 80% of screen height.
+    pub fn max_height(full_screen_height: u16) -> u16 {
+        (full_screen_height as u32 * 4 / 5) as u16
+    }
 }
 
 impl Widget for Popup<'_> {
@@ -81,10 +103,9 @@ impl Widget for Popup<'_> {
             .border_type(BorderType::Rounded)
             .style(style::selected_line());
 
-        // Constrain width and height to 80% of screen width. Width and height
-        // are u16s and less than 128 so the computation shouldn't overflow.
-        let width = u16::min(self.width(), full_screen.width * 4 / 5);
-        let height = u16::min(self.height(), full_screen.height * 4 / 5);
+        let width = u16::min(self.width(), Self::max_width(full_screen.width));
+        let height =
+            u16::min(self.height(), Self::max_height(full_screen.height));
 
         let rect =
             full_screen.center_horizontally(width).center_vertically(height);
@@ -116,7 +137,8 @@ impl Widget for Popup<'_> {
             .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
             .render(chunks[1], buf);
 
-        let body = Paragraph::new(self.body).wrap(Wrap { trim: false });
+        // NOTE: wrapping should be performed externally, by e.g. wrap_text.
+        let body = Paragraph::new(self.body);
 
         let mut body_rect = chunks[1];
         // Ensure we're inside the outer border.

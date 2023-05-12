@@ -8,6 +8,7 @@ use crate::artifacts::ArtifactIdData;
 use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::http_entrypoints::GetArtifactsAndEventReportsResponse;
+use crate::http_entrypoints::StartUpdateOptions;
 use crate::installinator_progress::IprStartReceiver;
 use crate::installinator_progress::IprUpdateTracker;
 use crate::mgs::make_mgs_client;
@@ -140,6 +141,7 @@ impl UpdateTracker {
         &self,
         sp: SpIdentifier,
         update_id: Uuid,
+        opts: StartUpdateOptions,
     ) -> Result<(), StartUpdateError> {
         self.start_impl(sp, |plan| async {
             // Do we need to upload this plan's trampoline phase 2 to MGS?
@@ -205,6 +207,7 @@ impl UpdateTracker {
                 update_cx,
                 event_buffer.clone(),
                 ipr_start_receiver,
+                opts,
             ));
 
             SpUpdateData { task, event_buffer }
@@ -438,6 +441,7 @@ impl UpdateDriver {
         update_cx: UpdateContext,
         event_buffer: Arc<StdMutex<EventBuffer>>,
         ipr_start_receiver: IprStartReceiver,
+        opts: StartUpdateOptions,
     ) {
         let update_cx = &update_cx;
 
@@ -460,6 +464,31 @@ impl UpdateDriver {
         // Build the update executor.
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
+
+        if let Some(secs) = opts.test_step_seconds {
+            engine
+                .new_step(
+                    UpdateComponent::Rot,
+                    UpdateStepId::TestStep,
+                    format!("Test step ({secs} seconds)"),
+                    move |cx| async move {
+                        for sec in 0..secs {
+                            cx.send_progress(
+                                StepProgress::with_current_and_total(
+                                    sec,
+                                    secs,
+                                    serde_json::Value::Null,
+                                ),
+                            )
+                            .await;
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+
+                        StepResult::success((), serde_json::Value::Null)
+                    },
+                )
+                .register();
+        }
 
         let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
             SpType::Sled => (

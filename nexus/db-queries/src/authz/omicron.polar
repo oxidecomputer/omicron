@@ -204,6 +204,21 @@ has_relation(silo: Silo, "parent_silo", project: Project)
 # macro.  Some resources require custom Polar code.  Those appear here.
 #
 
+resource Certificate {
+	permissions = [ "read", "modify" ];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Fleet-level and silo-level roles both grant privileges on certificates.
+	"read" if "admin" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", certificate: Certificate)
+	if certificate.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", certificate: Certificate)
+	if certificate.silo.fleet = fleet;
+
 resource SiloUser {
 	permissions = [
 	    "list_children",
@@ -321,7 +336,7 @@ has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 #
 # The resources here do not correspond to anything that appears explicitly in
 # the API or is stored in the database.  These are used either at the top level
-# of the API path (e.g., "/system/images") or as an implementation detail of the system
+# of the API path (e.g., "/v1/system/ip-pools") or as an implementation detail of the system
 # (in the case of console sessions and "Database").  The policies are
 # either statically-defined in this file or driven by role assignments on the
 # Fleet.  None of these resources defines their own roles.
@@ -369,29 +384,6 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
 	if silo in actor.silo and silo.fleet = ip_pool.fleet;
 
-# Describes the policy for accessing "/system/images" (in the API)
-resource GlobalImageList {
-	permissions = [
-	    "list_children",
-	    "modify",
-	    "create_child",
-	];
-
-	# Fleet Administrators can create or modify the global images list.
-	relations = { parent_fleet: Fleet };
-	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-
-	# Fleet Viewers can list global images.
-	"list_children" if "viewer" on "parent_fleet";
-}
-has_relation(fleet: Fleet, "parent_fleet", global_image_list: GlobalImageList)
-	if global_image_list.fleet = fleet;
-
-# Any authenticated user can list and read global images
-has_permission(_actor: AuthenticatedActor, "list_children", _global_image_list: GlobalImageList);
-has_permission(_actor: AuthenticatedActor, "read", _global_image: GlobalImage);
-
 # Describes the policy for creating and managing web console sessions.
 resource ConsoleSessionList {
 	permissions = [ "create_child" ];
@@ -409,6 +401,24 @@ resource DeviceAuthRequestList {
 }
 has_relation(fleet: Fleet, "parent_fleet", collection: DeviceAuthRequestList)
 	if collection.fleet = fleet;
+
+# Describes the policy for creating and managing Silo certificates
+resource SiloCertificateList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Both Fleet and Silo administrators can see and modify the Silo's
+	# certificates.
+	"list_children" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_silo";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloCertificateList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloCertificateList)
+	if collection.silo.fleet = fleet;
 
 # Describes the policy for creating and managing Silo identity providers
 resource SiloIdentityProviderList {

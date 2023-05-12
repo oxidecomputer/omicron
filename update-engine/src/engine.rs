@@ -198,6 +198,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
             self.sender.send(Event::Step(StepEvent {
+                spec: S::schema_name(),
                 execution_id: self.execution_id,
                 event_index: next_event_index(),
                 total_elapsed: total_start.elapsed(),
@@ -219,6 +220,7 @@ impl<'a, S: StepSpec> UpdateEngine<'a, S> {
 
         self.sender
             .send(Event::Step(StepEvent {
+                spec: S::schema_name(),
                 execution_id: self.execution_id,
                 event_index: next_event_index(),
                 total_elapsed: total_start.elapsed(),
@@ -661,6 +663,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             StepContextPayload::Nested(Event::Step(event)) => {
                 self.sender
                     .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
@@ -677,6 +680,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             StepContextPayload::Nested(Event::Progress(event)) => {
                 self.sender
                     .send(Event::Progress(ProgressEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: ProgressEventKind::Nested {
@@ -701,6 +705,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                 // Send the progress to the sender.
                 self.sender
                     .send(Event::Progress(ProgressEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         total_elapsed: self.total_start.elapsed(),
                         kind: ProgressEventKind::Progress {
@@ -718,6 +723,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                 // Send a progress reset message, but do not reset the attempt.
                 self.sender
                     .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
@@ -741,6 +747,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                 // Send the retry message.
                 self.sender
                     .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
@@ -766,6 +773,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             Ok(outcome) => {
                 self.sender
                     .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
@@ -798,6 +806,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             Ok(outcome) => {
                 self.sender
                     .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
                         total_elapsed: self.total_start.elapsed(),
@@ -843,6 +852,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
 
         self.sender
             .send(Event::Step(StepEvent {
+                spec: S::schema_name(),
                 execution_id: self.execution_id,
                 event_index: (self.next_event_index)(),
                 total_elapsed: self.total_start.elapsed(),

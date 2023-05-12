@@ -67,7 +67,6 @@ pub async fn make_resources(
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
-    builder.new_resource(authz::GLOBAL_IMAGE_LIST);
     builder.new_resource(authz::IP_POOL_LIST);
 
     // Silo/organization/project hierarchy
@@ -93,22 +92,6 @@ pub async fn make_resources(
         authz::FLEET,
         ("vendor".to_string(), "serial".to_string(), "model".to_string()),
         LookupType::ByCompositeId("vendor-serial-model".to_string()),
-    ));
-
-    let global_image_id =
-        "b46bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::GlobalImage::new(
-        authz::FLEET,
-        global_image_id,
-        LookupType::ById(global_image_id),
-    ));
-
-    let certificate_id =
-        "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::Certificate::new(
-        authz::FLEET,
-        certificate_id,
-        LookupType::ById(certificate_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
@@ -161,6 +144,14 @@ async fn make_silo(
     } else {
         builder.new_resource(silo.clone());
     }
+
+    builder.new_resource(authz::SiloCertificateList::new(silo.clone()));
+    let certificate_id = Uuid::new_v4();
+    builder.new_resource(authz::Certificate::new(
+        silo.clone(),
+        certificate_id,
+        LookupType::ByName(format!("{}-certificate", silo_name)),
+    ));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();

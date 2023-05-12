@@ -134,3 +134,14 @@ If you don't want to test wicket as a captive shell and simply want to try out t
 ```
 SSH_ORIGINAL_COMMAND=upload cargo run -p wicket
 ```
+
+# Adding a test update step
+
+While developing wicket, it can be useful to add a step which just reports
+progress and otherwise does nothing else. To add such a step, set the
+environment variable `WICKET_UPDATE_TEST_STEP_SECONDS` to an appropriate value.
+For example:
+
+```
+WICKET_UPDATE_TEST_STEP_SECONDS=15 cargo run --bin wicket
+```

@@ -474,6 +474,21 @@ impl DataStore {
             "deleted {} silo saml IdPs for silo {}", updated_rows, id
         );
 
+        // delete certificates
+        use db::schema::certificate::dsl as cert_dsl;
+
+        let updated_rows = diesel::update(cert_dsl::certificate)
+            .filter(cert_dsl::silo_id.eq(id))
+            .filter(cert_dsl::time_deleted.is_null())
+            .set(cert_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
         Ok(())
     }
 }

@@ -11,10 +11,13 @@ use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::NameOrId;
 use ref_cast::RefCast;
@@ -40,10 +43,17 @@ impl super::Nexus {
         opctx: &OpContext,
         params: params::CertificateCreate,
     ) -> CreateResult<db::model::Certificate> {
+        let authz_silo = opctx
+            .authn
+            .silo_required()
+            .internal_context("creating a Certificate")?;
         let kind = params.service;
-        let new_certificate =
-            db::model::Certificate::new(Uuid::new_v4(), kind.into(), params)?;
-        info!(self.log, "Creating certificate");
+        let new_certificate = db::model::Certificate::new(
+            authz_silo.id(),
+            Uuid::new_v4(),
+            kind.into(),
+            params,
+        )?;
         let cert = self
             .db_datastore
             .certificate_create(opctx, new_certificate)
@@ -67,7 +77,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Certificate> {
-        self.db_datastore.certificate_list_for(opctx, None, pagparams).await
+        self.db_datastore
+            .certificate_list_for(opctx, None, pagparams, true)
+            .await
     }
 
     pub async fn certificate_delete(
@@ -75,7 +87,8 @@ impl super::Nexus {
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,
     ) -> DeleteResult {
-        let (.., authz_cert, db_cert) = certificate_lookup.fetch().await?;
+        let (.., authz_cert, db_cert) =
+            certificate_lookup.fetch_for(authz::Action::Delete).await?;
         self.db_datastore.certificate_delete(opctx, &authz_cert).await?;
         match db_cert.service {
             ServiceKind::Nexus => {

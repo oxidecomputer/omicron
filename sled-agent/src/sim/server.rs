@@ -96,8 +96,11 @@ impl Server {
                         sa_address: sa_address.to_string(),
                         role: NexusTypes::SledRole::Gimlet,
                         baseboard: NexusTypes::Baseboard {
-                            identifier: format!("Simulated sled {}", config.id),
-                            model: String::from("Unknown"),
+                            serial_number: format!(
+                                "Simulated sled {}",
+                                config.id
+                            ),
+                            part_number: String::from("Unknown"),
                             revision: 0,
                         },
                         usable_hardware_threads: config

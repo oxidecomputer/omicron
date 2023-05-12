@@ -105,36 +105,7 @@ pub struct Certificate {
 
 // IMAGES
 
-/// View of a Global Image
-///
-/// Global images are visible to all users within a Silo.
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct GlobalImage {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
-
-    /// URL source of this image, if any
-    pub url: Option<String>,
-
-    /// Image distribution
-    pub distribution: String,
-
-    /// Image version
-    pub version: String,
-
-    /// Hash of the image contents, if applicable
-    pub digest: Option<Digest>,
-
-    /// size of blocks in bytes
-    pub block_size: ByteCount,
-
-    /// total size in bytes
-    pub size: ByteCount,
-}
-
-/// View of an Image
-///
-/// Images are local to their containing project.
+/// Client view of images
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
@@ -281,15 +252,17 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
-// SLEDS
+// FRUs
 
-/// Properties that should uniquely identify a Sled.
+/// Properties that uniquely identify an Oxide hardware component
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: i64,
 }
+
+// SLEDS
 
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -303,6 +276,18 @@ pub struct Sled {
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+// SWITCHES
+
+/// An operator's view of a Switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Switch {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub baseboard: Baseboard,
+    /// The rack to which this Switch is currently attached
+    pub rack_id: Uuid,
 }
 
 // PHYSICAL DISKS

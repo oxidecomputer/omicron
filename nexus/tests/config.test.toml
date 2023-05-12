@@ -5,7 +5,6 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "tests/static"
-cache_control_max_age_minutes = 10
 session_idle_timeout_minutes = 60
 session_absolute_timeout_minutes = 480
 

@@ -148,7 +148,16 @@ impl Component {
 
 // The component type and its slot.
 #[derive(
-    Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize,
+    Debug,
+    Clone,
+    Copy,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
 )]
 pub enum ComponentId {
     Sled(u8),

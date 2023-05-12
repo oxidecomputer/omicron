@@ -35,6 +35,30 @@
         }
       }
     },
+    "/baseboard": {
+      "get": {
+        "summary": "Report the configured baseboard details",
+        "operationId": "get_baseboard",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBaseboardResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/ignition/{type}/{slot}/{command}": {
       "post": {
         "summary": "Send an ignition command targeting a specific SP.",
@@ -210,6 +234,17 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
+          },
+          {
+            "in": "query",
+            "name": "test_step_seconds",
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -265,6 +300,74 @@
           "kind",
           "name",
           "version"
+        ]
+      },
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
+            ]
+          }
         ]
       },
       "Duration": {
@@ -368,6 +471,19 @@
           "artifacts",
           "event_reports"
         ]
+      },
+      "GetBaseboardResponse": {
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          }
+        }
       },
       "GetInventoryParams": {
         "type": "object",
@@ -497,6 +613,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -509,6 +629,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -528,6 +649,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used with `Self::from_generic` to deserialize generic metadata.",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -540,6 +665,7 @@
         "required": [
           "data",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1378,7 +1504,9 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0
-            }
+            },
+            "minItems": 6,
+            "maxItems": 6
           },
           "hubris_archive_id": {
             "type": "string"
@@ -1486,6 +1614,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1499,6 +1631,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -1524,6 +1657,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "spec": {
+            "description": "The specification that this event belongs to.\n\nThis is typically the name of the type `S` for which `StepSpec` is implemented.\n\nThis can be used along with `Self::from_generic` to identify which specification to deserialize generic metadata against. For example:\n\n```rust,ignore if event.spec == \"MySpec\" { // event is likely generated from a MySpec engine. let event = Event::<MySpec>::from_generic(event)?; // ... } ```",
+            "type": "string"
+          },
           "total_elapsed": {
             "description": "Total time elapsed since the start of execution.",
             "allOf": [
@@ -1537,6 +1674,7 @@
           "data",
           "event_index",
           "execution_id",
+          "spec",
           "total_elapsed"
         ]
       },
@@ -2728,6 +2866,20 @@
       },
       "UpdateStepId": {
         "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "test_step"
+                ]
+              }
+            },
+            "required": [
+              "id"
+            ]
+          },
           {
             "type": "object",
             "properties": {

@@ -18,7 +18,6 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
 use std::io::Write;
-use std::sync::Arc;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -93,12 +92,6 @@ impl CertificateChain {
         tls_cert_to_pem(&self.cert_chain())
     }
 
-    fn make_pki_verifier(&self) -> rustls::client::WebPkiVerifier {
-        let mut root_store = rustls::RootCertStore { roots: vec![] };
-        root_store.add(&self.root_cert).expect("adding root cert");
-        rustls::client::WebPkiVerifier::new(root_store, None)
-    }
-
     // Issues a GET request using the certificate chain.
     async fn do_request(
         &self,
@@ -121,11 +114,11 @@ impl CertificateChain {
                 http_client.request(request).await.map(|_| ())
             }
             "https" => {
+                let mut root_store = rustls::RootCertStore { roots: vec![] };
+                root_store.add(&self.root_cert).expect("adding root cert");
                 let tls_config = rustls::ClientConfig::builder()
                     .with_safe_defaults()
-                    .with_custom_certificate_verifier(Arc::new(
-                        self.make_pki_verifier(),
-                    ))
+                    .with_root_certificates(root_store)
                     .with_no_client_auth();
                 let https_connector =
                     hyper_rustls::HttpsConnectorBuilder::new()
@@ -158,7 +151,7 @@ fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
     serialized_certs
 }
 
-const CERTS_URL: &str = "/v1/system/certificates";
+const CERTS_URL: &str = "/v1/certificates";
 const CERT_NAME: &str = "my-certificate";
 const CERT_NAME2: &str = "my-other-certificate";
 

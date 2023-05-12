@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 mod gpt;
 mod partitions;
@@ -133,7 +134,7 @@ impl HardwareSnapshot {
                 "boot-storage-unit",
             ],
         )?;
-        let baseboard = Baseboard::new(
+        let baseboard = Baseboard::new_gimlet(
             string_from_property(&properties[0])?,
             string_from_property(&properties[1])?,
             i64_from_property(&properties[2])?,
@@ -503,7 +504,38 @@ fn poll_device_tree(
     tx: &broadcast::Sender<HardwareUpdate>,
 ) -> Result<(), Error> {
     // Construct a view of hardware by walking the device tree.
-    let polled_hw = HardwareSnapshot::new(log)?;
+    let polled_hw = match HardwareSnapshot::new(log) {
+        Ok(polled_hw) => polled_hw,
+
+        Err(e) => {
+            if let Error::NotAGimlet(root_node) = &e {
+                if root_node.as_str() == "i86pc" {
+                    // If on i86pc, generate some baseboard information before
+                    // returning this error. Each sled agent has to be uniquely
+                    // identified for multiple non-gimlets to work.
+                    {
+                        let mut inner = inner.lock().unwrap();
+
+                        if inner.baseboard.is_none() {
+                            let pc_baseboard = Baseboard::new_pc(
+                                Uuid::new_v4().simple().to_string(),
+                                root_node.clone(),
+                            );
+
+                            info!(
+                                log,
+                                "Generated i86pc baseboard {:?}", pc_baseboard
+                            );
+
+                            inner.baseboard = Some(pc_baseboard);
+                        }
+                    }
+                }
+            }
+
+            return Err(e);
+        }
+    };
 
     // After inspecting the device tree, diff with the old view, and provide
     // necessary updates.

@@ -106,7 +106,7 @@ pem.workspace = true
 petgraph.workspace = true
 rcgen.workspace = true
 regex.workspace = true
-rustls = { workspace = true, features = ["dangerous_configuration"] }
+rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true

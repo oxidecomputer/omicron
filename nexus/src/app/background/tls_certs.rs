@@ -127,6 +127,7 @@ impl BackgroundTask for TlsCertsWatcher {
                     // XXX-dap should be "external"?
                     Some(ServiceKind::Nexus),
                     &pagparams,
+                    false,
                 )
                 .await;
 
