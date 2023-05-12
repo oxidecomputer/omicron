@@ -110,7 +110,7 @@ resource: Silo "silo1": certificate list
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Certificate id "7986364c-960a-41e3-887a-4ff99ab91537"
+resource: Certificate "silo1-certificate"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -502,7 +502,7 @@ resource: Silo "silo2": certificate list
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: Certificate id "9f70510c-0ba4-45c0-b267-e5ba5444c470"
+resource: Certificate "silo2-certificate"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
