@@ -230,6 +230,9 @@ impl DataStore {
                         let ip_id = Uuid::new_v4();
                         let data = IncompleteExternalIp::for_service_explicit(
                             ip_id,
+                            &db::model::Name("nexus".parse().unwrap()),
+                            "Nexus external IP",
+                            service.service_id,
                             service_pool.id(),
                             external_address
                         );
@@ -898,7 +901,8 @@ mod test {
             observed_external_ips[0].id,
             observed_nexus_services[0].external_ip_id
         );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
+        assert!(observed_external_ips[0].is_service);
+        assert_eq!(observed_external_ips[0].kind, IpKind::Floating);
 
         // Furthermore, we should be able to see that this IP address has been
         // allocated as a part of the service IP pool.
@@ -916,8 +920,9 @@ mod test {
             observed_external_ips[0].ip_pool_range_id,
             observed_ip_pool_ranges[0].id
         );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
-        assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip,);
+        assert!(observed_external_ips[0].is_service);
+        assert_eq!(observed_external_ips[0].kind, IpKind::Floating);
+        assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip);
 
         assert!(observed_datasets.is_empty());
 

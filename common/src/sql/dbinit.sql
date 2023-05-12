@@ -1483,26 +1483,24 @@ WHERE time_deleted IS NULL;
 /* The kind of external IP address. */
 CREATE TYPE omicron.public.ip_kind AS ENUM (
     /* Automatic source NAT provided to all guests by default */
+    /*
+     * Source NAT provided to all guests by default or for services that
+     * only require outbound external connectivity.
+     */
     'snat',
 
     /*
      * An ephemeral IP is a fixed, known address whose lifetime is the same as
      * the instance to which it is attached.
+     * Not valid for services.
      */
     'ephemeral',
 
     /*
-     * A floating IP is an independent, named API resource. It is a fixed,
-     * known address that can be moved between instances. Its lifetime is not
-     * fixed to any instance.
+     * A floating IP is an independent, named API resource that can be assigned
+     * to an instance or service.
      */
-    'floating',
-
-    /*
-     * A service IP is an IP address not attached to a project nor an instance.
-     * It's intended to be used for internal services.
-     */
-    'service'
+    'floating'
 );
 
 /*
@@ -1529,8 +1527,11 @@ CREATE TABLE omicron.public.external_ip (
     /* FK to the `ip_pool_range` table. */
     ip_pool_range_id UUID NOT NULL,
 
-    /* FK to the `instance` table. See the constraints below. */
-    instance_id UUID,
+    /* True if this IP is associated with a service rather than an instance. */
+    is_service BOOL NOT NULL,
+
+    /* FK to the `instance` or `service` table. See constraints below. */
+    parent_id UUID,
 
     /* The kind of external address, e.g., ephemeral. */
     kind omicron.public.ip_kind NOT NULL,
@@ -1557,13 +1558,16 @@ CREATE TABLE omicron.public.external_ip (
     ),
 
     /*
-     * Only nullable if this is a floating/service IP, which may exist not
-     * attached to any instance.
+     * Only nullable if this is a floating IP, which may exist not
+     * attached to any instance or service yet.
      */
-    CONSTRAINT null_non_fip_instance_id CHECK (
-        (kind != 'floating' AND instance_id IS NOT NULL) OR
-        (kind = 'floating') OR
-        (kind = 'service')
+    CONSTRAINT null_non_fip_parent_id CHECK (
+        (kind != 'floating' AND parent_id is NOT NULL) OR (kind = 'floating')
+    ),
+
+    /* Ephemeral IPs are not supported for services. */
+    CONSTRAINT ephemeral_kind_service CHECK (
+        (kind = 'ephemeral' AND is_service = FALSE) OR (kind != 'ephemeral')
     )
 );
 
@@ -1591,10 +1595,10 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
     WHERE time_deleted IS NULL;
 
 CREATE UNIQUE INDEX ON omicron.public.external_ip (
-    instance_id,
+    parent_id,
     id
 )
-    WHERE instance_id IS NOT NULL AND time_deleted IS NULL;
+    WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
 
 /*******************************************************************/
 

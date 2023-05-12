@@ -1576,12 +1576,12 @@ pub mod test {
     }
 
     async fn no_external_ip_records_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::{ExternalIp, IpKind};
+        use crate::db::model::ExternalIp;
         use crate::db::schema::external_ip::dsl;
 
         dsl::external_ip
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::kind.ne(IpKind::Service))
+            .filter(dsl::is_service.eq(false))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(
                 datastore.pool_for_tests().await.unwrap(),

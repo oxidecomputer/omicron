@@ -73,10 +73,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
 
-        let data = IncompleteExternalIp::for_service(ip_id, pool.id());
+        let data = IncompleteExternalIp::for_service(
+            ip_id,
+            name,
+            description,
+            service_id,
+            pool.id(),
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -131,11 +140,20 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
+        name: &Name,
+        description: &str,
+        service_id: Uuid,
         ip: IpAddr,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
-        let data =
-            IncompleteExternalIp::for_service_explicit(ip_id, pool.id(), ip);
+        let data = IncompleteExternalIp::for_service_explicit(
+            ip_id,
+            name,
+            description,
+            service_id,
+            pool.id(),
+            ip,
+        );
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -186,7 +204,8 @@ impl DataStore {
         let now = Utc::now();
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_service.eq(false))
+            .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
             .set(dsl::time_deleted.eq(now))
             .execute_async(self.pool_authorized(opctx).await?)
@@ -202,7 +221,8 @@ impl DataStore {
     ) -> LookupResult<Vec<ExternalIp>> {
         use db::schema::external_ip::dsl;
         dsl::external_ip
-            .filter(dsl::instance_id.eq(instance_id))
+            .filter(dsl::is_service.eq(false))
+            .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
             .get_results_async(self.pool_authorized(opctx).await?)

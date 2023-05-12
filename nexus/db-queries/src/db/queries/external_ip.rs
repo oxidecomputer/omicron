@@ -92,7 +92,8 @@ const MAX_PORT: u16 = u16::MAX;
 ///         NULL AS time_deleted,
 ///         ip_pool_id,
 ///         ip_pool_range_id,
-///         <instance_id> AS instance_id,
+///         <is_service> AS is_service,
+///         <parent_id> AS parent_id,
 ///         <kind> AS kind,
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
@@ -335,10 +336,16 @@ impl NextExternalIp {
         out.push_identifier(dsl::ip_pool_range_id::NAME)?;
         out.push_sql(", ");
 
-        // Instance ID
-        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.instance_id())?;
+        // is_service flag
+        out.push_bind_param::<sql_types::Bool, bool>(self.ip.is_service())?;
         out.push_sql(" AS ");
-        out.push_identifier(dsl::instance_id::NAME)?;
+        out.push_identifier(dsl::is_service::NAME)?;
+        out.push_sql(", ");
+
+        // Parent (Instance/Service) ID
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.parent_id())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::parent_id::NAME)?;
         out.push_sql(", ");
 
         // IP kind
@@ -366,12 +373,12 @@ impl NextExternalIp {
         // The JOIN conditions depend on the IP type. For automatic SNAT IP
         // addresses, we need to consider existing records with their port
         // ranges. That's because we want to allow providing two different
-        // chunks of ports from the same IP to two different guests.
+        // chunks of ports from the same IP to two different guests or services.
         //
         // However, for Floating and Ephemeral IPs, we need to reserve the
-        // entire port range. Guests may start listening on any port, and we
-        // need to allow inbound connections to that port. (It can't be
-        // rewritten on the way in.)
+        // entire port range. An Instance or Service may start listening on
+        // any port, and we need to allow inbound connections to that port.
+        // (It can't be rewritten on the way in.)
         //
         // The second case is much simpler, so let's start with that.
         //
@@ -621,7 +628,7 @@ impl NextExternalIp {
     // ```
     //
     // For Floating or Ephemeral IP addresses, we reserve the entire port range
-    // for the guest. In this case, we generate the static values 0 and 65535:
+    // for the guest/service. In this case, we generate the static values 0 and 65535:
     //
     // ```sql
     // SELECT
@@ -1162,36 +1169,57 @@ mod tests {
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
+        let service1_id = Uuid::new_v4();
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id1)
+            .allocate_service_ip(
+                &context.opctx,
+                id1,
+                &Name("service1-ip".parse().unwrap()),
+                "service1-ip",
+                service1_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
-        assert_eq!(ip1.kind, IpKind::Service);
+        assert!(ip1.is_service);
         assert_eq!(ip1.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(ip1.first_port.0, 0);
         assert_eq!(ip1.last_port.0, u16::MAX);
-        assert!(ip1.instance_id.is_none());
+        assert_eq!(ip1.parent_id, Some(service1_id));
 
         // Allocate the next (last) IP address
+        let service2_id = Uuid::new_v4();
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id2)
+            .allocate_service_ip(
+                &context.opctx,
+                id2,
+                &Name("service2-ip".parse().unwrap()),
+                "service2-ip",
+                service2_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
-        assert_eq!(ip2.kind, IpKind::Service);
+        assert!(ip2.is_service);
         assert_eq!(ip2.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
         assert_eq!(ip2.first_port.0, 0);
         assert_eq!(ip2.last_port.0, u16::MAX);
-        assert!(ip2.instance_id.is_none());
+        assert_eq!(ip2.parent_id, Some(service2_id));
 
         // Once we're out of IP addresses, test that we see the right error.
+        let service3_id = Uuid::new_v4();
         let id3 = Uuid::new_v4();
         let err = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id3)
+            .allocate_service_ip(
+                &context.opctx,
+                id3,
+                &Name("service3-ip".parse().unwrap()),
+                "service3-ip",
+                service3_id,
+            )
             .await
             .expect_err("Should have failed to allocate after pool exhausted");
         assert_eq!(
@@ -1220,21 +1248,25 @@ mod tests {
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
+        let service_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
             .allocate_explicit_service_ip(
                 &context.opctx,
                 id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
             )
             .await
             .expect("Failed to allocate service IP address");
-        assert_eq!(ip.kind, IpKind::Service);
+        assert!(ip.is_service);
         assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)));
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert!(ip.instance_id.is_none());
+        assert_eq!(ip.parent_id, Some(service_id));
 
         // Try allocating the same service IP again.
         let ip_again = context
@@ -1242,10 +1274,14 @@ mod tests {
             .allocate_explicit_service_ip(
                 &context.opctx,
                 id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
             )
             .await
             .expect("Failed to allocate service IP address");
+        assert!(ip_again.is_service);
         assert_eq!(ip.id, ip_again.id);
         assert_eq!(ip.ip.ip(), ip_again.ip.ip());
 
@@ -1256,6 +1292,9 @@ mod tests {
             .allocate_explicit_service_ip(
                 &context.opctx,
                 Uuid::new_v4(),
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
             )
             .await
@@ -1272,6 +1311,9 @@ mod tests {
             .allocate_explicit_service_ip(
                 &context.opctx,
                 id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
             )
             .await
@@ -1298,12 +1340,16 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
 
+        let service_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let err = context
             .db_datastore
             .allocate_explicit_service_ip(
                 &context.opctx,
                 id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
             )
             .await
@@ -1332,21 +1378,34 @@ mod tests {
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
+        let service_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id)
+            .allocate_service_ip(
+                &context.opctx,
+                id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
-        assert_eq!(ip.kind, IpKind::Service);
+        assert!(ip.is_service);
         assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert!(ip.instance_id.is_none());
+        assert_eq!(ip.parent_id, Some(service_id));
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id)
+            .allocate_service_ip(
+                &context.opctx,
+                id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
 
@@ -1376,21 +1435,34 @@ mod tests {
 
         // Allocate an IP address as we would for an external, rack-associated
         // service.
+        let service_id = Uuid::new_v4();
         let id = Uuid::new_v4();
         let ip = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id)
+            .allocate_service_ip(
+                &context.opctx,
+                id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
-        assert_eq!(ip.kind, IpKind::Service);
+        assert!(ip.is_service);
         assert_eq!(ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(ip.first_port.0, 0);
         assert_eq!(ip.last_port.0, u16::MAX);
-        assert!(ip.instance_id.is_none());
+        assert_eq!(ip.parent_id, Some(service_id));
 
         let ip_again = context
             .db_datastore
-            .allocate_service_ip(&context.opctx, id)
+            .allocate_service_ip(
+                &context.opctx,
+                id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
+            )
             .await
             .expect("Failed to allocate service IP address");
 
