@@ -13,8 +13,8 @@
 #: [dependencies.package]
 #: job = "helios / package"
 #:
-#: [dependencies.build-end-to-end-tests]
-#: job = "helios / build-end-to-end-tests"
+#: [dependencies.ci-tools]
+#: job = "helios / CI tools"
 
 set -o errexit
 set -o pipefail
@@ -118,7 +118,7 @@ cd /opt/oxide/work
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
 mkdir tests
-for p in /input/build-end-to-end-tests/work/*.gz; do
+for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done

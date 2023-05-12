@@ -1,13 +1,15 @@
 #!/bin/bash
 #:
-#: name = "helios / tuf-repo"
+#: name = "helios / build TUF repo"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
 #: output_rules = [
 #:	"=/work/manifest.toml",
 #:	"=/work/repo.zip",
 #: ]
+#:
+#: [dependencies.ci-tools]
+#: job = "helios / CI tools"
 #:
 #: [dependencies.package]
 #: job = "helios / package"
@@ -23,19 +25,11 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-cargo --version
-rustc --version
-
 COMMIT=$(git rev-parse HEAD)
 VERSION="1.0.0-alpha+git${COMMIT:0:11}"
 
-#
-# The package job builds two switch zones. The one we need should be named "switch.tar.gz" so sled-agent can find it.
-#
-mv /input/package/work/zones/{switch-asic,switch}.tar.gz
-rm /input/package/work/zones/switch-softnpu.tar.gz
-
-cargo build --locked --release --bin tufaceous
+ptime -m gunzip < /input/ci-tools/work/tufaceous.gz > /work/tufaceous
+chmod a+x /work/tufaceous
 
 # Generate a throwaway repository key.
 python3 -c 'import secrets; open("/work/key.txt", "w").write("ed25519:%s\n" % secrets.token_hex(32))'
@@ -52,13 +46,23 @@ version = "$VERSION"
 kind = "composite-control-plane"
 EOF
 
-for zone in /input/package/work/zones/*; do
+# switch-asic needs to be named "switch", skip here.
+# switch-softnpu does not go in TUF repos.
+for zone in $(ls /input/package/work/zones/* | grep -v switch); do
     cat >>/work/manifest.toml <<EOF
 [[artifact.control_plane.source.zones]]
 kind = "file"
 path = "$zone"
 EOF
 done
+
+# Add switch-asic, but call it switch so sled-agent can find it.
+cp /input/package/work/zones/switch-asic.tar.gz /work/switch.tar.gz
+cat >>/work/manifest.toml <<EOF
+[[artifact.control_plane.source.zones]]
+kind = "file"
+path = "/work/switch.tar.gz"
+EOF
 
 for kind in host trampoline; do
     mkdir -p /work/os/$kind
@@ -78,4 +82,4 @@ phase_2 = { kind = "file", path = "/work/os/$kind/image/zfs.img" }
 EOF
 done
 
-target/release/tufaceous assemble --no-generate-key --skip-all-present /work/manifest.toml /work/repo.zip
+/work/tufaceous assemble --no-generate-key --skip-all-present /work/manifest.toml /work/repo.zip
