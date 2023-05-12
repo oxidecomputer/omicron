@@ -19,23 +19,21 @@ function main
         case $opt in
             f)
                 FORCE=1
-                shift
                 ;;
             R)
                 BUILD_RECOVERY=1
                 HELIOS_BUILD_EXTRA_ARGS=-R
-                shift
                 ;;
             B)
                 BUILD_STANDARD=1
                 HELIOS_BUILD_EXTRA_ARGS=-B
-                shift
                 ;;
             h | \?)
                 usage
                 ;;
         esac
     done
+    shift $((OPTIND-1))
 
     # Ensure we got either -R or -B but not both
     case "x$BUILD_RECOVERY$BUILD_STANDARD" in
