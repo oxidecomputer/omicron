@@ -29,6 +29,7 @@
 //    001de000-5110   built-in silo ("5110" looks like "silo")
 //    001de000-4401   built-in services project
 //    001de000-074c   built-in services vpc
+//    001de000-c470   built-in services vpc subnets
 
 use lazy_static::lazy_static;
 
@@ -39,6 +40,7 @@ pub mod silo;
 pub mod silo_user;
 pub mod user_builtin;
 pub mod vpc;
+pub mod vpc_subnet;
 
 lazy_static! {
     /* See above for where this uuid comes from. */

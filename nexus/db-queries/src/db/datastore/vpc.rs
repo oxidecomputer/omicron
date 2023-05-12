@@ -152,7 +152,52 @@ impl DataStore {
                 _ => Err(e),
             })?;
 
+        self.load_builtin_vpc_subnets(opctx).await?;
+
         info!(opctx.log, "created built-in services vpc");
+
+        Ok(())
+    }
+
+    /// Load built-in VPC Subnets into the database.
+    async fn load_builtin_vpc_subnets(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(), Error> {
+        use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
+        use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+        use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
+
+        debug!(opctx.log, "attempting to create built-in VPC Subnets");
+
+        // Create built-in VPC Subnets for Oxide Services
+
+        let (_, _, authz_vpc) = db::lookup::LookupPath::new(opctx, self)
+            .vpc_id(*SERVICES_VPC_ID)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .internal_context("lookup built-in services vpc")?;
+        for vpc_subnet in
+            [&*DNS_VPC_SUBNET, &*NEXUS_VPC_SUBNET, &*NTP_VPC_SUBNET]
+        {
+            if let Ok(_) = db::lookup::LookupPath::new(opctx, self)
+                .vpc_subnet_id(vpc_subnet.id())
+                .fetch()
+                .await
+            {
+                continue;
+            }
+            self.vpc_create_subnet(opctx, &authz_vpc, vpc_subnet.clone())
+                .await
+                .map(|_| ())
+                .map_err(SubnetError::into_external)
+                .or_else(|e| match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(e),
+                })?;
+        }
+
+        info!(opctx.log, "created built-in services vpc subnets");
 
         Ok(())
     }
