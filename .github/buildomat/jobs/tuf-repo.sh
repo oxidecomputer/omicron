@@ -5,7 +5,7 @@
 #: target = "helios-latest"
 #: output_rules = [
 #:	"=/work/manifest.toml",
-#:	"=/work/repo.zip",
+#:	"=/work/repo.zip.part*",
 #: ]
 #:
 #: [dependencies.ci-tools]
@@ -83,3 +83,9 @@ EOF
 done
 
 /work/tufaceous assemble --no-generate-key --skip-all-present /work/manifest.toml /work/repo.zip
+
+#
+# XXX: Buildomat currently does not support uploads greater than 1 GiB. This is
+# an awful temporary hack which we need to strip out the moment it does.
+#
+split -a 1 -b 1024m /work/repo.zip /work/repo.zip.part
