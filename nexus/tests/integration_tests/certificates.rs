@@ -151,7 +151,7 @@ fn tls_cert_to_pem(certs: &Vec<rustls::Certificate>) -> Vec<u8> {
     serialized_certs
 }
 
-const CERTS_URL: &str = "/certificates";
+const CERTS_URL: &str = "/v1/certificates";
 const CERT_NAME: &str = "my-certificate";
 const CERT_NAME2: &str = "my-other-certificate";
 

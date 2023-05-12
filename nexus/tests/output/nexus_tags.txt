@@ -87,6 +87,10 @@ current_user_view                        GET      /v1/me
 
 API operations found with tag "silos"
 OPERATION ID                             METHOD   URL PATH
+certificate_create                       POST     /v1/certificates
+certificate_delete                       DELETE   /v1/certificates/{certificate}
+certificate_list                         GET      /v1/certificates
+certificate_view                         GET      /v1/certificates/{certificate}
 group_list                               GET      /v1/groups
 group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
@@ -102,10 +106,6 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system"
 OPERATION ID                             METHOD   URL PATH
-certificate_create                       POST     /certificates
-certificate_delete                       DELETE   /certificates/{certificate}
-certificate_list                         GET      /certificates
-certificate_view                         GET      /certificates/{certificate}
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
 ip_pool_list                             GET      /v1/system/ip-pools

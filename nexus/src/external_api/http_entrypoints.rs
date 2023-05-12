@@ -2125,8 +2125,8 @@ async fn instance_disk_detach(
 /// certificates appearing first.
 #[endpoint {
     method = GET,
-    path = "/certificates",
-    tags = ["system"],
+    path = "/v1/certificates",
+    tags = ["silos"],
 }]
 async fn certificate_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2161,8 +2161,8 @@ async fn certificate_list(
 /// external connections.
 #[endpoint {
     method = POST,
-    path = "/certificates",
-    tags = ["system"]
+    path = "/v1/certificates",
+    tags = ["silos"]
 }]
 async fn certificate_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2190,8 +2190,8 @@ struct CertificatePathParam {
 /// Returns the details of a specific certificate
 #[endpoint {
     method = GET,
-    path = "/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2214,8 +2214,8 @@ async fn certificate_view(
 /// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
-    path = "/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
