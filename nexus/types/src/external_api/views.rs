@@ -105,7 +105,11 @@ pub struct Certificate {
 
 // IMAGES
 
-/// Client view of images
+/// View of an image
+///
+/// If `project_id` is present then the image is only visible inside that
+/// project. If it's not present then the image is visible to all projects in
+/// the silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
