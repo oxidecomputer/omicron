@@ -541,6 +541,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
 
+        silo_id -> Uuid,
         service -> crate::ServiceKindEnum,
         cert -> Binary,
         key -> Binary,

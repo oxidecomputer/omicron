@@ -289,13 +289,16 @@ CREATE TABLE omicron.public.certificate (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
+    -- which Silo this certificate is used for
+    silo_id UUID NOT NULL,
+
     -- The service type which should use this certificate
     service omicron.public.service_kind NOT NULL,
 
-    -- cert.pem file as a binary blob
+    -- cert.pem file (certificate chain in PEM format) as a binary blob
     cert BYTES NOT NULL,
 
-    -- key.pem file as a binary blob
+    -- key.pem file (private key in PEM format) as a binary blob
     key BYTES NOT NULL
 );
 
@@ -310,6 +313,7 @@ CREATE INDEX ON omicron.public.certificate (
 -- Add an index which enforces that certificates have unique names, and which
 -- allows pagination-by-name.
 CREATE UNIQUE INDEX ON omicron.public.certificate (
+    silo_id,
     name
 ) WHERE
     time_deleted IS NULL;

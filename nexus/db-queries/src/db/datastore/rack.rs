@@ -37,6 +37,7 @@ use diesel::upsert::excluded;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
+use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_types::external_api::params as external_params;
@@ -61,7 +62,7 @@ pub struct RackInit {
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
-    pub certificates: Vec<Certificate>,
+    pub certificates: Vec<external_params::CertificateCreate>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
@@ -141,6 +142,7 @@ impl DataStore {
             RackUpdate(PoolError),
             DnsSerialization(Error),
             Silo(Error),
+            Certificate(nexus_db_model::CertificateError),
             RoleAssignment(Error),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -283,17 +285,6 @@ impl DataStore {
                 }
                 info!(log, "Inserted datasets");
 
-                {
-                    use db::schema::certificate::dsl;
-                    diesel::insert_into(dsl::certificate)
-                        .values(certificates)
-                        .on_conflict(dsl::id)
-                        .do_nothing()
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Inserted certificates");
-
                 // Insert the initial contents of the internal and external DNS
                 // zones.
                 Self::load_dns_data(&conn, internal_dns)
@@ -320,6 +311,29 @@ impl DataStore {
                     .map_err(RackInitError::Silo)
                     .map_err(TxnError::CustomError)?;
                 info!(log, "Created recovery silo");
+
+                // Create certificates in that Silo.
+                let certificates = certificates
+                    .into_iter()
+                    .map(|c| {
+                        Certificate::new(
+                            db_silo.id(),
+                            Uuid::new_v4(),
+                            ServiceKind::Nexus,
+                            c
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(RackInitError::Certificate)
+                    .map_err(TxnError::CustomError)?;
+                {
+                    use db::schema::certificate::dsl;
+                    diesel::insert_into(dsl::certificate)
+                        .values(certificates)
+                        .execute_async(&conn)
+                        .await?;
+                }
+                info!(log, "Inserted certificates");
 
                 // Create the first user in the initial Recovery Silo
                 let silo_user_id = Uuid::new_v4();
@@ -490,6 +504,11 @@ impl DataStore {
                 TxnError::CustomError(RackInitError::Silo(err)) => {
                     Error::internal_error(&format!(
                         "failed to create recovery Silo: {:#}", err
+                    ))
+                },
+                TxnError::CustomError(RackInitError::Certificate(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to create certificates: {:#}", err
                     ))
                 },
                 TxnError::CustomError(RackInitError::RoleAssignment(err)) => {

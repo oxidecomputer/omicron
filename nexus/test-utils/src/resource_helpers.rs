@@ -152,7 +152,7 @@ pub async fn create_certificate(
     cert: Vec<u8>,
     key: Vec<u8>,
 ) -> Certificate {
-    let url = "/v1/system/certificates".to_string();
+    let url = "/v1/certificates".to_string();
     object_create(
         client,
         &url,
@@ -170,7 +170,7 @@ pub async fn create_certificate(
 }
 
 pub async fn delete_certificate(client: &ClientTestContext, cert_name: &str) {
-    let url = format!("/v1/system/certificates/{}", cert_name);
+    let url = format!("/v1/certificates/{}", cert_name);
     object_delete(client, &url).await
 }
 
