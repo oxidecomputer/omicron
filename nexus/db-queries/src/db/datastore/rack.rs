@@ -330,8 +330,6 @@ impl DataStore {
                     use db::schema::certificate::dsl;
                     diesel::insert_into(dsl::certificate)
                         .values(certificates)
-                        .on_conflict(dsl::id)
-                        .do_nothing()
                         .execute_async(&conn)
                         .await?;
                 }

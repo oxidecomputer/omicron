@@ -205,23 +205,14 @@ has_relation(silo: Silo, "parent_silo", project: Project)
 #
 
 resource Certificate {
-	permissions = [
-	    "read",
-	    "modify",
-	    "create_child",
-	    "list_children",
-	];
+	permissions = [ "read", "modify" ];
 	relations = { parent_silo: Silo, parent_fleet: Fleet };
 
 	# Fleet-level and silo-level roles both grant privileges on certificates.
 	"read" if "admin" on "parent_silo";
 	"modify" if "admin" on "parent_silo";
-	"create_child" if "admin" on "parent_silo";
-	"list_children" if "admin" on "parent_silo";
 	"read" if "admin" on "parent_fleet";
 	"modify" if "admin" on "parent_fleet";
-	"create_child" if "admin" on "parent_fleet";
-	"list_children" if "admin" on "parent_fleet";
 }
 has_relation(silo: Silo, "parent_silo", certificate: Certificate)
 	if certificate.silo = silo;
@@ -419,7 +410,6 @@ resource SiloCertificateList {
 
 	# Both Fleet and Silo administrators can see and modify the Silo's
 	# certificates.
-	"list_children" if "admin" on "parent_silo";
 	"list_children" if "admin" on "parent_silo";
 	"list_children" if "admin" on "parent_fleet";
 	"create_child" if "admin" on "parent_silo";
