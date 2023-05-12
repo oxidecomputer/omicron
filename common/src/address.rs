@@ -88,36 +88,36 @@ lazy_static::lazy_static! {
 
     /// The IPv4 subnet for External DNS OPTE ports.
     pub static ref DNS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 0, 0), 24).unwrap());
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
 
     /// The IPv6 subnet for External DNS OPTE ports.
     pub static ref DNS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
-        Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
-            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
-
-    /// The IPv4 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
-
-    /// The IPv6 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
         ).unwrap(),
     );
 
+    /// The IPv4 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+
+    /// The IPv6 subnet for Nexus OPTE ports.
+    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+        Ipv6Network::new(
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+            Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
+        ).unwrap(),
+    );
+
     /// The IPv4 subnet for Boundary NTP OPTE ports.
     pub static ref NTP_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
 
     /// The IPv6 subnet for Boundary NTP OPTE ports.
     pub static ref NTP_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
         Ipv6Network::new(
-            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
+            Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
         ).unwrap(),
     );
