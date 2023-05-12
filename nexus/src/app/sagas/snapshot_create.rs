@@ -181,9 +181,12 @@ declare_saga_actions! {
         + ssc_detach_disk_from_pantry
     }
 
+    START_RUNNING_SNAPSHOT_UNDO -> "ssc_not_used" {
+        + ssc_noop
+        - ssc_start_running_snapshot_undo
+    }
     START_RUNNING_SNAPSHOT -> "replace_sockets_map" {
         + ssc_start_running_snapshot
-        - ssc_start_running_snapshot_undo
     }
     CREATE_VOLUME_RECORD -> "created_volume" {
         + ssc_create_volume_record
@@ -266,8 +269,7 @@ impl NexusSaga for SagaSnapshotCreate {
 
         // (Sleds + DB) Start snapshot downstairs, add an entry in the DB for
         // the dataset's snapshot.
-        //
-        // TODO: Should this be two separate saga steps?
+        builder.append(start_running_snapshot_undo_action());
         builder.append(start_running_snapshot_action());
         // (DB) Copy and modify the disk volume construction request to point
         // to the new running snapshot
@@ -288,6 +290,10 @@ impl NexusSaga for SagaSnapshotCreate {
 }
 
 // snapshot create saga: action implementations
+
+async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
 
 async fn ssc_alloc_regions(
     sagactx: NexusActionContext,
