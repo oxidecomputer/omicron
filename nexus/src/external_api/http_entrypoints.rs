@@ -2118,15 +2118,15 @@ async fn instance_disk_detach(
 
 // Certificates
 
-/// List system-wide certificates
+/// List certificates for external endpoints
 ///
-/// Returns a list of all the system-wide certificates. System-wide certificates
-/// are returned sorted by creation date, with the most recent certificates
-/// appearing first.
+/// Returns a list of TLS certificates used for the external API (for the
+/// current Silo).  These are sorted by creation date, with the most recent
+/// certificates appearing first.
 #[endpoint {
     method = GET,
-    path = "/v1/system/certificates",
-    tags = ["system"],
+    path = "/v1/certificates",
+    tags = ["silos"],
 }]
 async fn certificate_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2161,8 +2161,8 @@ async fn certificate_list(
 /// external connections.
 #[endpoint {
     method = POST,
-    path = "/v1/system/certificates",
-    tags = ["system"]
+    path = "/v1/certificates",
+    tags = ["silos"]
 }]
 async fn certificate_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2190,8 +2190,8 @@ struct CertificatePathParam {
 /// Returns the details of a specific certificate
 #[endpoint {
     method = GET,
-    path = "/v1/system/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2214,8 +2214,8 @@ async fn certificate_view(
 /// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_delete(
     rqctx: RequestContext<Arc<ServerContext>>,

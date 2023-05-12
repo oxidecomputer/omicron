@@ -94,14 +94,6 @@ pub async fn make_resources(
         LookupType::ByCompositeId("vendor-serial-model".to_string()),
     ));
 
-    let certificate_id =
-        "c56bf5b5-e6e4-49e6-fe78-8e25d698dabc".parse().unwrap();
-    builder.new_resource(authz::Certificate::new(
-        authz::FLEET,
-        certificate_id,
-        LookupType::ById(certificate_id),
-    ));
-
     let device_user_code = String::from("a-device-user-code");
     builder.new_resource(authz::DeviceAuthRequest::new(
         authz::FLEET,
@@ -152,6 +144,14 @@ async fn make_silo(
     } else {
         builder.new_resource(silo.clone());
     }
+
+    builder.new_resource(authz::SiloCertificateList::new(silo.clone()));
+    let certificate_id = Uuid::new_v4();
+    builder.new_resource(authz::Certificate::new(
+        silo.clone(),
+        certificate_id,
+        LookupType::ByName(format!("{}-certificate", silo_name)),
+    ));
 
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();

@@ -97,21 +97,17 @@ impl super::Nexus {
                 // certificates start from one (e.g., certificate names
                 // "default-1", "default-2", etc).
                 let i = i + 1;
-                db::model::Certificate::new(
-                    Uuid::new_v4(),
-                    db::model::ServiceKind::Nexus,
-                    CertificateCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: Name::try_from(format!("default-{i}")).unwrap(),
-                            description: format!("x.509 certificate #{i} initialized at rack install"),
-                        },
-                        cert: c.cert,
-                        key: c.key,
-                        service: ServiceUsingCertificate::ExternalApi,
-                    }
-                ).map_err(|e| Error::from(e))
+                CertificateCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from(format!("default-{i}")).unwrap(),
+                        description: format!("x.509 certificate #{i} initialized at rack install"),
+                    },
+                    cert: c.cert,
+                    key: c.key,
+                    service: ServiceUsingCertificate::ExternalApi,
+                }
             })
-            .collect::<Result<_, Error>>()?;
+            .collect();
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
