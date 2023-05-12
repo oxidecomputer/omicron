@@ -4157,7 +4157,6 @@ dependencies = [
  "http",
  "hyper",
  "internal-dns",
- "nexus-client 0.1.0",
  "nexus-db-queries",
  "nexus-test-interface",
  "nexus-types",

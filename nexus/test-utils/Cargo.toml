@@ -18,7 +18,6 @@ headers.workspace = true
 http.workspace = true
 hyper.workspace = true
 internal-dns.workspace = true
-nexus-client.workspace = true
 nexus-db-queries.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true

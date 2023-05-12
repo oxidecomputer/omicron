@@ -106,6 +106,20 @@ pub enum Database {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InternalDns {
+    /// Nexus should infer the DNS server addresses from this subnet.
+    ///
+    /// This is a more common usage for production.
+    FromSubnet { subnet: Ipv6Subnet<RACK_PREFIX> },
+    /// Nexus should use precisely the following address.
+    ///
+    /// This is less desirable in production, but can give value
+    /// in test scenarios.
+    FromAddress { address: SocketAddr },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
     pub id: Uuid,
@@ -119,8 +133,9 @@ pub struct DeploymentConfig {
     pub dropshot_external: ConfigDropshot,
     /// Dropshot configuration for internal API server.
     pub dropshot_internal: ConfigDropshot,
-    /// Portion of the IP space to be managed by the Rack.
-    pub subnet: Ipv6Subnet<RACK_PREFIX>,
+    /// Describes how Nexus should find internal DNS servers
+    /// for bootstrapping.
+    pub internal_dns: InternalDns,
     /// DB configuration.
     pub database: Database,
 }
@@ -397,7 +412,7 @@ mod test {
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::nexus_config::{
         BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
-        DpdConfig, LoadErrorKind,
+        DpdConfig, InternalDns, LoadErrorKind,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -525,8 +540,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             [dendrite]
@@ -564,7 +580,11 @@ mod test {
                             .unwrap(),
                         ..Default::default()
                     },
-                    subnet: Ipv6Subnet::<RACK_PREFIX>::new(Ipv6Addr::LOCALHOST),
+                    internal_dns: InternalDns::FromSubnet {
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            Ipv6Addr::LOCALHOST
+                        )
+                    },
                     database: Database::FromDns,
                 },
                 pkg: PackageConfig {
@@ -638,8 +658,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             [dendrite]
@@ -691,8 +712,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             "##,
@@ -747,8 +769,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             request_body_max_bytes = 1024
-            [deployment.subnet]
-            net = "::/56"
+            [deployment.internal_dns]
+            type = "from_subnet"
+            subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
             "##,

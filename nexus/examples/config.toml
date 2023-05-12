@@ -50,8 +50,9 @@ request_body_max_bytes = 1048576
 bind_address = "[::1]:12221"
 request_body_max_bytes = 1048576
 
-[deployment.subnet]
-net = "fd00:1122:3344:0100::/56"
+[deployment.internal_dns]
+type = "from_subnet"
+subnet.net = "fd00:1122:3344:0100::/56"
 
 [deployment.database]
 # URL for connecting to the database

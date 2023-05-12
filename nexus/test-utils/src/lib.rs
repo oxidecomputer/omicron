@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use camino::Utf8Path;
+use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigDropshot;
@@ -223,8 +224,6 @@ impl RackInitRequestBuilder {
     }
 }
 
-// TODO: Maybe split this out into a few different files?
-
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub config: &'a mut omicron_common::nexus_config::Config,
     rack_init_builder: RackInitRequestBuilder,
@@ -246,8 +245,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
     // initialized.
-    pub nexus_internal: Option<<N as NexusServer>::InternalServer>,
-    pub nexus_internal_addr: Option<SocketAddr>,
+    nexus_internal: Option<<N as NexusServer>::InternalServer>,
+    nexus_internal_addr: Option<SocketAddr>,
 
     pub external_dns_zone_name: Option<String>,
     pub external_dns: Option<dns_server::InMemoryServer>,
@@ -294,22 +293,31 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         // Start up CockroachDB.
         let database = db::test_setup_database(log).await;
-        // Store actual address/port information for the databases after they start.
-        // TODO: Use DNS, not a hard-coded config
-        self.config.deployment.database = nexus_config::Database::FromUrl {
-            url: database.pg_config().clone(),
-        };
 
-        self.database = Some(database);
+        eprintln!("DB URL: {}", database.pg_config().to_string());
+        let address = database
+            .pg_config()
+            .to_string()
+            .split("postgresql://root@")
+            .nth(1)
+            .expect("Malformed URL: Missing postgresql prefix")
+            .split("/")
+            .next()
+            .expect("Malformed URL: No slash after port")
+            .parse::<std::net::SocketAddrV6>()
+            .expect("Failed to parse port");
 
-        // TODO: We don't know the port
-        /*
+        let zpool_id = Uuid::new_v4();
+        let dataset_id = Uuid::new_v4();
+        eprintln!("DB address: {}", address);
         self.rack_init_builder.add_dataset(
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            address: dataset
+            zpool_id,
+            dataset_id,
+            address,
+            DatasetKind::Cockroach,
+            internal_dns::ServiceName::Cockroach,
         );
-        */
+        self.database = Some(database);
     }
 
     // Start ClickHouse database server.
@@ -397,6 +405,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
     // Begin starting Nexus.
     pub async fn start_nexus_internal(&mut self) {
+        self.config.deployment.database = nexus_config::Database::FromDns;
         let (nexus_internal, nexus_internal_addr) =
             N::start_internal(&self.config, &self.logctx.log).await;
 
@@ -429,8 +438,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.nexus_internal_addr = Some(nexus_internal_addr);
     }
 
-    // Perform RSS handoff
-    pub async fn start_nexus_external(&mut self) {
+    pub async fn populate_internal_dns(&mut self) -> DnsConfigParams {
         // Populate the internal DNS system with all known DNS records
         let internal_dns_address = self
             .internal_dns
@@ -447,7 +455,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
+        dns_config
+    }
 
+    // Perform RSS handoff
+    pub async fn start_nexus_external(&mut self, dns_config: DnsConfigParams) {
         // Create a recovery silo
         let external_dns_zone_name =
             internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
@@ -663,6 +675,31 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             user_name: self.user_name.unwrap(),
         }
     }
+
+    pub async fn teardown(self) {
+        if let Some(server) = self.server {
+            server.close().await;
+        }
+        if let Some(mut database) = self.database {
+            database.cleanup().await.unwrap();
+        }
+        if let Some(mut clickhouse) = self.clickhouse {
+            clickhouse.cleanup().await.unwrap();
+        }
+        if let Some(sled_agent) = self.sled_agent {
+            sled_agent.http_server.close().await.unwrap();
+        }
+        if let Some(oximeter) = self.oximeter {
+            oximeter.close().await.unwrap();
+        }
+        if let Some(producer) = self.producer {
+            producer.close().await.unwrap();
+        }
+        if let Some(mut dendrite) = self.dendrite {
+            dendrite.cleanup().await.unwrap();
+        }
+        self.logctx.cleanup_successful();
+    }
 }
 
 pub async fn test_setup_with_config<N: NexusServer>(
@@ -682,7 +719,8 @@ pub async fn test_setup_with_config<N: NexusServer>(
     builder.start_nexus_internal().await;
     builder.start_sled(sim_mode).await;
     builder.start_crucible_pantry().await;
-    builder.start_nexus_external().await;
+    let dns_config = builder.populate_internal_dns().await;
+    builder.start_nexus_external(dns_config).await;
 
     builder.start_oximeter().await;
     builder.start_producer_server().await;

@@ -55,7 +55,7 @@ const COCKROACHDB_VERSION: &str =
 /// arguments for the `cockroach start-single-node` command
 ///
 /// Without customizations, this will run `cockroach start-single-node --insecure
-/// --listen-addr=127.0.0.1:0 --http-addr=:0`.
+/// --listen-addr=[::1]:0 --http-addr=:0`.
 ///
 /// It's useful to support running this concurrently (as in the test suite).  To
 /// support this, we allow CockroachDB to choose its listening ports.  To figure
@@ -163,7 +163,7 @@ impl CockroachStarterBuilder {
 
     /// Sets the listening port for the PostgreSQL and CockroachDB protocols
     ///
-    /// We always listen only on 127.0.0.1.
+    /// We always listen only on [::1].
     pub fn listen_port(mut self, listen_port: u16) -> Self {
         self.listen_port = listen_port;
         self
@@ -221,7 +221,7 @@ impl CockroachStarterBuilder {
 
         let listen_url_file =
             CockroachStarterBuilder::temp_path(&temp_dir, "listen-url");
-        let listen_arg = format!("127.0.0.1:{}", self.listen_port);
+        let listen_arg = format!("[::1]:{}", self.listen_port);
         self.arg(&store_arg)
             .arg("--listen-addr")
             .arg(&listen_arg)
@@ -880,7 +880,7 @@ fn make_pg_config(
 
     if let Host::Tcp(ip_host) = &hosts[0] {
         let url = format!(
-            "postgresql://{}@{}:{}/{}?sslmode=disable",
+            "postgresql://{}@[{}]:{}/{}?sslmode=disable",
             COCKROACHDB_USER, ip_host, ports[0], COCKROACHDB_DATABASE
         );
         url.parse::<PostgresConfigWithUrl>().with_context(|| {
@@ -1512,12 +1512,12 @@ mod test {
     // Success case for make_pg_config()
     #[test]
     fn test_make_pg_config_ok() {
-        let url = "postgresql://root@127.0.0.1:45913?sslmode=disable";
+        let url = "postgresql://root@[::1]:45913?sslmode=disable";
         let config = make_pg_config(url).expect("failed to parse basic case");
         assert_eq!(
             config.to_string().as_str(),
             // TODO-security This user should become "omicron"
-            "postgresql://root@127.0.0.1:45913/omicron?sslmode=disable",
+            "postgresql://root@[::1]:45913/omicron?sslmode=disable",
         );
     }
 
@@ -1530,7 +1530,7 @@ mod test {
 
         // unexpected contents in initial listen URL (wrong db name)
         let error = make_pg_config(
-            "postgresql://root@127.0.0.1:45913/foobar?sslmode=disable",
+            "postgresql://root@[::1]:45913/foobar?sslmode=disable",
         )
         .unwrap_err()
         .to_string();
@@ -1542,7 +1542,7 @@ mod test {
 
         // unexpected contents in initial listen URL (extra param)
         let error = make_pg_config(
-            "postgresql://root@127.0.0.1:45913/foobar?application_name=foo",
+            "postgresql://root@[::1]:45913/foobar?application_name=foo",
         )
         .unwrap_err()
         .to_string();

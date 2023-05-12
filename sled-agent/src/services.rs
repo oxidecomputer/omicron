@@ -1314,9 +1314,11 @@ impl ServiceManager {
                             request_body_max_bytes: 1048576,
                             ..Default::default()
                         },
-                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                            sled_info.underlay_address,
-                        ),
+                        internal_dns: nexus_config::InternalDns::FromSubnet {
+                            subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                                sled_info.underlay_address,
+                            ),
+                        },
                         database: nexus_config::Database::FromDns,
                     };
 
