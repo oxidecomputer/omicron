@@ -6,16 +6,28 @@
 
 // Copyright 2021 Oxide Computer Company
 
-use dropshot::{
-    endpoint, ApiDescription, ConfigDropshot, ConfigLogging, HttpError,
-    HttpResponseOk, HttpServer, HttpServerStarter, Path, RequestContext,
-};
+use dropshot::endpoint;
+use dropshot::ApiDescription;
+use dropshot::ConfigDropshot;
+use dropshot::ConfigLogging;
+use dropshot::HttpError;
+use dropshot::HttpResponseOk;
+use dropshot::HttpServer;
+use dropshot::HttpServerStarter;
+use dropshot::Path;
+use dropshot::RequestContext;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use oximeter::types::{ProducerRegistry, ProducerResults};
+use oximeter::types::ProducerRegistry;
+use oximeter::types::ProducerResults;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+use slog::debug;
+use slog::error;
+use slog::info;
+use slog::o;
 use slog::Drain;
-use slog::{debug, error, info, o};
+use slog::Logger;
 use std::net::SocketAddr;
 use thiserror::Error;
 use uuid::Uuid;
@@ -29,13 +41,30 @@ pub enum Error {
     RegistrationError(String),
 }
 
+/// Either configuration for building a logger, or an actual logger already
+/// instantiated.
+///
+/// This can be used to start a [`Server`] with a new logger or a child of a
+/// parent logger if desired.
+#[derive(Debug, Clone)]
+pub enum LogConfig {
+    /// Configuration for building a new logger.
+    Config(ConfigLogging),
+    /// An explicit logger to use.
+    Logger(Logger),
+}
+
 /// Information used to configure a [`Server`]
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The information for contacting this server, and collecting its metrics.
     pub server_info: ProducerEndpoint,
+    /// The address at which we attempt to register as a producer.
     pub registration_address: SocketAddr,
-    pub dropshot_config: ConfigDropshot,
-    pub logging_config: ConfigLogging,
+    /// Configuration for starting the Dropshot server used to produce metrics.
+    pub dropshot: ConfigDropshot,
+    /// The logging configuration or actual logger used to emit logs.
+    pub log: LogConfig,
 }
 
 /// A Dropshot server used to expose metrics to be collected over the network.
@@ -55,13 +84,18 @@ impl Server {
         // Clone mutably, as we may update the address after the server starts, see below.
         let mut config = config.clone();
 
-        let (drain, registration) = slog_dtrace::with_drain(
-            config
-                .logging_config
+        // Build a logger, either using the configuration or actual logger
+        // provided. First build the base logger from the configuration or a
+        // clone of the provided logger, and then add the DTrace and Dropshot
+        // loggers on top of it.
+        let base_logger = match config.log {
+            LogConfig::Config(conf) => conf
                 .to_logger("metric-server")
                 .map_err(|msg| Error::Server(msg.to_string()))?,
-        );
-        let log = slog::Logger::root(drain.fuse(), slog::o!());
+            LogConfig::Logger(log) => log.clone(),
+        };
+        let (drain, registration) = slog_dtrace::with_drain(base_logger);
+        let log = Logger::root(drain.fuse(), slog::o!());
         if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
             let msg = format!("failed to register DTrace probes: {}", e);
             error!(log, "failed to register DTrace probes: {}", e);
@@ -69,10 +103,12 @@ impl Server {
         } else {
             debug!(log, "registered DTrace probes");
         }
-        let registry = ProducerRegistry::with_id(config.server_info.id);
         let dropshot_log = log.new(o!("component" => "dropshot"));
+
+        // Build the producer registry and server that uses it as its context.
+        let registry = ProducerRegistry::with_id(config.server_info.id);
         let server = HttpServerStarter::new(
-            &config.dropshot_config,
+            &config.dropshot,
             metric_server_api(),
             registry.clone(),
             &dropshot_log,
