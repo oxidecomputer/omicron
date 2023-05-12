@@ -21,6 +21,12 @@ AuthorizedKeysFile none
 AllowAgentForwarding no
 AllowTcpForwarding no
 
+#
+# Allow the user to pass through a limited set of environment variables for
+# locale and shell preferences:
+#
+AcceptEnv LANG LC_* OXIDE_PREF_*
+
 AllowUsers wicket support
 
 # Allow "wicket" to log in without a password, and constrain it to the captive shell
