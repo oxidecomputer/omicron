@@ -28,7 +28,6 @@ use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -566,17 +565,13 @@ impl DataStore {
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                // This is the rare case where we want to allow table scans.
-                // There must not be enough Nexus instances for this to be a
-                // problem.  If there were, we couldn't fit them in DNS anyway.
-                let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-                conn.batch_execute_async(sql).await?;
                 Ok(extip_dsl::external_ip
                     .inner_join(
                         service_dsl::service.on(service_dsl::id
                             .eq(extip_dsl::parent_id.assume_not_null())),
                     )
                     .filter(extip_dsl::parent_id.is_not_null())
+                    .filter(extip_dsl::time_deleted.is_null())
                     .filter(extip_dsl::is_service)
                     .filter(service_dsl::kind.eq(ServiceKind::Nexus))
                     .select(ExternalIp::as_select())
