@@ -174,9 +174,7 @@ pub struct DatasetPutRequest {
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     ExternalDns,
-    ExternalDnsConfig,
     InternalDns,
-    InternalDnsConfig,
     Nexus { external_address: IpAddr },
     Oximeter,
     Dendrite,
@@ -189,9 +187,7 @@ impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
-            ExternalDnsConfig => "external_dns_config",
             ExternalDns => "external_dns",
-            InternalDnsConfig => "internal_dns_config",
             InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",

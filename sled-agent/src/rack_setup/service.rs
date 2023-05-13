@@ -645,27 +645,15 @@ impl ServiceInner {
                                 zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::ExternalDnsConfig,
+                                kind: NexusTypes::ServiceKind::ExternalDns,
                             });
                         }
-                        ServiceType::InternalDns {
-                            http_address,
-                            dns_address,
-                        } => {
+                        ServiceType::InternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::InternalDnsConfig,
-                            });
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: dns_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
                             });
                         }

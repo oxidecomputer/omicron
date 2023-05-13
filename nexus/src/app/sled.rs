@@ -277,10 +277,10 @@ impl super::Nexus {
             db::model::Service::new(id, sled_id, zone_id, address, kind);
         self.db_datastore.service_upsert(opctx, service).await?;
 
-        if kind == ServiceKind::ExternalDnsConfig {
+        if kind == ServiceKind::ExternalDns {
             self.background_tasks
                 .activate(&self.background_tasks.task_external_dns_servers);
-        } else if kind == ServiceKind::InternalDnsConfig {
+        } else if kind == ServiceKind::InternalDns {
             self.background_tasks
                 .activate(&self.background_tasks.task_internal_dns_servers);
         }

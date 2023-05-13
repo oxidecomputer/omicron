@@ -20,9 +20,7 @@ impl_enum_type!(
     CruciblePantry => b"crucible_pantry"
     Dendrite => b"dendrite"
     ExternalDns => b"external_dns"
-    ExternalDnsConfig => b"external_dns_config"
     InternalDns => b"internal_dns"
-    InternalDnsConfig => b"internal_dns_config"
     Nexus => b"nexus"
     Oximeter => b"oximeter"
     Tfport => b"tfport"
@@ -53,14 +51,8 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             internal_api::params::ServiceKind::ExternalDns => {
                 ServiceKind::ExternalDns
             }
-            internal_api::params::ServiceKind::ExternalDnsConfig => {
-                ServiceKind::ExternalDnsConfig
-            }
             internal_api::params::ServiceKind::InternalDns => {
                 ServiceKind::InternalDns
-            }
-            internal_api::params::ServiceKind::InternalDnsConfig => {
-                ServiceKind::InternalDnsConfig
             }
             internal_api::params::ServiceKind::Nexus { .. } => {
                 ServiceKind::Nexus

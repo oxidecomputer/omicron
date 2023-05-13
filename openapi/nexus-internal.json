@@ -2662,35 +2662,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "external_dns_config"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
                   "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns_config"
                 ]
               }
             },
