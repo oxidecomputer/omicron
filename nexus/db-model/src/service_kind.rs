@@ -48,7 +48,7 @@ impl From<ServiceUsingCertificate> for ServiceKind {
 impl From<internal_api::params::ServiceKind> for ServiceKind {
     fn from(k: internal_api::params::ServiceKind) -> Self {
         match k {
-            internal_api::params::ServiceKind::ExternalDns => {
+            internal_api::params::ServiceKind::ExternalDns { .. } => {
                 ServiceKind::ExternalDns
             }
             internal_api::params::ServiceKind::InternalDns => {

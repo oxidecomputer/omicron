@@ -261,7 +261,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
         sled_id: sa_id,
         zone_id: Some(Uuid::new_v4()),
         address: dns_server_address_external,
-        kind: ServiceKind::ExternalDns,
+        kind: ServiceKind::ExternalDns {
+            external_address: external_dns_server.local_address().ip(),
+        },
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),

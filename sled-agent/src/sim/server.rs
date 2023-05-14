@@ -288,7 +288,9 @@ impl Server {
         {
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDns,
+                kind: NexusTypes::ServiceKind::ExternalDns {
+                    external_address: (*external_dns_internal_addr.ip()).into(),
+                },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),

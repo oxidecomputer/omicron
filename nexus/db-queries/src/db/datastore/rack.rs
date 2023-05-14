@@ -222,14 +222,30 @@ impl DataStore {
                         })
                     })?;
 
-                    if let internal_params::ServiceKind::Nexus { external_address } = service.kind {
-                        // Allocate the explicit IP address that is currently
-                        // in-use by this Nexus service.
+                    // Record explicit IP allocation if service has one
+                    let external_ip = match service.kind {
+                        internal_params::ServiceKind::ExternalDns { external_address } => {
+                            Some((
+                                db::model::Name("external-dns".parse().unwrap()),
+                                "ExternalDns External IP",
+                                external_address,
+                            ))
+                        }
+                        internal_params::ServiceKind::Nexus { external_address } => {
+                            Some((
+                                db::model::Name("nexus".parse().unwrap()),
+                                "Nexus External IP",
+                                external_address,
+                            ))
+                        }
+                        _ => None
+                    };
+                    if let Some((name, description, external_address)) = external_ip {
                         let ip_id = Uuid::new_v4();
                         let data = IncompleteExternalIp::for_service_explicit(
                             ip_id,
-                            &db::model::Name("nexus".parse().unwrap()),
-                            "Nexus external IP",
+                            &name,
+                            description,
                             service.service_id,
                             service_pool.id(),
                             external_address
@@ -238,7 +254,11 @@ impl DataStore {
                             &conn,
                             data
                         ).await.map_err(|err| {
-                            warn!(log, "Initializing Rack: Failed to allocate IP address");
+                            warn!(
+                                log,
+                                "Initializing Rack: Failed to allocate IP address ({:?})",
+                                name
+                            );
                             TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
                         assert_eq!(allocated_ip.ip.ip(), external_address);
@@ -829,26 +849,43 @@ mod test {
     fn_to_get_all!(dataset, Dataset);
 
     #[tokio::test]
-    async fn rack_set_initialized_with_nexus_service() {
-        let logctx =
-            dev::test_setup_log("rack_set_initialized_with_nexus_service");
+    async fn rack_set_initialized_with_services() {
+        let logctx = dev::test_setup_log("rack_set_initialized_with_services");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let sled = create_test_sled(&datastore).await;
 
-        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let service_ip_pool_ranges = vec![IpRange::try_from((
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(1, 2, 3, 5),
+        ))
+        .unwrap()];
+
+        let external_dns_ip = service_ip_pool_ranges[0].first_address();
+        let external_dns_id = Uuid::new_v4();
+        let nexus_ip = service_ip_pool_ranges[0].last_address();
         let nexus_id = Uuid::new_v4();
-        let services = vec![internal_params::ServicePutRequest {
-            service_id: nexus_id,
-            sled_id: sled.id(),
-            zone_id: Some(nexus_id),
-            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-            kind: internal_params::ServiceKind::Nexus {
-                external_address: nexus_ip,
+        let services = vec![
+            internal_params::ServicePutRequest {
+                service_id: external_dns_id,
+                sled_id: sled.id(),
+                zone_id: Some(external_dns_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
+                kind: internal_params::ServiceKind::ExternalDns {
+                    external_address: external_dns_ip,
+                },
             },
-        }];
-        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+            internal_params::ServicePutRequest {
+                service_id: nexus_id,
+                sled_id: sled.id(),
+                zone_id: Some(nexus_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: nexus_ip,
+                },
+            },
+        ];
 
         let rack = datastore
             .rack_set_initialized(
@@ -868,23 +905,44 @@ mod test {
         let observed_services = get_all_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
-        // We should only see the one nexus we inserted earlier
-        assert_eq!(observed_services.len(), 1);
-        assert_eq!(observed_services[0].sled_id, sled.id());
-        assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
-        assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
-        assert_eq!(*observed_services[0].port, 123);
+        // We should see both the ExternalDns and Nexus services
+        assert_eq!(observed_services.len(), 2);
+        let (dns_service, nexus_service) =
+            if observed_services[0].kind == ServiceKind::ExternalDns {
+                (&observed_services[0], &observed_services[1])
+            } else {
+                (&observed_services[1], &observed_services[0])
+            };
 
-        // We should also see the single external IP allocated for this nexus
-        // interface.
+        assert_eq!(dns_service.id(), external_dns_id);
+        assert_eq!(dns_service.sled_id, sled.id());
+        assert_eq!(dns_service.kind, ServiceKind::ExternalDns);
+        assert_eq!(*dns_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*dns_service.port, 123);
+
+        assert_eq!(nexus_service.id(), nexus_id);
+        assert_eq!(nexus_service.sled_id, sled.id());
+        assert_eq!(nexus_service.kind, ServiceKind::Nexus);
+        assert_eq!(*nexus_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*nexus_service.port, 456);
+
+        // We should also see the single external IP allocated for each service
         let observed_external_ips = get_all_external_ips(&datastore).await;
-        assert_eq!(observed_external_ips.len(), 1);
-        assert_eq!(
-            observed_external_ips[0].parent_id,
-            Some(observed_services[0].id())
-        );
-        assert!(observed_external_ips[0].is_service);
-        assert_eq!(observed_external_ips[0].kind, IpKind::Floating);
+        assert_eq!(observed_external_ips.len(), 2);
+        let (dns_external_ip, nexus_external_ip) =
+            if observed_external_ips[0].parent_id == Some(external_dns_id) {
+                (&observed_external_ips[0], &observed_external_ips[1])
+            } else {
+                (&observed_external_ips[1], &observed_external_ips[0])
+            };
+
+        assert_eq!(dns_external_ip.parent_id, Some(dns_service.id()));
+        assert!(dns_external_ip.is_service);
+        assert_eq!(dns_external_ip.kind, IpKind::Floating);
+
+        assert_eq!(nexus_external_ip.parent_id, Some(nexus_service.id()));
+        assert!(nexus_external_ip.is_service);
+        assert_eq!(nexus_external_ip.kind, IpKind::Floating);
 
         // Furthermore, we should be able to see that this IP address has been
         // allocated as a part of the service IP pool.
@@ -896,13 +954,20 @@ mod test {
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
-        // Verify the allocated external IP
-        assert_eq!(observed_external_ips[0].ip_pool_id, svc_pool.id());
+        // Verify the allocated external IPs
+        assert_eq!(dns_external_ip.ip_pool_id, svc_pool.id());
         assert_eq!(
-            observed_external_ips[0].ip_pool_range_id,
+            dns_external_ip.ip_pool_range_id,
             observed_ip_pool_ranges[0].id
         );
-        assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip);
+        assert_eq!(dns_external_ip.ip.ip(), external_dns_ip);
+
+        assert_eq!(nexus_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(
+            nexus_external_ip.ip_pool_range_id,
+            observed_ip_pool_ranges[0].id
+        );
+        assert_eq!(nexus_external_ip.ip.ip(), nexus_ip);
 
         assert!(observed_datasets.is_empty());
 
@@ -1144,31 +1209,31 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         // Request two services which happen to be using the same IP address.
-        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
-        let nexus_id1 = Uuid::new_v4();
-        let nexus_id2 = Uuid::new_v4();
+        let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let external_dns_id = Uuid::new_v4();
+        let nexus_id = Uuid::new_v4();
 
         let services = vec![
             internal_params::ServicePutRequest {
-                service_id: nexus_id1,
+                service_id: external_dns_id,
                 sled_id: sled.id(),
-                zone_id: Some(nexus_id1),
+                zone_id: Some(external_dns_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-                kind: internal_params::ServiceKind::Nexus {
-                    external_address: nexus_ip,
+                kind: internal_params::ServiceKind::ExternalDns {
+                    external_address: ip,
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: nexus_id2,
+                service_id: nexus_id,
                 sled_id: sled.id(),
-                zone_id: Some(nexus_id2),
+                zone_id: Some(nexus_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
-                    external_address: nexus_ip,
+                    external_address: ip,
                 },
             },
         ];
-        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+        let service_ip_pool_ranges = vec![IpRange::from(ip)];
 
         let result = datastore
             .rack_set_initialized(

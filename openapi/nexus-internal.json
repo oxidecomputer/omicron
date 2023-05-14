@@ -2645,6 +2645,18 @@
           {
             "type": "object",
             "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "external_address": {
+                    "type": "string",
+                    "format": "ip"
+                  }
+                },
+                "required": [
+                  "external_address"
+                ]
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2653,6 +2665,7 @@
               }
             },
             "required": [
+              "content",
               "type"
             ]
           },

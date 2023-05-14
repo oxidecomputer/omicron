@@ -639,13 +639,19 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Dendrite,
                             });
                         }
-                        ServiceType::ExternalDns { http_address, .. } => {
+                        ServiceType::ExternalDns {
+                            http_address,
+                            dns_address,
+                            ..
+                        } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
-                                kind: NexusTypes::ServiceKind::ExternalDns,
+                                kind: NexusTypes::ServiceKind::ExternalDns {
+                                    external_address: dns_address.ip(),
+                                },
                             });
                         }
                         ServiceType::InternalDns { http_address, .. } => {
