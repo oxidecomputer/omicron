@@ -65,13 +65,19 @@ impl Control for OverviewPane {
                 }
             }
             Cmd::Exit => {
-                // Transition to the rack view. `Exit` makes sense here
-                // because we are exiting a subview of the rack.
-                if !self.rack_view_selected {
+                if self.inventory_view.popup.is_some() {
+                    // If we're showing a popup, pass this event through so we
+                    // can close it.
+                    self.inventory_view.on(state, cmd)
+                } else if !self.rack_view_selected {
+                    // Otherwise, transition to the rack view. `Exit` makes
+                    // sense here because we are exiting a subview of the rack.
                     self.rack_view_selected = true;
                     Some(Action::Redraw)
                 } else {
-                    self.inventory_view.on(state, cmd)
+                    // We're already on the rack view - there's nowhere to exit
+                    // to, so this is a no-op.
+                    None
                 }
             }
             _ => self.dispatch(state, cmd),
