@@ -426,6 +426,12 @@
               "$ref": "#/components/schemas/ProgressEventForWicketdEngineSpec"
             }
           },
+          "root_execution_id": {
+            "nullable": true,
+            "description": "The root execution ID for this report.\n\nEach report has a root execution ID, which ties together all step and progress events. This is always filled out if the list of step events is non-empty.",
+            "type": "string",
+            "format": "uuid"
+          },
           "step_events": {
             "description": "A list of step events.\n\nStep events include success and failure events.",
             "type": "array",
