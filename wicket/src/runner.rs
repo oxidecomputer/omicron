@@ -11,6 +11,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use futures::StreamExt;
+use slog::Logger;
 use slog::{debug, error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
@@ -58,6 +59,16 @@ pub struct RunnerCore {
 }
 
 impl RunnerCore {
+    pub fn new(log: Logger) -> Self {
+        Self {
+            screen: Screen::new(&log),
+            state: State::new(),
+            terminal: Terminal::new(CrosstermBackend::new(stdout())).unwrap(),
+            log,
+            log_throttler: EventReportLogThrottler::default(),
+        }
+    }
+
     /// Resize and draw the initial screen before handling `Event`s
     pub fn init_screen(&mut self) -> anyhow::Result<()> {
         // Size the initial screen
@@ -215,20 +226,13 @@ pub struct Runner {
 impl Runner {
     pub fn new(log: slog::Logger, wicketd_addr: SocketAddrV6) -> Runner {
         let (events_tx, events_rx) = unbounded_channel();
-        let backend = CrosstermBackend::new(stdout());
         let tokio_rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap();
         let (wicketd, wicketd_manager) =
             WicketdManager::new(&log, events_tx.clone(), wicketd_addr);
-        let core = RunnerCore {
-            screen: Screen::new(&log),
-            state: State::new(),
-            terminal: Terminal::new(backend).unwrap(),
-            log,
-            log_throttler: EventReportLogThrottler::default(),
-        };
+        let core = RunnerCore::new(log);
         Runner {
             core,
             events_rx,
