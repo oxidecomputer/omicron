@@ -192,6 +192,16 @@ impl<S: StepSpec> StepEvent<S> {
             | StepEventKind::Unknown => None,
         }
     }
+
+    /// Returns the event index for the leaf event, recursing into nested events
+    /// if necessary.
+    pub fn leaf_event_index(&self) -> usize {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_event_index(),
+            _ => self.event_index,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete

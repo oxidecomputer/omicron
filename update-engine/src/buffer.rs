@@ -719,10 +719,9 @@ impl<S: StepSpec> EventBufferStepData<S> {
     }
 
     fn add_high_priority_step_event(&mut self, event: StepEvent<S>) {
-        match self
-            .high_priority
-            .binary_search_by(|probe| probe.event_index.cmp(&event.event_index))
-        {
+        match self.high_priority.binary_search_by(|probe| {
+            probe.leaf_event_index().cmp(&event.leaf_event_index())
+        }) {
             Ok(_) => {
                 // This is a duplicate.
             }
@@ -747,7 +746,7 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
             StepStatus::Running { low_priority, .. } => {
                 match low_priority.binary_search_by(|probe| {
-                    probe.event_index.cmp(&event.event_index)
+                    probe.leaf_event_index().cmp(&event.leaf_event_index())
                 }) {
                     Ok(_) => {
                         // This is a duplicate.
