@@ -979,6 +979,8 @@ pub(crate) mod test {
         );
         assert!(no_region_allocations_exist(datastore, &test).await);
         assert!(no_regions_ensured(&sled_agent, &test).await);
+
+        assert!(test.crucible_resources_deleted().await);
     }
 
     #[nexus_test(server = crate::Server)]
