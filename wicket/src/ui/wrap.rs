@@ -295,7 +295,8 @@ impl<'a> Fragment for StyledWord<'a> {
     }
 
     fn whitespace_width(&self) -> f64 {
-        // Since whitespace is always ASCII spaces, this is
+        // Since whitespace is always ASCII spaces, this is equal to the number
+        // of whitespace characters.
         self.whitespace.len() as f64
     }
 
