@@ -157,7 +157,7 @@ impl Control for RackView {
             "OXIDE RACK",
             component_style,
         )]))
-        .block(border.clone().title("<ENTER>"));
+        .block(border.clone());
         frame.render_widget(title_bar, chunks[0]);
 
         // Draw the pane border
@@ -207,7 +207,7 @@ impl InventoryView {
     pub fn new() -> InventoryView {
         InventoryView {
             help: vec![
-                ("Rack View", "<ENTER>"),
+                ("Rack View", "<ESC>"),
                 ("Switch Component", "<LEFT/RIGHT>"),
                 ("Scroll", "<UP/DOWN>"),
                 ("Ignition", "<I>"),
@@ -309,7 +309,7 @@ impl Control for InventoryView {
                 component_style,
             ),
         ]))
-        .block(block.clone().title("<ENTER>"));
+        .block(block.clone());
         frame.render_widget(title_bar, chunks[0]);
 
         // Draw the contents
