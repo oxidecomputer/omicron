@@ -65,8 +65,8 @@ function main
         *) HELIOS_PATH=$(pwd)/$1 ;;
     esac
     case $2 in
-        /*) TRAMPOLINE_PATH=$2 ;;
-        *) TRAMPOLINE_PATH=$(pwd)/$2 ;;
+        /*) GLOBAL_ZONE_TARBALL_PATH=$2 ;;
+        *) GLOBAL_ZONE_TARBALL_PATH=$(pwd)/$2 ;;
     esac
 
     # Extract the trampoline global zone tarball into a tmp_gz directory
@@ -75,8 +75,8 @@ function main
     fi
     trap 'cd /; rm -rf "$tmp_gz"' EXIT
 
-    echo "Extracting trampoline gz packages into $tmp_gz"
-    ptime -m tar xvzf $TRAMPOLINE_PATH -C $tmp_gz
+    echo "Extracting gz packages into $tmp_gz"
+    ptime -m tar xvzf $GLOBAL_ZONE_TARBALL_PATH -C $tmp_gz
 
     # Move to the helios checkout
     cd $HELIOS_PATH
