@@ -14,6 +14,7 @@ use futures::StreamExt;
 use slog::{debug, error, info};
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
+use std::time::Instant;
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
@@ -21,6 +22,7 @@ use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
 
+use crate::events::EventReportMap;
 use crate::ui::Screen;
 use crate::wicketd::{self, WicketdHandle, WicketdManager};
 use crate::{Action, Cmd, Event, KeyHandler, Recorder, State, TICK_INTERVAL};
@@ -49,6 +51,10 @@ pub struct RunnerCore {
 
     // Our friendly neighborhood logger
     pub log: slog::Logger,
+
+    // Helper to limit our logging of event reports (which can be quite large)
+    // to a slower cadence than their arrival.
+    log_throttler: EventReportLogThrottler,
 }
 
 impl RunnerCore {
@@ -114,7 +120,7 @@ impl RunnerCore {
                 event_reports,
             } => {
                 self.state.service_status.reset_wicketd(Duration::ZERO);
-                debug!(self.log, "{:#?}", event_reports);
+                self.log_throttler.log_event_report(&event_reports, &self.log);
                 self.state.update_state.update_artifacts_and_reports(
                     &self.log,
                     system_version,
@@ -221,6 +227,7 @@ impl Runner {
             state: State::new(),
             terminal: Terminal::new(backend).unwrap(),
             log,
+            log_throttler: EventReportLogThrottler::default(),
         };
         Runner {
             core,
@@ -344,4 +351,53 @@ async fn run_event_listener(
             }
         }
     });
+}
+
+struct EventReportLogThrottler {
+    last_log: Option<Instant>,
+    min_time_between_logs: Duration,
+}
+
+impl Default for EventReportLogThrottler {
+    fn default() -> Self {
+        const DEFAULT_TIME_BETWEEN_LOGS: Duration = Duration::from_secs(60);
+        Self::new(DEFAULT_TIME_BETWEEN_LOGS)
+    }
+}
+
+impl EventReportLogThrottler {
+    fn new(min_time_between_logs: Duration) -> Self {
+        Self { last_log: None, min_time_between_logs }
+    }
+
+    fn log_event_report(
+        &mut self,
+        event_report: &EventReportMap,
+        log: &slog::Logger,
+    ) {
+        let should_log_full_report = self
+            .last_log
+            .map(|last| last.elapsed() >= self.min_time_between_logs)
+            .unwrap_or(true);
+
+        if should_log_full_report {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!("{:#?}", event_report),
+            );
+            self.last_log = Some(Instant::now());
+        } else {
+            debug!(
+                log,
+                "received event reports for {} sleds",
+                event_report.len();
+                "details" => format!(
+                    "(omitted; only logged every {:?})",
+                    self.min_time_between_logs,
+                ),
+            );
+        }
+    }
 }
