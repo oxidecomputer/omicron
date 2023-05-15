@@ -364,7 +364,7 @@ struct EventReportLogThrottler {
 
 impl Default for EventReportLogThrottler {
     fn default() -> Self {
-        const DEFAULT_TIME_BETWEEN_LOGS: Duration = Duration::from_secs(60);
+        const DEFAULT_TIME_BETWEEN_LOGS: Duration = Duration::from_secs(15);
         Self::new(DEFAULT_TIME_BETWEEN_LOGS)
     }
 }

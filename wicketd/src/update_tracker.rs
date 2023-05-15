@@ -155,11 +155,6 @@ impl UpdateTracker {
                         // this update's artifact ID? If not, cancel the old
                         // task (which might still be trying to upload) and
                         // start a new one with our current image.
-                        //
-                        // TODO-correctness If we still have updates running
-                        // that expect the old image, they're probably going to
-                        // fail. Should we handle that more cleanly or just let
-                        // them fail?
                         if prev.status.borrow().id != plan.trampoline_phase_2.id
                         {
                             // It does _not_ match - we have a new plan with a
