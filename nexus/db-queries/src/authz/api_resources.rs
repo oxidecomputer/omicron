@@ -976,7 +976,7 @@ authz_resource! {
 
 authz_resource! {
     name = "SledInstance",
-    parent = "Sled",
+    parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = FleetChild,

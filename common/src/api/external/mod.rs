@@ -705,6 +705,7 @@ pub enum ResourceType {
     Rack,
     Service,
     Sled,
+    SledInstance,
     Switch,
     SagaDbg,
     Snapshot,

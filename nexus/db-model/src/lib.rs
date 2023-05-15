@@ -137,6 +137,7 @@ pub use silo_group::*;
 pub use silo_user::*;
 pub use silo_user_password_hash::*;
 pub use sled::*;
+pub use sled_instance::*;
 pub use sled_resource::*;
 pub use sled_resource_kind::*;
 pub use snapshot::*;
