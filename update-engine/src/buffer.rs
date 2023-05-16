@@ -131,9 +131,10 @@ impl<S: StepSpec> EventBuffer<S> {
         // Gather step events across all keys.
         let mut step_events = Vec::new();
         let mut progress_events = Vec::new();
-        for value in self.event_store.map.values() {
-            step_events.extend(value.step_events_since(last_seen).cloned());
-            progress_events.extend(value.step_status.progress_event().cloned());
+        for (_, step_data) in self.steps().as_slice() {
+            step_events.extend(step_data.step_events_since(last_seen).cloned());
+            progress_events
+                .extend(step_data.step_status.progress_event().cloned());
         }
 
         // Sort events.
@@ -145,7 +146,12 @@ impl<S: StepSpec> EventBuffer<S> {
             last_seen = Some(last.event_index);
         }
 
-        EventReport { step_events, progress_events, last_seen }
+        EventReport {
+            step_events,
+            progress_events,
+            root_execution_id: self.root_execution_id(),
+            last_seen,
+        }
     }
 
     /// Returns true if any further step events are pending since `last_seen`.
@@ -154,8 +160,8 @@ impl<S: StepSpec> EventBuffer<S> {
     /// step events. A typical use for this is to check that all step events
     /// have been reported before a sender shuts down.
     pub fn has_pending_events_since(&self, last_seen: Option<usize>) -> bool {
-        for value in self.event_store.map.values() {
-            if value.step_events_since(last_seen).next().is_some() {
+        for (_, step_data) in self.steps().as_slice() {
+            if step_data.step_events_since(last_seen).next().is_some() {
                 return true;
             }
         }
@@ -719,10 +725,11 @@ impl<S: StepSpec> EventBufferStepData<S> {
     }
 
     fn add_high_priority_step_event(&mut self, event: StepEvent<S>) {
-        match self
-            .high_priority
-            .binary_search_by(|probe| probe.event_index.cmp(&event.event_index))
-        {
+        // Dedup by the *leaf index* in case nested reports aren't deduped
+        // coming in.
+        match self.high_priority.binary_search_by(|probe| {
+            probe.leaf_event_index().cmp(&event.leaf_event_index())
+        }) {
             Ok(_) => {
                 // This is a duplicate.
             }
@@ -746,8 +753,10 @@ impl<S: StepSpec> EventBufferStepData<S> {
                 );
             }
             StepStatus::Running { low_priority, .. } => {
+                // Dedup by the *leaf index* in case nested reports aren't
+                // deduped coming in.
                 match low_priority.binary_search_by(|probe| {
-                    probe.event_index.cmp(&event.event_index)
+                    probe.leaf_event_index().cmp(&event.leaf_event_index())
                 }) {
                     Ok(_) => {
                         // This is a duplicate.
@@ -1093,7 +1102,7 @@ mod tests {
             .new_step(
                 "nested".to_owned(),
                 3,
-                "Step 3 (this is nested",
+                "Step 3 (this is nested)",
                 move |parent_cx| async move {
                     parent_cx
                         .with_nested_engine(|engine| {
@@ -1108,10 +1117,48 @@ mod tests {
             )
             .register();
 
-        // The step index here (20) is large enough to be higher than all nested
+        let log = logctx.log.clone();
+        engine
+            .new_step(
+                "remote-nested".to_owned(),
+                20,
+                "Step 4 (remote nested)",
+                move |cx| async move {
+                    let (sender, mut receiver) = mpsc::channel(16);
+                    let mut engine = UpdateEngine::new(&log, sender);
+                    define_remote_nested_engine(&mut engine, 20);
+
+                    let mut buffer = EventBuffer::default();
+
+                    let mut execute_fut = std::pin::pin!(engine.execute());
+                    let mut execute_done = false;
+                    loop {
+                        tokio::select! {
+                            res = &mut execute_fut, if !execute_done => {
+                                res.expect("remote nested engine completed successfully");
+                                execute_done = true;
+                            }
+                            Some(event) = receiver.recv() => {
+                                // Generate complete reports to ensure deduping
+                                // happens within StepContexts.
+                                buffer.add_event(event);
+                                cx.send_nested_report(buffer.generate_report()).await?;
+                            }
+                            else => {
+                                break;
+                            }
+                        }
+                    }
+
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
+
+        // The step index here (100) is large enough to be higher than all nested
         // steps.
         engine
-            .new_step("baz".to_owned(), 20, "Step 4", move |_cx| async move {
+            .new_step("baz".to_owned(), 100, "Step 5", move |_cx| async move {
                 StepResult::success((), Default::default())
             })
             .register();
@@ -1230,10 +1277,36 @@ mod tests {
                         panic!("first event should always be a step event")
                     }
                 };
+
+            // Ensure that events are never seen twice.
+            let mut event_indexes_seen = HashSet::new();
+            let mut leaf_event_indexes_seen = HashSet::new();
             let generated_step_events: Vec<_> = generated_events
                 .iter()
                 .filter_map(|event| match event {
-                    Event::Step(event) => Some(event.clone()),
+                    Event::Step(event) => {
+                        if event_indexes_seen.contains(&event.event_index) {
+                            panic!(
+                                "duplicate event seen for index {}",
+                                event.event_index
+                            );
+                        }
+                        event_indexes_seen.insert(event.event_index);
+
+                        let leaf_event_key = (
+                            event.leaf_execution_id(),
+                            event.leaf_event_index(),
+                        );
+                        if leaf_event_indexes_seen.contains(&leaf_event_key) {
+                            panic!(
+                                "duplicate leaf event seen \
+                                 for key {leaf_event_key:?}",
+                            );
+                        }
+                        leaf_event_indexes_seen.insert(leaf_event_key);
+
+                        Some(event.clone())
+                    }
                     Event::Progress(_) => None,
                 })
                 .collect();
@@ -1490,19 +1563,32 @@ mod tests {
                     ),
                     "this is the last event so ExecutionStatus must be completed"
                 );
-                // There is one nested engine.
+                // There are two nested engines.
                 ensure!(
-                    summary.len() == 2,
-                    "one nested engine must be defined"
+                    summary.len() == 3,
+                    "two nested engines must be defined"
                 );
-                let (_, nested_summary) =
-                    summary.last().expect("this is the second nested engine");
+
+                let (_, nested_summary) = summary
+                    .get_index(1)
+                    .expect("this is the first nested engine");
                 ensure!(
                     matches!(
                         nested_summary.execution_status,
                         ExecutionStatus::Failed { .. },
                     ),
                     "for this engine, the ExecutionStatus must be failed"
+                );
+
+                let (_, nested_summary) = summary
+                    .get_index(2)
+                    .expect("this is the second nested engine");
+                ensure!(
+                    matches!(
+                        nested_summary.execution_status,
+                        ExecutionStatus::Completed { .. },
+                    ),
+                    "for this engine, the ExecutionStatus must be succeeded"
                 );
             } else {
                 ensure!(
@@ -1611,6 +1697,43 @@ mod tests {
                     .await;
 
                     bail!("failing step")
+                },
+            )
+            .register();
+    }
+
+    fn define_remote_nested_engine(
+        engine: &mut UpdateEngine<'_, TestSpec>,
+        start_id: usize,
+    ) {
+        engine
+            .new_step(
+                "nested-foo".to_owned(),
+                start_id + 1,
+                "Nested step 1",
+                move |cx| async move {
+                    cx.send_progress(
+                        StepProgress::progress(Default::default()),
+                    )
+                    .await;
+                    StepResult::success((), Default::default())
+                },
+            )
+            .register();
+
+        engine
+            .new_step::<_, _, ()>(
+                "nested-bar".to_owned(),
+                start_id + 2,
+                "Nested step 2",
+                move |cx| async move {
+                    cx.send_progress(StepProgress::with_current(
+                        20,
+                        Default::default(),
+                    ))
+                    .await;
+
+                    StepResult::success((), Default::default())
                 },
             )
             .register();

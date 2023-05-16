@@ -192,6 +192,25 @@ impl<S: StepSpec> StepEvent<S> {
             | StepEventKind::Unknown => None,
         }
     }
+
+    /// Returns the execution ID for the leaf event, recursing into nested
+    /// events if necessary.
+    pub fn leaf_execution_id(&self) -> ExecutionId {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_execution_id(),
+            _ => self.execution_id,
+        }
+    }
+
+    /// Returns the event index for the leaf event, recursing into nested events
+    /// if necessary.
+    pub fn leaf_event_index(&self) -> usize {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_event_index(),
+            _ => self.event_index,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -1416,6 +1435,13 @@ pub struct EventReport<S: StepSpec> {
     /// nested event in progress.
     pub progress_events: Vec<ProgressEvent<S>>,
 
+    /// The root execution ID for this report.
+    ///
+    /// Each report has a root execution ID, which ties together all step and
+    /// progress events. This is always filled out if the list of step events is
+    /// non-empty.
+    pub root_execution_id: Option<ExecutionId>,
+
     /// The last event seen.
     ///
     /// `last_seen` can be used to retrieve deltas of events.
@@ -1451,6 +1477,7 @@ impl<S: StepSpec> EventReport<S> {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
+            root_execution_id: value.root_execution_id,
             last_seen: value.last_seen,
         })
     }
@@ -1477,6 +1504,7 @@ impl<S: StepSpec> EventReport<S> {
                 .into_iter()
                 .map(|event| event.into_generic())
                 .collect(),
+            root_execution_id: self.root_execution_id,
             last_seen: self.last_seen,
         }
     }
