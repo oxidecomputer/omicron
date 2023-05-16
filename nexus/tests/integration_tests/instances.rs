@@ -647,13 +647,15 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // Starting the instance should have programmed V2P mappings to all the
         // sleds except the one where the instance is running.
         //
-        // TODO: In practice, the instance's sled also has V2P mappings, but
+        // TODO(#3107): In practice, the instance's sled also has V2P mappings, but
         // these are established during VMM setup (i.e. as part of creating the
         // instance's OPTE ports) instead of being established by explicit calls
         // from Nexus. Simulated sled agent handles the latter calls but does
         // not currently update any mappings during simulated instance creation,
         // so the check below verifies that no mappings exist on the instance's
-        // own sled instead of checking for a real mapping.
+        // own sled instead of checking for a real mapping. Once Nexus programs
+        // all mappings explicitly (without skipping the instance's current
+        // sled) this bifurcation should be removed.
         if sled_agent.id != original_sled_id {
             assert_sled_v2p_mappings(
                 sled_agent,
@@ -699,9 +701,10 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // programmed new V2P mappings to all sleds other than the destination
         // sled.
         //
-        // TODO: As above, the destination sled's mappings are not updated here
-        // because Nexus presumes that the instance's new sled agent will have
-        // updated any mappings there.
+        // TODO(#3107): As above, the destination sled's mappings are not
+        // updated here because Nexus presumes that the instance's new sled
+        // agent will have updated any mappings there. Remove this bifurcation
+        // when Nexus programs all mappings explicitly.
         if sled_agent.id != dst_sled_id {
             assert_sled_v2p_mappings(
                 sled_agent,
@@ -3333,6 +3336,8 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
 
     for sled_agent in &sled_agents {
+        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
+        // itself.
         if sled_agent.id != db_instance.runtime().sled_id {
             assert_sled_v2p_mappings(
                 sled_agent,
