@@ -3289,6 +3289,7 @@ dependencies = [
  "installinator-common",
  "ipcc-key-value",
  "itertools",
+ "libc",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",

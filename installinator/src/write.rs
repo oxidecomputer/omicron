@@ -597,6 +597,7 @@ impl WriteTransport for BlockDeviceTransport {
             .create(create)
             .write(true)
             .truncate(create)
+            .custom_flags(libc::O_SYNC)
             .open(destination)
             .await
             .map_err(|error| WriteError {
