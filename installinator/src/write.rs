@@ -16,9 +16,9 @@ use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
 use illumos_utils::dkio::{self, MediaInfoExtended};
 use installinator_common::{
-    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
-    StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
-    WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesError, ControlPlaneZonesSpec, ControlPlaneZonesStepId,
+    M2Slot, StepContext, StepProgress, StepResult, UpdateEngine,
+    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
@@ -40,6 +40,11 @@ struct ArtifactDestination {
     // partition (real gimlet) or a file (test).
     host_phase_2: Utf8PathBuf,
 
+    // On real gimlets, we remove any files currently in the control plane
+    // destination directory. For tests and non-gimlets, we don't want to go
+    // around removing files arbitrarily.
+    clean_control_plane_dir: bool,
+
     // Directory in which we unpack the control plane zone images.
     control_plane_dir: Utf8PathBuf,
 }
@@ -57,7 +62,8 @@ pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
 
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        std::fs::create_dir_all(dir)
+        let control_plane_dir = dir.join("zones");
+        std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
         // `in_directory()` is only used for testing (e.g., on
@@ -68,7 +74,8 @@ impl WriteDestination {
             ArtifactDestination {
                 create_host_phase_2: true,
                 host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
-                control_plane_dir: dir.into(),
+                clean_control_plane_dir: false,
+                control_plane_dir,
             },
         );
 
@@ -113,6 +120,7 @@ impl WriteDestination {
                             entry.insert(ArtifactDestination {
                                 create_host_phase_2: false,
                                 host_phase_2: path,
+                                clean_control_plane_dir: true,
                                 control_plane_dir,
                             });
                         }
@@ -456,6 +464,7 @@ impl ArtifactsToWrite<'_> {
         // own step.
         let inner_cx = ControlPlaneZoneWriteContext {
             slot,
+            clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
         };
@@ -469,7 +478,18 @@ impl ArtifactsToWrite<'_> {
                 log, "{error:?}";
                 "artifact_id" => ?self.control_plane_id,
             );
-            error
+            match error {
+                ControlPlaneZonesError::WriteError(error) => error,
+                ControlPlaneZonesError::RemoveFilesError { error, .. } => {
+                    WriteError {
+                        component: WriteComponent::ControlPlane,
+                        slot,
+                        written_bytes: 0,
+                        total_bytes: 0,
+                        error,
+                    }
+                }
+            }
         })?;
 
         info!(
@@ -483,6 +503,7 @@ impl ArtifactsToWrite<'_> {
 
 struct ControlPlaneZoneWriteContext<'a> {
     slot: M2Slot,
+    clean_output_directory: bool,
     output_directory: &'a Utf8Path,
     zones: &'a ControlPlaneZoneImages,
 }
@@ -496,6 +517,37 @@ impl ControlPlaneZoneWriteContext<'_> {
         use update_engine::StepHandle;
 
         let slot = self.slot;
+
+        // If we're on a gimlet, remove any files in the control plane
+        // destination directory.
+        if self.clean_output_directory {
+            let output_directory = self.output_directory.to_path_buf();
+            engine
+                .new_step(
+                    WriteComponent::ControlPlane,
+                    ControlPlaneZonesStepId::CleanTargetDirectory {
+                        path: output_directory.clone(),
+                    },
+                    format!("Removing files in {}", output_directory),
+                    move |_cx| async move {
+                        let path = output_directory.clone();
+                        tokio::task::spawn_blocking(move || {
+                            remove_contents_of(&output_directory)
+                        })
+                        .await
+                        .unwrap()
+                        .map_err(|error| {
+                            ControlPlaneZonesError::RemoveFilesError {
+                                path,
+                                error,
+                            }
+                        })?;
+
+                        StepResult::success((), ())
+                    },
+                )
+                .register();
+        }
 
         // Dealing with the `&mut impl WriteTransport` is tricky. Every step in
         // the loop below needs access to it, but we can't move it into every
@@ -530,6 +582,26 @@ impl ControlPlaneZoneWriteContext<'_> {
                 .register();
         }
     }
+}
+
+fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
+    use std::fs;
+
+    // We can't use `std::fs::remove_dir_all()` because we want to keep `path`
+    // itself. Instead, walk through it and remove any files/directories we
+    // find.
+    let dir = fs::read_dir(path)?;
+
+    for entry in dir {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            fs::remove_file(entry.path())?;
+        } else {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+
+    Ok(())
 }
 
 // Used in tests to test against file failures.
@@ -910,6 +982,7 @@ mod tests {
             ArtifactDestination {
                 create_host_phase_2: true,
                 host_phase_2: destination_host.clone(),
+                clean_control_plane_dir: false,
                 control_plane_dir: tempdir_path.into(),
             },
         );

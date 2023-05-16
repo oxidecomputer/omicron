@@ -281,6 +281,20 @@ impl AsError for WriteError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum ControlPlaneZonesError {
+    #[error(transparent)]
+    WriteError(#[from] WriteError),
+    #[error("error removing files from {path}: {error}")]
+    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+}
+
+impl AsError for ControlPlaneZonesError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
 /// The specification for writing control plane zones.
 #[derive(JsonSchema)]
 pub enum ControlPlaneZonesSpec {}
@@ -294,19 +308,31 @@ impl StepSpec for ControlPlaneZonesSpec {
     type ProgressMetadata = ();
     type CompletionMetadata = ();
     type SkippedMetadata = ();
-    type Error = WriteError;
+    type Error = ControlPlaneZonesError;
 }
 
 /// A step identifier for the control plane zones operation.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ControlPlaneZonesStepId {
+    /// Removing any files from the target directory.
+    CleanTargetDirectory {
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+    },
+
     /// Writing a zone.
     Zone { name: String },
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,
+}
+
+fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }
 
 fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
