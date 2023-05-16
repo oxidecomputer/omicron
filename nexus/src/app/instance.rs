@@ -1176,6 +1176,10 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
+        // All external IPs map to the primary network interface, so find that
+        // interface. If there is no such interface, there's no way to route
+        // traffic destined to those IPs, so there's nothing to configure and
+        // it's safe to return early.
         let network_interface = match self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -1184,8 +1188,6 @@ impl super::Nexus {
             .find(|interface| interface.primary)
         {
             Some(interface) => interface,
-            // Return early if instance does not have a primary network
-            // interface
             None => {
                 info!(log, "Instance has no primary network interface";
                       "instance_id" => %instance_id);
