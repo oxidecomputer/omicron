@@ -14,28 +14,27 @@ use uuid::Uuid;
 pub struct SledInstance {
     #[diesel(embed)]
     identity: SledInstanceIdentity,
+    active_sled_id: Uuid,
+    pub migration_id: Option<Uuid>,
 
     pub name: Name,
-
     pub silo_name: Name,
     pub project_name: Name,
 
     pub state: InstanceState,
-
-    pub migration_id: Option<Uuid>,
-
     pub ncpus: i64,
     pub memory: i64,
 }
 
 impl From<SledInstance> for views::SledInstance {
-    from (sled_instance: SledInstance) -> Self {
+    fn from(sled_instance: SledInstance) -> Self {
         Self {
             identity: sled_instance.identity(),
-            name: sled_instance.name,
-            silo_name: sled_instance.silo_name,
-            project_name: sled_instance.project_name,
-            state: sled_instance.state,
+            name: sled_instance.name.into(),
+            active_sled_id: sled_instance.active_sled_id,
+            silo_name: sled_instance.silo_name.into(),
+            project_name: sled_instance.project_name.into(),
+            state: *sled_instance.state.state(),
             migration_id: sled_instance.migration_id,
             ncpus: sled_instance.ncpus,
             memory: sled_instance.memory,

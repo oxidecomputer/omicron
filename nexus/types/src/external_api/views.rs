@@ -12,7 +12,7 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, IdentityMetadata, Ipv4Net, Ipv6Net, Name,
+    ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
     ObjectIdentity, RoleName, SemverVersion,
 };
 use schemars::JsonSchema;
@@ -276,6 +276,21 @@ pub struct Sled {
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+/// An operator's view of an instance running on a given sled
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SledInstance {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub active_sled_id: Uuid,
+    pub migration_id: Option<Uuid>,
+    pub name: Name,
+    pub silo_name: Name,
+    pub project_name: Name,
+    pub state: InstanceState,
+    pub ncpus: i64,
+    pub memory: i64,
 }
 
 // SWITCHES
