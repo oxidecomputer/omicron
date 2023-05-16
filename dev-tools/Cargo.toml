@@ -9,9 +9,11 @@ path = "../rpaths"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+libc.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-interface.workspace = true
 omicron-common.workspace = true
@@ -20,6 +22,7 @@ omicron-test-utils.workspace = true
 omicron-sled-agent.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+rcgen.workspace = true
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
