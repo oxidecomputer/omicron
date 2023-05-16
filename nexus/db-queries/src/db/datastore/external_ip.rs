@@ -153,6 +153,7 @@ impl DataStore {
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
+    #[allow(clippy::too_many_arguments)]
     pub async fn allocate_explicit_service_ip(
         &self,
         opctx: &OpContext,

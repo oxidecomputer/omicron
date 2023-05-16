@@ -1468,11 +1468,17 @@ mod test {
                         if name.is_some() && description.is_some() {
                             // Name/description must be non-NULL, instance ID can be
                             // either
-                            res.expect(&format!(
-                                "Failed to insert Floating IP with valid \
-                                 name, description, and {} ID",
-                                if is_service { "Service" } else { "Instance" }
-                            ));
+                            res.unwrap_or_else(|_| {
+                                panic!(
+                                    "Failed to insert Floating IP with valid \
+                                     name, description, and {} ID",
+                                    if is_service {
+                                        "Service"
+                                    } else {
+                                        "Instance"
+                                    }
+                                )
+                            });
                         } else {
                             // At least one is not valid, we expect a check violation
                             let err = res.expect_err(

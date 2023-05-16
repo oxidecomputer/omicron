@@ -1017,10 +1017,9 @@ mod test {
             .iter()
             .find(|e| e.parent_id == Some(ntp2_id))
             .unwrap();
-        assert!(observed_external_ips
+        assert!(!observed_external_ips
             .iter()
-            .find(|e| e.parent_id == Some(ntp3_id))
-            .is_none());
+            .any(|e| e.parent_id == Some(ntp3_id)));
 
         assert_eq!(dns_external_ip.parent_id, Some(dns_service.id()));
         assert!(dns_external_ip.is_service);
