@@ -1,11 +1,12 @@
 #!/bin/bash
 #:
-#: name = "helios / build-end-to-end-tests"
+#: name = "helios / CI tools"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "1.68.2"
 #: output_rules = [
-#:	"=/work/*.gz",
+#:	"=/work/end-to-end-tests/*.gz",
+#:	"=/work/tufaceous.gz",
 #: ]
 
 set -o errexit
@@ -17,16 +18,28 @@ rustc --version
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 
+########## end-to-end-tests ##########
+
+banner end-to-end-tests
+
 #
 # Reduce debuginfo just to line tables.
 #
 export CARGO_PROFILE_DEV_DEBUG=1
 export CARGO_PROFILE_TEST_DEBUG=1
 
-ptime -m cargo build -p end-to-end-tests --tests --bin bootstrap \
+ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
 	--message-format json-render-diagnostics >/tmp/output.end-to-end.json
 
+mkdir -p /work/end-to-end-tests
 for p in target/debug/bootstrap $(/opt/ooce/bin/jq -r 'select(.profile.test) | .executable' /tmp/output.end-to-end.json); do
 	# shellcheck disable=SC2094
-	ptime -m gzip < "$p" > /work/"$(basename "$p").gz"
+	ptime -m gzip < "$p" > /work/end-to-end-tests/"$(basename "$p").gz"
 done
+
+########## tufaceous ##########
+
+banner tufaceous
+
+ptime -m cargo build --locked -p tufaceous --release
+ptime -m gzip < target/release/tufaceous > /work/tufaceous.gz
