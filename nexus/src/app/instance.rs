@@ -1343,7 +1343,7 @@ impl super::Nexus {
                 ))
             })?;
 
-            debug!(log, "creation of nat entry successful for: {target_ip:#?}");
+            info!(log, "creation of nat entry successful for: {target_ip:#?}");
         }
 
         Ok(())
