@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::dkio::MediaInfoExtended;
+use illumos_utils::dkio::{self, MediaInfoExtended};
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
     StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
@@ -564,6 +564,14 @@ impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
     async fn fsync(self) -> io::Result<()> {
         let f = self.into_inner();
         f.sync_all().await?;
+
+        // We only create `BlockSizeBufWriter` for the raw block device storing
+        // the OS ramdisk. After `fsync`'ing, also flush the write cache.
+        tokio::task::spawn_blocking(move || {
+            dkio::flush_write_cache(f.as_raw_fd())
+        })
+        .await
+        .unwrap()
     }
 }
 

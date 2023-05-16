@@ -4,10 +4,25 @@
 
 //! Utilities for interacting with disk control operations (`man dkio`).
 
-use std::io;
-
 use libc::c_int;
 use libc::c_uint;
+use std::io;
+use std::ptr;
+
+pub fn flush_write_cache(fd: i32) -> Result<(), io::Error> {
+    // Safety: We are issuing the `DKIOCFLUSHWRITECACHE` ioctl which is
+    // documented to take a an argument of `NULL` when called from user-mode.
+    // Due to the definition of `ioctl`, we have to turbofish the `null_mut()`
+    // call to _something_; any raw C type is fine (we don't want a Rust fat
+    // pointer type).
+    let rc = unsafe {
+        libc::ioctl(fd, DKIOCFLUSHWRITECACHE as _, ptr::null_mut::<i32>())
+    };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MediaInfoExtended {
@@ -116,3 +131,4 @@ type diskaddr_t = libc::c_ulonglong;
 
 const DKIOC: c_int = 0x04 << 8;
 const DKIOCGMEDIAINFOEXT: c_int = DKIOC | 48;
+const DKIOCFLUSHWRITECACHE: c_int = DKIOC | 34;
