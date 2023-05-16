@@ -73,12 +73,6 @@ EOF
 done
 
 for kind in host trampoline; do
-    mkdir -p /work/os/$kind
-    pushd /work/os/$kind
-    # https://github.com/oxidecomputer/helios#os-image-archives
-    tar xf /input/$kind/work/helios/image/output/os.tar.gz image/rom image/zfs.img
-    popd
-
     cat >>/work/manifest.toml <<EOF
 [artifact.$kind]
 name = "$kind"
