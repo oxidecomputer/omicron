@@ -220,6 +220,21 @@ impl IncompleteExternalIp {
         }
     }
 
+    pub fn for_service_snat(id: Uuid, service_id: Uuid, pool_id: Uuid) -> Self {
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::SNat,
+            is_service: true,
+            parent_id: Some(service_id),
+            pool_id,
+            explicit_ip: None,
+            explicit_port_range: None,
+        }
+    }
+
     pub fn id(&self) -> &Uuid {
         &self.id
     }

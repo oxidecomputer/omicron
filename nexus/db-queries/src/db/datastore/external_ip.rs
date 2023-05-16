@@ -89,6 +89,23 @@ impl DataStore {
         self.allocate_external_ip(opctx, data).await
     }
 
+    /// Allocates an SNAT IP address for internal service usage.
+    pub async fn allocate_service_snat_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        service_id: Uuid,
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+
+        let data = IncompleteExternalIp::for_service_snat(
+            ip_id,
+            service_id,
+            pool.id(),
+        );
+        self.allocate_external_ip(opctx, data).await
+    }
+
     async fn allocate_external_ip(
         &self,
         opctx: &OpContext,
@@ -144,6 +161,7 @@ impl DataStore {
         description: &str,
         service_id: Uuid,
         ip: IpAddr,
+        port_range: Option<(u16, u16)>,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
         let data = IncompleteExternalIp::for_service_explicit(
@@ -153,7 +171,7 @@ impl DataStore {
             service_id,
             pool.id(),
             ip,
-            None,
+            port_range,
         );
         self.allocate_external_ip(opctx, data).await
     }

@@ -162,7 +162,9 @@ const MAX_PORT: u16 = u16::MAX;
 /// previously_allocated_ip AS (
 ///     SELECT
 ///         id as old_id,
-///         ip as old_ip
+///         ip as old_ip,
+///         first_port as old_first_port,
+///         last_port as old_last_port
 ///     FROM external_ip
 ///     WHERE
 ///         id = <id> AND time_deleted IS NULL
@@ -178,10 +180,15 @@ const MAX_PORT: u16 = u16::MAX;
 ///             -- ... If it does exist, the IP address must be the same for
 ///             -- both the old and new request.
 ///             (
-///                 SELECT ip = old_ip
+///                 SELECT
+///                    ip = old_ip AND
+///                    first_port = old_first_port AND
+///                    last_port = old_last_port
 ///                 FROM
 ///                     (
-///                         SELECT ip, old_ip
+///                         SELECT
+///                             ip, first_port, last_port,
+///                             old_ip, old_first_port, old_last_port
 ///                         FROM next_external_ip
 ///                         INNER JOIN
 ///                         previously_allocated_ip ON old_id = id
@@ -464,9 +471,13 @@ impl NextExternalIp {
 
         out.push_sql("SELECT ");
         out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" AS old_id,");
+        out.push_sql(" AS old_id, ");
         out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(" AS old_ip FROM ");
+        out.push_sql(" AS old_ip, ");
+        out.push_identifier(dsl::first_port::NAME)?;
+        out.push_sql(" AS old_first_port, ");
+        out.push_identifier(dsl::last_port::NAME)?;
+        out.push_sql(" AS old_last_port FROM ");
         EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
         out.push_sql(" WHERE ");
         out.push_identifier(dsl::id::NAME)?;
@@ -503,12 +514,25 @@ impl NextExternalIp {
                 out.push_sql(
                     "NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR",
                 );
-                // ... Or we are allocating the same IP adress...
+                // ... Or we are allocating the same IP address...
                 out.push_sql("(SELECT ");
                 out.push_identifier(dsl::ip::NAME)?;
-                out.push_sql(" = old_ip FROM (SELECT ");
+                out.push_sql(" = old_ip AND ");
+                // (as well as the same port range)
+                out.push_identifier(dsl::first_port::NAME)?;
+                out.push_sql(" = old_first_port AND ");
+                out.push_identifier(dsl::last_port::NAME)?;
+                out.push_sql(" = old_last_port FROM (SELECT ");
                 out.push_identifier(dsl::ip::NAME)?;
-                out.push_sql(", old_ip FROM next_external_ip INNER JOIN previously_allocated_ip ON old_id = id))");
+                out.push_sql(", ");
+                out.push_identifier(dsl::first_port::NAME)?;
+                out.push_sql(", ");
+                out.push_identifier(dsl::last_port::NAME)?;
+                out.push_sql(
+                    ", old_ip, old_first_port, old_last_port \
+                    FROM next_external_ip INNER JOIN previously_allocated_ip \
+                    ON old_id = id))",
+                );
                 Ok(())
             }
         }
@@ -1183,7 +1207,7 @@ mod tests {
 
         let ip_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 2),
+            Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
         context.initialize_ip_pool(SERVICE_IP_POOL_NAME, ip_range).await;
@@ -1204,30 +1228,47 @@ mod tests {
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip1.is_service);
+        assert_eq!(ip1.kind, IpKind::Floating);
         assert_eq!(ip1.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
         assert_eq!(ip1.first_port.0, 0);
         assert_eq!(ip1.last_port.0, u16::MAX);
         assert_eq!(ip1.parent_id, Some(service1_id));
 
-        // Allocate the next (last) IP address
+        // Allocate an SNat IP
         let service2_id = Uuid::new_v4();
         let id2 = Uuid::new_v4();
         let ip2 = context
             .db_datastore
-            .allocate_service_ip(
-                &context.opctx,
-                id2,
-                &Name("service2-ip".parse().unwrap()),
-                "service2-ip",
-                service2_id,
-            )
+            .allocate_service_snat_ip(&context.opctx, id2, service2_id)
             .await
             .expect("Failed to allocate service IP address");
         assert!(ip2.is_service);
+        assert_eq!(ip2.kind, IpKind::SNat);
         assert_eq!(ip2.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
         assert_eq!(ip2.first_port.0, 0);
-        assert_eq!(ip2.last_port.0, u16::MAX);
+        assert_eq!(ip2.last_port.0, 16383);
         assert_eq!(ip2.parent_id, Some(service2_id));
+
+        // Allocate the next IP address
+        let service3_id = Uuid::new_v4();
+        let id3 = Uuid::new_v4();
+        let ip3 = context
+            .db_datastore
+            .allocate_service_ip(
+                &context.opctx,
+                id3,
+                &Name("service3-ip".parse().unwrap()),
+                "service3-ip",
+                service3_id,
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert!(ip3.is_service);
+        assert_eq!(ip3.kind, IpKind::Floating);
+        assert_eq!(ip3.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)));
+        assert_eq!(ip3.first_port.0, 0);
+        assert_eq!(ip3.last_port.0, u16::MAX);
+        assert_eq!(ip3.parent_id, Some(service3_id));
 
         // Once we're out of IP addresses, test that we see the right error.
         let service3_id = Uuid::new_v4();
@@ -1249,6 +1290,21 @@ mod tests {
                 message: String::from("No external IP addresses available"),
             }
         );
+
+        // But we should be able to allocate another SNat IP
+        let service4_id = Uuid::new_v4();
+        let id4 = Uuid::new_v4();
+        let ip4 = context
+            .db_datastore
+            .allocate_service_snat_ip(&context.opctx, id4, service4_id)
+            .await
+            .expect("Failed to allocate service IP address");
+        assert!(ip4.is_service);
+        assert_eq!(ip4.kind, IpKind::SNat);
+        assert_eq!(ip4.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
+        assert_eq!(ip4.first_port.0, 16384);
+        assert_eq!(ip4.last_port.0, 32767);
+        assert_eq!(ip4.parent_id, Some(service4_id));
 
         context.success().await;
     }
@@ -1280,6 +1336,7 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                None,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1299,6 +1356,7 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                None,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1317,6 +1375,7 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                None,
             )
             .await
             .expect_err("Should have failed to re-allocate same IP address (different UUID)");
@@ -1336,9 +1395,93 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                None,
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (same UUID)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Re-allocating IP address with a different value"
+        );
+
+        // Try allocating the same service IP once more, but do it with a
+        // different port range.
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                id,
+                &Name("service-ip".parse().unwrap()),
+                "service-ip",
+                service_id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+                Some((0, 16383)),
+            )
+            .await
+            .expect_err("Should have failed to re-allocate different IP address (different port range)");
+        assert_eq!(
+            err.to_string(),
+            "Invalid Request: Re-allocating IP address with a different value"
+        );
+
+        // This time start with an explicit SNat
+        let snat_service_id = Uuid::new_v4();
+        let snat_id = Uuid::new_v4();
+        let snat_ip = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                snat_id,
+                &Name("snat-service-ip".parse().unwrap()),
+                "snat-service-ip",
+                snat_service_id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                Some((32768, 49151)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert!(snat_ip.is_service);
+        assert_eq!(snat_ip.kind, IpKind::SNat);
+        assert_eq!(snat_ip.ip.ip(), IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert_eq!(snat_ip.first_port.0, 32768);
+        assert_eq!(snat_ip.last_port.0, 49151);
+        assert_eq!(snat_ip.parent_id, Some(snat_service_id));
+
+        // Try allocating the same service IP again.
+        let snat_ip_again = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                snat_id,
+                &Name("snat-service-ip".parse().unwrap()),
+                "snat-service-ip",
+                snat_service_id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                Some((32768, 49151)),
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert!(snat_ip_again.is_service);
+        assert_eq!(snat_ip.id, snat_ip_again.id);
+        assert_eq!(snat_ip.ip.ip(), snat_ip_again.ip.ip());
+        assert_eq!(snat_ip.first_port, snat_ip_again.first_port);
+        assert_eq!(snat_ip.last_port, snat_ip_again.last_port);
+
+        // Try allocating the same service IP once more, but do it with a
+        // different port range.
+        let err = context
+            .db_datastore
+            .allocate_explicit_service_ip(
+                &context.opctx,
+                snat_id,
+                &Name("snat-service-ip".parse().unwrap()),
+                "snat-service-ip",
+                snat_service_id,
+                IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                Some((49152, 65535)),
+            )
+            .await
+            .expect_err("Should have failed to re-allocate different IP address (different port range)");
         assert_eq!(
             err.to_string(),
             "Invalid Request: Re-allocating IP address with a different value"
@@ -1372,6 +1515,7 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
+                None,
             )
             .await
             .expect_err("Should have failed to allocate out-of-bounds IP");
