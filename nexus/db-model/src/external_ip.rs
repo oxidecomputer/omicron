@@ -16,6 +16,7 @@ use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
+use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use std::convert::TryFrom;
 use std::net::IpAddr;
@@ -94,6 +95,8 @@ pub struct IncompleteExternalIp {
     pool_id: Uuid,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
+    // Optional range when requesting a specific SNAT range be allocated.
+    explicit_port_range: Option<(i32, i32)>,
 }
 
 impl IncompleteExternalIp {
@@ -112,6 +115,7 @@ impl IncompleteExternalIp {
             parent_id: Some(instance_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -126,6 +130,7 @@ impl IncompleteExternalIp {
             parent_id: Some(instance_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -145,6 +150,7 @@ impl IncompleteExternalIp {
             parent_id: None,
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -155,17 +161,41 @@ impl IncompleteExternalIp {
         service_id: Uuid,
         pool_id: Uuid,
         address: IpAddr,
+        port_range: Option<(u16, u16)>,
     ) -> Self {
+        let (name, description, kind, explicit_port_range) = match port_range {
+            Some((first_port, last_port)) => {
+                assert!(
+                    (first_port % NUM_SOURCE_NAT_PORTS == 0)
+                        && (last_port - first_port + 1) == NUM_SOURCE_NAT_PORTS,
+                    "explicit port range must be aligned to {}",
+                    NUM_SOURCE_NAT_PORTS,
+                );
+                (
+                    None,
+                    None,
+                    IpKind::SNat,
+                    Some((first_port.into(), last_port.into())),
+                )
+            }
+            None => (
+                Some(name.clone()),
+                Some(description.to_string()),
+                IpKind::Floating,
+                None,
+            ),
+        };
         Self {
             id,
-            name: Some(name.clone()),
-            description: Some(description.to_string()),
+            name,
+            description,
             time_created: Utc::now(),
-            kind: IpKind::Floating,
+            kind,
             is_service: true,
             parent_id: Some(service_id),
             pool_id,
             explicit_ip: Some(IpNetwork::from(address)),
+            explicit_port_range,
         }
     }
 
@@ -186,6 +216,7 @@ impl IncompleteExternalIp {
             parent_id: Some(service_id),
             pool_id,
             explicit_ip: None,
+            explicit_port_range: None,
         }
     }
 
@@ -223,6 +254,10 @@ impl IncompleteExternalIp {
 
     pub fn explicit_ip(&self) -> &Option<IpNetwork> {
         &self.explicit_ip
+    }
+
+    pub fn explicit_port_range(&self) -> &Option<(i32, i32)> {
+        &self.explicit_port_range
     }
 }
 

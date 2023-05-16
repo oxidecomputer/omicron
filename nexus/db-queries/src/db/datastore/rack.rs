@@ -229,6 +229,7 @@ impl DataStore {
                                 db::model::Name("external-dns".parse().unwrap()),
                                 "ExternalDns External IP",
                                 external_address,
+                                None,
                             ))
                         }
                         internal_params::ServiceKind::Nexus { external_address } => {
@@ -236,11 +237,20 @@ impl DataStore {
                                 db::model::Name("nexus".parse().unwrap()),
                                 "Nexus External IP",
                                 external_address,
+                                None,
+                            ))
+                        }
+                        internal_params::ServiceKind::Ntp { snat_cfg: Some(snat) } => {
+                            Some((
+                                db::model::Name("ntp".parse().unwrap()),
+                                "Boundary NTP External IP",
+                                snat.ip,
+                                Some((snat.first_port, snat.last_port))
                             ))
                         }
                         _ => None
                     };
-                    if let Some((name, description, external_address)) = external_ip {
+                    if let Some((name, description, external_ip, port_range)) = external_ip {
                         let ip_id = Uuid::new_v4();
                         let data = IncompleteExternalIp::for_service_explicit(
                             ip_id,
@@ -248,7 +258,8 @@ impl DataStore {
                             description,
                             service.service_id,
                             service_pool.id(),
-                            external_address
+                            external_ip,
+                            port_range
                         );
                         let allocated_ip = Self::allocate_external_ip_on_connection(
                             &conn,
@@ -261,7 +272,7 @@ impl DataStore {
                             );
                             TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
-                        assert_eq!(allocated_ip.ip.ip(), external_address);
+                        assert_eq!(allocated_ip.ip.ip(), external_ip);
                     }
                 }
                 info!(log, "Inserted services");

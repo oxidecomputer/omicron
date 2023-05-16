@@ -8,6 +8,7 @@ use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -180,7 +181,7 @@ pub enum ServiceKind {
     Dendrite,
     Tfport,
     CruciblePantry,
-    Ntp,
+    Ntp { snat_cfg: Option<SourceNatConfig> },
 }
 
 impl fmt::Display for ServiceKind {
@@ -194,7 +195,7 @@ impl fmt::Display for ServiceKind {
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
-            Ntp => "ntp",
+            Ntp { .. } => "ntp",
         };
         write!(f, "{}", s)
     }

@@ -627,6 +627,15 @@ impl NextExternalIp {
     //         AS candidate_first_port
     // ```
     //
+    // If an explicit port range is requested, we generate a simple
+    // SELECT clause:
+    //
+    // ```sql
+    // SELECT
+    //     <explicit_first_port> AS candidate_first_port,
+    //     <explicit_last_port> AS candidate_last_port
+    // ```
+    //
     // For Floating or Ephemeral IP addresses, we reserve the entire port range
     // for the guest/service. In this case, we generate the static values 0 and 65535:
     //
@@ -640,20 +649,32 @@ impl NextExternalIp {
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         const MAX_PORT: i32 = self::MAX_PORT as i32;
-        if matches!(self.ip.kind(), &IpKind::SNat) {
-            out.push_sql(
-                "SELECT candidate_first_port, candidate_first_port + ",
-            );
-            out.push_bind_param::<sql_types::Int4, i32>(
-                &self.last_port_offset,
-            )?;
-            out.push_sql(" AS candidate_last_port FROM generate_series(0, ");
-            out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
-            out.push_sql(", ");
-            out.push_bind_param::<sql_types::Int4, i32>(
-                &self.n_ports_per_chunk,
-            )?;
-            out.push_sql(") AS candidate_first_port");
+        if let IpKind::SNat = self.ip.kind() {
+            if let Some((first_port, last_port)) =
+                &self.ip.explicit_port_range()
+            {
+                out.push_sql("SELECT ");
+                out.push_bind_param::<sql_types::Int4, i32>(first_port)?;
+                out.push_sql(" AS candidate_first_port, ");
+                out.push_bind_param::<sql_types::Int4, i32>(last_port)?;
+                out.push_sql(" AS candidate_last_port");
+            } else {
+                out.push_sql(
+                    "SELECT candidate_first_port, candidate_first_port + ",
+                );
+                out.push_bind_param::<sql_types::Int4, i32>(
+                    &self.last_port_offset,
+                )?;
+                out.push_sql(
+                    " AS candidate_last_port FROM generate_series(0, ",
+                );
+                out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
+                out.push_sql(", ");
+                out.push_bind_param::<sql_types::Int4, i32>(
+                    &self.n_ports_per_chunk,
+                )?;
+                out.push_sql(") AS candidate_first_port");
+            }
         } else {
             out.push_sql("SELECT 0 AS candidate_first_port, ");
             out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;

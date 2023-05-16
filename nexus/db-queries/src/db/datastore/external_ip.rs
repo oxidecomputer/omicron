@@ -153,6 +153,7 @@ impl DataStore {
             service_id,
             pool.id(),
             ip,
+            None,
         );
         self.allocate_external_ip(opctx, data).await
     }
