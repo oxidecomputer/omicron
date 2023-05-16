@@ -253,7 +253,7 @@ async fn sdc_alloc_regions(
         )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(dbg!(datasets_and_regions))
+    Ok(datasets_and_regions)
 }
 
 async fn sdc_alloc_regions_undo(
