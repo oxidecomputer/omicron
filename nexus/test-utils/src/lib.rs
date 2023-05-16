@@ -228,15 +228,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address_internal = match sled_agent
-        .dns_dropshot_server
-        .local_addr()
-    {
-        SocketAddr::V4(_) => panic!(
+    let dns_server_address_internal =
+        match sled_agent.dns_dropshot_server.local_addr() {
+            SocketAddr::V4(_) => panic!(
             "expected internal DNS config (HTTP) server to have IPv6 address"
         ),
-        SocketAddr::V6(addr) => addr,
-    };
+            SocketAddr::V6(addr) => addr,
+        };
     if let SocketAddr::V4(_) = sled_agent.dns_server.local_address() {
         panic!("expected internal DNS server to have IPv6 address");
     }
@@ -248,14 +246,13 @@ pub async fn test_setup_with_config<N: NexusServer>(
         address: dns_server_address_internal,
         kind: ServiceKind::InternalDns,
     };
-    let dns_server_address_external = match external_dns_config_server
-        .local_addr()
-    {
-        SocketAddr::V4(_) => panic!(
+    let dns_server_address_external =
+        match external_dns_config_server.local_addr() {
+            SocketAddr::V4(_) => panic!(
             "expected external DNS config (HTTP) server to have IPv6 address"
         ),
-        SocketAddr::V6(addr) => addr,
-    };
+            SocketAddr::V6(addr) => addr,
+        };
     let dns_service_external = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
