@@ -377,8 +377,7 @@ async fn sic_add_network_config(
         .instance_id(instance_id)
         .fetch()
         .await
-        .map_err(ActionError::action_failed)
-        .unwrap();
+        .map_err(ActionError::action_failed)?;
 
     // Read the sled record from the database. This needs to use the instance-
     // create context (and not the regular saga context) to leverage its fleet-
