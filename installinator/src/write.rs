@@ -535,7 +535,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 // Used in tests to test against file failures.
 #[async_trait]
 trait WriteTransport: fmt::Debug + Send {
-    type W: AsyncWrite + Send + Unpin;
+    type W: WriteTransportWriter;
 
     async fn make_writer(
         &mut self,
@@ -545,6 +545,26 @@ trait WriteTransport: fmt::Debug + Send {
         total_bytes: u64,
         create: bool,
     ) -> Result<Self::W, WriteError>;
+}
+
+#[async_trait]
+trait WriteTransportWriter: AsyncWrite + Send + Unpin {
+    async fn fsync(self) -> io::Result<()>;
+}
+
+#[async_trait]
+impl WriteTransportWriter for tokio::fs::File {
+    async fn fsync(self) -> io::Result<()> {
+        self.sync_all().await
+    }
+}
+
+#[async_trait]
+impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
+    async fn fsync(self) -> io::Result<()> {
+        let f = self.into_inner();
+        f.sync_all().await?;
+    }
 }
 
 #[derive(Debug)]
@@ -687,6 +707,19 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     }
 
     match writer.flush().await {
+        Ok(()) => {}
+        Err(error) => {
+            return Err(WriteError {
+                component,
+                slot,
+                written_bytes,
+                total_bytes,
+                error,
+            });
+        }
+    };
+
+    match writer.fsync().await {
         Ok(()) => {}
         Err(error) => {
             return Err(WriteError {
@@ -1034,6 +1067,13 @@ mod tests {
                 .await
                 .make_writer(component, slot, destination, total_bytes, create)
                 .await
+        }
+    }
+
+    #[async_trait]
+    impl WriteTransportWriter for PartialAsyncWrite<tokio::fs::File> {
+        async fn fsync(self) -> io::Result<()> {
+            Ok(())
         }
     }
 
