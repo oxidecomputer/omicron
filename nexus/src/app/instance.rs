@@ -1025,7 +1025,13 @@ impl super::Nexus {
         //   race with this one.
         // - This work is not done in a saga. The presumption is instead that
         //   if any of these operations fail, the entire update will fail, and
-        //   sled agent will retry the update.
+        //   sled agent will retry the update. Unwinding on failure isn't needed
+        //   because (a) any partially-applied configuration is correct
+        //   configuration, (b) if the instance is migrating, it can't migrate
+        //   again until this routine successfully updates configuration and
+        //   writes an update back to CRDB, and (c) sled agent won't process any
+        //   new instance state changes (e.g. a change that stops an instance)
+        //   until this state change is successfully committed.
         let (.., db_instance) = LookupPath::new(&opctx, &self.db_datastore)
             .instance_id(*id)
             .fetch_for(authz::Action::Read)
