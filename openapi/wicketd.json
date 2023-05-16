@@ -1559,6 +1559,14 @@
       "StartUpdateOptions": {
         "type": "object",
         "properties": {
+          "skip_rot_version_check": {
+            "description": "If true, skip the check on the current RoT version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
+          "skip_sp_version_check": {
+            "description": "If true, skip the check on the current SP version and always update it regardless of whether the update appears to be neeeded.",
+            "type": "boolean"
+          },
           "test_error": {
             "nullable": true,
             "description": "If passed in, fails the update with a simulated error.",
@@ -1575,7 +1583,11 @@
             "format": "uint64",
             "minimum": 0
           }
-        }
+        },
+        "required": [
+          "skip_rot_version_check",
+          "skip_sp_version_check"
+        ]
       },
       "StepComponentSummaryForGenericSpec": {
         "type": "object",
