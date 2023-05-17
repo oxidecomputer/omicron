@@ -218,7 +218,7 @@ impl Zpool {
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
         cmd.arg(ZPOOL).arg("export").arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute(&mut cmd)?;
 
         Ok(())
     }
@@ -232,7 +232,7 @@ impl Zpool {
             .arg("set")
             .arg("failmode=continue")
             .arg(&name.to_string());
-        execute(&mut cmd).map_err(Error::from)?;
+        execute(&mut cmd)?;
         Ok(())
     }
 
