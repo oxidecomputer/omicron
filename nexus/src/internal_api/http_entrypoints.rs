@@ -250,8 +250,11 @@ async fn cpapi_instances_put(
     let nexus = &apictx.nexus;
     let path = path_params.into_inner();
     let new_state = new_runtime_state.into_inner();
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
     let handler = async {
-        nexus.notify_instance_updated(&path.instance_id, &new_state).await?;
+        nexus
+            .notify_instance_updated(&opctx, &path.instance_id, &new_state)
+            .await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
