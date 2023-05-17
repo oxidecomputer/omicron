@@ -523,14 +523,17 @@ impl UpdatePane {
             }
             Cmd::StartUpdate => {
                 let selected = state.rack_state.selected;
-                if state.update_state.item_state(selected)
-                    == UpdateItemState::NotStarted
-                {
-                    // NotStarted means that "Press ... to start" is displayed.
-                    self.popup = Some(PopupKind::StartUpdate);
-                    Some(Action::Redraw)
-                } else {
-                    None
+                match state.update_state.item_state(selected) {
+                    UpdateItemState::NotStarted
+                    | UpdateItemState::StartUpdate { response: Err(_) } => {
+                        // If an update hasn't been started or has failed to
+                        // start, "Press ... to start" is displayed.
+                        self.popup = Some(PopupKind::StartUpdate);
+                        Some(Action::Redraw)
+                    }
+                    UpdateItemState::AwaitingRepository
+                    | UpdateItemState::StartUpdate { response: Ok(()) }
+                    | UpdateItemState::RunningOrCompleted { .. } => None,
                 }
             }
             Cmd::GotoTop => {
@@ -866,6 +869,9 @@ impl UpdatePane {
                             "failed to start",
                             style::failed_update_bold(),
                         ),
+                        Span::styled(": press ", style::plain_text()),
+                        Span::styled("<Ctrl-U>", style::selected_line()),
+                        Span::styled(" to retry", style::plain_text()),
                     ])),
                 };
 
