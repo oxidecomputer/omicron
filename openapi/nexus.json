@@ -10595,13 +10595,21 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "tls_certificates": {
+            "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateCreate"
+            }
           }
         },
         "required": [
           "description",
           "discoverable",
           "identity_mode",
-          "name"
+          "name",
+          "tls_certificates"
         ]
       },
       "SiloIdentityMode": {

@@ -88,7 +88,7 @@ impl super::Nexus {
             .collect();
 
         let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
-        let certificates: Vec<_> = request
+        let tls_certificates: Vec<_> = request
             .certs
             .into_iter()
             .enumerate()
@@ -168,6 +168,7 @@ impl super::Nexus {
             discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
+            tls_certificates,
         };
 
         self.db_datastore
@@ -178,7 +179,6 @@ impl super::Nexus {
                     services: request.services,
                     datasets,
                     service_ip_pool_ranges,
-                    certificates,
                     internal_dns,
                     external_dns,
                     recovery_silo,
