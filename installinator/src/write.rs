@@ -605,6 +605,10 @@ impl ControlPlaneZoneWriteContext<'_> {
                         WriteError::SyncOutputDirError { error }
                     })?;
 
+                    // Drop `output_directory` to close it so we can export the
+                    // zpool.
+                    std::mem::drop(output_directory);
+
                     if let Some(zpool) = zpool {
                         Zpool::export(zpool)?;
                     }
