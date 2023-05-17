@@ -3676,10 +3676,11 @@ async fn sled_instance_list(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
         let sled_instances = nexus
             .sled_instance_list(
                 &opctx,
-                path.sled_id,
+                &sled_lookup,
                 &data_page_params_for(&rqctx, &query)?,
             )
             .await?

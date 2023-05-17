@@ -17,13 +17,13 @@ impl DataStore {
     pub async fn sled_instance_list(
         &self,
         opctx: &OpContext,
-        sled_id: Uuid,
+        authz_sled: &authz::Sled,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SledInstance> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::sled_instance::dsl;
         paginated(dsl::sled_instance, dsl::id, &pagparams)
-            .filter(dsl::active_sled_id.eq(sled_id))
+            .filter(dsl::active_sled_id.eq(authz_sled.id()))
             .select(SledInstance::as_select())
             .load_async::<SledInstance>(self.pool_authorized(opctx).await?)
             .await
