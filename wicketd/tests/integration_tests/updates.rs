@@ -250,7 +250,9 @@ async fn test_installinator_fetch() {
     //
     // The control plane zone names here are defined in `fake.toml` which we
     // load above.
-    for file_name in [HOST_PHASE_2_FILE_NAME, "zone1.tar.gz", "zone2.tar.gz"] {
+    for file_name in
+        [HOST_PHASE_2_FILE_NAME, "zones/zone1.tar.gz", "zones/zone2.tar.gz"]
+    {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }
