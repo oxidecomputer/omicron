@@ -677,7 +677,13 @@ impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
         // We only create `BlockSizeBufWriter` for the raw block device storing
         // the OS ramdisk. After `fsync`'ing, also flush the write cache.
         tokio::task::spawn_blocking(move || {
-            dkio::flush_write_cache(f.as_raw_fd())
+            match dkio::flush_write_cache(f.as_raw_fd()) {
+                Ok(()) => Ok(()),
+                // Some drives don't support `flush_write_cache`; we don't want
+                // to fail in this case.
+                Err(err) if err.raw_os_error() == Some(libc::ENOTSUP) => Ok(()),
+                Err(err) => Err(err),
+            }
         })
         .await
         .unwrap()
