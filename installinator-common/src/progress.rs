@@ -266,7 +266,7 @@ pub enum WriteStepId {
 pub enum WriteError {
     #[error(
         "writing {component} to slot {slot} failed \
-     after {written_bytes}/{total_bytes} bytes"
+         after {written_bytes}/{total_bytes} bytes"
     )]
     WriteError {
         component: WriteComponent,
