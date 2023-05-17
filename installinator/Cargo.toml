@@ -34,6 +34,7 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 smf.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true

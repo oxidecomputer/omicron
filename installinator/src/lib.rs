@@ -15,6 +15,7 @@ mod reporter;
 #[cfg(test)]
 mod test_helpers;
 mod write;
+mod async_temp_file;
 
 pub use dispatch::*;
 pub use write::*;

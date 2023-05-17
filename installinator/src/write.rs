@@ -26,16 +26,13 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepSpec;
 
-use crate::{block_size_writer::BlockSizeBufWriter, hardware::Hardware};
+use crate::{
+    async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
+    hardware::Hardware,
+};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
-    // On real gimlets, we expect to write the host phase 2 to an
-    // already-existing device (the appropriate M.2 slice). But for tests or
-    // runs on non-gimlets, we want to write the host phase 2 to a new file we
-    // create.
-    create_host_phase_2: bool,
-
     // Path to write the host image; either a raw device corresponding to an M.2
     // partition (real gimlet) or a file (test).
     host_phase_2: Utf8PathBuf,
@@ -72,7 +69,6 @@ impl WriteDestination {
         drives.insert(
             M2Slot::A,
             ArtifactDestination {
-                create_host_phase_2: true,
                 host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
                 clean_control_plane_dir: false,
                 control_plane_dir,
@@ -118,7 +114,6 @@ impl WriteDestination {
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
-                                create_host_phase_2: false,
                                 host_phase_2: path,
                                 clean_control_plane_dir: true,
                                 control_plane_dir,
@@ -438,7 +433,6 @@ impl ArtifactsToWrite<'_> {
             slot,
             self.host_phase_2_data.clone(),
             &destinations.host_phase_2,
-            destinations.create_host_phase_2,
             transport,
             cx,
         )
@@ -570,7 +564,6 @@ impl ControlPlaneZoneWriteContext<'_> {
                             slot,
                             data.clone().into(),
                             &out_path,
-                            true,
                             transport,
                             &cx,
                         )
@@ -615,25 +608,26 @@ trait WriteTransport: fmt::Debug + Send {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError>;
 }
 
 #[async_trait]
 trait WriteTransportWriter: AsyncWrite + Send + Unpin {
-    async fn fsync(self) -> io::Result<()>;
+    async fn finalize(self) -> io::Result<()>;
 }
 
 #[async_trait]
-impl WriteTransportWriter for tokio::fs::File {
-    async fn fsync(self) -> io::Result<()> {
-        self.sync_all().await
+impl WriteTransportWriter for AsyncNamedTempFile {
+    async fn finalize(self) -> io::Result<()> {
+        self.sync_all().await?;
+        self.persist().await?;
+        Ok(())
     }
 }
 
 #[async_trait]
 impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
-    async fn fsync(self) -> io::Result<()> {
+    async fn finalize(self) -> io::Result<()> {
         let f = self.into_inner();
         f.sync_all().await?;
 
@@ -652,7 +646,7 @@ struct FileTransport;
 
 #[async_trait]
 impl WriteTransport for FileTransport {
-    type W = tokio::fs::File;
+    type W = AsyncNamedTempFile;
 
     async fn make_writer(
         &mut self,
@@ -660,21 +654,16 @@ impl WriteTransport for FileTransport {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError> {
-        tokio::fs::OpenOptions::new()
-            .create(create)
-            .write(true)
-            .truncate(create)
-            .open(destination)
-            .await
-            .map_err(|error| WriteError {
+        AsyncNamedTempFile::with_destination(destination).await.map_err(
+            |error| WriteError {
                 component,
                 slot,
                 written_bytes: 0,
                 total_bytes,
                 error,
-            })
+            },
+        )
     }
 }
 
@@ -691,12 +680,11 @@ impl WriteTransport for BlockDeviceTransport {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError> {
         let f = tokio::fs::OpenOptions::new()
-            .create(create)
+            .create(false)
             .write(true)
-            .truncate(create)
+            .truncate(false)
             .custom_flags(libc::O_SYNC)
             .open(destination)
             .await
@@ -746,18 +734,11 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     slot: M2Slot,
     mut artifact: BufList,
     destination: &Utf8Path,
-    create: bool,
     transport: &mut impl WriteTransport,
     cx: &StepContext<S>,
 ) -> Result<(), WriteError> {
     let mut writer = transport
-        .make_writer(
-            component,
-            slot,
-            destination,
-            artifact.num_bytes() as u64,
-            create,
-        )
+        .make_writer(component, slot, destination, artifact.num_bytes() as u64)
         .await?;
 
     let total_bytes = artifact.num_bytes() as u64;
@@ -799,7 +780,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
         }
     };
 
-    match writer.fsync().await {
+    match writer.finalize().await {
         Ok(()) => {}
         Err(error) => {
             return Err(WriteError {
@@ -980,7 +961,6 @@ mod tests {
         drives.insert(
             M2Slot::A,
             ArtifactDestination {
-                create_host_phase_2: true,
                 host_phase_2: destination_host.clone(),
                 clean_control_plane_dir: false,
                 control_plane_dir: tempdir_path.into(),
@@ -1133,7 +1113,7 @@ mod tests {
 
     #[async_trait]
     impl WriteTransport for SharedTransport {
-        type W = PartialAsyncWrite<tokio::fs::File>;
+        type W = PartialAsyncWrite<AsyncNamedTempFile>;
 
         async fn make_writer(
             &mut self,
@@ -1141,20 +1121,19 @@ mod tests {
             slot: M2Slot,
             destination: &Utf8Path,
             total_bytes: u64,
-            create: bool,
         ) -> Result<Self::W, WriteError> {
             self.0
                 .lock()
                 .await
-                .make_writer(component, slot, destination, total_bytes, create)
+                .make_writer(component, slot, destination, total_bytes)
                 .await
         }
     }
 
     #[async_trait]
-    impl WriteTransportWriter for PartialAsyncWrite<tokio::fs::File> {
-        async fn fsync(self) -> io::Result<()> {
-            Ok(())
+    impl WriteTransportWriter for PartialAsyncWrite<AsyncNamedTempFile> {
+        async fn finalize(self) -> io::Result<()> {
+            self.into_inner().finalize().await
         }
     }
 
@@ -1166,7 +1145,7 @@ mod tests {
 
     #[async_trait]
     impl WriteTransport for PartialIoTransport {
-        type W = PartialAsyncWrite<tokio::fs::File>;
+        type W = PartialAsyncWrite<AsyncNamedTempFile>;
 
         async fn make_writer(
             &mut self,
@@ -1174,11 +1153,10 @@ mod tests {
             slot: M2Slot,
             destination: &Utf8Path,
             total_bytes: u64,
-            create: bool,
         ) -> Result<Self::W, WriteError> {
             let f = self
                 .file_transport
-                .make_writer(component, slot, destination, total_bytes, create)
+                .make_writer(component, slot, destination, total_bytes)
                 .await?;
             // This is the next series of operations.
             let these_ops =
