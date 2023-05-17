@@ -1467,7 +1467,6 @@ WHERE time_deleted IS NULL;
 
 /* The kind of external IP address. */
 CREATE TYPE omicron.public.ip_kind AS ENUM (
-    /* Automatic source NAT provided to all guests by default */
     /*
      * Source NAT provided to all guests by default or for services that
      * only require outbound external connectivity.
