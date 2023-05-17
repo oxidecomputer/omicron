@@ -27,6 +27,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::Certificate;
+use nexus_db_model::ServiceKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -39,8 +41,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
 use uuid::Uuid;
-use nexus_db_model::ServiceKind;
-use nexus_db_model::Certificate;
 
 impl DataStore {
     /// Load built-in silos into the database
