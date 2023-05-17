@@ -764,7 +764,7 @@ lookup_resource! {
     name = "SledInstance",
     ancestors = [],
     children = [],
-    lookup_by_name = true,
+    lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
 }
