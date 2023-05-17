@@ -78,15 +78,6 @@ impl super::Nexus {
         self.db_datastore.sled_list(&opctx, pagparams).await
     }
 
-    pub async fn sled_list_instances(
-        &self,
-        opctx: &OpContext,
-        sled_id: Uuid,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<db::model::SledInstance> {
-        self.db_datastore.sled_instance_list(&opctx, sled_id, pagparams).await
-    }
-
     pub async fn sled_client(
         &self,
         id: &Uuid,
