@@ -95,6 +95,16 @@ pub struct DeleteVnicError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::get_linkprop`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get link property \"{prop_name}\" on vnic {link_name}: {err}")]
+pub struct GetLinkpropError {
+    link_name: String,
+    prop_name: String,
+    #[source]
+    err: ExecutionError,
+}
+
 /// Errors returned from [`Dladm::set_linkprop`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to set link property \"{prop_name}\" to \"{prop_value}\" on vnic {link_name}: {err}")]
@@ -387,6 +397,21 @@ impl Dladm {
         Ok(())
     }
 
+    /// Get a link property value on a VNIC
+    pub fn get_linkprop(
+        vnic: &str,
+        prop_name: &str,
+    ) -> Result<String, GetLinkpropError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd =
+            command.args(&[DLADM, "show-linkprop", "-c", "-o", "value", "-p", prop_name, vnic]);
+        let result = execute(cmd).map_err(|err| GetLinkpropError {
+            link_name: vnic.to_string(),
+            prop_name: prop_name.to_string(),
+            err,
+        })?;
+        Ok(String::from_utf8_lossy(&result.stdout).into_owned())
+    }
     /// Set a link property on a VNIC
     pub fn set_linkprop(
         vnic: &str,
