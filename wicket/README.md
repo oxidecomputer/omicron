@@ -114,7 +114,7 @@ WICKET_UPDATE_TEST_ERROR=<value> cargo run --bin wicket
 
 Here, `<value>` can be:
 
-* `start_failed`: Fail to start an update.
+* `start_failed`: Simulate a failure while starting an update.
 * (implement more options as needed)
 
 ## Adding a test update step
