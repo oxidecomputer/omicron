@@ -8,6 +8,7 @@ use super::common;
 use super::dns_config;
 use super::dns_propagation;
 use super::dns_servers;
+use super::tls_certs;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -34,6 +35,11 @@ pub struct BackgroundTasks {
     pub task_external_dns_config: common::TaskHandle,
     /// task handle for the external DNS servers background task
     pub task_external_dns_servers: common::TaskHandle,
+
+    /// task handle for the task that keeps track of configured TLS certificates
+    pub task_tls_certs: common::TaskHandle,
+    /// TLS certificates read by the background task
+    pub tls_certs: tokio::sync::watch::Receiver<Option<tls_certs::TlsCerts>>,
 }
 
 impl BackgroundTasks {
@@ -55,10 +61,24 @@ impl BackgroundTasks {
         let (task_external_dns_config, task_external_dns_servers) = init_dns(
             &mut driver,
             opctx,
-            datastore,
+            datastore.clone(),
             DnsGroup::External,
             &config.dns_external,
         );
+
+        // Background task: TLS certificate list watcher
+        let (task_tls_certs, tls_certs) = {
+            let watcher = tls_certs::TlsCertsWatcher::new(datastore);
+            let watcher_channel = watcher.watcher();
+            let task = driver.register(
+                "tls_certs".to_string(),
+                config.tls_certs.period_secs,
+                Box::new(watcher),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+            (task, watcher_channel)
+        };
 
         BackgroundTasks {
             driver,
@@ -66,6 +86,8 @@ impl BackgroundTasks {
             task_internal_dns_servers,
             task_external_dns_config,
             task_external_dns_servers,
+            task_tls_certs,
+            tls_certs,
         }
     }
 

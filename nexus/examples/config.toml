@@ -44,6 +44,8 @@ bind_address = "127.0.0.1:12220"
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
 
+# XXX-dap add a commented-out section showing how to enable TLS
+
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API
 bind_address = "[::1]:12221"
@@ -77,3 +79,8 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+# How frequently we check the list of stored TLS certificates.  This is
+# approximately an upper bound on how soon after updating the list of
+# certificates it will take _other_ Nexus instances to notice and stop serving
+# them (on a sunny day).
+tls_certs.period_secs = 60

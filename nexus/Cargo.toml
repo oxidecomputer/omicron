@@ -87,6 +87,7 @@ omicron-passwords.workspace = true
 oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
+rustls = { workspace = true }
 
 [dev-dependencies]
 assert_matches.workspace = true

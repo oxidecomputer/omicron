@@ -281,6 +281,25 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
     }
 
+    pub async fn silos_list_all(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Silo> {
+        // TODO-scalability It would be better if this made paginated queries to
+        // the database.  In practice, we are not likely to have a large number
+        // of Silos.
+        // XXX-dap commonize with above
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        use db::schema::silo::dsl;
+        dsl::silo
+            .filter(dsl::time_deleted.is_null())
+            .select(Silo::as_select())
+            .load_async::<Silo>(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+    }
+
     pub async fn silo_delete(
         &self,
         opctx: &OpContext,

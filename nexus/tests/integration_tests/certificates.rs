@@ -302,65 +302,6 @@ async fn test_crud(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_refresh(cptestctx: &ControlPlaneTestContext) {
-    let chain = CertificateChain::new();
-    let (cert, key) =
-        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
-
-    create_certificate(
-        &cptestctx.external_client,
-        CERT_NAME,
-        cert.clone(),
-        key.clone(),
-    )
-    .await;
-
-    let http_client = &cptestctx.external_http_client().await;
-    let https_client = &cptestctx.external_https_client().await;
-
-    let mut root_certs = rustls::RootCertStore::empty();
-    root_certs.add(&chain.root_cert).expect("Failed to add certificate");
-
-    // We can use HTTP on the HTTP interface, and HTTPS on the HTTPS
-    // interface...
-    chain.do_request(&http_client, http::uri::Scheme::HTTP).await.unwrap();
-    chain.do_request(&https_client, http::uri::Scheme::HTTPS).await.unwrap();
-
-    // ... but not vice-versa.
-    chain.do_request(&http_client, http::uri::Scheme::HTTPS).await.unwrap_err();
-    chain.do_request(&https_client, http::uri::Scheme::HTTP).await.unwrap_err();
-
-    // Remove the default certificate, add a new one.
-    //
-    // NOTE: We're doing this on the "HTTP client" interface only because dropshot
-    // makes a hard-coded assumption that the test client is not using HTTPS:
-    // https://docs.rs/dropshot/0.8.0/src/dropshot/test_util.rs.html#106
-    let chain2 = CertificateChain::new();
-    let (cert, key) =
-        (chain2.cert_chain_as_pem(), chain2.end_cert_private_key_as_pem());
-    create_certificate(
-        &http_client,
-        "my-other-certificate",
-        cert.clone(),
-        key.clone(),
-    )
-    .await;
-    delete_certificate(&http_client, CERT_NAME).await;
-
-    // (Test config) Refresh the clients -- the port for the HTTPS interface
-    // probably changed.
-    let https_client = &cptestctx.external_https_client().await;
-
-    // Requests through the old certificate chain fail -- it was removed.
-    chain
-        .do_request(&https_client, http::uri::Scheme::HTTPS)
-        .await
-        .unwrap_err();
-    // Requests through the new certificate chain succeed.
-    chain2.do_request(&https_client, http::uri::Scheme::HTTPS).await.unwrap();
-}
-
-#[nexus_test]
 async fn test_cannot_create_certificate_with_bad_key(
     cptestctx: &ControlPlaneTestContext,
 ) {

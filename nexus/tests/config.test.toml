@@ -2,9 +2,6 @@
 # Oxide API: configuration file for test suite
 #
 
-# Avoid conflicting with other ports during HTTPS tests
-nexus_https_port = 0
-
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "tests/static"
@@ -78,3 +75,8 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+# How frequently we check the list of stored TLS certificates.  This is
+# approximately an upper bound on how soon after updating the list of
+# certificates it will take _other_ Nexus instances to notice and stop serving
+# them (on a sunny day).
+tls_certs.period_secs = 60

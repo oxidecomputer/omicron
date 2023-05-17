@@ -4,6 +4,7 @@
 
 //! Rack management
 
+use super::silo::silo_dns_name;
 use crate::authz;
 use crate::db;
 use crate::db::lookup::LookupPath;
@@ -158,7 +159,7 @@ impl super::Nexus {
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
         );
-        dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
+        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
 
         let recovery_silo = SiloCreate {
             identity: IdentityMetadataCreateParams {
@@ -192,14 +193,15 @@ impl super::Nexus {
             )
             .await?;
 
-        // We've potentially updated both the list of DNS servers and the DNS
-        // configuration.  Activate both background tasks, for both internal and
-        // external DNS.
+        // We've potentially updated the list of DNS servers and the DNS
+        // configuration for both internal and external DNS, plus the Silo
+        // certificates.  Activate the relevant background tasks.
         for task in &[
             &self.background_tasks.task_internal_dns_config,
             &self.background_tasks.task_internal_dns_servers,
             &self.background_tasks.task_external_dns_config,
             &self.background_tasks.task_external_dns_servers,
+            &self.background_tasks.task_tls_certs,
         ] {
             self.background_tasks.activate(task);
         }

@@ -128,37 +128,28 @@ impl Server {
         apictx.nexus.await_rack_initialization(&opctx).await;
 
         // Launch the external server.
+        let tls_config = apictx
+            .nexus
+            .external_tls_config(config.deployment.dropshot_external.tls)
+            .await;
         let http_server_external = {
-            let server_starter_external = dropshot::HttpServerStarter::new(
-                &config.deployment.dropshot_external,
-                external_api(),
-                Arc::clone(&apictx),
-                &log.new(o!("component" => "dropshot_external")),
-            )
-            .map_err(|error| {
-                format!("initializing external server: {}", error)
-            })?;
+            let server_starter_external =
+                dropshot::HttpServerStarter::new_with_tls(
+                    &config.deployment.dropshot_external.dropshot,
+                    external_api(),
+                    Arc::clone(&apictx),
+                    &log.new(o!("component" => "dropshot_external")),
+                    tls_config.map(dropshot::ConfigTls::Dynamic),
+                )
+                .map_err(|error| {
+                    format!("initializing external server: {}", error)
+                })?;
             server_starter_external.start()
         };
-
-        // Transfer control of the external server to Nexus
-        let mut http_servers_external = crate::app::ExternalServers::new(
-            config.deployment.dropshot_external.clone(),
-            config.pkg.nexus_https_port,
-        );
-        http_servers_external.set_http(http_server_external);
         apictx
             .nexus
-            .set_servers(http_servers_external, http_server_internal)
+            .set_servers(http_server_external, http_server_internal)
             .await;
-
-        // If Nexus has TLS certificates, launch the HTTPS server.
-        apictx
-            .nexus
-            .refresh_tls_config(&opctx)
-            .await
-            .map_err(|e| e.to_string())?;
-
         let server = Server { apictx: apictx.clone() };
         Ok(server)
     }
@@ -264,10 +255,12 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
+    // XXX-dap allow to return HTTP *or* HTTPS
     async fn get_http_server_external_address(&self) -> Option<SocketAddr> {
         self.apictx.nexus.get_http_external_server_address().await
     }
 
+    // XXX-dap revisit / rip out, only used by test?
     async fn get_https_server_external_address(&self) -> Option<SocketAddr> {
         self.apictx.nexus.get_https_external_server_address().await
     }

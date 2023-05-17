@@ -332,7 +332,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     };
 
     if let Some(p) = args.nexus_listen_port {
-        config.deployment.dropshot_external.bind_address.set_port(p);
+        config.deployment.dropshot_external.dropshot.bind_address.set_port(p);
     }
 
     // Start up a ControlPlaneTestContext, which tautologically sets up

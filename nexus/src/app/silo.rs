@@ -64,19 +64,6 @@ impl super::Nexus {
         }
     }
 
-    /// Returns the (relative) DNS name for this Silo's API and console endpoints
-    /// _within_ the control plane DNS zone (i.e., without that zone's suffix)
-    ///
-    /// This specific naming scheme is determined under RFD 357.
-    pub(crate) fn silo_dns_name(
-        name: &omicron_common::api::external::Name,
-    ) -> String {
-        // RFD 4 constrains resource names (including Silo names) to DNS-safe
-        // strings, which is why it's safe to directly put the name of the
-        // resource into the DNS name rather than doing any kind of escaping.
-        format!("{}.sys", name)
-    }
-
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
@@ -107,7 +94,7 @@ impl super::Nexus {
             format!("create silo: {:?}", silo_name),
             self.id.to_string(),
         );
-        dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
+        dns_update.add_name(silo_dns_name(silo_name), dns_records)?;
 
         let silo = datastore
             .silo_create(&opctx, &nexus_opctx, new_silo_params, dns_update)
@@ -139,7 +126,7 @@ impl super::Nexus {
             format!("delete silo: {:?}", db_silo.name()),
             self.id.to_string(),
         );
-        dns_update.remove_name(Self::silo_dns_name(&db_silo.name()))?;
+        dns_update.remove_name(silo_dns_name(&db_silo.name()))?;
         datastore
             .silo_delete(opctx, &authz_silo, &db_silo, dns_opctx, dns_update)
             .await?;
@@ -879,4 +866,17 @@ impl super::Nexus {
     ) -> db::lookup::SiloGroup<'a> {
         LookupPath::new(opctx, &self.db_datastore).silo_group_id(*group_id)
     }
+}
+
+/// Returns the (relative) DNS name for this Silo's API and console endpoints
+/// _within_ the external DNS zone (i.e., without that zone's suffix)
+///
+/// This specific naming scheme is determined under RFD 357.
+pub(crate) fn silo_dns_name(
+    name: &omicron_common::api::external::Name,
+) -> String {
+    // RFD 4 constrains resource names (including Silo names) to DNS-safe
+    // strings, which is why it's safe to directly put the name of the
+    // resource into the DNS name rather than doing any kind of escaping.
+    format!("{}.sys", name)
 }

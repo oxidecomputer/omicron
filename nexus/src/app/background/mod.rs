@@ -9,6 +9,7 @@ mod dns_config;
 mod dns_propagation;
 mod dns_servers;
 mod init;
+mod tls_certs;
 
 pub use common::Driver;
 pub use common::TaskHandle;

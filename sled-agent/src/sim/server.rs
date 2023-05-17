@@ -320,11 +320,16 @@ impl Server {
                 .unwrap(),
         };
 
+        let certs = match &rss_args.tls_certificate {
+            Some(c) => vec![c.clone()],
+            None => vec![],
+        };
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
             internal_services_ip_pool_ranges,
-            certs: vec![],
+            certs,
             internal_dns_zone_config: d2n_params(&dns_config),
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
@@ -393,6 +398,9 @@ pub struct RssArgs {
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify a certificate and associated private key for the initial Silo's
+    /// initial TLS certificates
+    pub tls_certificate: Option<NexusTypes::Certificate>,
 }
 
 /// Run an instance of the `Server`
