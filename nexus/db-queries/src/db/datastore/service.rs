@@ -38,11 +38,12 @@ impl DataStore {
     ) -> CreateResult<Service> {
         use db::schema::service::dsl;
 
+        let service_id = service.id();
         let sled_id = service.sled_id;
         Sled::insert_resource(
             sled_id,
             diesel::insert_into(dsl::service)
-                .values(service.clone())
+                .values(service)
                 .on_conflict(dsl::id)
                 .do_update()
                 .set((
@@ -65,7 +66,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Service,
-                        &service.id().to_string(),
+                        &service_id.to_string(),
                     ),
                 )
             }
