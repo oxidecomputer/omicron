@@ -45,6 +45,8 @@ pub struct UpdatePane {
     #[allow(unused)]
     log: Logger,
     help: Vec<(&'static str, &'static str)>,
+    not_started_help: Vec<(&'static str, &'static str)>,
+    start_update_failed_help: Vec<(&'static str, &'static str)>,
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
@@ -91,6 +93,8 @@ impl UpdatePane {
                 ("Ignition", "<i>"),
                 ("Update", "<Enter>"),
             ],
+            not_started_help: vec![("Start", "<Ctrl-U>")],
+            start_update_failed_help: vec![("Retry", "<Ctrl-U>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, ComponentUpdateListState::default()))
@@ -794,6 +798,10 @@ impl UpdatePane {
 
         match state.update_state.item_state(state.rack_state.selected) {
             UpdateItemState::AwaitingRepository => {
+                // No status bar, so make the main rect bigger.
+                let mut rect = self.status_view_main_rect;
+                rect.height += 3;
+
                 // Show this command.
                 let text = Text::from(vec![
                     Spans::from(Vec::new()),
@@ -816,9 +824,10 @@ impl UpdatePane {
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
                     .block(block.clone().title("AWAITING REPOSITORY"));
-                frame.render_widget(paragraph, self.status_view_main_rect);
+                frame.render_widget(paragraph, rect);
             }
             UpdateItemState::NotStarted => {
+                // Need to make space for the command bar at the bottom.
                 let text = Text::from(vec![
                     Spans::from(Vec::new()),
                     Spans::from(vec![
@@ -832,8 +841,18 @@ impl UpdatePane {
                 ]);
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
-                    .block(block.clone().title("UPDATE READY"));
+                    .block(block.clone().title("UPDATE READY").borders(
+                        Borders::LEFT | Borders::RIGHT | Borders::TOP,
+                    ));
                 frame.render_widget(paragraph, self.status_view_main_rect);
+                frame.render_widget(
+                    help_text(&self.not_started_help).block(block.clone()),
+                    self.help_rect,
+                );
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Bottom),
+                    self.status_view_main_rect,
+                );
             }
             UpdateItemState::StartUpdate { response } => {
                 // Split the status view rect into two rects:
@@ -842,16 +861,16 @@ impl UpdatePane {
                 let mut status_text_rect = self.status_view_main_rect;
                 status_text_rect.height = 3;
 
-                // TODO: height looks wrong, needs adjustment
                 let mut message_rect = self.status_view_main_rect;
                 message_rect.y += 3;
-                message_rect.height = message_rect.height.saturating_sub(3);
+                // We're going to compute message_rect.height based on the help
+                // text returned in the next block.
 
-                let status_text = match response {
+                let (status_text, help_text) = match response {
                     Ok(()) => {
                         // This should show up very briefly, if at all, and then
                         // be replaced with the events.
-                        Text::from(Spans::from(vec![
+                        let status_text = Text::from(Spans::from(vec![
                             Span::styled("Update ", style::plain_text()),
                             Span::styled(
                                 "started",
@@ -861,19 +880,34 @@ impl UpdatePane {
                                 ", waiting for events",
                                 style::plain_text(),
                             ),
-                        ]))
+                        ]));
+                        (status_text, None)
                     }
-                    Err(_) => Text::from(Spans::from(vec![
-                        Span::styled("Update ", style::plain_text()),
-                        Span::styled(
-                            "failed to start",
-                            style::failed_update_bold(),
-                        ),
-                        Span::styled(": press ", style::plain_text()),
-                        Span::styled("<Ctrl-U>", style::selected_line()),
-                        Span::styled(" to retry", style::plain_text()),
-                    ])),
+                    Err(_) => {
+                        let status_text = Text::from(Spans::from(vec![
+                            Span::styled("Update ", style::plain_text()),
+                            Span::styled(
+                                "failed to start",
+                                style::failed_update_bold(),
+                            ),
+                        ]));
+                        let help_text =
+                            Some(help_text(&self.start_update_failed_help));
+                        (status_text, help_text)
+                    }
                 };
+
+                if help_text.is_some() {
+                    // message_rect.height needs to be subtracted by 3 to
+                    // account for the box being moved downards (message_rect.y
+                    // += 3).
+                    message_rect.height = message_rect.height.saturating_sub(3);
+                } else {
+                    // As above, message_rect.height needs to be subtracted by 3
+                    // to account for the box being moved downwards. *However*,
+                    // the height needs to be incremented by 3 since there's no
+                    // help bar. This means that there is no change in height.
+                }
 
                 let body = match response {
                     Ok(()) => {
@@ -908,7 +942,6 @@ impl UpdatePane {
                     }
                 };
 
-                // Render the status text.
                 let paragraph = Paragraph::new(status_text)
                     .block(block.clone().title("UPDATE STATUS"))
                     .alignment(Alignment::Center);
@@ -924,16 +957,34 @@ impl UpdatePane {
                 };
                 let wrapped_body = wrap_text(&body, options);
 
-                let body_paragraph =
-                    Paragraph::new(wrapped_body).block(block.clone().borders(
-                        Borders::LEFT | Borders::RIGHT | Borders::BOTTOM,
-                    ));
+                // Render the status text.
+                let body_borders = if help_text.is_some() {
+                    // The bottom border will be formed by the top border of the help text.
+                    Borders::LEFT | Borders::RIGHT
+                } else {
+                    Borders::LEFT | Borders::RIGHT | Borders::BOTTOM
+                };
+
+                let body_paragraph = Paragraph::new(wrapped_body)
+                    .block(block.clone().borders(body_borders));
                 frame.render_widget(body_paragraph, message_rect);
 
-                frame.render_widget(
-                    BoxConnector::new(BoxConnectorKind::Top),
-                    message_rect,
-                );
+                // Render the help text if available.
+                if let Some(text) = help_text {
+                    frame.render_widget(
+                        text.block(block.clone()),
+                        self.help_rect,
+                    );
+                    frame.render_widget(
+                        BoxConnector::new(BoxConnectorKind::Both),
+                        message_rect,
+                    );
+                } else {
+                    frame.render_widget(
+                        BoxConnector::new(BoxConnectorKind::Top),
+                        message_rect,
+                    );
+                }
             }
             UpdateItemState::RunningOrCompleted { .. } => {
                 // Split the status view rect into two rects:
@@ -944,7 +995,14 @@ impl UpdatePane {
 
                 let mut list_rect = self.status_view_main_rect;
                 list_rect.y += 3;
-                list_rect.height = list_rect.height.saturating_sub(3);
+                // list_rect was moved down by 3 so we would ordinarily need to
+                // subtract 3 from its height. However, we currently do not have
+                // any help text in this pane because of which we have to add 3
+                // to its height. That cancels out exactly so there's no height
+                // adjustment here.
+                //
+                // If we gain a status bar in the future, then we'll have to
+                // introduce a height adjustment in those cases.
 
                 let id_state = self
                     .component_state
@@ -1346,6 +1404,7 @@ impl Control for UpdatePane {
                     Constraint::Length(3),
                     Constraint::Length(4),
                     Constraint::Min(0),
+                    Constraint::Min(3),
                 ]
                 .as_ref(),
             )
@@ -1354,6 +1413,7 @@ impl Control for UpdatePane {
         // status_view_chunks[1] is table_headers_rect as above.
         self.status_view_version_rect = status_view_chunks[2];
         self.status_view_main_rect = status_view_chunks[3];
+        // status_view_chunks[2] is help_rect as above.
 
         self.update_items(state);
     }
