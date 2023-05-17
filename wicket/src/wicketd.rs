@@ -136,7 +136,7 @@ impl WicketdManager {
                 .post_start_update(sp.type_, sp.slot, &options)
                 .await
             {
-                Ok(resp) => Ok(resp.into_inner()),
+                Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),
             };
 
