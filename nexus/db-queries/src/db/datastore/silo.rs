@@ -39,6 +39,8 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
 use uuid::Uuid;
+use nexus_db_model::ServiceKind;
+use nexus_db_model::Certificate;
 
 impl DataStore {
     /// Load built-in silos into the database
@@ -225,6 +227,27 @@ impl DataStore {
                 let (delete_old_query, insert_new_query) = queries;
                 delete_old_query.execute_async(&conn).await?;
                 insert_new_query.execute_async(&conn).await?;
+            }
+
+            let certificates = new_silo_params
+                .tls_certificates
+                .into_iter()
+                .map(|c| {
+                    Certificate::new(
+                        silo.id(),
+                        Uuid::new_v4(),
+                        ServiceKind::Nexus,
+                        c,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Error::from)?;
+            {
+                use db::schema::certificate::dsl;
+                diesel::insert_into(dsl::certificate)
+                    .values(certificates)
+                    .execute_async(&conn)
+                    .await?;
             }
 
             self.dns_update(nexus_opctx, &conn, dns_update).await?;

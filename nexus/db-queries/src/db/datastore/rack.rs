@@ -18,7 +18,6 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
-use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::NexusService;
@@ -37,7 +36,6 @@ use diesel::upsert::excluded;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
-use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_types::external_api::params as external_params;
@@ -62,7 +60,6 @@ pub struct RackInit {
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
-    pub certificates: Vec<external_params::CertificateCreate>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
@@ -130,7 +127,6 @@ impl DataStore {
         let services = rack_init.services;
         let datasets = rack_init.datasets;
         let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
-        let certificates = rack_init.certificates;
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
@@ -142,7 +138,6 @@ impl DataStore {
             RackUpdate(PoolError),
             DnsSerialization(Error),
             Silo(Error),
-            Certificate(nexus_db_model::CertificateError),
             RoleAssignment(Error),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -311,29 +306,6 @@ impl DataStore {
                     .map_err(RackInitError::Silo)
                     .map_err(TxnError::CustomError)?;
                 info!(log, "Created recovery silo");
-
-                // Create certificates in that Silo.
-                let certificates = certificates
-                    .into_iter()
-                    .map(|c| {
-                        Certificate::new(
-                            db_silo.id(),
-                            Uuid::new_v4(),
-                            ServiceKind::Nexus,
-                            c
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(RackInitError::Certificate)
-                    .map_err(TxnError::CustomError)?;
-                {
-                    use db::schema::certificate::dsl;
-                    diesel::insert_into(dsl::certificate)
-                        .values(certificates)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Inserted certificates");
 
                 // Create the first user in the initial Recovery Silo
                 let silo_user_id = Uuid::new_v4();
@@ -506,11 +478,6 @@ impl DataStore {
                         "failed to create recovery Silo: {:#}", err
                     ))
                 },
-                TxnError::CustomError(RackInitError::Certificate(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to create certificates: {:#}", err
-                    ))
-                },
                 TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
                     Error::internal_error(&format!(
                         "failed to assign role to initial user: {:#}", err
@@ -634,7 +601,6 @@ mod test {
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
-                certificates: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
                     internal_dns::DNS_ZONE,
@@ -657,6 +623,7 @@ mod test {
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
+                    tls_certificates: vec![],
                 },
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password
