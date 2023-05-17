@@ -8632,7 +8632,7 @@
         ]
       },
       "Image": {
-        "description": "Client view of images",
+        "description": "View of an image\n\nIf `project_id` is present then the image is only visible inside that project. If it's not present then the image is visible to all projects in the silo.",
         "type": "object",
         "properties": {
           "block_size": {

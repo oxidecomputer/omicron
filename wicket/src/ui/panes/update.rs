@@ -657,7 +657,7 @@ impl UpdatePane {
             "UPDATE STATUS",
             header_style,
         )]))
-        .block(block.clone().title("<ENTER>"));
+        .block(block.clone());
         frame.render_widget(title_bar, self.title_rect);
 
         // Draw the table headers
@@ -722,7 +722,7 @@ impl UpdatePane {
             Span::styled("UPDATE STATUS / ", border_style),
             Span::styled(state.rack_state.selected.to_string(), header_style),
         ]))
-        .block(block.clone().title("<ENTER>"));
+        .block(block.clone());
         frame.render_widget(title_bar, self.title_rect);
 
         let versions = &state.update_state.artifact_versions;
