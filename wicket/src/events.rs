@@ -27,6 +27,12 @@ pub enum Event {
     /// An Inventory Update Event
     Inventory { inventory: RackV1Inventory, mgs_last_seen: Duration },
 
+    /// A start update request completed and a response was received.
+    StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
         system_version: Option<SemverVersion>,

@@ -99,9 +99,51 @@ return actions when they need to be redrawn. However, the `Runner` also doesn't
 know when a screen animation is ongoing, and so it forwards all ticks to the
 `Screen` which returns an `Action::Redraw` if a redraw is necessary.
 
-# Testing wicket as a captive shell
+# Manually testing wicket
 
-Wicket is meant to be used as a captive shell over ssh. To test the captive shell support on a local Unix machine:
+Use these to test out particular scenarios with wicket by hand. (Feel free to
+add more as needed!)
+
+## Adding a simulated update failure
+
+Add a simulated failure to wicket.
+
+```
+WICKET_UPDATE_TEST_ERROR=<value> cargo run --bin wicket
+```
+
+Here, `<value>` can be:
+
+* `start_failed`: Fail to start an update.
+* (implement more options as needed)
+
+## Adding a test update step
+
+Add a step which just reports progress and otherwise does nothing else. To add
+such a step, set the environment variable `WICKET_UPDATE_TEST_STEP_SECONDS` to
+an appropriate value. For example:
+
+```
+WICKET_UPDATE_TEST_STEP_SECONDS=15 cargo run --bin wicket
+```
+
+## Testing upload functionality
+
+Test upload functionality without setting up wicket as an SSH captive shell (see below for instructions). (This is the most common use case.)
+
+```
+SSH_ORIGINAL_COMMAND=upload cargo run -p wicket < my-tuf-repo.zip
+```
+
+Test upload functionality if wicket is set up as an SSH captive shell:
+
+```
+ssh user@$IP_ADDRESS upload < my-tuf-repo.zip
+```
+
+## Testing wicket as an SSH captive shell
+
+Wicket is meant to be used as a captive shell over ssh. If you're making changes to the SSH shell support, you'll likely want to test the captive shell support on a local Unix machine. Here's how to do so.
 
 1. Make the `wicket` available globally. For the rest of this section we're going to use the path `/usr/local/bin/wicket`.
     * If your build directory is globally readable, create a symlink to `wicket` in a well-known location. From omicron's root, run: `sudo ln -s $(readlink -f target/debug/wicket) /usr/local/bin/wicket`
@@ -126,22 +168,3 @@ Wicket is meant to be used as a captive shell over ssh. To test the captive shel
     * illumos: `svcadm restart ssh`
 
 From now on, if you run `ssh wicket-test@localhost`, you should get the wicket captive shell. Also, `ssh wicket-test@localhost upload` should let you upload a zip file as a TUF repository.
-
-# Testing upload functionality without a captive shell
-
-If you don't want to test wicket as a captive shell and simply want to try out the upload functionality, run:
-
-```
-SSH_ORIGINAL_COMMAND=upload cargo run -p wicket
-```
-
-# Adding a test update step
-
-While developing wicket, it can be useful to add a step which just reports
-progress and otherwise does nothing else. To add such a step, set the
-environment variable `WICKET_UPDATE_TEST_STEP_SECONDS` to an appropriate value.
-For example:
-
-```
-WICKET_UPDATE_TEST_STEP_SECONDS=15 cargo run --bin wicket
-```

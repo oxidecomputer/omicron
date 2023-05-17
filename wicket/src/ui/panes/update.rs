@@ -832,6 +832,103 @@ impl UpdatePane {
                     .block(block.clone().title("UPDATE READY"));
                 frame.render_widget(paragraph, self.status_view_main_rect);
             }
+            UpdateItemState::StartUpdate { response } => {
+                // Split the status view rect into two rects:
+                // * status text (3 lines including borders)
+                // * the message (everything else)
+                let mut status_text_rect = self.status_view_main_rect;
+                status_text_rect.height = 3;
+
+                // TODO: height looks wrong, needs adjustment
+                let mut message_rect = self.status_view_main_rect;
+                message_rect.y += 3;
+                message_rect.height = message_rect.height.saturating_sub(3);
+
+                let status_text = match response {
+                    Ok(()) => {
+                        // This should show up very briefly, if at all, and then
+                        // be replaced with the events.
+                        Text::from(Spans::from(vec![
+                            Span::styled("Update ", style::plain_text()),
+                            Span::styled(
+                                "started",
+                                style::successful_update_bold(),
+                            ),
+                            Span::styled(
+                                ", waiting for events",
+                                style::plain_text(),
+                            ),
+                        ]))
+                    }
+                    Err(_) => Text::from(Spans::from(vec![
+                        Span::styled("Update ", style::plain_text()),
+                        Span::styled(
+                            "failed to start",
+                            style::failed_update_bold(),
+                        ),
+                    ])),
+                };
+
+                let body = match response {
+                    Ok(()) => {
+                        // Don't display any text here; status_text should be
+                        // enough for the user.
+                        Text::from(Vec::new())
+                    }
+                    Err(message) => {
+                        // Print out the message here.
+                        //
+                        // TODO: show a list of causes -- HttpError (which this
+                        // ultimately comes from) doesn't seem to have a good
+                        // way to return structured data like that.
+                        let mut spans = Vec::new();
+
+                        // If the message has multiple lines of text, split them
+                        // into separate spans. This makes text wrapping offsets
+                        // work correctly.
+                        let mut next_line =
+                            vec![Span::styled("Message: ", style::selected())];
+                        for line in message.lines() {
+                            next_line.push(Span::styled(
+                                line.to_owned(),
+                                style::plain_text(),
+                            ));
+                            spans.push(Spans::from(next_line));
+                            next_line = Vec::new();
+                        }
+                        spans.push(Spans::from(next_line));
+
+                        Text::from(spans)
+                    }
+                };
+
+                // Render the status text.
+                let paragraph = Paragraph::new(status_text)
+                    .block(block.clone().title("UPDATE STATUS"))
+                    .alignment(Alignment::Center);
+                frame.render_widget(paragraph, status_text_rect);
+
+                // Wrap the text to the screen width.
+                let options = crate::ui::wrap::Options {
+                    // Subtract 2 for borders.
+                    width: message_rect.width.saturating_sub(2) as usize,
+                    initial_indent: Span::raw(""),
+                    subsequent_indent: Span::raw(""),
+                    break_words: true,
+                };
+                let wrapped_body = wrap_text(&body, options);
+
+                let body_paragraph =
+                    Paragraph::new(wrapped_body).block(block.clone().borders(
+                        Borders::LEFT | Borders::RIGHT | Borders::BOTTOM,
+                    ));
+                frame.render_widget(body_paragraph, message_rect);
+
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Top),
+                    message_rect,
+                );
+            }
             UpdateItemState::RunningOrCompleted { .. } => {
                 // Split the status view rect into two rects:
                 // * status text (3 lines including borders)

@@ -12,7 +12,6 @@ use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
-use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
@@ -144,10 +143,20 @@ async fn get_artifacts_and_event_reports(
 
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub(crate) struct StartUpdateOptions {
+    /// If passed in, fails the update with a simulated error.
+    pub(crate) test_error: Option<UpdateTestError>,
+
     /// If passed in, creates a test step that lasts these many seconds long.
     ///
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
+}
+
+#[derive(Copy, Clone, Debug, JsonSchema, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpdateTestError {
+    /// Simulate an error where an update fails to start.
+    StartFailed,
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -178,7 +187,7 @@ async fn get_baseboard(
 async fn post_start_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
-    opts: Query<StartUpdateOptions>,
+    opts: TypedBody<StartUpdateOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
     let target = target.into_inner();
@@ -257,6 +266,14 @@ async fn post_start_update(
         }
     }
 
+    let opts = opts.into_inner();
+    if opts.test_error == Some(UpdateTestError::StartFailed) {
+        return Err(HttpError::for_bad_request(
+            None,
+            "Simulated failure while starting update".into(),
+        ));
+    }
+
     // All pre-flight update checks look OK: start the update.
     //
     // Generate an ID for this update; the update tracker will send it to the
@@ -264,8 +281,7 @@ async fn post_start_update(
     // back to our artifact server with its progress reports.
     let update_id = Uuid::new_v4();
 
-    match rqctx.update_tracker.start(target, update_id, opts.into_inner()).await
-    {
+    match rqctx.update_tracker.start(target, update_id, opts).await {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }

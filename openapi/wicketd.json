@@ -234,19 +234,18 @@
             "schema": {
               "$ref": "#/components/schemas/SpType"
             }
-          },
-          {
-            "in": "query",
-            "name": "test_step_seconds",
-            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "resource updated"
@@ -1556,6 +1555,27 @@
           "power",
           "switch"
         ]
+      },
+      "StartUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the update with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          },
+          "test_step_seconds": {
+            "nullable": true,
+            "description": "If passed in, creates a test step that lasts these many seconds long.\n\nThis is used for testing.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        }
       },
       "StepComponentSummaryForGenericSpec": {
         "type": "object",
@@ -3046,6 +3066,17 @@
             },
             "required": [
               "id"
+            ]
+          }
+        ]
+      },
+      "UpdateTestError": {
+        "oneOf": [
+          {
+            "description": "Simulate an error where an update fails to start.",
+            "type": "string",
+            "enum": [
+              "start_failed"
             ]
           }
         ]

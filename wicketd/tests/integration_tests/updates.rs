@@ -22,6 +22,7 @@ use wicket_common::update_events::{StepEventKind, UpdateComponent};
 use wicketd::{RunningUpdateState, StartUpdateError};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, SpIdentifier, SpType,
+    StartUpdateOptions,
 };
 
 #[tokio::test]
@@ -105,7 +106,11 @@ async fn test_updates() {
     // Now, try starting the update on SP 0.
     wicketd_testctx
         .wicketd_client
-        .post_start_update(target_sp.type_, target_sp.slot, None)
+        .post_start_update(
+            target_sp.type_,
+            target_sp.slot,
+            &StartUpdateOptions::default(),
+        )
         .await
         .expect("update started successfully");
 

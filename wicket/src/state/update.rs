@@ -37,25 +37,28 @@ impl RackUpdateState {
                 .map(|id| match id {
                     ComponentId::Sled(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                            UpdateComponent::Host,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::Sp,
+                                UpdateComponent::Host,
+                            ],
+                        ),
                     ),
                     ComponentId::Switch(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                        ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                        ),
                     ),
                 })
                 .collect(),
@@ -71,12 +74,31 @@ impl RackUpdateState {
         } else {
             match &self.items[&component].state {
                 UpdateItemStateImpl::NotStarted => UpdateItemState::NotStarted,
+                UpdateItemStateImpl::StartUpdate { response } => {
+                    UpdateItemState::StartUpdate { response: response.clone() }
+                }
                 UpdateItemStateImpl::RunningOrCompleted {
                     event_report,
                     ..
                 } => UpdateItemState::RunningOrCompleted { event_report },
             }
         }
+    }
+
+    pub fn handle_start_update_response(
+        &mut self,
+        log: &Logger,
+        component_id: ComponentId,
+        response: Result<(), String>,
+    ) {
+        match self.items.get_mut(&component_id) {
+            Some(item) => {
+                item.handle_start_update_response(log, response);
+            }
+            None => {
+                warn!(log, "Unknown Component ID in start update response: {component_id}");
+            }
+        };
     }
 
     pub fn update_artifacts_and_reports(
@@ -113,9 +135,9 @@ impl RackUpdateState {
         }
 
         // Reset all component IDs that weren't updated.
-        for (id, item_state) in &mut self.items {
+        for (id, item) in &mut self.items {
             if !updated_component_ids.contains(id) {
-                item_state.reset();
+                item.reset();
             }
         }
     }
@@ -130,6 +152,10 @@ pub enum UpdateItemState<'a> {
     /// The update repository has been uploaded but the update hasn't been
     /// started yet.
     NotStarted,
+
+    /// The update has been started, and has either succeeded or failed to
+    /// start.
+    StartUpdate { response: Result<(), String> },
 
     /// The update is running, or has completed or failed.
     RunningOrCompleted {
@@ -146,13 +172,21 @@ pub enum UpdateItemState<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateItem {
     // A list of all components within this ID.
+    component_id: ComponentId,
     components: Vec<UpdateComponent>,
     state: UpdateItemStateImpl,
 }
 
 impl UpdateItem {
-    pub fn new(components: Vec<UpdateComponent>) -> Self {
-        Self { components, state: UpdateItemStateImpl::NotStarted }
+    pub fn new(
+        component_id: ComponentId,
+        components: Vec<UpdateComponent>,
+    ) -> Self {
+        Self {
+            component_id,
+            components,
+            state: UpdateItemStateImpl::NotStarted,
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -161,7 +195,8 @@ impl UpdateItem {
 
     pub fn event_report(&self) -> Option<&EventReport> {
         match &self.state {
-            UpdateItemStateImpl::NotStarted => None,
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::StartUpdate { .. } => None,
             UpdateItemStateImpl::RunningOrCompleted {
                 event_report, ..
             } => Some(event_report),
@@ -169,8 +204,48 @@ impl UpdateItem {
     }
 
     fn reset(&mut self) {
-        self.state = UpdateItemStateImpl::NotStarted;
-        return;
+        // Reset the item state to NotStarted if it is RunningOrCompleted, but
+        // not if it's StartUpdate with an error.
+        match &self.state {
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::StartUpdate { response: Err(_) } => {
+                // Do not reset the state if an error is currently displayed.
+                // This is because we want it to keep being displayed.
+            }
+            UpdateItemStateImpl::StartUpdate { response: Ok(()) }
+            | UpdateItemStateImpl::RunningOrCompleted { .. } => {
+                self.state = UpdateItemStateImpl::NotStarted;
+            }
+        }
+    }
+
+    fn handle_start_update_response(
+        &mut self,
+        log: &slog::Logger,
+        response: Result<(), String>,
+    ) {
+        match &self.state {
+            // All states other than RunningOrCompleted are liable to be
+            // changed.
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::StartUpdate { .. } => {
+                self.state = UpdateItemStateImpl::StartUpdate { response };
+            }
+            UpdateItemStateImpl::RunningOrCompleted { .. } => {
+                // The UI only sends out start update requests in the above
+                // three states. This means that we shouldn't normally receive
+                // an update start response in this request. If we do we can't
+                // do anything else but log it, really: there's no good UI
+                // channel to surface such an unexpected case.
+                slog::warn!(
+                    log,
+                    "Received start update response while in \
+                     RunningOrCompleted state {}: {:?}",
+                    self.component_id,
+                    response
+                );
+            }
+        }
     }
 
     fn update(&mut self, new_event_report: EventReport) {
@@ -180,7 +255,8 @@ impl UpdateItem {
         }
 
         match &mut self.state {
-            state @ UpdateItemStateImpl::NotStarted => {
+            state @ UpdateItemStateImpl::NotStarted
+            | state @ UpdateItemStateImpl::StartUpdate { .. } => {
                 // Transition to the running state.
                 let components = self
                     .components
@@ -206,7 +282,8 @@ impl UpdateItem {
                 event_report,
                 ..
             } => (components, &*event_report),
-            UpdateItemStateImpl::NotStarted => {
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::StartUpdate { .. } => {
                 unreachable!(
                     "above block means it's always in the Running state"
                 )
@@ -267,19 +344,27 @@ impl UpdateItem {
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (UpdateComponent, UpdateState)> + '_ {
-        self.components.iter().map(|component| match &self.state {
-            UpdateItemStateImpl::NotStarted => {
-                (*component, UpdateState::NotStarted)
-            }
-            UpdateItemStateImpl::RunningOrCompleted { components, .. } => {
-                (*component, UpdateState::Running(components[component]))
-            }
+        self.components.iter().map(|component| {
+            let state = match &self.state {
+                UpdateItemStateImpl::NotStarted => UpdateState::NotStarted,
+                UpdateItemStateImpl::StartUpdate { response } => match response
+                {
+                    Ok(()) => UpdateState::Starting,
+                    Err(_) => UpdateState::FailedToStart,
+                },
+                UpdateItemStateImpl::RunningOrCompleted {
+                    components, ..
+                } => UpdateState::Running(components[component]),
+            };
+            (*component, state)
         })
     }
 }
 
 pub enum UpdateState {
     NotStarted,
+    Starting,
+    FailedToStart,
     Running(UpdateRunningState),
 }
 
@@ -287,6 +372,8 @@ impl Display for UpdateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotStarted => write!(f, "NOT STARTED"),
+            Self::Starting => write!(f, "STARTING"),
+            Self::FailedToStart => write!(f, "FAILED TO START"),
             Self::Running(state) => write!(f, "{state}"),
         }
     }
@@ -295,7 +382,10 @@ impl Display for UpdateState {
 impl UpdateState {
     pub fn style(&self) -> Style {
         match self {
-            UpdateState::NotStarted => style::deselected(),
+            UpdateState::NotStarted | UpdateState::Starting => {
+                style::deselected()
+            }
+            UpdateState::FailedToStart => style::failed_update(),
             UpdateState::Running(state) => state.style(),
         }
     }
@@ -304,6 +394,10 @@ impl UpdateState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum UpdateItemStateImpl {
     NotStarted,
+    StartUpdate {
+        // This can be error in case the update failed.
+        response: Result<(), String>,
+    },
     RunningOrCompleted {
         event_report: EventReport,
         components: BTreeMap<UpdateComponent, UpdateRunningState>,
