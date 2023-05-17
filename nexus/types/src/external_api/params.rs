@@ -290,6 +290,10 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
+
+    /// Initial TLS certificates to be used for the new Silo's console and API
+    /// endpoints.  These should be valid for the Silo's DNS name(s).
+    pub tls_certificates: Vec<CertificateCreate>,
 }
 
 /// Create-time parameters for a `User`
