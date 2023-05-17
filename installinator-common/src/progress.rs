@@ -324,6 +324,9 @@ pub enum ControlPlaneZonesStepId {
     /// Writing a zone.
     Zone { name: String },
 
+    /// Syncing writes to disk.
+    Fsync,
+
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,

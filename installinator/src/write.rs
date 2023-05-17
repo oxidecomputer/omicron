@@ -22,7 +22,10 @@ use installinator_common::{
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::{
+    fs::File,
+    io::{AsyncWrite, AsyncWriteExt},
+};
 use tufaceous_lib::ControlPlaneZoneImages;
 use update_engine::StepSpec;
 
@@ -574,6 +577,39 @@ impl ControlPlaneZoneWriteContext<'_> {
                 )
                 .register();
         }
+
+        // `fsync()` the directory to ensure the directory entries for all the
+        // files we just created are written to disk.
+        let output_directory = self.output_directory.to_path_buf();
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::Fsync,
+                "Syncing writes to disk",
+                move |_cx| async move {
+                    let output_directory = File::open(&output_directory)
+                        .await
+                        .map_err(|error| WriteError {
+                            component: WriteComponent::ControlPlane,
+                            slot,
+                            written_bytes: 0,
+                            total_bytes: 0,
+                            error,
+                        })?;
+                    output_directory.sync_all().await.map_err(|error| {
+                        WriteError {
+                            component: WriteComponent::ControlPlane,
+                            slot,
+                            written_bytes: 0,
+                            total_bytes: 0,
+                            error,
+                        }
+                    })?;
+
+                    StepResult::success((), ())
+                },
+            )
+            .register();
     }
 }
 
