@@ -149,11 +149,10 @@ impl DataStore {
         })
     }
 
-    /// Allocates an explicit IP address for an internal service.
+    /// Allocates an explicit Floating IP address for an internal service.
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
-    #[allow(clippy::too_many_arguments)]
     pub async fn allocate_explicit_service_ip(
         &self,
         opctx: &OpContext,
@@ -162,13 +161,34 @@ impl DataStore {
         description: &str,
         service_id: Uuid,
         ip: IpAddr,
-        port_range: Option<(u16, u16)>,
     ) -> CreateResult<ExternalIp> {
         let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
         let data = IncompleteExternalIp::for_service_explicit(
             ip_id,
             name,
             description,
+            service_id,
+            pool.id(),
+            ip,
+        );
+        self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Allocates an explicit SNAT IP address for an internal service.
+    ///
+    /// Unlike the other IP allocation requests, this does not search for an
+    /// available IP address, it asks for one explicitly.
+    pub async fn allocate_explicit_service_snat_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        service_id: Uuid,
+        ip: IpAddr,
+        port_range: (u16, u16),
+    ) -> CreateResult<ExternalIp> {
+        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let data = IncompleteExternalIp::for_service_explicit_snat(
+            ip_id,
             service_id,
             pool.id(),
             ip,

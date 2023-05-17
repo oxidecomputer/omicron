@@ -1336,7 +1336,6 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                None,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1356,7 +1355,6 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                None,
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1375,7 +1373,6 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                None,
             )
             .await
             .expect_err("Should have failed to re-allocate same IP address (different UUID)");
@@ -1395,7 +1392,6 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
-                None,
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (same UUID)");
@@ -1408,14 +1404,12 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .allocate_explicit_service_snat_ip(
                 &context.opctx,
                 id,
-                &Name("service-ip".parse().unwrap()),
-                "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
-                Some((0, 16383)),
+                (0, 16383),
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (different port range)");
@@ -1429,14 +1423,12 @@ mod tests {
         let snat_id = Uuid::new_v4();
         let snat_ip = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .allocate_explicit_service_snat_ip(
                 &context.opctx,
                 snat_id,
-                &Name("snat-service-ip".parse().unwrap()),
-                "snat-service-ip",
                 snat_service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-                Some((32768, 49151)),
+                (32768, 49151),
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1450,14 +1442,12 @@ mod tests {
         // Try allocating the same service IP again.
         let snat_ip_again = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .allocate_explicit_service_snat_ip(
                 &context.opctx,
                 snat_id,
-                &Name("snat-service-ip".parse().unwrap()),
-                "snat-service-ip",
                 snat_service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-                Some((32768, 49151)),
+                (32768, 49151),
             )
             .await
             .expect("Failed to allocate service IP address");
@@ -1471,14 +1461,12 @@ mod tests {
         // different port range.
         let err = context
             .db_datastore
-            .allocate_explicit_service_ip(
+            .allocate_explicit_service_snat_ip(
                 &context.opctx,
                 snat_id,
-                &Name("snat-service-ip".parse().unwrap()),
-                "snat-service-ip",
                 snat_service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-                Some((49152, 65535)),
+                (49152, 65535),
             )
             .await
             .expect_err("Should have failed to re-allocate different IP address (different port range)");
@@ -1515,7 +1503,6 @@ mod tests {
                 "service-ip",
                 service_id,
                 IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
-                None,
             )
             .await
             .expect_err("Should have failed to allocate out-of-bounds IP");

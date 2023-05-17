@@ -161,36 +161,41 @@ impl IncompleteExternalIp {
         service_id: Uuid,
         pool_id: Uuid,
         address: IpAddr,
-        port_range: Option<(u16, u16)>,
     ) -> Self {
-        let (name, description, kind, explicit_port_range) = match port_range {
-            Some((first_port, last_port)) => {
-                assert!(
-                    (first_port % NUM_SOURCE_NAT_PORTS == 0)
-                        && (last_port - first_port + 1) == NUM_SOURCE_NAT_PORTS,
-                    "explicit port range must be aligned to {}",
-                    NUM_SOURCE_NAT_PORTS,
-                );
-                (
-                    None,
-                    None,
-                    IpKind::SNat,
-                    Some((first_port.into(), last_port.into())),
-                )
-            }
-            None => (
-                Some(name.clone()),
-                Some(description.to_string()),
-                IpKind::Floating,
-                None,
-            ),
-        };
         Self {
             id,
-            name,
-            description,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
             time_created: Utc::now(),
-            kind,
+            kind: IpKind::Floating,
+            is_service: true,
+            parent_id: Some(service_id),
+            pool_id,
+            explicit_ip: Some(IpNetwork::from(address)),
+            explicit_port_range: None,
+        }
+    }
+
+    pub fn for_service_explicit_snat(
+        id: Uuid,
+        service_id: Uuid,
+        pool_id: Uuid,
+        address: IpAddr,
+        (first_port, last_port): (u16, u16),
+    ) -> Self {
+        assert!(
+            (first_port % NUM_SOURCE_NAT_PORTS == 0)
+                && (last_port - first_port + 1) == NUM_SOURCE_NAT_PORTS,
+            "explicit port range must be aligned to {}",
+            NUM_SOURCE_NAT_PORTS,
+        );
+        let explicit_port_range = Some((first_port.into(), last_port.into()));
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::SNat,
             is_service: true,
             parent_id: Some(service_id),
             pool_id,

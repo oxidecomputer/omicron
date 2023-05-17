@@ -188,6 +188,8 @@ impl DataStore {
 
                 // Allocate records for all services.
                 for service in services {
+                    use internal_params::ServiceKind;
+
                     let service_db = db::model::Service::new(
                         service.service_id,
                         service.sled_id,
@@ -223,52 +225,41 @@ impl DataStore {
                     })?;
 
                     // Record explicit IP allocation if service has one
-                    let external_ip = match service.kind {
-                        internal_params::ServiceKind::ExternalDns { external_address } => {
-                            Some((
-                                db::model::Name("external-dns".parse().unwrap()),
-                                "ExternalDns External IP",
+                    let service_ip = match service.kind {
+                        ServiceKind::ExternalDns { external_address }
+                        | ServiceKind::Nexus { external_address } => {
+                            let name = service.kind.to_string().replace('_', "-").parse().unwrap();
+                            let db_ip = IncompleteExternalIp::for_service_explicit(
+                                Uuid::new_v4(),
+                                &db::model::Name(name),
+                                &format!("{}", service.kind),
+                                service.service_id,
+                                service_pool.id(),
                                 external_address,
-                                None,
-                            ))
+                            );
+                            Some((external_address, db_ip))
                         }
-                        internal_params::ServiceKind::Nexus { external_address } => {
-                            Some((
-                                db::model::Name("nexus".parse().unwrap()),
-                                "Nexus External IP",
-                                external_address,
-                                None,
-                            ))
-                        }
-                        internal_params::ServiceKind::Ntp { snat_cfg: Some(snat) } => {
-                            Some((
-                                db::model::Name("ntp".parse().unwrap()),
-                                "Boundary NTP External IP",
+                        ServiceKind::Ntp { snat_cfg: Some(snat) } => {
+                            let db_ip = IncompleteExternalIp::for_service_explicit_snat(
+                                Uuid::new_v4(),
+                                service.service_id,
+                                service_pool.id(),
                                 snat.ip,
-                                Some((snat.first_port, snat.last_port))
-                            ))
+                                (snat.first_port, snat.last_port),
+                            );
+                            Some((snat.ip, db_ip))
                         }
-                        _ => None
+                        _ => None,
                     };
-                    if let Some((name, description, external_ip, port_range)) = external_ip {
-                        let ip_id = Uuid::new_v4();
-                        let data = IncompleteExternalIp::for_service_explicit(
-                            ip_id,
-                            &name,
-                            description,
-                            service.service_id,
-                            service_pool.id(),
-                            external_ip,
-                            port_range
-                        );
+                    if let Some((external_ip, db_ip)) = service_ip {
                         let allocated_ip = Self::allocate_external_ip_on_connection(
                             &conn,
-                            data
+                            db_ip,
                         ).await.map_err(|err| {
                             warn!(
                                 log,
-                                "Initializing Rack: Failed to allocate IP address ({:?})",
-                                name
+                                "Initializing Rack: Failed to allocate IP address for {}",
+                                service.kind,
                             );
                             TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
