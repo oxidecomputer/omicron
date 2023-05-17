@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod artifact;
+mod async_temp_file;
 mod block_size_writer;
 mod bootstrap;
 mod dispatch;
@@ -15,7 +16,6 @@ mod reporter;
 #[cfg(test)]
 mod test_helpers;
 mod write;
-mod async_temp_file;
 
 pub use dispatch::*;
 pub use write::*;

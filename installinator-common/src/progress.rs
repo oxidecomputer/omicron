@@ -281,7 +281,10 @@ pub enum WriteError {
     #[error("error fsyncing output directory: {error}")]
     SyncOutputDirError { error: std::io::Error },
     #[error("error interacting with zpool: {error}")]
-    ZpoolError { #[from] error: zpool::Error },
+    ZpoolError {
+        #[from]
+        error: zpool::Error,
+    },
 }
 
 impl AsError for WriteError {
