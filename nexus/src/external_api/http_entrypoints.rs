@@ -42,7 +42,8 @@ use ipnetwork::IpNetwork;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_types::{
-    external_api::views::Switch, identity::AssetIdentityMetadata,
+    external_api::views::{SledInstance, Switch},
+    identity::AssetIdentityMetadata,
 };
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
@@ -190,6 +191,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
+        api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
         api.register(switch_list)?;
@@ -3653,6 +3655,42 @@ async fn sled_view(
         let (.., sled) =
             nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
         Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List instances running on a given sled
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}/instances",
+    tags = ["system"],
+}]
+async fn sled_instance_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SledPath>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<SledInstance>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let sled_instances = nexus
+            .sled_instance_list(
+                &opctx,
+                path.sled_id,
+                &data_page_params_for(&rqctx, &query)?,
+            )
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sled_instances,
+            &|_, sled_instance: &SledInstance| sled_instance.identity.id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
