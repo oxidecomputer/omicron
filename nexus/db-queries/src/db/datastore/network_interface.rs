@@ -21,6 +21,7 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::ServiceNetworkInterface;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::paginated;
 use crate::db::queries::network_interface;
@@ -111,7 +112,6 @@ impl DataStore {
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
     ) -> Result<InstanceNetworkInterface, network_interface::InsertError> {
-        use db::schema::network_interface::dsl;
         if interface.kind != NetworkInterfaceKind::Instance {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(
@@ -119,6 +119,38 @@ impl DataStore {
                 ),
             ));
         }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `InstanceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_instance)
+    }
+
+    pub(crate) async fn service_create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
+        if interface.kind != NetworkInterfaceKind::Service {
+            return Err(network_interface::InsertError::External(
+                Error::invalid_request(
+                    "expected service type network interface",
+                ),
+            ));
+        }
+        self.create_network_interface_raw(opctx, interface)
+            .await
+            // Convert to `ServiceNetworkInterface` before returning; we know
+            // this is valid as we've checked the condition on-entry.
+            .map(NetworkInterface::as_service)
+    }
+
+    async fn create_network_interface_raw(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<NetworkInterface, network_interface::InsertError> {
+        use db::schema::network_interface::dsl;
         let subnet_id = interface.subnet.identity.id;
         let query = network_interface::InsertQuery::new(interface.clone());
         VpcSubnet::insert_resource(
@@ -131,9 +163,6 @@ impl DataStore {
                 .map_err(network_interface::InsertError::External)?,
         )
         .await
-        // Convert to `InstanceNetworkInterface` before returning; we know
-        // this is valid as we've checked the condition on-entry.
-        .map(NetworkInterface::as_instance)
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
                 network_interface::InsertError::External(

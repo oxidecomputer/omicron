@@ -708,6 +708,7 @@ pub enum ResourceType {
     PhysicalDisk,
     Rack,
     Service,
+    ServiceNetworkInterface,
     Sled,
     SledInstance,
     Switch,
@@ -1902,6 +1903,18 @@ impl MacAddr {
         let value = thread_rng()
             .gen_range((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR);
         Self::from_i64(value)
+    }
+
+    /// Is this a MAC in the Guest Addresses range
+    pub fn is_guest(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_GUEST_ADDR && value <= Self::MAX_GUEST_ADDR
+    }
+
+    /// Is this a MAC in the System Addresses range
+    pub fn is_system(&self) -> bool {
+        let value = self.to_i64();
+        value >= Self::MIN_SYSTEM_ADDR && value <= Self::MAX_SYSTEM_ADDR
     }
 
     /// Construct a MAC address from its i64 big-endian byte representation.

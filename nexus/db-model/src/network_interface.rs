@@ -210,6 +210,7 @@ pub struct IncompleteNetworkInterface {
     pub vpc_id: Uuid,
     pub subnet: VpcSubnet,
     pub ip: Option<std::net::IpAddr>,
+    pub mac: Option<external::MacAddr>,
 }
 
 impl IncompleteNetworkInterface {
@@ -221,10 +222,26 @@ impl IncompleteNetworkInterface {
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
+        mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
         if let Some(ip) = ip {
             subnet.check_requestable_addr(ip)?;
         };
+        match (mac, kind) {
+            (Some(mac), NetworkInterfaceKind::Instance) if !mac.is_guest() => {
+                return Err(external::Error::invalid_request(&format!(
+                    "invalid MAC address {} for guest NIC",
+                    mac
+                )));
+            }
+            (Some(mac), NetworkInterfaceKind::Service) if !mac.is_system() => {
+                return Err(external::Error::invalid_request(&format!(
+                    "invalid MAC address {} for service NIC",
+                    mac
+                )));
+            }
+            _ => {}
+        }
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
         Ok(IncompleteNetworkInterface {
             identity,
@@ -233,6 +250,7 @@ impl IncompleteNetworkInterface {
             subnet,
             vpc_id,
             ip,
+            mac,
         })
     }
 
@@ -252,6 +270,7 @@ impl IncompleteNetworkInterface {
             subnet,
             identity,
             ip,
+            None,
         )
     }
 
@@ -262,6 +281,7 @@ impl IncompleteNetworkInterface {
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
+        mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
         Self::new(
             interface_id,
@@ -271,6 +291,7 @@ impl IncompleteNetworkInterface {
             subnet,
             identity,
             ip,
+            mac,
         )
     }
 }
