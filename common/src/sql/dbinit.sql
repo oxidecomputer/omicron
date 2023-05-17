@@ -886,18 +886,13 @@ AS SELECT
    instance.memory,
    instance.state
 FROM
-    omicron.public.instance as instance
-JOIN
-    omicron.public.project as project
-ON  
-    instance.project_id = project.id
-JOIN
-    omicron.public.silo as silo
-ON  
-    project.silo_id = silo.id
+    omicron.public.instance AS instance
+    JOIN omicron.public.project AS project ON
+            instance.project_id = project.id
+    JOIN omicron.public.silo AS silo ON
+            project.silo_id = silo.id
 WHERE
-    instance.active_sled_id IS NOT NULL
-AND instance.time_deleted IS NULL;
+    instance.time_deleted IS NULL;
 
 
 /*
