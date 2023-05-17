@@ -14,11 +14,14 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::dkio::{self, MediaInfoExtended};
+use illumos_utils::{
+    dkio::{self, MediaInfoExtended},
+    zpool::{Zpool, ZpoolName},
+};
 use installinator_common::{
-    ControlPlaneZonesError, ControlPlaneZonesSpec, ControlPlaneZonesStepId,
-    M2Slot, StepContext, StepProgress, StepResult, UpdateEngine,
-    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
+    StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
+    WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
@@ -47,6 +50,9 @@ struct ArtifactDestination {
 
     // Directory in which we unpack the control plane zone images.
     control_plane_dir: Utf8PathBuf,
+
+    // Zpool containing `control_plane_dir`, if we're on a real gimlet.
+    control_plane_zpool: Option<ZpoolName>,
 }
 
 #[derive(Clone, Debug)]
@@ -75,6 +81,7 @@ impl WriteDestination {
                 host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
                 clean_control_plane_dir: false,
                 control_plane_dir,
+                control_plane_zpool: None,
             },
         );
 
@@ -110,8 +117,8 @@ impl WriteDestination {
                         "zpool" => %disk.zpool_name(),
                     );
 
-                    let control_plane_dir = disk
-                        .zpool_name()
+                    let zpool_name = disk.zpool_name().clone();
+                    let control_plane_dir = zpool_name
                         .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
 
                     match drives.entry(slot) {
@@ -120,6 +127,7 @@ impl WriteDestination {
                                 host_phase_2: path,
                                 clean_control_plane_dir: true,
                                 control_plane_dir,
+                                control_plane_zpool: Some(zpool_name),
                             });
                         }
                         Entry::Occupied(_) => {
@@ -281,17 +289,28 @@ impl<'a> ArtifactWriter<'a> {
                         done_drives.insert(*drive);
                         success_this_iter += 1;
                     }
-                    Err(error) => match error.component {
-                        WriteComponent::HostPhase2 => {
-                            *progress = DriveWriteProgress::HostPhase2Failed;
+                    Err(error) => match error {
+                        WriteError::WriteError { component, .. } => {
+                            match component {
+                                WriteComponent::HostPhase2 => {
+                                    *progress =
+                                        DriveWriteProgress::HostPhase2Failed;
+                                }
+                                WriteComponent::ControlPlane => {
+                                    *progress =
+                                        DriveWriteProgress::ControlPlaneFailed;
+                                }
+                                WriteComponent::Unknown => {
+                                    unreachable!("we should never generate an unknown component")
+                                }
+                            }
                         }
-                        WriteComponent::ControlPlane => {
+                        // These errors are only produced when writing the
+                        // control plane zones.
+                        WriteError::RemoveFilesError { .. }
+                        | WriteError::SyncOutputDirError { .. }
+                        | WriteError::ZpoolError { .. } => {
                             *progress = DriveWriteProgress::ControlPlaneFailed;
-                        }
-                        WriteComponent::Unknown => {
-                            unreachable!(
-                                "we should never generate an unknown component"
-                            )
                         }
                     },
                 }
@@ -459,14 +478,18 @@ impl ArtifactsToWrite<'_> {
     ) -> Result<StepResult<(), WriteSpec>, WriteError> {
         // Register a nested engine to write the set of zones, each zone as its
         // own step.
-        let inner_cx = ControlPlaneZoneWriteContext {
+        let inner_cx = &ControlPlaneZoneWriteContext {
             slot,
             clean_output_directory: destinations.clean_control_plane_dir,
             output_directory: &destinations.control_plane_dir,
             zones: self.control_plane_zones,
         };
         cx.with_nested_engine(|engine| {
-            inner_cx.register_steps(engine, transport);
+            inner_cx.register_steps(
+                engine,
+                transport,
+                destinations.control_plane_zpool.as_ref(),
+            );
             Ok(())
         })
         .await
@@ -475,18 +498,7 @@ impl ArtifactsToWrite<'_> {
                 log, "{error:?}";
                 "artifact_id" => ?self.control_plane_id,
             );
-            match error {
-                ControlPlaneZonesError::WriteError(error) => error,
-                ControlPlaneZonesError::RemoveFilesError { error, .. } => {
-                    WriteError {
-                        component: WriteComponent::ControlPlane,
-                        slot,
-                        written_bytes: 0,
-                        total_bytes: 0,
-                        error,
-                    }
-                }
-            }
+            error
         })?;
 
         info!(
@@ -510,6 +522,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         &'b self,
         engine: &UpdateEngine<'b, ControlPlaneZonesSpec>,
         transport: &'b mut impl WriteTransport,
+        zpool: Option<&'b ZpoolName>,
     ) {
         use update_engine::StepHandle;
 
@@ -534,10 +547,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         .await
                         .unwrap()
                         .map_err(|error| {
-                            ControlPlaneZonesError::RemoveFilesError {
-                                path,
-                                error,
-                            }
+                            WriteError::RemoveFilesError { path, error }
                         })?;
 
                         StepResult::success((), ())
@@ -587,24 +597,17 @@ impl ControlPlaneZoneWriteContext<'_> {
                 ControlPlaneZonesStepId::Fsync,
                 "Syncing writes to disk",
                 move |_cx| async move {
-                    let output_directory = File::open(&output_directory)
-                        .await
-                        .map_err(|error| WriteError {
-                            component: WriteComponent::ControlPlane,
-                            slot,
-                            written_bytes: 0,
-                            total_bytes: 0,
-                            error,
-                        })?;
+                    let output_directory =
+                        File::open(&output_directory).await.map_err(
+                            |error| WriteError::SyncOutputDirError { error },
+                        )?;
                     output_directory.sync_all().await.map_err(|error| {
-                        WriteError {
-                            component: WriteComponent::ControlPlane,
-                            slot,
-                            written_bytes: 0,
-                            total_bytes: 0,
-                            error,
-                        }
+                        WriteError::SyncOutputDirError { error }
                     })?;
+
+                    if let Some(zpool) = zpool {
+                        Zpool::export(zpool)?;
+                    }
 
                     StepResult::success((), ())
                 },
@@ -692,7 +695,7 @@ impl WriteTransport for FileTransport {
         total_bytes: u64,
     ) -> Result<Self::W, WriteError> {
         AsyncNamedTempFile::with_destination(destination).await.map_err(
-            |error| WriteError {
+            |error| WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
@@ -724,7 +727,7 @@ impl WriteTransport for BlockDeviceTransport {
             .custom_flags(libc::O_SYNC)
             .open(destination)
             .await
-            .map_err(|error| WriteError {
+            .map_err(|error| WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
@@ -734,7 +737,7 @@ impl WriteTransport for BlockDeviceTransport {
 
         let media_info =
             MediaInfoExtended::from_fd(f.as_raw_fd()).map_err(|error| {
-                WriteError {
+                WriteError::WriteError {
                     component,
                     slot,
                     written_bytes: 0,
@@ -749,7 +752,7 @@ impl WriteTransport for BlockDeviceTransport {
         // size. We can assume the image we're given should be
         // appropriately-sized: return an error here if it is not.
         if total_bytes % block_size != 0 {
-            return Err(WriteError {
+            return Err(WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
@@ -792,7 +795,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
                 .await;
             }
             Err(error) => {
-                return Err(WriteError {
+                return Err(WriteError::WriteError {
                     component,
                     slot,
                     written_bytes,
@@ -806,7 +809,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     match writer.flush().await {
         Ok(()) => {}
         Err(error) => {
-            return Err(WriteError {
+            return Err(WriteError::WriteError {
                 component,
                 slot,
                 written_bytes,
@@ -819,7 +822,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     match writer.finalize().await {
         Ok(()) => {}
         Err(error) => {
-            return Err(WriteError {
+            return Err(WriteError::WriteError {
                 component,
                 slot,
                 written_bytes,
@@ -1000,6 +1003,7 @@ mod tests {
                 host_phase_2: destination_host.clone(),
                 clean_control_plane_dir: false,
                 control_plane_dir: tempdir_path.into(),
+                control_plane_zpool: None,
             },
         );
         let destination =

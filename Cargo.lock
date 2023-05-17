@@ -3363,6 +3363,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "illumos-utils",
  "omicron-common 0.1.0",
  "schemars",
  "serde",

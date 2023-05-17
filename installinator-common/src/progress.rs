@@ -6,6 +6,7 @@ use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use illumos_utils::zpool;
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
@@ -262,34 +263,28 @@ pub enum WriteStepId {
 
 /// The error that occurred.
 #[derive(Debug, Error)]
-#[error(
-    "writing {component} to slot {slot} failed \
+pub enum WriteError {
+    #[error(
+        "writing {component} to slot {slot} failed \
      after {written_bytes}/{total_bytes} bytes"
-)]
-pub struct WriteError {
-    pub component: WriteComponent,
-    pub slot: M2Slot,
-    pub written_bytes: u64,
-    pub total_bytes: u64,
-    #[source]
-    pub error: std::io::Error,
+    )]
+    WriteError {
+        component: WriteComponent,
+        slot: M2Slot,
+        written_bytes: u64,
+        total_bytes: u64,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error removing files from {path}: {error}")]
+    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("error fsyncing output directory: {error}")]
+    SyncOutputDirError { error: std::io::Error },
+    #[error("error interacting with zpool: {error}")]
+    ZpoolError { #[from] error: zpool::Error },
 }
 
 impl AsError for WriteError {
-    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
-        self
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum ControlPlaneZonesError {
-    #[error(transparent)]
-    WriteError(#[from] WriteError),
-    #[error("error removing files from {path}: {error}")]
-    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
-}
-
-impl AsError for ControlPlaneZonesError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
@@ -308,7 +303,7 @@ impl StepSpec for ControlPlaneZonesSpec {
     type ProgressMetadata = ();
     type CompletionMetadata = ();
     type SkippedMetadata = ();
-    type Error = ControlPlaneZonesError;
+    type Error = WriteError;
 }
 
 /// A step identifier for the control plane zones operation.
