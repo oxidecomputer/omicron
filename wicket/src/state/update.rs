@@ -289,6 +289,10 @@ impl UpdateItem {
         }
     }
 
+    pub fn components(&self) -> &[UpdateComponent] {
+        &self.components
+    }
+
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (UpdateComponent, UpdateState)> + '_ {

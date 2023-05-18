@@ -544,20 +544,39 @@ impl UpdatePane {
         );
         match cmd {
             Cmd::Up => {
-                let id_state = self
-                    .component_state
-                    .get_mut(&state.rack_state.selected)
-                    .unwrap();
-                id_state.prev_item();
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .prev_component(state);
+                } else {
+                    let id_state = self
+                        .component_state
+                        .get_mut(&state.rack_state.selected)
+                        .unwrap();
+                    id_state.prev_item();
+                }
                 Some(Action::Redraw)
             }
             Cmd::Down => {
-                let id_state = self
-                    .component_state
-                    .get_mut(&state.rack_state.selected)
-                    .unwrap();
-                id_state.next_item();
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .next_component(state);
+                } else {
+                    let id_state = self
+                        .component_state
+                        .get_mut(&state.rack_state.selected)
+                        .unwrap();
+                    id_state.next_item();
+                }
                 Some(Action::Redraw)
+            }
+            Cmd::Toggle => {
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .toggle_currently_selected(state);
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
             }
             Cmd::Left => {
                 state.rack_state.prev();
@@ -617,6 +636,17 @@ impl UpdatePane {
                 Some(Action::Redraw)
             }
             _ => None,
+        }
+    }
+
+    fn is_force_update_visible(&self, state: &State) -> bool {
+        // We only show the toggle spans for force updating the SP/RoT when the
+        // user could potentially start an update.
+        match state.update_state.item_state(state.rack_state.selected) {
+            UpdateItemState::NotStarted => true,
+            UpdateItemState::AwaitingRepository
+            | UpdateItemState::UpdateStarted
+            | UpdateItemState::RunningOrCompleted { .. } => false,
         }
     }
 
@@ -928,7 +958,9 @@ impl UpdatePane {
             }
             UpdateItemState::NotStarted => {
                 // Need to make space for the command bar at the bottom.
-                let text = Text::from(vec![
+                let force_update = ForceUpdateSelectionState::from(state);
+                let mut text = force_update.spans();
+                text.extend_from_slice(&[
                     Spans::from(Vec::new()),
                     Spans::from(vec![
                         Span::styled(
@@ -939,14 +971,19 @@ impl UpdatePane {
                         Span::styled(" to start", style::plain_text()),
                     ]),
                 ]);
+                let text = Text::from(text);
                 let paragraph = Paragraph::new(text)
-                    .alignment(Alignment::Center)
+                    .alignment(Alignment::Left)
                     .block(block.clone().title("UPDATE READY").borders(
                         Borders::LEFT | Borders::RIGHT | Borders::TOP,
                     ));
                 frame.render_widget(paragraph, self.status_view_main_rect);
+
+                let mut help = force_update.help_text();
+                help.extend_from_slice(&self.not_started_help);
+
                 frame.render_widget(
-                    help_text(&self.not_started_help).block(block.clone()),
+                    help_text(&help).block(block.clone()),
                     self.help_rect,
                 );
                 frame.render_widget(
@@ -1015,6 +1052,160 @@ impl UpdatePane {
                     .render_stateful(frame, &mut id_state.tui_list_state);
             }
         }
+    }
+}
+
+struct ComponentForceUpdateSelectionState {
+    version: String,
+    toggled_on: bool,
+    selected: bool,
+}
+
+struct ForceUpdateSelectionState {
+    rot: Option<ComponentForceUpdateSelectionState>,
+    sp: Option<ComponentForceUpdateSelectionState>,
+}
+
+impl From<&'_ State> for ForceUpdateSelectionState {
+    fn from(state: &'_ State) -> Self {
+        let component_id = state.rack_state.selected;
+        let versions = &state.update_state.artifact_versions;
+        let inventory = &state.inventory;
+        let update_item = &state.update_state.items[&component_id];
+
+        let mut rot = None;
+        let mut sp = None;
+
+        for &component in update_item.components() {
+            // We only allow force updating the SP/RoT; host is effectively
+            // always force updated (we always update it regardless of version).
+            if matches!(component, UpdateComponent::Host) {
+                continue;
+            }
+
+            let artifact_version =
+                artifact_version(&component_id, component, versions);
+            let installed_version =
+                installed_version(&component_id, component, inventory);
+            match component {
+                UpdateComponent::Rot => {
+                    assert!(
+                        rot.is_none(),
+                        "update item contains multiple RoT entries"
+                    );
+                    if artifact_version == installed_version {
+                        rot = Some(ComponentForceUpdateSelectionState {
+                            version: artifact_version,
+                            toggled_on: state
+                                .force_update_state
+                                .force_update_rot,
+                            selected: false, // set below
+                        });
+                    }
+                }
+                UpdateComponent::Sp => {
+                    assert!(
+                        sp.is_none(),
+                        "update item contains multiple RoT entries"
+                    );
+                    if artifact_version == installed_version {
+                        sp = Some(ComponentForceUpdateSelectionState {
+                            version: artifact_version,
+                            toggled_on: state
+                                .force_update_state
+                                .force_update_sp,
+                            selected: false, // set below
+                        });
+                    }
+                }
+                UpdateComponent::Host => unreachable!(), // skipped above
+            }
+        }
+
+        // If we only have one force-updateable component, mark it as selected;
+        // otherwise, respect the option currently selected in `State`.
+        match (rot.as_mut(), sp.as_mut()) {
+            (Some(rot), None) => rot.selected = true,
+            (None, Some(sp)) => sp.selected = true,
+            (Some(rot), Some(sp)) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::Rot
+                {
+                    rot.selected = true;
+                } else {
+                    sp.selected = true;
+                }
+            }
+            (None, None) => (),
+        }
+
+        Self { rot, sp }
+    }
+}
+
+impl ForceUpdateSelectionState {
+    fn num_spans(&self) -> usize {
+        usize::from(self.rot.is_some()) + usize::from(self.sp.is_some())
+    }
+
+    fn next_component(&self, state: &mut State) {
+        // Only move to the next component if we're showing more than 1.
+        if self.num_spans() > 1 {
+            state.force_update_state.next_component();
+        }
+    }
+
+    fn prev_component(&self, state: &mut State) {
+        // Only move to the prev component if we're showing more than 1.
+        if self.num_spans() > 1 {
+            state.force_update_state.prev_component();
+        }
+    }
+
+    fn help_text(&self) -> Vec<(&'static str, &'static str)> {
+        match self.num_spans() {
+            0 => vec![],
+            1 => vec![("Toggle", "Space")],
+            _ => vec![("Toggle", "Space"), ("Up", "Up"), ("Down", "Down")],
+        }
+    }
+
+    fn toggle_currently_selected(&self, state: &mut State) {
+        if self.rot.as_ref().map(|rot| rot.selected).unwrap_or(false) {
+            state.force_update_state.toggle(UpdateComponent::Rot);
+        } else if self.sp.as_ref().map(|sp| sp.selected).unwrap_or(false) {
+            state.force_update_state.toggle(UpdateComponent::Sp);
+        }
+    }
+
+    fn spans(&self) -> Vec<Spans<'static>> {
+        fn make_spans(
+            name: &str,
+            c: &ComponentForceUpdateSelectionState,
+        ) -> Spans<'static> {
+            let prefix = if c.toggled_on { "[✔]" } else { "[ ]" };
+            let style = if c.selected {
+                style::highlighted()
+            } else {
+                style::plain_text()
+            };
+            Spans::from(vec![Span::styled(
+                format!(
+                    "{prefix} Force update {name} (version is already {})",
+                    c.version
+                ),
+                style,
+            )])
+        }
+
+        let mut spans = Vec::new();
+        if let Some(rot) = self.rot.as_ref() {
+            spans.push(make_spans("RoT", rot));
+        }
+        if let Some(sp) = self.sp.as_ref() {
+            spans.push(make_spans("SP", sp));
+        }
+        spans
     }
 }
 
