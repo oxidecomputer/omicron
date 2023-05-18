@@ -2402,7 +2402,7 @@ mod test {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _| {
+            |physical_link: &Etherstub, _, _, _, _| {
                 assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },

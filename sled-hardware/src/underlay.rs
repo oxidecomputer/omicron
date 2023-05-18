@@ -10,8 +10,8 @@ use illumos_utils::addrobj::AddrObject;
 use illumos_utils::dladm;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
-use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::GetLinkpropError;
+use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::SetLinkpropError;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
 use illumos_utils::zone::Zones;
@@ -64,17 +64,10 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
     // If we have previously set the MTU, do not attempt to re-set.
     const MTU: &str = "9000";
     for link in &underlay_nics {
-        let existing_mtu = Dladm::get_linkprop(
-            &link.to_string(),
-            "mtu",
-        )?;
+        let existing_mtu = Dladm::get_linkprop(&link.to_string(), "mtu")?;
 
         if existing_mtu != MTU {
-            Dladm::set_linkprop(
-                &link.to_string(),
-                "mtu",
-                MTU,
-            )?;
+            Dladm::set_linkprop(&link.to_string(), "mtu", MTU)?;
         }
     }
 

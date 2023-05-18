@@ -97,7 +97,9 @@ pub struct DeleteVnicError {
 
 /// Errors returned from [`Dladm::get_linkprop`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get link property \"{prop_name}\" on vnic {link_name}: {err}")]
+#[error(
+    "Failed to get link property \"{prop_name}\" on vnic {link_name}: {err}"
+)]
 pub struct GetLinkpropError {
     link_name: String,
     prop_name: String,
@@ -202,7 +204,7 @@ impl Dladm {
         if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, vnic_name, None, None)?;
+        Self::create_vnic(source, vnic_name, None, None, Some(9000))?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
@@ -338,6 +340,7 @@ impl Dladm {
         vnic_name: &str,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
+        mtu: Option<usize>,
     ) -> Result<(), CreateVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
@@ -356,6 +359,11 @@ impl Dladm {
         if let Some(vlan) = vlan {
             args.push("-v".to_string());
             args.push(vlan.to_string());
+        }
+
+        if let Some(mtu) = mtu {
+            args.push("-p".to_string());
+            args.push(format!("mtu={mtu}"));
         }
 
         args.push(vnic_name.to_string());
@@ -403,8 +411,16 @@ impl Dladm {
         prop_name: &str,
     ) -> Result<String, GetLinkpropError> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[DLADM, "show-linkprop", "-c", "-o", "value", "-p", prop_name, vnic]);
+        let cmd = command.args(&[
+            DLADM,
+            "show-linkprop",
+            "-c",
+            "-o",
+            "value",
+            "-p",
+            prop_name,
+            vnic,
+        ]);
         let result = execute(cmd).map_err(|err| GetLinkpropError {
             link_name: vnic.to_string(),
             prop_name: prop_name.to_string(),
