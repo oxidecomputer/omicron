@@ -54,7 +54,7 @@ impl OmicronRepo {
     /// Loads a repository from the given path.
     ///
     /// This method enforces expirations. To load without expiration enforcement, use
-    /// [`Self::load_ignore_expiration`].
+    /// [`Self::load_untrusted_ignore_expiration`].
     pub fn load_untrusted(
         log: &slog::Logger,
         repo_path: &Utf8Path,
