@@ -26,6 +26,25 @@ pub fn help_text<'a>(data: &'a [(&'a str, &'a str)]) -> Paragraph<'a> {
     Paragraph::new(Spans::from(text))
 }
 
+/// Split up a text into lines and push them into a `Spans` one at a time.
+///
+/// This makes text wrapping offsets work correctly.
+pub fn push_text_lines<'a>(
+    message: &str,
+    prefix: Vec<Span<'a>>,
+    spans: &mut Vec<Spans<'a>>,
+) {
+    // If the message has multiple lines of text, split them
+    // into separate spans. This makes text wrapping offsets
+    // work correctly.
+    let mut next_line = prefix;
+    for line in message.lines() {
+        next_line.push(Span::styled(line.to_owned(), style::plain_text()));
+        spans.push(Spans::from(next_line));
+        next_line = Vec::new();
+    }
+}
+
 /// Align a bunch of spans on a single line with with at most `column_width`
 /// length, and being left-aligned by `left_margin`
 pub fn align_by(

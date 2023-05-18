@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use super::{align_by, help_text, Control};
+use super::{align_by, help_text, push_text_lines, Control};
 use crate::state::{
     update_component_title, ComponentId, Inventory, UpdateItemState,
     ALL_COMPONENT_IDS,
@@ -258,11 +258,9 @@ impl UpdatePane {
 
                 if let Some(message) = message {
                     body.lines.push(Spans::default());
-                    let message_spans = vec![
-                        Span::styled("Message: ", style::selected()),
-                        Span::styled(message.as_ref(), style::plain_text()),
-                    ];
-                    body.lines.push(Spans::from(message_spans));
+                    let prefix =
+                        vec![Span::styled("Message: ", style::selected())];
+                    push_text_lines(&message, prefix, &mut body.lines);
                 }
             }
             StepStatus::Completed { info: None } => {
@@ -296,11 +294,8 @@ impl UpdatePane {
                 body.lines.push(Spans::default());
 
                 // Show the message.
-                let message_spans = vec![
-                    Span::styled("Message: ", style::selected()),
-                    Span::styled(&info.message, style::plain_text()),
-                ];
-                body.lines.push(Spans::from(message_spans));
+                let prefix = vec![Span::styled("Message: ", style::selected())];
+                push_text_lines(&info.message, prefix, &mut body.lines);
 
                 // Show causes.
                 if !info.causes.is_empty() {
@@ -926,17 +921,9 @@ impl UpdatePane {
                         // If the message has multiple lines of text, split them
                         // into separate spans. This makes text wrapping offsets
                         // work correctly.
-                        let mut next_line =
+                        let prefix =
                             vec![Span::styled("Message: ", style::selected())];
-                        for line in message.lines() {
-                            next_line.push(Span::styled(
-                                line.to_owned(),
-                                style::plain_text(),
-                            ));
-                            spans.push(Spans::from(next_line));
-                            next_line = Vec::new();
-                        }
-                        spans.push(Spans::from(next_line));
+                        push_text_lines(&message, prefix, &mut spans);
 
                         Text::from(spans)
                     }
