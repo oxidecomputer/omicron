@@ -46,15 +46,20 @@ impl OmicronRepo {
             .sign_and_finish(keys, expiry)
             .context("error signing new repository")?;
 
-        Self::load(log, repo_path)
+        // In theory we "trust" the key we just used to sign this repository,
+        // but the code path is equivalent to `load_untrusted`.
+        Self::load_untrusted(log, repo_path)
     }
 
     /// Loads a repository from the given path.
     ///
     /// This method enforces expirations. To load without expiration enforcement, use
     /// [`Self::load_ignore_expiration`].
-    pub fn load(log: &slog::Logger, repo_path: &Utf8Path) -> Result<Self> {
-        Self::load_impl(log, repo_path, ExpirationEnforcement::Safe)
+    pub fn load_untrusted(
+        log: &slog::Logger,
+        repo_path: &Utf8Path,
+    ) -> Result<Self> {
+        Self::load_untrusted_impl(log, repo_path, ExpirationEnforcement::Safe)
     }
 
     /// Loads a repository from the given path, ignoring expiration.
@@ -63,14 +68,14 @@ impl OmicronRepo {
     ///
     /// 1. When you're editing an existing repository and will re-sign it afterwards.
     /// 2. In an environment in which time isn't available.
-    pub fn load_ignore_expiration(
+    pub fn load_untrusted_ignore_expiration(
         log: &slog::Logger,
         repo_path: &Utf8Path,
     ) -> Result<Self> {
-        Self::load_impl(log, repo_path, ExpirationEnforcement::Unsafe)
+        Self::load_untrusted_impl(log, repo_path, ExpirationEnforcement::Unsafe)
     }
 
-    fn load_impl(
+    fn load_untrusted_impl(
         log: &slog::Logger,
         repo_path: &Utf8Path,
         exp: ExpirationEnforcement,
