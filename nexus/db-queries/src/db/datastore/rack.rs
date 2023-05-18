@@ -22,8 +22,6 @@ use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::Rack;
-use crate::db::model::Service;
-use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
@@ -135,7 +133,7 @@ impl DataStore {
         #[derive(Debug)]
         enum RackInitError {
             AddingIp(Error),
-            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            ServiceInsert(Error),
             DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
             DnsSerialization(Error),
@@ -197,33 +195,11 @@ impl DataStore {
                         service.address,
                         service.kind.into(),
                     );
-
-                    use db::schema::service::dsl;
-                    let sled_id = service.sled_id;
-                    <Sled as DatastoreCollection<Service>>::insert_resource(
-                        sled_id,
-                        diesel::insert_into(dsl::service)
-                            .values(service_db.clone())
-                            .on_conflict(dsl::id)
-                            .do_update()
-                            .set((
-                                dsl::time_modified.eq(Utc::now()),
-                                dsl::sled_id.eq(excluded(dsl::sled_id)),
-                                dsl::ip.eq(excluded(dsl::ip)),
-                                dsl::port.eq(excluded(dsl::port)),
-                                dsl::kind.eq(excluded(dsl::kind)),
-                            )),
-                    )
-                    .insert_and_get_result_async(&conn)
-                    .await
-                    .map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to insert service");
-                        TxnError::CustomError(RackInitError::ServiceInsert {
-                            err,
-                            sled_id,
-                            svc_id: service.service_id,
-                        })
-                    })?;
+                    self.service_upsert_conn(&conn, service_db)
+                        .await
+                        .map_err(|e| {
+                            TxnError::CustomError(RackInitError::ServiceInsert(e))
+                        })?;
 
                     // Record explicit IP allocation if service has one
                     let service_ip = match service.kind {
@@ -478,26 +454,10 @@ impl DataStore {
                         public_error_from_diesel_pool(e, ErrorHandler::Server)
                     }
                 },
-                TxnError::CustomError(RackInitError::ServiceInsert {
-                    err,
-                    sled_id,
-                    svc_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Sled,
-                            lookup_type: LookupType::ById(sled_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Service,
-                                &svc_id.to_string(),
-                            ),
-                        )
-                    }
+                TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to insert Service record: {:#}", err
+                    ))
                 },
                 TxnError::CustomError(RackInitError::RackUpdate(err)) => {
                     public_error_from_diesel_pool(
@@ -625,7 +585,9 @@ mod test {
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
+    use crate::db::model::Service;
     use crate::db::model::ServiceKind;
+    use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
     use nexus_db_model::{DnsGroup, InitialDnsGroup};
