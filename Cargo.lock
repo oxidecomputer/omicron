@@ -1996,6 +1996,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
+ "http",
+ "ipnetwork",
  "omicron-zone-package",
  "progenitor",
  "progenitor-client",
