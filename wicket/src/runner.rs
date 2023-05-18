@@ -169,7 +169,7 @@ impl RunnerCore {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(component_id) => {
+            Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
                     // The variables here must be kept in sync with the
                     // "Manually testing wicket" section of README.md.

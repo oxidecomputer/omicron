@@ -203,6 +203,11 @@ impl UpdateItem {
         }
     }
 
+    /// Resets the state to "not started". This is called when:
+    ///
+    /// * A new TUF repo is uploaded.
+    /// * wicketd stops returning event reports for this component, for any
+    ///   other reason.
     fn reset(&mut self) {
         // Reset the item state to NotStarted if it is RunningOrCompleted, but
         // not if it's StartUpdate with an error.
