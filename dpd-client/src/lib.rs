@@ -33,7 +33,7 @@ pub struct ClientState {
 impl Client {
     /// Ensure that a NAT entry exists, overwriting a previous conflicting entry if
     /// applicable.
-    #[allow(clippy::too-many-arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_nat_entry(
         &self,
         log: &Logger,

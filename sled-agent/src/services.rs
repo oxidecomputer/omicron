@@ -780,7 +780,7 @@ impl ServiceManager {
                         first_port,
                         last_port,
                         port.0.vni().as_u32(),
-                        underlay_address.into(),
+                        underlay_address,
                     )
                     .await
                     .map_err(BackoffError::transient)?;
