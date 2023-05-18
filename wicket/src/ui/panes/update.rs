@@ -934,7 +934,8 @@ impl UpdatePane {
 
                 let list = List::new(
                     id_state.list_items.values().cloned().collect::<Vec<_>>(),
-                );
+                )
+                .highlight_style(style::highlighted());
 
                 let status_view = StatusView {
                     status_view_rect: self.status_view_main_rect,
