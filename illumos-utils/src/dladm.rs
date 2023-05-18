@@ -204,7 +204,7 @@ impl Dladm {
         if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, vnic_name, None, None, Some(9000))?;
+        Self::create_vnic(source, vnic_name, None, None, 9000)?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
@@ -340,7 +340,7 @@ impl Dladm {
         vnic_name: &str,
         mac: Option<MacAddr>,
         vlan: Option<VlanID>,
-        mtu: Option<usize>,
+        mtu: usize,
     ) -> Result<(), CreateVnicError> {
         let mut command = std::process::Command::new(PFEXEC);
         let mut args = vec![
@@ -361,18 +361,60 @@ impl Dladm {
             args.push(vlan.to_string());
         }
 
-        if let Some(mtu) = mtu {
-            args.push("-p".to_string());
-            args.push(format!("mtu={mtu}"));
-        }
+        args.push("-p".to_string());
+        args.push(format!("mtu={mtu}"));
 
         args.push(vnic_name.to_string());
+
         let cmd = command.args(&args);
         execute(cmd).map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
             err,
         })?;
+
+        // After creating, create an IP interface, then explicitly set the IP
+        // MTUs as well
+
+        let commands = vec![
+            vec![
+                IPADM.to_string(),
+                "create-if".to_string(),
+                "-t".to_string(),
+                vnic_name.to_string(),
+            ],
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", mtu),
+                "-m".to_string(),
+                "ipv4".to_string(),
+                vnic_name.to_string(),
+            ],
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", mtu),
+                "-m".to_string(),
+                "ipv6".to_string(),
+                vnic_name.to_string(),
+            ],
+        ];
+
+        for args in &commands {
+            let mut command = std::process::Command::new(PFEXEC);
+            let cmd = command.args(args);
+            execute(cmd).map_err(|err| CreateVnicError {
+                name: vnic_name.to_string(),
+                link: source.name().to_string(),
+                err,
+            })?;
+        }
+
         Ok(())
     }
 
