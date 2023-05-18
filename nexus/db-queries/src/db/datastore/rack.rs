@@ -523,7 +523,7 @@ impl DataStore {
                     .filter(extip_dsl::parent_id.is_not_null())
                     .filter(extip_dsl::time_deleted.is_null())
                     .filter(extip_dsl::is_service)
-                    .filter(service_dsl::kind.eq(ServiceKind::Nexus))
+                    .filter(service_dsl::kind.eq(db::model::ServiceKind::Nexus))
                     .select(ExternalIp::as_select())
                     .get_results_async(&conn)
                     .await?
