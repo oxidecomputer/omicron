@@ -52,14 +52,14 @@ struct Args {
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
     /// will record the Nexus service running with the specified external IP
-    /// address.  When combined with DNS_EXTERNAL_IP:PORT, this will cause
-    /// Nexus to publish DNS names to external DNS.
+    /// address.  When combined with `EXTERNAL_DNS_INTERNAL_IP:PORT`, this will
+    /// cause Nexus to publish DNS names to external DNS.
     rss_nexus_external_addr: Option<SocketAddr>,
 
     #[clap(long, name = "EXTERNAL_DNS_INTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
     /// will record the external DNS service running with the specified internal
-    /// IP address.  When combined with NEXUS_EXTERNAL_IP:PORT, this will cause
+    /// IP address.  When combined with `NEXUS_EXTERNAL_IP:PORT`, this will cause
     /// Nexus to publish DNS names to external DNS.
     rss_external_dns_internal_addr: Option<SocketAddrV6>,
 }

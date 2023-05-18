@@ -255,7 +255,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        instance_id -> Nullable<Uuid>,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
         first_port -> Int4,
@@ -505,13 +506,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         kind -> crate::ServiceKindEnum,
-    }
-}
-
-table! {
-    nexus_service (id) {
-        id -> Uuid,
-        external_ip_id -> Uuid,
     }
 }
 
@@ -938,5 +932,4 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
-allow_tables_to_appear_in_same_query!(external_ip, nexus_service);
-joinable!(nexus_service -> external_ip (external_ip_id));
+allow_tables_to_appear_in_same_query!(external_ip, service);
