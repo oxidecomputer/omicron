@@ -77,9 +77,10 @@ async fn services_put(
         Ok(result) => result.map_err(|e| Error::from(e))?,
 
         Err(e) => {
-            return Err(HttpError::for_internal_error(
-                format!("unexpected failure awaiting \"services_ensure\": {:#}", e)
-            ));
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected failure awaiting \"services_ensure\": {:#}",
+                e
+            )));
         }
     }
 
