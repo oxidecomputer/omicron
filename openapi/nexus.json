@@ -305,6 +305,169 @@
         }
       }
     },
+    "/v1/certificates": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "List certificates for external endpoints",
+        "description": "Returns a list of TLS certificates used for the external API (for the current Silo).  These are sorted by creation date, with the most recent certificates appearing first.",
+        "operationId": "certificate_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Create a new system-wide x.509 certificate",
+        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
+        "operationId": "certificate_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/certificates/{certificate}": {
+      "get": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Fetch a certificate",
+        "description": "Returns the details of a specific certificate",
+        "operationId": "certificate_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Certificate"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "silos"
+        ],
+        "summary": "Delete a certificate",
+        "description": "Permanently delete a certificate. This operation cannot be undone.",
+        "operationId": "certificate_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "certificate",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/disks": {
       "get": {
         "tags": [
@@ -886,7 +1049,7 @@
         }
       }
     },
-    "/v1/groups/{group}": {
+    "/v1/groups/{group_id}": {
       "get": {
         "tags": [
           "silos"
@@ -896,7 +1059,7 @@
         "parameters": [
           {
             "in": "path",
-            "name": "group",
+            "name": "group_id",
             "description": "ID of the group",
             "required": true,
             "schema": {
@@ -1123,6 +1286,54 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/images/{image}/demote": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Demote a silo image",
+        "description": "Demote a silo image to be visible only to a specified project",
+        "operationId": "image_demote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image",
+            "description": "Name or ID of the image",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Image"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3053,169 +3264,6 @@
         }
       }
     },
-    "/v1/system/certificates": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "List system-wide certificates",
-        "description": "Returns a list of all the system-wide certificates. System-wide certificates are returned sorted by creation date, with the most recent certificates appearing first.",
-        "operationId": "certificate_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "sort_by",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrIdSortMode"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CertificateResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      },
-      "post": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Create a new system-wide x.509 certificate",
-        "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
-        "operationId": "certificate_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CertificateCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Certificate"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/certificates/{certificate}": {
-      "get": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Fetch a certificate",
-        "description": "Returns the details of a specific certificate",
-        "operationId": "certificate_view",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "certificate",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Certificate"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "system"
-        ],
-        "summary": "Delete a certificate",
-        "description": "Permanently delete a certificate. This operation cannot be undone.",
-        "operationId": "certificate_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "certificate",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/system/hardware/disks": {
       "get": {
         "tags": [
@@ -3443,7 +3491,7 @@
           {
             "in": "path",
             "name": "sled_id",
-            "description": "The sled's unique ID.",
+            "description": "ID of the sled",
             "required": true,
             "schema": {
               "type": "string",
@@ -3482,7 +3530,7 @@
           {
             "in": "path",
             "name": "sled_id",
-            "description": "The sled's unique ID.",
+            "description": "ID of the sled",
             "required": true,
             "schema": {
               "type": "string",
@@ -3537,6 +3585,104 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switches": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List switches",
+        "operationId": "switch_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switches/{switch_id}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Fetch a switch",
+        "operationId": "switch_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "switch_id",
+            "description": "ID of the switch",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Switch"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -6887,7 +7033,7 @@
     },
     "schemas": {
       "Baseboard": {
-        "description": "Properties that should uniquely identify a Sled.",
+        "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
         "properties": {
           "part": {
@@ -8417,7 +8563,7 @@
         ]
       },
       "Image": {
-        "description": "Client view of images",
+        "description": "View of an image\n\nIf `project_id` is present then the image is only visible inside that project. If it's not present then the image is visible to all projects in the silo.",
         "type": "object",
         "properties": {
           "block_size": {
@@ -10449,13 +10595,21 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "tls_certificates": {
+            "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateCreate"
+            }
           }
         },
         "required": [
           "description",
           "discoverable",
           "identity_mode",
-          "name"
+          "name",
+          "tls_certificates"
         ]
       },
       "SiloIdentityMode": {
@@ -10821,6 +10975,63 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SshKey"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Switch": {
+        "description": "An operator's view of a Switch.",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_id": {
+            "description": "The rack to which this Switch is currently attached",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "baseboard",
+          "id",
+          "rack_id",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SwitchResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Switch"
             }
           },
           "next_page": {

@@ -1,6 +1,6 @@
 #!/bin/bash
 #:
-#: name = "helios / build recovery OS image"
+#: name = "helios / build trampoline OS image"
 #: variety = "basic"
 #: target = "helios-latest"
 #: rust_toolchain = "1.68.2"
@@ -29,7 +29,7 @@
 #:
 #: [[publish]]
 #: series = "image"
-#: name = "os-recovery.tar.gz"
+#: name = "os-trampoline.tar.gz"
 #: from_output = "/work/helios/image/output/os.tar.gz"
 #:
 

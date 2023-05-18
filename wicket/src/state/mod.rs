@@ -15,7 +15,10 @@ pub use inventory::{
 };
 pub use rack::{KnightRiderMode, RackState};
 pub use status::{Liveness, ServiceStatus};
-pub use update::{update_component_title, RackUpdateState, UpdateState};
+pub use update::{
+    update_component_title, RackUpdateState, UpdateItemState,
+    UpdateRunningState,
+};
 
 use serde::{Deserialize, Serialize};
 

@@ -41,7 +41,9 @@ use dropshot::{
 use ipnetwork::IpNetwork;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
-use nexus_types::identity::AssetIdentityMetadata;
+use nexus_types::{
+    external_api::views::Switch, identity::AssetIdentityMetadata,
+};
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -141,6 +143,7 @@ pub fn external_api() -> NexusApiDescription {
         api.register(image_view)?;
         api.register(image_delete)?;
         api.register(image_promote)?;
+        api.register(image_demote)?;
 
         api.register(snapshot_list)?;
         api.register(snapshot_create)?;
@@ -189,6 +192,8 @@ pub fn external_api() -> NexusApiDescription {
         api.register(sled_view)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
+        api.register(switch_list)?;
+        api.register(switch_view)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -255,6 +260,7 @@ pub fn external_api() -> NexusApiDescription {
 
         api.register(console_api::console_projects)?;
         api.register(console_api::console_projects_new)?;
+        api.register(console_api::console_silo_images)?;
         api.register(console_api::console_silo_utilization)?;
         api.register(console_api::console_silo_access)?;
         api.register(console_api::console_root)?;
@@ -2112,15 +2118,15 @@ async fn instance_disk_detach(
 
 // Certificates
 
-/// List system-wide certificates
+/// List certificates for external endpoints
 ///
-/// Returns a list of all the system-wide certificates. System-wide certificates
-/// are returned sorted by creation date, with the most recent certificates
-/// appearing first.
+/// Returns a list of TLS certificates used for the external API (for the
+/// current Silo).  These are sorted by creation date, with the most recent
+/// certificates appearing first.
 #[endpoint {
     method = GET,
-    path = "/v1/system/certificates",
-    tags = ["system"],
+    path = "/v1/certificates",
+    tags = ["silos"],
 }]
 async fn certificate_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2155,8 +2161,8 @@ async fn certificate_list(
 /// external connections.
 #[endpoint {
     method = POST,
-    path = "/v1/system/certificates",
-    tags = ["system"]
+    path = "/v1/certificates",
+    tags = ["silos"]
 }]
 async fn certificate_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2184,8 +2190,8 @@ struct CertificatePathParam {
 /// Returns the details of a specific certificate
 #[endpoint {
     method = GET,
-    path = "/v1/system/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2208,8 +2214,8 @@ async fn certificate_view(
 /// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/certificates/{certificate}",
-    tags = ["system"],
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
 }]
 async fn certificate_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -2433,6 +2439,41 @@ async fn image_promote(
             )
             .await?;
         let image = nexus.image_promote(&opctx, &image_lookup).await?;
+        Ok(HttpResponseAccepted(image.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Demote a silo image
+///
+/// Demote a silo image to be visible only to a specified project
+#[endpoint {
+    method = POST,
+    path = "/v1/images/{image}/demote",
+    tags = ["images"]
+}]
+async fn image_demote(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ImagePath>,
+    query_params: Query<params::ProjectSelector>,
+) -> Result<HttpResponseAccepted<Image>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let image_lookup = nexus
+            .image_lookup(
+                &opctx,
+                params::ImageSelector { image: path.image, project: None },
+            )
+            .await?;
+
+        let project_lookup = nexus.project_lookup(&opctx, query)?;
+
+        let image =
+            nexus.image_demote(&opctx, &image_lookup, &project_lookup).await?;
         Ok(HttpResponseAccepted(image.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -3594,13 +3635,6 @@ async fn sled_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for Sled requests
-#[derive(Deserialize, JsonSchema)]
-struct SledPathParam {
-    /// The sled's unique ID.
-    sled_id: Uuid,
-}
-
 /// Fetch a sled
 #[endpoint {
     method = GET,
@@ -3609,7 +3643,7 @@ struct SledPathParam {
 }]
 async fn sled_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SledPathParam>,
+    path_params: Path<params::SledPath>,
 ) -> Result<HttpResponseOk<Sled>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -3654,6 +3688,65 @@ async fn physical_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+// Switches
+
+/// List switches
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/switches",
+    tags = ["system"],
+}]
+async fn switch_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Switch>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let switches = nexus
+            .switch_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            switches,
+            &|_, switch: &Switch| switch.identity.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch a switch
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/switches/{switch_id}",
+    tags = ["system"],
+ }]
+async fn switch_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPath>,
+) -> Result<HttpResponseOk<Switch>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let (.., switch) = nexus
+            .switch_lookup(
+                &opctx,
+                params::SwitchSelector { switch: path.switch_id },
+            )?
+            .fetch()
+            .await?;
+        Ok(HttpResponseOk(switch.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List physical disks attached to sleds
 #[endpoint {
     method = GET,
@@ -3662,7 +3755,7 @@ async fn physical_disk_list(
 }]
 async fn sled_physical_disk_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<SledPathParam>,
+    path_params: Path<params::SledPath>,
     query_params: Query<PaginatedById>,
 ) -> Result<HttpResponseOk<ResultsPage<PhysicalDisk>>, HttpError> {
     let apictx = rqctx.context();
@@ -4131,7 +4224,7 @@ async fn group_list(
 /// Fetch group
 #[endpoint {
     method = GET,
-    path = "/v1/groups/{group}",
+    path = "/v1/groups/{group_id}",
     tags = ["silos"],
 }]
 async fn group_view(
@@ -4144,7 +4237,7 @@ async fn group_view(
         let path = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let (.., group) =
-            nexus.silo_group_lookup(&opctx, &path.group).fetch().await?;
+            nexus.silo_group_lookup(&opctx, &path.group_id).fetch().await?;
         Ok(HttpResponseOk(group.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

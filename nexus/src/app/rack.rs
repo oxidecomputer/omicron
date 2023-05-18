@@ -88,7 +88,7 @@ impl super::Nexus {
             .collect();
 
         let service_ip_pool_ranges = request.internal_services_ip_pool_ranges;
-        let certificates: Vec<_> = request
+        let tls_certificates: Vec<_> = request
             .certs
             .into_iter()
             .enumerate()
@@ -97,21 +97,17 @@ impl super::Nexus {
                 // certificates start from one (e.g., certificate names
                 // "default-1", "default-2", etc).
                 let i = i + 1;
-                db::model::Certificate::new(
-                    Uuid::new_v4(),
-                    db::model::ServiceKind::Nexus,
-                    CertificateCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: Name::try_from(format!("default-{i}")).unwrap(),
-                            description: format!("x.509 certificate #{i} initialized at rack install"),
-                        },
-                        cert: c.cert,
-                        key: c.key,
-                        service: ServiceUsingCertificate::ExternalApi,
-                    }
-                ).map_err(|e| Error::from(e))
+                CertificateCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from(format!("default-{i}")).unwrap(),
+                        description: format!("x.509 certificate #{i} initialized at rack install"),
+                    },
+                    cert: c.cert,
+                    key: c.key,
+                    service: ServiceUsingCertificate::ExternalApi,
+                }
             })
-            .collect::<Result<_, Error>>()?;
+            .collect();
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
@@ -172,6 +168,7 @@ impl super::Nexus {
             discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
             admin_group_name: None,
+            tls_certificates,
         };
 
         self.db_datastore
@@ -182,7 +179,6 @@ impl super::Nexus {
                     services: request.services,
                     datasets,
                     service_ip_pool_ranges,
-                    certificates,
                     internal_dns,
                     external_dns,
                     recovery_silo,

@@ -192,6 +192,25 @@ impl<S: StepSpec> StepEvent<S> {
             | StepEventKind::Unknown => None,
         }
     }
+
+    /// Returns the execution ID for the leaf event, recursing into nested
+    /// events if necessary.
+    pub fn leaf_execution_id(&self) -> ExecutionId {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_execution_id(),
+            _ => self.execution_id,
+        }
+    }
+
+    /// Returns the event index for the leaf event, recursing into nested events
+    /// if necessary.
+    pub fn leaf_event_index(&self) -> usize {
+        match &self.kind {
+            StepEventKind::Nested { event, .. } => event.leaf_event_index(),
+            _ => self.event_index,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -957,6 +976,48 @@ pub enum ProgressEventKind<S: StepSpec> {
 }
 
 impl<S: StepSpec> ProgressEventKind<S> {
+    /// Returns the progress counter for this event, if available.
+    pub fn progress_counter(&self) -> Option<ProgressCounter> {
+        match self {
+            ProgressEventKind::Progress { progress, .. } => *progress,
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.progress_counter()
+            }
+            ProgressEventKind::WaitingForProgress { .. }
+            | ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `attempt` for the leaf event, recursing into nested events as
+    /// necessary.
+    ///
+    /// Returns None for unknown events.
+    pub fn leaf_attempt(&self) -> Option<usize> {
+        match self {
+            ProgressEventKind::WaitingForProgress { attempt, .. }
+            | ProgressEventKind::Progress { attempt, .. } => Some(*attempt),
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_attempt()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
+    /// Returns `step_elapsed` for the leaf event, recursing into nested events
+    /// as necessary.
+    pub fn leaf_step_elapsed(&self) -> Option<Duration> {
+        match self {
+            ProgressEventKind::WaitingForProgress { step_elapsed, .. }
+            | ProgressEventKind::Progress { step_elapsed, .. } => {
+                Some(*step_elapsed)
+            }
+            ProgressEventKind::Nested { event, .. } => {
+                event.kind.leaf_step_elapsed()
+            }
+            ProgressEventKind::Unknown => None,
+        }
+    }
+
     /// Converts a generic version into self.
     ///
     /// This version can be used to convert a generic type into a more concrete
@@ -1259,7 +1320,9 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 /// number of bytes. There is no guarantee that the counter won't go back in
 /// subsequent events; that can happen e.g. if a fetch happens from multiple
 /// peers within a single attempt.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ProgressCounter {
     pub current: u64,
@@ -1372,6 +1435,13 @@ pub struct EventReport<S: StepSpec> {
     /// nested event in progress.
     pub progress_events: Vec<ProgressEvent<S>>,
 
+    /// The root execution ID for this report.
+    ///
+    /// Each report has a root execution ID, which ties together all step and
+    /// progress events. This is always filled out if the list of step events is
+    /// non-empty.
+    pub root_execution_id: Option<ExecutionId>,
+
     /// The last event seen.
     ///
     /// `last_seen` can be used to retrieve deltas of events.
@@ -1407,6 +1477,7 @@ impl<S: StepSpec> EventReport<S> {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?,
+            root_execution_id: value.root_execution_id,
             last_seen: value.last_seen,
         })
     }
@@ -1433,6 +1504,7 @@ impl<S: StepSpec> EventReport<S> {
                 .into_iter()
                 .map(|event| event.into_generic())
                 .collect(),
+            root_execution_id: self.root_execution_id,
             last_seen: self.last_seen,
         }
     }

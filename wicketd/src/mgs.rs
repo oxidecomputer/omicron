@@ -24,7 +24,10 @@ use self::inventory::{
 
 mod inventory;
 
-const MGS_TIMEOUT: Duration = Duration::from_secs(10);
+// This timeout feels long, but needs to be long for the case where we update
+// our sidecar's SP: we won't get a respose until the SP brings back the
+// management network, which often takes 15+ seconds.
+const MGS_TIMEOUT: Duration = Duration::from_secs(30);
 
 // We support:
 //   * One outstanding query request from wicket

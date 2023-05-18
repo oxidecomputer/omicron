@@ -85,7 +85,7 @@ use uuid::Uuid;
 //                                                  returns Instance
 //             .fetch().await?;
 //
-// As you can see, at each step, a selection function (like "organization_name")
+// As you can see, at each step, a selection function (like "project_name")
 // consumes the current tail of the list and returns a new tail.  We don't want
 // the caller to have to keep track of multiple objects, so that implies that
 // the tail must own all the state that we're building up as we go.
@@ -122,7 +122,7 @@ impl<'a> LookupPath<'a> {
             .opctx
             .authn
             .silo_required()
-            .internal_context("looking up Organization by name")
+            .internal_context("looking up Project by name")
         {
             Ok(authz_silo) => {
                 let root = Root { lookup_root: self };
@@ -346,6 +346,11 @@ impl<'a> LookupPath<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type Switch, identified by its id
+    pub fn switch_id(self, id: Uuid) -> Switch<'a> {
+        Switch::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
@@ -426,21 +431,60 @@ impl<'a> LookupPath<'a> {
         UserBuiltin::Name(Root { lookup_root: self }, name)
     }
 
-    /// Select a resource of type Certificate, identified by its name
-    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
-        Certificate::Name(Root { lookup_root: self }, name)
-    }
-
     /// Select a resource of type Certificate, identified by its id
     pub fn certificate_id<'b>(self, id: Uuid) -> Certificate<'b>
     where
         'a: 'b,
     {
         Certificate::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Certificate, identified by its name
+    pub fn certificate_name<'b, 'c>(self, name: &'b Name) -> Certificate<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Certificate::Name(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Certificate::Error(root, error)
+            }
+        }
+    }
+
+    /// Select a resource of type Certificate, identified by its owned name
+    pub fn certificate_name_owned<'b, 'c>(self, name: Name) -> Certificate<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        match self
+            .opctx
+            .authn
+            .silo_required()
+            .internal_context("looking up Certificate by name")
+        {
+            Ok(authz_silo) => {
+                let root = Root { lookup_root: self };
+                let silo_key = Silo::PrimaryKey(root, authz_silo.id());
+                Certificate::OwnedName(silo_key, name)
+            }
+            Err(error) => {
+                let root = Root { lookup_root: self };
+                Certificate::Error(root, error)
+            }
+        }
     }
 
     /// Select a resource of type SamlIdentityProvider, identified by its id
@@ -476,7 +520,7 @@ impl<'a> Root<'a> {
 lookup_resource! {
     name = "Silo",
     ancestors = [],
-    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage" ],
+    children = [ "IdentityProvider", "SamlIdentityProvider", "Project", "SiloImage", "Certificate" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -717,6 +761,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "Switch",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "PhysicalDisk",
     ancestors = [],
     children = [],
@@ -771,7 +824,7 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Certificate",
-    ancestors = [],
+    ancestors = [ "Silo" ],
     children = [],
     lookup_by_name = true,
     soft_deletes = true,

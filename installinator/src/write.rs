@@ -14,30 +14,45 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::dkio::MediaInfoExtended;
+use illumos_utils::{
+    dkio::{self, MediaInfoExtended},
+    zpool::{Zpool, ZpoolName},
+};
 use installinator_common::{
-    M2Slot, StepContext, StepProgress, StepResult, UpdateEngine,
-    WriteComponent, WriteError, WriteOutput, WriteSpec, WriteStepId,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
+    StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
+    WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::{
+    fs::File,
+    io::{AsyncWrite, AsyncWriteExt},
+};
+use tufaceous_lib::ControlPlaneZoneImages;
+use update_engine::StepSpec;
 
-use crate::{block_size_writer::BlockSizeBufWriter, hardware::Hardware};
+use crate::{
+    async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
+    hardware::Hardware,
+};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
-    // On real gimlets, we expect to write the host phase 2 to an
-    // already-existing device (the appropriate M.2 slice). But for tests or
-    // runs on non-gimlets, we want to write the host phase 2 to a new file we
-    // create.
-    create_host_phase_2: bool,
+    // Path to write the host image; either a raw device corresponding to an M.2
+    // partition (real gimlet) or a file (test).
     host_phase_2: Utf8PathBuf,
 
-    // TODO-completeness This SHOULD NOT be optional, but at the time of this
-    // writing we don't know how to write the control plane artifacts on a real
-    // gimlet, so we leave it optional for now. This should be fixed very soon!
-    control_plane: Option<Utf8PathBuf>,
+    // On real gimlets, we remove any files currently in the control plane
+    // destination directory. For tests and non-gimlets, we don't want to go
+    // around removing files arbitrarily.
+    clean_control_plane_dir: bool,
+
+    // Directory in which we unpack the control plane zone images.
+    control_plane_dir: Utf8PathBuf,
+
+    // Zpool containing `control_plane_dir`, if we're on a real gimlet.
+    control_plane_zpool: Option<ZpoolName>,
 }
 
 #[derive(Clone, Debug)]
@@ -51,14 +66,10 @@ pub(crate) struct WriteDestination {
 /// Exposed for testing.
 pub static HOST_PHASE_2_FILE_NAME: &str = "host_phase_2.bin";
 
-/// The name of the control plane image written to disk.
-///
-/// Exposed for testing.
-pub static CONTROL_PLANE_FILE_NAME: &str = "control_plane.bin";
-
 impl WriteDestination {
     pub(crate) fn in_directory(dir: &Utf8Path) -> Result<Self> {
-        std::fs::create_dir_all(dir)
+        let control_plane_dir = dir.join("zones");
+        std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
         // `in_directory()` is only used for testing (e.g., on
@@ -67,9 +78,10 @@ impl WriteDestination {
         drives.insert(
             M2Slot::A,
             ArtifactDestination {
-                create_host_phase_2: true,
                 host_phase_2: dir.join(HOST_PHASE_2_FILE_NAME),
-                control_plane: Some(dir.join(CONTROL_PLANE_FILE_NAME)),
+                clean_control_plane_dir: false,
+                control_plane_dir,
+                control_plane_zpool: None,
             },
         );
 
@@ -105,15 +117,17 @@ impl WriteDestination {
                         "zpool" => %disk.zpool_name(),
                     );
 
+                    let zpool_name = disk.zpool_name().clone();
+                    let control_plane_dir = zpool_name
+                        .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
+
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
                             entry.insert(ArtifactDestination {
-                                create_host_phase_2: false,
                                 host_phase_2: path,
-                                // TODO-completeness Fix this once we know how
-                                // to write the control plane image to this
-                                // disk's zpool.
-                                control_plane: None,
+                                clean_control_plane_dir: true,
+                                control_plane_dir,
+                                control_plane_zpool: Some(zpool_name),
                             });
                         }
                         Entry::Occupied(_) => {
@@ -146,6 +160,10 @@ impl WriteDestination {
 
         Ok(Self { drives, is_host_phase_2_block_device: true })
     }
+
+    pub(crate) fn num_target_disks(&self) -> usize {
+        self.drives.len()
+    }
 }
 
 /// State machine for our progress writing to one of the M.2 drives.
@@ -174,7 +192,7 @@ impl<'a> ArtifactWriter<'a> {
         host_phase_2_id: &'a ArtifactHashId,
         host_phase_2_data: &'a BufList,
         control_plane_id: &'a ArtifactHashId,
-        control_plane_data: &'a BufList,
+        control_plane_zones: &'a ControlPlaneZoneImages,
         destination: WriteDestination,
     ) -> Self {
         let drives = destination
@@ -190,7 +208,7 @@ impl<'a> ArtifactWriter<'a> {
                 host_phase_2_id,
                 host_phase_2_data,
                 control_plane_id,
-                control_plane_data,
+                control_plane_zones,
             },
         }
     }
@@ -271,17 +289,28 @@ impl<'a> ArtifactWriter<'a> {
                         done_drives.insert(*drive);
                         success_this_iter += 1;
                     }
-                    Err(error) => match error.component {
-                        WriteComponent::HostPhase2 => {
-                            *progress = DriveWriteProgress::HostPhase2Failed;
+                    Err(error) => match error {
+                        WriteError::WriteError { component, .. } => {
+                            match component {
+                                WriteComponent::HostPhase2 => {
+                                    *progress =
+                                        DriveWriteProgress::HostPhase2Failed;
+                                }
+                                WriteComponent::ControlPlane => {
+                                    *progress =
+                                        DriveWriteProgress::ControlPlaneFailed;
+                                }
+                                WriteComponent::Unknown => {
+                                    unreachable!("we should never generate an unknown component")
+                                }
+                            }
                         }
-                        WriteComponent::ControlPlane => {
+                        // These errors are only produced when writing the
+                        // control plane zones.
+                        WriteError::RemoveFilesError { .. }
+                        | WriteError::SyncOutputDirError { .. }
+                        | WriteError::ZpoolError { .. } => {
                             *progress = DriveWriteProgress::ControlPlaneFailed;
-                        }
-                        WriteComponent::Unknown => {
-                            unreachable!(
-                                "we should never generate an unknown component"
-                            )
                         }
                     },
                 }
@@ -408,7 +437,7 @@ struct ArtifactsToWrite<'a> {
     host_phase_2_id: &'a ArtifactHashId,
     host_phase_2_data: &'a BufList,
     control_plane_id: &'a ArtifactHashId,
-    control_plane_data: &'a BufList,
+    control_plane_zones: &'a ControlPlaneZoneImages,
 }
 
 impl ArtifactsToWrite<'_> {
@@ -426,7 +455,6 @@ impl ArtifactsToWrite<'_> {
             slot,
             self.host_phase_2_data.clone(),
             &destinations.host_phase_2,
-            destinations.create_host_phase_2,
             transport,
             cx,
         )
@@ -448,36 +476,174 @@ impl ArtifactsToWrite<'_> {
         transport: &mut impl WriteTransport,
         cx: &StepContext<WriteSpec>,
     ) -> Result<StepResult<(), WriteSpec>, WriteError> {
-        // Temporary workaround while we may not know how to write the control
-        // plane image: if we don't know where to put it, we're done.
-        let Some(control_plane_dest) = destinations.control_plane.as_ref() else
-        {
-            return StepResult::skipped((), (), "We don't yet know how to write the control plane");
-        };
-
-        write_artifact_impl(
-            WriteComponent::ControlPlane,
+        // Register a nested engine to write the set of zones, each zone as its
+        // own step.
+        let inner_cx = &ControlPlaneZoneWriteContext {
             slot,
-            self.control_plane_data.clone(),
-            control_plane_dest,
-            true,
-            transport,
-            cx,
-        )
+            clean_output_directory: destinations.clean_control_plane_dir,
+            output_directory: &destinations.control_plane_dir,
+            zones: self.control_plane_zones,
+        };
+        cx.with_nested_engine(|engine| {
+            inner_cx.register_steps(
+                engine,
+                transport,
+                destinations.control_plane_zpool.as_ref(),
+            );
+            Ok(())
+        })
         .await
         .map_err(|error| {
-            info!(log, "{error:?}"; "artifact_id" => ?self.control_plane_id);
+            warn!(
+                log, "{error:?}";
+                "artifact_id" => ?self.control_plane_id,
+            );
             error
         })?;
 
+        info!(
+            log,
+            "finished writing {} control plane zones",
+            self.control_plane_zones.zones.len()
+        );
         StepResult::success((), ())
     }
+}
+
+struct ControlPlaneZoneWriteContext<'a> {
+    slot: M2Slot,
+    clean_output_directory: bool,
+    output_directory: &'a Utf8Path,
+    zones: &'a ControlPlaneZoneImages,
+}
+
+impl ControlPlaneZoneWriteContext<'_> {
+    fn register_steps<'b>(
+        &'b self,
+        engine: &UpdateEngine<'b, ControlPlaneZonesSpec>,
+        transport: &'b mut impl WriteTransport,
+        zpool: Option<&'b ZpoolName>,
+    ) {
+        use update_engine::StepHandle;
+
+        let slot = self.slot;
+
+        // If we're on a gimlet, remove any files in the control plane
+        // destination directory.
+        if self.clean_output_directory {
+            let output_directory = self.output_directory.to_path_buf();
+            engine
+                .new_step(
+                    WriteComponent::ControlPlane,
+                    ControlPlaneZonesStepId::CleanTargetDirectory {
+                        path: output_directory.clone(),
+                    },
+                    format!("Removing files in {}", output_directory),
+                    move |_cx| async move {
+                        let path = output_directory.clone();
+                        tokio::task::spawn_blocking(move || {
+                            remove_contents_of(&output_directory)
+                        })
+                        .await
+                        .unwrap()
+                        .map_err(|error| {
+                            WriteError::RemoveFilesError { path, error }
+                        })?;
+
+                        StepResult::success((), ())
+                    },
+                )
+                .register();
+        }
+
+        // Dealing with the `&mut impl WriteTransport` is tricky. Every step in
+        // the loop below needs access to it, but we can't move it into every
+        // closure. Instead, we put it into a `StepHandle`, and have each step
+        // return it on completion. This way each step passes it forward to its
+        // successor.
+        let mut transport = StepHandle::ready(transport);
+
+        for (name, data) in &self.zones.zones {
+            let out_path = self.output_directory.join(name);
+            transport = engine
+                .new_step(
+                    WriteComponent::ControlPlane,
+                    ControlPlaneZonesStepId::Zone { name: name.clone() },
+                    format!("Writing zone {name}"),
+                    move |cx| async move {
+                        let transport = transport.into_value(cx.token()).await;
+                        write_artifact_impl(
+                            WriteComponent::ControlPlane,
+                            slot,
+                            data.clone().into(),
+                            &out_path,
+                            transport,
+                            &cx,
+                        )
+                        .await?;
+
+                        StepResult::success(transport, ())
+                    },
+                )
+                .register();
+        }
+
+        // `fsync()` the directory to ensure the directory entries for all the
+        // files we just created are written to disk.
+        let output_directory = self.output_directory.to_path_buf();
+        engine
+            .new_step(
+                WriteComponent::ControlPlane,
+                ControlPlaneZonesStepId::Fsync,
+                "Syncing writes to disk",
+                move |_cx| async move {
+                    let output_directory =
+                        File::open(&output_directory).await.map_err(
+                            |error| WriteError::SyncOutputDirError { error },
+                        )?;
+                    output_directory.sync_all().await.map_err(|error| {
+                        WriteError::SyncOutputDirError { error }
+                    })?;
+
+                    // Drop `output_directory` to close it so we can export the
+                    // zpool.
+                    std::mem::drop(output_directory);
+
+                    if let Some(zpool) = zpool {
+                        Zpool::export(zpool)?;
+                    }
+
+                    StepResult::success((), ())
+                },
+            )
+            .register();
+    }
+}
+
+fn remove_contents_of(path: &Utf8Path) -> io::Result<()> {
+    use std::fs;
+
+    // We can't use `std::fs::remove_dir_all()` because we want to keep `path`
+    // itself. Instead, walk through it and remove any files/directories we
+    // find.
+    let dir = fs::read_dir(path)?;
+
+    for entry in dir {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            fs::remove_file(entry.path())?;
+        } else {
+            fs::remove_dir_all(entry.path())?;
+        }
+    }
+
+    Ok(())
 }
 
 // Used in tests to test against file failures.
 #[async_trait]
 trait WriteTransport: fmt::Debug + Send {
-    type W: AsyncWrite + Send + Unpin;
+    type W: WriteTransportWriter;
 
     async fn make_writer(
         &mut self,
@@ -485,8 +651,43 @@ trait WriteTransport: fmt::Debug + Send {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError>;
+}
+
+#[async_trait]
+trait WriteTransportWriter: AsyncWrite + Send + Unpin {
+    async fn finalize(self) -> io::Result<()>;
+}
+
+#[async_trait]
+impl WriteTransportWriter for AsyncNamedTempFile {
+    async fn finalize(self) -> io::Result<()> {
+        self.sync_all().await?;
+        self.persist().await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
+    async fn finalize(self) -> io::Result<()> {
+        let f = self.into_inner();
+        f.sync_all().await?;
+
+        // We only create `BlockSizeBufWriter` for the raw block device storing
+        // the OS ramdisk. After `fsync`'ing, also flush the write cache.
+        tokio::task::spawn_blocking(move || {
+            match dkio::flush_write_cache(f.as_raw_fd()) {
+                Ok(()) => Ok(()),
+                // Some drives don't support `flush_write_cache`; we don't want
+                // to fail in this case.
+                Err(err) if err.raw_os_error() == Some(libc::ENOTSUP) => Ok(()),
+                Err(err) => Err(err),
+            }
+        })
+        .await
+        .unwrap()
+    }
 }
 
 #[derive(Debug)]
@@ -494,7 +695,7 @@ struct FileTransport;
 
 #[async_trait]
 impl WriteTransport for FileTransport {
-    type W = tokio::fs::File;
+    type W = AsyncNamedTempFile;
 
     async fn make_writer(
         &mut self,
@@ -502,21 +703,16 @@ impl WriteTransport for FileTransport {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError> {
-        tokio::fs::OpenOptions::new()
-            .create(create)
-            .write(true)
-            .truncate(create)
-            .open(destination)
-            .await
-            .map_err(|error| WriteError {
+        AsyncNamedTempFile::with_destination(destination).await.map_err(
+            |error| WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
                 total_bytes,
                 error,
-            })
+            },
+        )
     }
 }
 
@@ -533,15 +729,15 @@ impl WriteTransport for BlockDeviceTransport {
         slot: M2Slot,
         destination: &Utf8Path,
         total_bytes: u64,
-        create: bool,
     ) -> Result<Self::W, WriteError> {
         let f = tokio::fs::OpenOptions::new()
-            .create(create)
+            .create(false)
             .write(true)
-            .truncate(create)
+            .truncate(false)
+            .custom_flags(libc::O_SYNC)
             .open(destination)
             .await
-            .map_err(|error| WriteError {
+            .map_err(|error| WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
@@ -551,7 +747,7 @@ impl WriteTransport for BlockDeviceTransport {
 
         let media_info =
             MediaInfoExtended::from_fd(f.as_raw_fd()).map_err(|error| {
-                WriteError {
+                WriteError::WriteError {
                     component,
                     slot,
                     written_bytes: 0,
@@ -566,7 +762,7 @@ impl WriteTransport for BlockDeviceTransport {
         // size. We can assume the image we're given should be
         // appropriately-sized: return an error here if it is not.
         if total_bytes % block_size != 0 {
-            return Err(WriteError {
+            return Err(WriteError::WriteError {
                 component,
                 slot,
                 written_bytes: 0,
@@ -582,23 +778,16 @@ impl WriteTransport for BlockDeviceTransport {
     }
 }
 
-async fn write_artifact_impl(
+async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
     component: WriteComponent,
     slot: M2Slot,
     mut artifact: BufList,
     destination: &Utf8Path,
-    create: bool,
     transport: &mut impl WriteTransport,
-    cx: &StepContext<WriteSpec>,
+    cx: &StepContext<S>,
 ) -> Result<(), WriteError> {
     let mut writer = transport
-        .make_writer(
-            component,
-            slot,
-            destination,
-            artifact.num_bytes() as u64,
-            create,
-        )
+        .make_writer(component, slot, destination, artifact.num_bytes() as u64)
         .await?;
 
     let total_bytes = artifact.num_bytes() as u64;
@@ -616,7 +805,7 @@ async fn write_artifact_impl(
                 .await;
             }
             Err(error) => {
-                return Err(WriteError {
+                return Err(WriteError::WriteError {
                     component,
                     slot,
                     written_bytes,
@@ -630,7 +819,20 @@ async fn write_artifact_impl(
     match writer.flush().await {
         Ok(()) => {}
         Err(error) => {
-            return Err(WriteError {
+            return Err(WriteError::WriteError {
+                component,
+                slot,
+                written_bytes,
+                total_bytes,
+                error,
+            });
+        }
+    };
+
+    match writer.finalize().await {
+        Ok(()) => {}
+        Err(error) => {
+            return Err(WriteError::WriteError {
                 component,
                 slot,
                 written_bytes,
@@ -808,19 +1010,29 @@ mod tests {
         drives.insert(
             M2Slot::A,
             ArtifactDestination {
-                create_host_phase_2: true,
                 host_phase_2: destination_host.clone(),
-                control_plane: Some(destination_control_plane.clone()),
+                clean_control_plane_dir: false,
+                control_plane_dir: tempdir_path.into(),
+                control_plane_zpool: None,
             },
         );
         let destination =
             WriteDestination { drives, is_host_phase_2_block_device: false };
 
+        // Assemble our one control plane artifact into a 1-long list of zone
+        // images.
+        let control_plane_zone_images = ControlPlaneZoneImages {
+            zones: vec![(
+                destination_control_plane.file_name().unwrap().to_string(),
+                artifact_control_plane.iter().flatten().copied().collect(),
+            )],
+        };
+
         let mut writer = ArtifactWriter::new(
             &host_id,
             &artifact_host,
             &control_plane_id,
-            &artifact_control_plane,
+            &control_plane_zone_images,
             destination,
         );
 
@@ -951,7 +1163,7 @@ mod tests {
 
     #[async_trait]
     impl WriteTransport for SharedTransport {
-        type W = PartialAsyncWrite<tokio::fs::File>;
+        type W = PartialAsyncWrite<AsyncNamedTempFile>;
 
         async fn make_writer(
             &mut self,
@@ -959,13 +1171,19 @@ mod tests {
             slot: M2Slot,
             destination: &Utf8Path,
             total_bytes: u64,
-            create: bool,
         ) -> Result<Self::W, WriteError> {
             self.0
                 .lock()
                 .await
-                .make_writer(component, slot, destination, total_bytes, create)
+                .make_writer(component, slot, destination, total_bytes)
                 .await
+        }
+    }
+
+    #[async_trait]
+    impl WriteTransportWriter for PartialAsyncWrite<AsyncNamedTempFile> {
+        async fn finalize(self) -> io::Result<()> {
+            self.into_inner().finalize().await
         }
     }
 
@@ -977,7 +1195,7 @@ mod tests {
 
     #[async_trait]
     impl WriteTransport for PartialIoTransport {
-        type W = PartialAsyncWrite<tokio::fs::File>;
+        type W = PartialAsyncWrite<AsyncNamedTempFile>;
 
         async fn make_writer(
             &mut self,
@@ -985,11 +1203,10 @@ mod tests {
             slot: M2Slot,
             destination: &Utf8Path,
             total_bytes: u64,
-            create: bool,
         ) -> Result<Self::W, WriteError> {
             let f = self
                 .file_transport
-                .make_writer(component, slot, destination, total_bytes, create)
+                .make_writer(component, slot, destination, total_bytes)
                 .await?;
             // This is the next series of operations.
             let these_ops =

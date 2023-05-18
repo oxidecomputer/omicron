@@ -6,6 +6,7 @@ use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use illumos_utils::zpool;
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
@@ -66,6 +67,17 @@ pub enum InstallinatorComponent {
 pub enum InstallinatorStepId {
     Download,
     Format,
+    Scan,
+    // There are multiple "composite" artifacts in the tuf repository the user
+    // gives to wicketd: the RoT (A/B images), the host (phase1/phase2), and the
+    // control plane (the collection of zones). wicketd handles unpacking the
+    // RoT and host composite artifacts, because it needs to give pieces from
+    // inside them to MGS. However, it does not unpack the control plane
+    // artifact: only installinator needs access to the zone images inside, so
+    // we have an explicit step here for that unpacking. If the user uploads a
+    // tuf repository with a malformed control plane composite artifact, this
+    // step is the point at which we'd discover that and fail.
+    UnpackControlPlaneArtifact,
     Write,
 }
 
@@ -103,6 +115,16 @@ pub enum InstallinatorProgressMetadata {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "reason")]
 pub enum InstallinatorCompletionMetadata {
+    HardwareScan {
+        /// Number of disks found.
+        disks_found: usize,
+    },
+
+    ControlPlaneZones {
+        /// Number of zone images that will be installed.
+        zones_to_install: usize,
+    },
+
     Download {
         /// The address the artifact was downloaded from.
         address: SocketAddrV6,
@@ -241,23 +263,77 @@ pub enum WriteStepId {
 
 /// The error that occurred.
 #[derive(Debug, Error)]
-#[error(
-    "writing {component} to slot {slot} failed \
-     after {written_bytes}/{total_bytes} bytes"
-)]
-pub struct WriteError {
-    pub component: WriteComponent,
-    pub slot: M2Slot,
-    pub written_bytes: u64,
-    pub total_bytes: u64,
-    #[source]
-    pub error: std::io::Error,
+pub enum WriteError {
+    #[error(
+        "writing {component} to slot {slot} failed \
+         after {written_bytes}/{total_bytes} bytes"
+    )]
+    WriteError {
+        component: WriteComponent,
+        slot: M2Slot,
+        written_bytes: u64,
+        total_bytes: u64,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error removing files from {path}: {error}")]
+    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("error fsyncing output directory: {error}")]
+    SyncOutputDirError { error: std::io::Error },
+    #[error("error interacting with zpool: {error}")]
+    ZpoolError {
+        #[from]
+        error: zpool::Error,
+    },
 }
 
 impl AsError for WriteError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }
+}
+
+/// The specification for writing control plane zones.
+#[derive(JsonSchema)]
+pub enum ControlPlaneZonesSpec {}
+
+// This is a nested spec used within a `WriteSpec` engine, and we reuse a couple
+// of `WriteSpec`'s types for simplicity.
+impl StepSpec for ControlPlaneZonesSpec {
+    type Component = WriteComponent;
+    type StepId = ControlPlaneZonesStepId;
+    type StepMetadata = ();
+    type ProgressMetadata = ();
+    type CompletionMetadata = ();
+    type SkippedMetadata = ();
+    type Error = WriteError;
+}
+
+/// A step identifier for the control plane zones operation.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum ControlPlaneZonesStepId {
+    /// Removing any files from the target directory.
+    CleanTargetDirectory {
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+    },
+
+    /// Writing a zone.
+    Zone { name: String },
+
+    /// Syncing writes to disk.
+    Fsync,
+
+    /// Future variants that might be unknown.
+    #[serde(other, deserialize_with = "deserialize_ignore_any")]
+    Unknown,
+}
+
+fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }
 
 fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {

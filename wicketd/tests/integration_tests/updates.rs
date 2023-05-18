@@ -11,7 +11,7 @@ use camino_tempfile::Utf8TempDir;
 use clap::Parser;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as gateway_setup;
-use installinator::{CONTROL_PLANE_FILE_NAME, HOST_PHASE_2_FILE_NAME};
+use installinator::HOST_PHASE_2_FILE_NAME;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
@@ -247,7 +247,12 @@ async fn test_installinator_fetch() {
 
     // Check that the host and control plane artifacts were downloaded
     // correctly.
-    for file_name in [HOST_PHASE_2_FILE_NAME, CONTROL_PLANE_FILE_NAME] {
+    //
+    // The control plane zone names here are defined in `fake.toml` which we
+    // load above.
+    for file_name in
+        [HOST_PHASE_2_FILE_NAME, "zones/zone1.tar.gz", "zones/zone2.tar.gz"]
+    {
         let path = dest_path.join(file_name);
         assert!(path.is_file(), "{path} was written out");
     }

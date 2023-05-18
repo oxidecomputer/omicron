@@ -46,8 +46,8 @@ impl super::Nexus {
             id,
             info.sa_address,
             db::model::SledBaseboard {
-                serial_number: info.baseboard.identifier,
-                part_number: info.baseboard.model,
+                serial_number: info.baseboard.serial_number,
+                part_number: info.baseboard.part_number,
                 revision: info.baseboard.revision,
             },
             db::model::SledSystemHardware {
@@ -290,12 +290,18 @@ impl super::Nexus {
 
     // OPTE V2P mappings
 
-    /// Ensure that the necessary v2p mappings for an instance are created
+    /// Ensures that V2P mappings exist that indicate that the instance with ID
+    /// `instance_id` is resident on the sled with ID `sled_id`.
     pub async fn create_instance_v2p_mappings(
         &self,
         opctx: &OpContext,
         instance_id: Uuid,
+        sled_id: Uuid,
     ) -> Result<(), Error> {
+        info!(&self.log, "creating V2P mappings for instance";
+              "instance_id" => %instance_id,
+              "sled_id" => %sled_id);
+
         // For every sled that isn't the sled this instance was allocated to, create
         // a virtual to physical mapping for each of this instance's NICs.
         //
@@ -329,22 +335,19 @@ impl super::Nexus {
         // instances in different VPCs from connecting to each other. If it ever
         // stops doing this, the broadcast approach will create V2P mappings
         // that shouldn't exist.
-
-        let (.., authz_instance, db_instance) =
-            LookupPath::new(&opctx, &self.db_datastore)
-                .instance_id(instance_id)
-                .fetch_for(authz::Action::Read)
-                .await?;
+        let (.., authz_instance) = LookupPath::new(&opctx, &self.db_datastore)
+            .instance_id(instance_id)
+            .lookup_for(authz::Action::Read)
+            .await?;
 
         let instance_nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        // Lookup the physical host IP of the sled hosting this instance
-        let instance_sled_id = db_instance.runtime().sled_id;
+        // Look up the supplied sled's physical host IP.
         let physical_host_ip =
-            *self.sled_lookup(&self.opctx_alloc, &instance_sled_id).await?.ip;
+            *self.sled_lookup(&self.opctx_alloc, &sled_id).await?.ip;
 
         let mut last_sled_id: Option<Uuid> = None;
         loop {
@@ -362,7 +365,10 @@ impl super::Nexus {
             for sled in &sleds_page {
                 // set_v2p not required for sled instance was allocated to, OPTE
                 // currently does that automatically
-                if sled.id() == instance_sled_id {
+                //
+                // TODO(#3107): Remove this when XDE stops creating mappings
+                // implicitly.
+                if sled.id() == sled_id {
                     continue;
                 }
 
@@ -458,6 +464,9 @@ impl super::Nexus {
             for sled in &sleds_page {
                 // del_v2p not required for sled instance was allocated to, OPTE
                 // currently does that automatically
+                //
+                // TODO(#3107): Remove this when XDE stops deleting mappings
+                // implicitly.
                 if sled.id() == instance_sled_id {
                     continue;
                 }

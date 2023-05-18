@@ -65,6 +65,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
+                tls_certificates: vec![],
             },
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -283,6 +284,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             discoverable: false,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
+            tls_certificates: vec![],
         },
     )
     .await;

@@ -22,6 +22,7 @@ use omicron_common::nexus_config;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
+use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::o;
 use slog::Logger;
@@ -41,6 +42,7 @@ pub mod resource_helpers;
 
 pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 
@@ -498,13 +500,13 @@ pub async fn start_producer_server(
     let config = oximeter_producer::Config {
         server_info,
         registration_address: nexus_address,
-        dropshot_config: ConfigDropshot {
+        dropshot: ConfigDropshot {
             bind_address: producer_address,
             ..Default::default()
         },
-        logging_config: ConfigLogging::StderrTerminal {
+        log: LogConfig::Config(ConfigLogging::StderrTerminal {
             level: ConfigLoggingLevel::Error,
-        },
+        }),
     };
     let server =
         ProducerServer::start(&config).await.map_err(|e| e.to_string())?;

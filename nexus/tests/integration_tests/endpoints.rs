@@ -15,6 +15,7 @@ use lazy_static::lazy_static;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
+use nexus_test_utils::SWITCH_UUID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -42,6 +43,8 @@ lazy_static! {
         format!("/v1/system/hardware/racks/{}", RACK_UUID);
     pub static ref HARDWARE_SLED_URL: String =
         format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID);
+    pub static ref HARDWARE_SWITCH_URL: String =
+        format!("/v1/system/hardware/switches/{}", SWITCH_UUID);
     pub static ref HARDWARE_DISK_URL: String =
         format!("/v1/system/hardware/disks");
     pub static ref HARDWARE_SLED_DISK_URL: String =
@@ -65,6 +68,7 @@ lazy_static! {
             discoverable: true,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: None,
+            tls_certificates: vec![],
         };
     // Use the default Silo for testing the local IdP
     pub static ref DEMO_SILO_USERS_CREATE_URL: String = format!(
@@ -322,10 +326,9 @@ lazy_static! {
 lazy_static! {
     pub static ref DEMO_CERTIFICATE_NAME: Name =
         "demo-certificate".parse().unwrap();
-    pub static ref DEMO_CERTIFICATES_URL: String =
-        format!("/v1/system/certificates");
+    pub static ref DEMO_CERTIFICATES_URL: String = format!("/v1/certificates");
     pub static ref DEMO_CERTIFICATE_URL: String =
-        format!("/v1/system/certificates/demo-certificate");
+        format!("/v1/certificates/demo-certificate");
     pub static ref DEMO_CERTIFICATE: CertificateChain = CertificateChain::new();
     pub static ref DEMO_CERTIFICATE_CREATE: params::CertificateCreate =
         params::CertificateCreate {
@@ -348,6 +351,8 @@ lazy_static! {
         format!("/v1/images/{}?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_PROJECT_PROMOTE_IMAGE_URL: String =
         format!("/v1/images/{}/promote?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
+    pub static ref DEMO_SILO_DEMOTE_IMAGE_URL: String =
+        format!("/v1/images/{}/demote?project={}", *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME);
     pub static ref DEMO_IMAGE_CREATE: params::ImageCreate =
         params::ImageCreate {
             identity: IdentityMetadataCreateParams {
@@ -1230,6 +1235,15 @@ lazy_static! {
             ],
         },
 
+        VerifyEndpoint {
+            url: &DEMO_SILO_DEMOTE_IMAGE_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(serde_json::value::Value::Null),
+            ],
+        },
+
         /* Snapshots */
 
         VerifyEndpoint {
@@ -1420,6 +1434,21 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: "/v1/system/hardware/switches",
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        // TODO: Switches should be configured alongside sled agents during test setup
+        VerifyEndpoint {
+            url: &HARDWARE_SWITCH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::GetNonexistent],
         },
 
         VerifyEndpoint {

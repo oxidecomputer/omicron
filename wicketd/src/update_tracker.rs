@@ -151,19 +151,15 @@ impl UpdateTracker {
 
                 match upload_trampoline_phase_2_to_mgs.as_mut() {
                     Some(prev) => {
-                        // We've previously started an upload - does it match this
-                        // update's artifact ID? If not, cancel the old task (which
-                        // might still be trying to upload) and start a new one with
-                        // our current image.
-                        //
-                        // TODO-correctness If we still have updates running that
-                        // expect the old image, they're probably going to fail.
-                        // Should we handle that more cleanly or just let them fail?
+                        // We've previously started an upload - does it match
+                        // this update's artifact ID? If not, cancel the old
+                        // task (which might still be trying to upload) and
+                        // start a new one with our current image.
                         if prev.status.borrow().id != plan.trampoline_phase_2.id
                         {
                             // It does _not_ match - we have a new plan with a
-                            // different trampoline image. If the old task is still
-                            // running, cancel it, and start a new one.
+                            // different trampoline image. If the old task is
+                            // still running, cancel it, and start a new one.
                             prev.task.abort();
                             *prev = self
                                 .spawn_upload_trampoline_phase_2_to_mgs(&plan);
@@ -176,8 +172,9 @@ impl UpdateTracker {
                     }
                 }
 
-                // Both branches above leave `upload_trampoline_phase_2_to_mgs` with
-                // data, so we can unwrap here to clone the `watch` channel.
+                // Both branches above leave `upload_trampoline_phase_2_to_mgs`
+                // with data, so we can unwrap here to clone the `watch`
+                // channel.
                 upload_trampoline_phase_2_to_mgs
                     .as_ref()
                     .unwrap()
@@ -286,7 +283,7 @@ impl UpdateTracker {
         let plan = update_data
             .artifact_store
             .current_plan()
-            .ok_or_else(|| StartUpdateError::TufRepositoryUnavailable)?;
+            .ok_or(StartUpdateError::TufRepositoryUnavailable)?;
 
         match update_data.sp_update_data.entry(sp) {
             // Vacant: this is the first time we've started an update to this
@@ -813,7 +810,6 @@ impl UpdateDriver {
             )
             .register();
 
-        // TODO: this should most likely use nested steps.
         host_registrar
             .new_step(
                 UpdateStepId::RunningInstallinator,

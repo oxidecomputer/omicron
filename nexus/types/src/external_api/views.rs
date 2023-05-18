@@ -105,7 +105,11 @@ pub struct Certificate {
 
 // IMAGES
 
-/// Client view of images
+/// View of an image
+///
+/// If `project_id` is present then the image is only visible inside that
+/// project. If it's not present then the image is visible to all projects in
+/// the silo.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Image {
     #[serde(flatten)]
@@ -252,15 +256,17 @@ pub struct Rack {
     pub identity: AssetIdentityMetadata,
 }
 
-// SLEDS
+// FRUs
 
-/// Properties that should uniquely identify a Sled.
+/// Properties that uniquely identify an Oxide hardware component
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
     pub serial: String,
     pub part: String,
     pub revision: i64,
 }
+
+// SLEDS
 
 /// An operator's view of a Sled.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -274,6 +280,18 @@ pub struct Sled {
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
+}
+
+// SWITCHES
+
+/// An operator's view of a Switch.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Switch {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub baseboard: Baseboard,
+    /// The rack to which this Switch is currently attached
+    pub rack_id: Uuid,
 }
 
 // PHYSICAL DISKS

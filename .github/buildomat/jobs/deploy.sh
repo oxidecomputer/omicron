@@ -13,8 +13,8 @@
 #: [dependencies.package]
 #: job = "helios / package"
 #:
-#: [dependencies.build-end-to-end-tests]
-#: job = "helios / build-end-to-end-tests"
+#: [dependencies.ci-tools]
+#: job = "helios / CI tools"
 
 set -o errexit
 set -o pipefail
@@ -118,12 +118,61 @@ cd /opt/oxide/work
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
 mkdir tests
-for p in /input/build-end-to-end-tests/work/*.gz; do
+for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
 	chmod a+x "tests/$(basename "${p%.gz}")"
 done
 
 ptime -m pfexec ./tools/create_virtual_hardware.sh
+
+#
+# Generate a self-signed certificate to use as the initial TLS certificate for
+# the recovery Silo.  Its DNS name is determined by the silo name and the
+# delegated external DNS name, both of which are in the RSS config file.  In a
+# real system, the certificate would come from the customer during initial rack
+# setup on the technician port.
+#
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
+rm -f pkg/config-rss.toml
+
+#
+# By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS
+# implementation used by reqwest rejects endpoint certificates that are also CA
+# certificates.  So in order to use the certificate, we need one without
+# "CA:true".  There doesn't seem to be a way to do this on the command line.
+# Instead, we must override the system configuration with our own configuration
+# file.  There's virtually nothing in it.
+#
+TLS_NAME="$SILO_NAME.sys.$EXTERNAL_DNS_DOMAIN"
+openssl req \
+    -newkey rsa:4096 \
+    -x509 \
+    -sha256 \
+    -days 3 \
+    -nodes \
+    -out "pkg/initial-tls-cert.pem" \
+    -keyout "pkg/initial-tls-key.pem" \
+    -subj "/CN=$TLS_NAME" \
+    -addext "subjectAltName=DNS:$TLS_NAME" \
+    -addext "basicConstraints=critical,CA:FALSE" \
+    -config /dev/stdin <<EOF
+[req]
+prompt = no
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+EOF
+tar rvf out/omicron-sled-agent.tar \
+    pkg/initial-tls-cert.pem \
+    pkg/initial-tls-key.pem
+rm -f pkg/initial-tls-cert.pem pkg/initial-tls-key.pem
+rmdir pkg
+# The actual end-to-end tests need the certificate.  This is where that file
+# will end up once installed.
+E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
+
 
 #
 # Image-related tests use images served by catacomb. The lab network is
@@ -208,6 +257,7 @@ export RUST_BACKTRACE=1
 ./tests/bootstrap
 
 rm ./tests/bootstrap
+export E2E_TLS_CERT
 for test_bin in tests/*; do
 	./"$test_bin"
 done

@@ -18,7 +18,6 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
-use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::NexusService;
@@ -61,7 +60,6 @@ pub struct RackInit {
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
-    pub certificates: Vec<Certificate>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
@@ -129,7 +127,6 @@ impl DataStore {
         let services = rack_init.services;
         let datasets = rack_init.datasets;
         let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
-        let certificates = rack_init.certificates;
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
@@ -282,17 +279,6 @@ impl DataStore {
                     })?;
                 }
                 info!(log, "Inserted datasets");
-
-                {
-                    use db::schema::certificate::dsl;
-                    diesel::insert_into(dsl::certificate)
-                        .values(certificates)
-                        .on_conflict(dsl::id)
-                        .do_nothing()
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Inserted certificates");
 
                 // Insert the initial contents of the internal and external DNS
                 // zones.
@@ -615,7 +601,6 @@ mod test {
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
-                certificates: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
                     internal_dns::DNS_ZONE,
@@ -638,6 +623,7 @@ mod test {
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
+                    tls_certificates: vec![],
                 },
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password

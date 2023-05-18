@@ -27,6 +27,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::Certificate;
+use nexus_db_model::ServiceKind;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -225,6 +227,27 @@ impl DataStore {
                 let (delete_old_query, insert_new_query) = queries;
                 delete_old_query.execute_async(&conn).await?;
                 insert_new_query.execute_async(&conn).await?;
+            }
+
+            let certificates = new_silo_params
+                .tls_certificates
+                .into_iter()
+                .map(|c| {
+                    Certificate::new(
+                        silo.id(),
+                        Uuid::new_v4(),
+                        ServiceKind::Nexus,
+                        c,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(Error::from)?;
+            {
+                use db::schema::certificate::dsl;
+                diesel::insert_into(dsl::certificate)
+                    .values(certificates)
+                    .execute_async(&conn)
+                    .await?;
             }
 
             self.dns_update(nexus_opctx, &conn, dns_update).await?;
@@ -473,6 +496,21 @@ impl DataStore {
             opctx.log,
             "deleted {} silo saml IdPs for silo {}", updated_rows, id
         );
+
+        // delete certificates
+        use db::schema::certificate::dsl as cert_dsl;
+
+        let updated_rows = diesel::update(cert_dsl::certificate)
+            .filter(cert_dsl::silo_id.eq(id))
+            .filter(cert_dsl::time_deleted.is_null())
+            .set(cert_dsl::time_deleted.eq(Utc::now()))
+            .execute_async(self.pool_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel_pool(e, ErrorHandler::Server)
+            })?;
+
+        debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
 
         Ok(())
     }

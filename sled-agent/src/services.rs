@@ -173,6 +173,9 @@ pub enum Error {
 
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
+
+    #[error("Serde error: {0}")]
+    SerdeError(#[from] serde_json::Error),
 }
 
 impl Error {
@@ -1337,7 +1340,11 @@ impl ServiceManager {
                                 IpAddr::V6(*internal_ip),
                                 NEXUS_INTERNAL_PORT,
                             ),
-                            request_body_max_bytes: 1048576,
+                            // This has to be large enough to support, among
+                            // other things, the initial list of TLS
+                            // certificates provided by the customer during rack
+                            // setup.
+                            request_body_max_bytes: 10 * 1024 * 1024,
                             ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
@@ -1510,15 +1517,26 @@ impl ServiceManager {
                         "config/mgs-address",
                         &format!("[::1]:{MGS_PORT}"),
                     )?;
+
+                    let serialized_baseboard =
+                        serde_json::to_string_pretty(&baseboard)?;
+                    let serialized_baseboard_path = Utf8PathBuf::from(format!(
+                        "{}/opt/oxide/baseboard.json",
+                        running_zone.root()
+                    ));
+                    tokio::fs::write(
+                        &serialized_baseboard_path,
+                        &serialized_baseboard,
+                    )
+                    .await
+                    .map_err(|err| {
+                        Error::io_path(&serialized_baseboard_path, err)
+                    })?;
                     smfh.setprop(
-                        "config/baseboard-identifier",
-                        baseboard.identifier(),
+                        "config/baseboard-file",
+                        String::from("/opt/oxide/baseboard.json"),
                     )?;
-                    smfh.setprop("config/baseboard-model", baseboard.model())?;
-                    smfh.setprop(
-                        "config/baseboard-revision",
-                        baseboard.revision(),
-                    )?;
+
                     smfh.refresh()?;
                 }
                 ServiceType::Dendrite { asic } => {

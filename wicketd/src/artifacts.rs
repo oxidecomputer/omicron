@@ -315,14 +315,12 @@ impl ArtifactsWithPlan {
                 }
             }
 
-            slog::debug!(
-                log,
-                "added artifact with kind {}, id {}:{}, hash {}, length {}",
-                artifact_id.kind,
-                artifact_id.name,
-                artifact_id.version,
-                artifact_hash,
-                num_bytes,
+            slog::info!(
+                log, "added artifact";
+                "kind" => %artifact_id.kind,
+                "id" => format!("{}:{}", artifact_id.name, artifact_id.version),
+                "hash" => %artifact_hash,
+                "length" => num_bytes,
             );
         }
 
@@ -681,6 +679,11 @@ impl UpdatePlan {
                 ));
             }
             Entry::Vacant(entry) => {
+                slog::info!(log, "added host phase 2 artifact";
+                    "kind" => %host_phase_2_hash_id.kind,
+                    "hash" => %host_phase_2_hash_id.hash,
+                    "length" => host_phase_2.data.len(),
+                );
                 entry.insert(host_phase_2.data.0.clone());
             }
         }

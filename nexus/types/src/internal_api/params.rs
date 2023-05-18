@@ -31,11 +31,12 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// Describes properties that should uniquely identify a Gimlet.
+// TODO: We need a unified representation of these hardware identifiers
+/// Describes properties that should uniquely identify Oxide manufactured hardware
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct Baseboard {
-    pub identifier: String,
-    pub model: String,
+    pub serial_number: String,
+    pub part_number: String,
     pub revision: i64,
 }
 
@@ -67,6 +68,15 @@ pub enum PhysicalDiskKind {
     M2,
     U2,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPutRequest {
+    pub baseboard: Baseboard,
+    pub rack_id: Uuid,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
