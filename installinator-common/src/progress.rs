@@ -6,6 +6,7 @@ use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
+use illumos_utils::zpool;
 use schemars::{
     gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
@@ -262,17 +263,28 @@ pub enum WriteStepId {
 
 /// The error that occurred.
 #[derive(Debug, Error)]
-#[error(
-    "writing {component} to slot {slot} failed \
-     after {written_bytes}/{total_bytes} bytes"
-)]
-pub struct WriteError {
-    pub component: WriteComponent,
-    pub slot: M2Slot,
-    pub written_bytes: u64,
-    pub total_bytes: u64,
-    #[source]
-    pub error: std::io::Error,
+pub enum WriteError {
+    #[error(
+        "writing {component} to slot {slot} failed \
+         after {written_bytes}/{total_bytes} bytes"
+    )]
+    WriteError {
+        component: WriteComponent,
+        slot: M2Slot,
+        written_bytes: u64,
+        total_bytes: u64,
+        #[source]
+        error: std::io::Error,
+    },
+    #[error("error removing files from {path}: {error}")]
+    RemoveFilesError { path: Utf8PathBuf, error: std::io::Error },
+    #[error("error fsyncing output directory: {error}")]
+    SyncOutputDirError { error: std::io::Error },
+    #[error("error interacting with zpool: {error}")]
+    ZpoolError {
+        #[from]
+        error: zpool::Error,
+    },
 }
 
 impl AsError for WriteError {
@@ -301,12 +313,27 @@ impl StepSpec for ControlPlaneZonesSpec {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ControlPlaneZonesStepId {
+    /// Removing any files from the target directory.
+    CleanTargetDirectory {
+        #[schemars(schema_with = "path_schema")]
+        path: Utf8PathBuf,
+    },
+
     /// Writing a zone.
     Zone { name: String },
+
+    /// Syncing writes to disk.
+    Fsync,
 
     /// Future variants that might be unknown.
     #[serde(other, deserialize_with = "deserialize_ignore_any")]
     Unknown,
+}
+
+fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
 }
 
 fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {

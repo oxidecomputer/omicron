@@ -35,8 +35,7 @@ impl<W: AsyncWrite> BlockSizeBufWriter<W> {
         Self { inner, buf: Vec::with_capacity(block_size), block_size }
     }
 
-    #[cfg(test)]
-    fn into_inner(self) -> W {
+    pub(crate) fn into_inner(self) -> W {
         self.inner
     }
 

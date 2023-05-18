@@ -3588,6 +3588,75 @@
         }
       }
     },
+    "/v1/system/hardware/sleds/{sled_id}/instances": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List instances running on a given sled",
+        "operationId": "sled_instance_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledInstanceResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/system/hardware/switches": {
       "get": {
         "tags": [
@@ -10595,13 +10664,21 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "tls_certificates": {
+            "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateCreate"
+            }
           }
         },
         "required": [
           "description",
           "discoverable",
           "identity_mode",
-          "name"
+          "name",
+          "tls_certificates"
         ]
       },
       "SiloIdentityMode": {
@@ -10739,6 +10816,89 @@
           "time_modified",
           "usable_hardware_threads",
           "usable_physical_ram"
+        ]
+      },
+      "SledInstance": {
+        "description": "An operator's view of an instance running on a given sled",
+        "type": "object",
+        "properties": {
+          "active_sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "migration_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "ncpus": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "active_sled_id",
+          "id",
+          "memory",
+          "name",
+          "ncpus",
+          "project_name",
+          "silo_name",
+          "state",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SledInstanceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledInstance"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "SledResultsPage": {

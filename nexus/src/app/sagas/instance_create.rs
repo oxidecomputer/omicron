@@ -34,7 +34,6 @@ use slog::warn;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::Ipv6Addr;
-use std::str::FromStr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -373,131 +372,35 @@ async fn sic_add_network_config(
         &params.serialized_authn,
     );
     let osagactx = sagactx.user_data();
-    let dpd_client: &dpd_client::Client = &osagactx.nexus().dpd_client;
-    let datastore = &osagactx.datastore();
-    let log = sagactx.user_data().log();
-
-    let (.., authz_instance, db_instance) = LookupPath::new(&opctx, &datastore)
+    let datastore = osagactx.datastore();
+    let (.., db_instance) = LookupPath::new(&opctx, &datastore)
         .instance_id(instance_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
-    let instance_id = db_instance.id();
+    // Read the sled record from the database. This needs to use the instance-
+    // create context (and not the regular saga context) to leverage its fleet-
+    // read permissions.
     let sled_uuid = db_instance.runtime_state.sled_id;
-
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
         .sled_id(sled_uuid)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
 
-    let sled_ip_address = sled.address();
-
-    debug!(log, "fetching network interfaces");
-
-    let network_interface = match datastore
-        .derive_guest_network_interface_info(&opctx, &authz_instance)
+    // Set up Dendrite configuration using the saga context, which supplies
+    // access to the instance's device configuration.
+    osagactx
+        .nexus()
+        .instance_ensure_dpd_config(
+            &opctx,
+            instance_id,
+            &sled.address(),
+            Some(which),
+        )
         .await
-        .map_err(ActionError::action_failed)?
-        .into_iter()
-        .find(|interface| interface.primary)
-    {
-        Some(interface) => interface,
-        // Return early if instance does not have a primary network
-        // interface
-        None => return Ok(()),
-    };
-
-    let mac_address =
-        macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
-            .map_err(|e| {
-                ActionError::action_failed(Error::internal_error(&format!(
-                    "failed to convert mac address: {e}"
-                )))
-            })?;
-
-    let vni: u32 = network_interface.vni.into();
-
-    debug!(log, "fetching external ip addresses");
-
-    let target_ip = &datastore
-        .instance_lookup_external_ips(&opctx, instance_id)
-        .await
-        .map_err(ActionError::action_failed)?
-        .get(which)
-        .ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(&format!(
-                "failed to find external ip address at index: {which}"
-            )))
-        })?
-        .to_owned();
-
-    debug!(log, "checking for existing nat mapping for {target_ip:#?}");
-
-    let existing_nat = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client.nat_ipv4_get(&network.ip(), *target_ip.first_port).await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client.nat_ipv6_get(&network.ip(), *target_ip.first_port).await
-        }
-    };
-
-    match existing_nat {
-        Ok(_) => {
-            // nat entry already exists, do nothing
-            return Ok(());
-        }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-            } else {
-                return Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to query dpd: {e}"),
-                )));
-            }
-        }
-    }
-
-    debug!(log, "creating nat entry for: {target_ip:#?}");
-
-    let nat_target = dpd_client::types::NatTarget {
-        inner_mac: dpd_client::types::MacAddr { a: mac_address.into_array() },
-        internal_ip: *sled_ip_address.ip(),
-        vni: vni.into(),
-    };
-
-    match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_create(
-                    &network.ip(),
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    &nat_target,
-                )
-                .await
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_create(
-                    &network.ip(),
-                    *target_ip.first_port,
-                    *target_ip.last_port,
-                    &nat_target,
-                )
-                .await
-        }
-    }
-    .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&format!(
-            "failed to create nat entry via dpd: {e}"
-        )))
-    })?;
-
-    debug!(log, "creation of nat entry successful for: {target_ip:#?}");
-    Ok(())
+        .map_err(ActionError::action_failed)
 }
 
 async fn sic_remove_network_config(
@@ -1280,10 +1183,11 @@ async fn sic_v2p_ensure(
         &params.serialized_authn,
     );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let sled_id = sagactx.lookup::<Uuid>("server_id")?;
 
     osagactx
         .nexus()
-        .create_instance_v2p_mappings(&opctx, instance_id)
+        .create_instance_v2p_mappings(&opctx, instance_id, sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 

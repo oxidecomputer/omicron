@@ -803,13 +803,14 @@ CREATE TABLE omicron.public.instance (
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
-     * Server where the VM is currently running, if any.  Note that when we
-     * support live migration, there may be multiple servers associated with
+     * Sled where the VM is currently running, if any.  Note that when we
+     * support live migration, there may be multiple sleds associated with
      * this Instance, but only one will be truly active.  Still, consumers of
      * this information should consider whether they also want to know the other
-     * servers involved in the migration.
+     * sleds involved in the migration.
      */
-    active_server_id UUID,
+    active_sled_id UUID,
+
     /* Identifies the underlying propolis-server backing the instance. */
     active_propolis_id UUID NOT NULL,
     active_propolis_ip INET,
@@ -847,9 +848,37 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 -- Allow looking up instances by server. This is particularly
 -- useful for resource accounting within a sled.
 CREATE INDEX ON omicron.public.instance (
-    active_server_id
+    active_sled_id
 ) WHERE
     time_deleted IS NULL;
+
+/*
+ * A special view of an instance provided to operators for insights into what's running 
+ * on a sled.
+ */
+
+CREATE VIEW omicron.public.sled_instance 
+AS SELECT
+   instance.id,
+   instance.name,
+   silo.name as silo_name,
+   project.name as project_name,
+   instance.active_sled_id,
+   instance.time_created,
+   instance.time_modified,
+   instance.migration_id,
+   instance.ncpus,
+   instance.memory,
+   instance.state
+FROM
+    omicron.public.instance AS instance
+    JOIN omicron.public.project AS project ON
+            instance.project_id = project.id
+    JOIN omicron.public.silo AS silo ON
+            project.silo_id = silo.id
+WHERE
+    instance.time_deleted IS NULL;
+
 
 /*
  * Guest-Visible, Virtual Disks

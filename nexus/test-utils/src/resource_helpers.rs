@@ -262,6 +262,7 @@ pub async fn create_silo(
             discoverable,
             identity_mode,
             admin_group_name: None,
+            tls_certificates: vec![],
         },
     )
     .await

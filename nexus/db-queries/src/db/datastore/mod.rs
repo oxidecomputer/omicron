@@ -66,6 +66,7 @@ mod silo;
 mod silo_group;
 mod silo_user;
 mod sled;
+mod sled_instance;
 mod snapshot;
 mod ssh_key;
 mod switch;

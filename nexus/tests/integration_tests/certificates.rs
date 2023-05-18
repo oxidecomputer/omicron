@@ -11,12 +11,18 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::resource_helpers::create_certificate;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::delete_certificate;
+use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::Certificate;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::Name;
+use omicron_nexus::authz::SiloRole;
 use omicron_nexus::external_api::params;
 use omicron_nexus::external_api::shared;
+use omicron_nexus::external_api::views::Silo;
 use std::io::Write;
 
 type ControlPlaneTestContext =
@@ -420,4 +426,78 @@ async fn test_cannot_create_certificate_with_expired_cert(
         (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
 
     cert_create_expect_error(&client, CERT_NAME, cert, key).await;
+}
+
+#[nexus_test]
+async fn test_silo_with_certificates(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Create a Silo with TLS certificates.  Make sure that the certificates
+    // show up in the new Silo.
+    let chain = CertificateChain::new();
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+    let cert_name: Name = "a-cert".parse().unwrap();
+    let api_cert = params::CertificateCreate {
+        identity: IdentityMetadataCreateParams {
+            name: cert_name.clone(),
+            description: String::from("certifies stuff"),
+        },
+        cert,
+        key,
+        service: shared::ServiceUsingCertificate::ExternalApi,
+    };
+    let silo: Silo = object_create(
+        client,
+        "/v1/system/silos",
+        &params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "silo-name".parse().unwrap(),
+                description: "a silo".to_string(),
+            },
+            discoverable: false,
+            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            admin_group_name: None,
+            tls_certificates: vec![api_cert],
+        },
+    )
+    .await;
+
+    // We should *not* see this certificate if we list certs in the usual way
+    // because it's in a different Silo.
+    let certs = certs_list(&client).await;
+    assert!(certs.is_empty());
+
+    // Create a new user in the silo.
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"some-silo-user".parse().unwrap(),
+        params::UserPassword::InvalidPassword,
+    )
+    .await
+    .id;
+
+    // Grant the user "admin" privileges on that Silo.
+    let silo_url = "/v1/system/silos/silo-name";
+    grant_iam(
+        client,
+        silo_url,
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // As that new user, list certificates.  We should see the one we created.
+    let certs: dropshot::ResultsPage<Certificate> =
+        NexusRequest::object_get(client, CERTS_URL)
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .expect("failed to list certificates")
+            .parsed_body()
+            .expect("failed to parse list of certificates");
+    assert_eq!(certs.items.len(), 1);
+    assert_eq!(certs.items[0].identity.name, cert_name);
 }

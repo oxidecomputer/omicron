@@ -252,17 +252,35 @@ impl InstanceInner {
     }
 
     async fn publish_state_to_nexus(&self) -> Result<(), Error> {
-        self.lazy_nexus_client
-            .get()
-            .await?
-            .cpapi_instances_put(
-                self.id(),
-                &nexus_client::types::InstanceRuntimeState::from(
-                    self.state.current().clone(),
-                ),
-            )
-            .await
-            .map_err(|e| Error::Notification(e))?;
+        // Retry until Nexus acknowledges that it has applied this state update.
+        // Note that Nexus may receive this call but then fail while reacting
+        // to it; Nexus expects this routine to treat those failures as
+        // transient errors and reissue the triggering updates.
+        backoff::retry_notify(
+            backoff::retry_policy_local(),
+            || async {
+                self.lazy_nexus_client
+                    .get()
+                    .await
+                    .map_err(|e| backoff::BackoffError::transient(e.into()))?
+                    .cpapi_instances_put(
+                        self.id(),
+                        &self.state.current().clone().into(),
+                    )
+                    .await
+                    .map_err(|e| {
+                        backoff::BackoffError::transient(Error::Notification(e))
+                    })
+            },
+            |err: Error, delay| {
+                warn!(self.log,
+                      "Failed to publish instance state to Nexus: {}",
+                      err.to_string();
+                      "instance_id" => %self.id(),
+                      "retry_after" => ?delay);
+            },
+        )
+        .await?;
 
         Ok(())
     }
