@@ -62,7 +62,7 @@ pub fn find_nics() -> Result<Vec<AddrObject>, Error> {
 
     // Before these links have any consumers (eg. IP interfaces), set the MTU.
     // If we have previously set the MTU, do not attempt to re-set.
-    const MTU: &str = "1600";
+    const MTU: &str = "9000";
     for link in &underlay_nics {
         let existing_mtu = Dladm::get_linkprop(
             &link.to_string(),
