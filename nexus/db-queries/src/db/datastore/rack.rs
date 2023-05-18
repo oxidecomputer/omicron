@@ -62,7 +62,7 @@ pub struct RackInit {
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
-    pub recovery_silo: external_params::SiloCreate,
+    pub recovery_silo: external_params::SiloCreateInternal,
     pub recovery_user_id: external_params::UserId,
     pub recovery_user_password_hash: omicron_passwords::PasswordHashString,
     pub dns_update: DnsVersionUpdateBuilder,
@@ -615,7 +615,7 @@ mod test {
                     "test suite",
                     HashMap::new(),
                 ),
-                recovery_silo: external_params::SiloCreate {
+                recovery_silo: external_params::SiloCreateInternal {
                     identity: IdentityMetadataCreateParams {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),

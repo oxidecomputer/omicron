@@ -96,11 +96,11 @@ pub struct Silo {
 
 impl Silo {
     /// Creates a new database Silo object.
-    pub fn new(params: params::SiloCreate) -> Self {
+    pub fn new(params: params::SiloCreateInternal) -> Self {
         Self::new_with_id(Uuid::new_v4(), params)
     }
 
-    pub fn new_with_id(id: Uuid, params: params::SiloCreate) -> Self {
+    pub fn new_with_id(id: Uuid, params: params::SiloCreateInternal) -> Self {
         Self {
             identity: SiloIdentity::new(id, params.identity),
             discoverable: params.discoverable,

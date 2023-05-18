@@ -13,7 +13,7 @@ lazy_static! {
         .expect("invalid uuid for builtin silo id");
     pub static ref DEFAULT_SILO: db::model::Silo = db::model::Silo::new_with_id(
         *SILO_ID,
-        params::SiloCreate {
+        params::SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: "default-silo".parse().unwrap(),
                 description: "default silo".to_string(),

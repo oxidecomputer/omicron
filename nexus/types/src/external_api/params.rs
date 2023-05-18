@@ -291,6 +291,60 @@ pub struct SiloCreate {
     /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
 
+    /// The initial TLS certificate to be used for the new Silo's console and
+    /// API endpoints.  This should be valid for the Silo's DNS name(s).
+    pub tls_certificate: CertificateCreate,
+}
+
+impl From<SiloCreate> for SiloCreateInternal {
+    fn from(value: SiloCreate) -> Self {
+        let SiloCreate {
+            identity,
+            discoverable,
+            identity_mode,
+            admin_group_name,
+            tls_certificate,
+        } = value;
+
+        let http_only = "http_only".as_bytes();
+
+        let tls_certificates = if tls_certificate.key == http_only
+            && tls_certificate.cert == http_only
+        {
+            Vec::new()
+        } else {
+            vec![tls_certificate]
+        };
+
+        Self {
+            identity,
+            discoverable,
+            identity_mode,
+            admin_group_name,
+            tls_certificates,
+        }
+    }
+}
+
+/// Internal create-time parameters for a `Silo`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloCreateInternal {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    pub discoverable: bool,
+
+    pub identity_mode: shared::SiloIdentityMode,
+
+    /// If set, this group will be created during Silo creation and granted the
+    /// "Silo Admin" role. Identity providers can assert that users belong to
+    /// this group and those users can log in and further initialize the Silo.
+    ///
+    /// Note that if configuring a SAML based identity provider,
+    /// group_attribute_name must be set for users to be considered part of a
+    /// group. See `SamlIdentityProviderCreate` for more information.
+    pub admin_group_name: Option<String>,
+
     /// Initial TLS certificates to be used for the new Silo's console and API
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
@@ -735,8 +789,6 @@ pub struct CertificateCreate {
     pub cert: Vec<u8>,
     /// PEM file containing private key
     pub key: Vec<u8>,
-    /// The service using this certificate
-    pub service: shared::ServiceUsingCertificate,
 }
 
 impl std::fmt::Debug for CertificateCreate {

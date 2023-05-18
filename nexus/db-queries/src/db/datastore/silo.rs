@@ -107,7 +107,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: params::SiloCreateInternal,
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo> {
         let conn = self.pool_authorized(opctx).await?;
@@ -127,7 +127,7 @@ impl DataStore {
               + Sync),
         opctx: &OpContext,
         nexus_opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: params::SiloCreateInternal,
         dns_update: DnsVersionUpdateBuilder,
     ) -> CreateResult<Silo>
     where

@@ -7327,22 +7327,13 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "service": {
-            "description": "The service using this certificate",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ServiceUsingCertificate"
-              }
-            ]
           }
         },
         "required": [
           "cert",
           "description",
           "key",
-          "name",
-          "service"
+          "name"
         ]
       },
       "CertificateResultsPage": {
@@ -10596,12 +10587,13 @@
           "name": {
             "$ref": "#/components/schemas/Name"
           },
-          "tls_certificates": {
-            "description": "Initial TLS certificates to be used for the new Silo's console and API endpoints.  These should be valid for the Silo's DNS name(s).",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CertificateCreate"
-            }
+          "tls_certificate": {
+            "description": "The initial TLS certificate to be used for the new Silo's console and API endpoints.  This should be valid for the Silo's DNS name(s).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CertificateCreate"
+              }
+            ]
           }
         },
         "required": [
@@ -10609,7 +10601,7 @@
           "discoverable",
           "identity_mode",
           "name",
-          "tls_certificates"
+          "tls_certificate"
         ]
       },
       "SiloIdentityMode": {

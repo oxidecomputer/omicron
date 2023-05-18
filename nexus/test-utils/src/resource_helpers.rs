@@ -163,7 +163,6 @@ pub async fn create_certificate(
             },
             cert,
             key,
-            service: shared::ServiceUsingCertificate::ExternalApi,
         },
     )
     .await
@@ -254,7 +253,7 @@ pub async fn create_silo(
     object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &params::SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),

@@ -480,8 +480,9 @@ async fn silo_create(
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
-        let silo =
-            nexus.silo_create(&opctx, new_silo_params.into_inner()).await?;
+        let silo = nexus
+            .silo_create(&opctx, new_silo_params.into_inner().into())
+            .await?;
         Ok(HttpResponseCreated(silo.try_into()?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

@@ -10,7 +10,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Name;
 use crate::db::model::ServiceKind;
 use crate::external_api::params;
-use crate::external_api::shared;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_types::identity::Resource;
@@ -49,11 +48,10 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("creating a Certificate")?;
-        let kind = params.service;
         let new_certificate = db::model::Certificate::new(
             authz_silo.id(),
             Uuid::new_v4(),
-            kind.into(),
+            ServiceKind::Nexus,
             params,
         )?;
         let cert = self
@@ -61,18 +59,14 @@ impl super::Nexus {
             .certificate_create(opctx, new_certificate)
             .await?;
 
-        match kind {
-            shared::ServiceUsingCertificate::ExternalApi => {
-                // TODO: If we make this operation "add a certificate, and try to update
-                // nearby Nexus servers to use it", that means it'll be combining a DB
-                // operation with a service update request. If we want both to reliably
-                // complete together, we should consider making this a saga.
-                // TODO: Refresh other nexus servers?
-                self.refresh_tls_config(&opctx).await?;
-                info!(self.log, "TLS refreshed successfully");
-                Ok(cert)
-            }
-        }
+        // TODO: If we make this operation "add a certificate, and try to update
+        // nearby Nexus servers to use it", that means it'll be combining a DB
+        // operation with a service update request. If we want both to reliably
+        // complete together, we should consider making this a saga.
+        // TODO: Refresh other nexus servers?
+        self.refresh_tls_config(&opctx).await?;
+        info!(self.log, "TLS refreshed successfully");
+        Ok(cert)
     }
 
     pub async fn certificates_list(

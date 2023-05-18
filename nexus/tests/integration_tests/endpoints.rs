@@ -59,8 +59,8 @@ lazy_static! {
         format!("/v1/system/silos/{}", *DEMO_SILO_NAME);
     pub static ref DEMO_SILO_POLICY_URL: String =
         format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME);
-    pub static ref DEMO_SILO_CREATE: params::SiloCreate =
-        params::SiloCreate {
+    pub static ref DEMO_SILO_CREATE: params::SiloCreateInternal =
+        params::SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_SILO_NAME.clone(),
                 description: String::from(""),
@@ -338,7 +338,6 @@ lazy_static! {
             },
             cert: DEMO_CERTIFICATE.cert_chain_as_pem(),
             key: DEMO_CERTIFICATE.end_cert_private_key_as_pem(),
-            service: shared::ServiceUsingCertificate::ExternalApi,
         };
 }
 
