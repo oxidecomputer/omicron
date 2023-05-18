@@ -770,19 +770,20 @@ impl ServiceManager {
                     "service" => ?svc,
                 );
 
-                dpd_client.ensure_nat_entry(
-                    &self.inner.log,
-                    target_ip.into(),
-                    dpd_client::types::MacAddr {
-                        a: port.0.mac().into_array(),
-                    },
-                    first_port,
-                    last_port,
-                    port.0.vni().as_u32(),
-                    underlay_address.into(),
-                )
-                .await
-                .map_err(BackoffError::transient)?;
+                dpd_client
+                    .ensure_nat_entry(
+                        &self.inner.log,
+                        target_ip.into(),
+                        dpd_client::types::MacAddr {
+                            a: port.0.mac().into_array(),
+                        },
+                        first_port,
+                        last_port,
+                        port.0.vni().as_u32(),
+                        underlay_address.into(),
+                    )
+                    .await
+                    .map_err(BackoffError::transient)?;
 
                 Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
             };

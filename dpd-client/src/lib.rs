@@ -15,8 +15,8 @@
 // by omicron.
 #![allow(rustdoc::broken_intra_doc_links)]
 
-use slog::Logger;
 use slog::info;
+use slog::Logger;
 
 include!(concat!(env!("OUT_DIR"), "/dpd-client.rs"));
 
@@ -45,14 +45,10 @@ impl Client {
     ) -> Result<(), progenitor_client::Error<types::Error>> {
         let existing_nat = match target_ip {
             ipnetwork::IpNetwork::V4(network) => {
-                self
-                    .nat_ipv4_get(&network.ip(), target_first_port)
-                    .await
+                self.nat_ipv4_get(&network.ip(), target_first_port).await
             }
             ipnetwork::IpNetwork::V6(network) => {
-                self
-                    .nat_ipv6_get(&network.ip(), target_first_port)
-                    .await
+                self.nat_ipv6_get(&network.ip(), target_first_port).await
             }
         };
 
@@ -70,20 +66,18 @@ impl Client {
 
                     match target_ip {
                         ipnetwork::IpNetwork::V4(network) => {
-                            self
-                                .nat_ipv4_delete(
-                                    &network.ip(),
-                                    target_first_port,
-                                )
-                                .await
+                            self.nat_ipv4_delete(
+                                &network.ip(),
+                                target_first_port,
+                            )
+                            .await
                         }
                         ipnetwork::IpNetwork::V6(network) => {
-                            self
-                                .nat_ipv6_delete(
-                                    &network.ip(),
-                                    target_first_port,
-                                )
-                                .await
+                            self.nat_ipv6_delete(
+                                &network.ip(),
+                                target_first_port,
+                            )
+                            .await
                         }
                     }?;
                 } else {
@@ -113,24 +107,22 @@ impl Client {
 
         match target_ip {
             ipnetwork::IpNetwork::V4(network) => {
-                self
-                    .nat_ipv4_create(
-                        &network.ip(),
-                        target_first_port,
-                        target_last_port,
-                        &nat_target,
-                    )
-                    .await
+                self.nat_ipv4_create(
+                    &network.ip(),
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
             }
             ipnetwork::IpNetwork::V6(network) => {
-                self
-                    .nat_ipv6_create(
-                        &network.ip(),
-                        target_first_port,
-                        target_last_port,
-                        &nat_target,
-                    )
-                    .await
+                self.nat_ipv6_create(
+                    &network.ip(),
+                    target_first_port,
+                    target_last_port,
+                    &nat_target,
+                )
+                .await
             }
         }?;
 
