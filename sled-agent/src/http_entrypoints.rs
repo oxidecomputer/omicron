@@ -67,22 +67,19 @@ async fn services_put(
     let sa = rqctx.context().clone();
     let body_args = body.into_inner();
 
-    // Spawn a task to run `services_ensure`: dropshot/hyper will cancel an
-    // endpoint's task if the call times out or is otherwise cancelled, and this
-    // leads to a specific issue where booting all the service zones takes
-    // longer than the progenitor client default timeout. The request times out,
-    // `services_ensure` gets cancelled, and this leaves zones partially
-    // configured but not added to the list of `existing_zones`. When the next
-    // `PUT /services` call is made, `services_ensure` will eventually try to
-    // bring up the same zone it was interrupted at, leading to configuration
-    // issues. See: oxidecomputer/omicron#3098.
-
+    // Spawn a separate task to run `services_ensure`: cancellation of this
+    // endpoint's future (as might happen if the client abandons the request or
+    // times out) could result in leaving zones partially configured and the
+    // in-memory state of the service manager invalid. See:
+    // oxidecomputer/omicron#3098.
     match tokio::spawn(async move { sa.services_ensure(body_args).await }).await
     {
         Ok(result) => result.map_err(|e| Error::from(e))?,
 
         Err(e) => {
-            return Err(HttpError::for_internal_error(e.to_string()));
+            return Err(HttpError::for_internal_error(
+                format!("unexpected failure awaiting \"services_ensure\": {:#}", e)
+            ));
         }
     }
 
