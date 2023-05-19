@@ -102,6 +102,7 @@ omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
+oxide-client.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 rcgen.workspace = true

@@ -13,6 +13,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServicePutRequest;
@@ -151,14 +152,20 @@ pub async fn test_setup<N: NexusServer>(
     test_name: &str,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config::<N>(test_name, &mut config, sim::SimMode::Explicit)
-        .await
+    test_setup_with_config::<N>(
+        test_name,
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
+    )
+    .await
 }
 
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
+    initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
     let start_time = chrono::Utc::now();
     let logctx = LogContext::new(test_name, &config.pkg.log);
@@ -310,6 +317,11 @@ pub async fn test_setup_with_config<N: NexusServer>(
         user_password_hash,
     };
 
+    let tls_certificates = match initial_cert {
+        Some(cert) => vec![cert],
+        None => vec![],
+    };
+
     let server = N::start(
         nexus_internal,
         &config,
@@ -321,6 +333,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         ],
         &external_dns_zone_name,
         recovery_silo,
+        tls_certificates,
     )
     .await;
 

@@ -340,7 +340,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     println!("omicron-dev: setting up all services ... ");
     let cptestctx = nexus_test_utils::test_setup_with_config::<
         omicron_nexus::Server,
-    >("omicron-dev", &mut config, sim::SimMode::Auto)
+    >("omicron-dev", &mut config, sim::SimMode::Auto, None)
     .await;
     println!("omicron-dev: services are running.");
 

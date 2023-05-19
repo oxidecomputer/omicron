@@ -2177,7 +2177,6 @@ dependencies = [
  "chrono",
  "futures",
  "http",
- "hyper",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -4648,6 +4647,7 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "oso",
+ "oxide-client",
  "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-db",
@@ -5046,16 +5046,21 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 name = "oxide-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.21.0",
  "chrono",
  "futures",
+ "http",
+ "hyper",
  "progenitor",
  "rand 0.8.5",
  "regress 0.6.0",
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
+ "trust-dns-resolver",
  "uuid",
 ]
 
