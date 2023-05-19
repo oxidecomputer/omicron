@@ -7,8 +7,8 @@
 //! associated with those names
 
 use super::common::BackgroundTask;
-use crate::app::certificate::read_all_endpoints;
-pub use crate::app::certificate::ExternalEndpoints;
+use crate::app::external_endpoints::read_all_endpoints;
+pub use crate::app::external_endpoints::ExternalEndpoints;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -72,8 +72,8 @@ impl BackgroundTask for ExternalEndpointsWatcher {
             }
 
             let new_config = result.unwrap();
-            let rv = serde_json::to_value(&new_config.serialize())
-                .unwrap_or_else(|error| {
+            let rv =
+                serde_json::to_value(&new_config).unwrap_or_else(|error| {
                     json!({
                         "error":
                             format!(
@@ -88,24 +88,24 @@ impl BackgroundTask for ExternalEndpointsWatcher {
                     info!(
                         &log,
                         "found Silo/DNS/TLS config (initial)";
-                        "config" => ?new_config.serialize(),
+                        "config" => ?new_config,
                     );
                     self.last = Some(new_config.clone());
                     self.tx.send_replace(Some(new_config));
                 }
 
                 Some(old) => {
-                    if old.serialize() == new_config.serialize() {
+                    if *old == new_config {
                         debug!(
                             &log,
                             "found Silo/DNS/TLS config (no change)";
-                            "config" => ?new_config.serialize(),
+                            "config" => ?new_config,
                         );
                     } else {
                         info!(
                             &log,
                             "found Silo/DNS/TLS config (changed)";
-                            "config" => ?new_config.serialize(),
+                            "config" => ?new_config,
                         );
                         self.last = Some(new_config.clone());
                         self.tx.send_replace(Some(new_config));
@@ -161,17 +161,13 @@ mod test {
         );
         let _ = task.activate(&opctx).await;
         let initial_state_raw = watcher.borrow();
-        let initial_state = initial_state_raw.as_ref().unwrap().serialize();
-        assert!(initial_state
-            .by_dns_name
-            .contains_key(recovery_silo_dns_name.as_str()));
-        assert!(initial_state
-            .by_dns_name
-            .contains_key(builtin_silo_dns_name.as_str()));
+        let initial_state = initial_state_raw.as_ref().unwrap();
+        assert!(initial_state.has_domain(recovery_silo_dns_name.as_str()));
+        assert!(initial_state.has_domain(builtin_silo_dns_name.as_str()));
         // There are no other Silos.
-        assert_eq!(initial_state.by_dns_name.len(), 2);
+        assert_eq!(initial_state.ndomains(), 2);
         // Neither of these will have a valid certificate in this configuration.
-        assert_eq!(initial_state.warnings.len(), 2);
+        assert_eq!(initial_state.nwarnings(), 2);
         drop(initial_state);
         drop(initial_state_raw);
 
@@ -190,18 +186,14 @@ mod test {
         );
         let _ = task.activate(&opctx).await;
         let new_state_raw = watcher.borrow();
-        let new_state = new_state_raw.as_ref().unwrap().serialize();
-        assert!(new_state
-            .by_dns_name
-            .contains_key(recovery_silo_dns_name.as_str()));
-        assert!(new_state
-            .by_dns_name
-            .contains_key(builtin_silo_dns_name.as_str()));
-        assert!(new_state.by_dns_name.contains_key(new_silo_dns_name.as_str()));
+        let new_state = new_state_raw.as_ref().unwrap();
+        assert!(new_state.has_domain(recovery_silo_dns_name.as_str()));
+        assert!(new_state.has_domain(builtin_silo_dns_name.as_str()));
+        assert!(new_state.has_domain(new_silo_dns_name.as_str()));
         // There are no other Silos.
-        assert_eq!(new_state.by_dns_name.len(), 3);
-        // Neither of these will have a valid certificate in this configuration.
-        assert_eq!(new_state.warnings.len(), 3);
+        assert_eq!(new_state.ndomains(), 3);
+        // None of these will have a valid certificate in this configuration.
+        assert_eq!(new_state.nwarnings(), 3);
 
         // That's it.  We're not testing all possible cases.  That's done with
         // unit tests for the underlying function.  We're just testing that the

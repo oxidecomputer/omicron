@@ -4,7 +4,7 @@
 
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
-use self::certificate::NexusCertResolver;
+use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
@@ -31,6 +31,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
+mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
