@@ -254,14 +254,8 @@ impl nexus_test_interface::NexusServer for Server {
         Server::start(internal_server).await.unwrap()
     }
 
-    // XXX-dap allow to return HTTP *or* HTTPS
-    async fn get_http_server_external_address(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_http_external_server_address().await
-    }
-
-    // XXX-dap revisit / rip out, only used by test?
-    async fn get_https_server_external_address(&self) -> Option<SocketAddr> {
-        self.apictx.nexus.get_https_external_server_address().await
+    async fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.nexus.get_external_server_address().await.unwrap()
     }
 
     async fn get_http_server_internal_address(&self) -> SocketAddr {

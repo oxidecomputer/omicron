@@ -1305,7 +1305,7 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, .. } => {
+                ServiceType::Nexus { internal_ip, external_tls, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info = self
@@ -1329,7 +1329,7 @@ impl ServiceManager {
                         rack_id: sled_info.rack_id,
 
                         dropshot_external: ConfigDropshotWithTls {
-                            tls: true, // XXX-dap only if cert provided to RSS?
+                            tls: *external_tls,
                             dropshot: dropshot::ConfigDropshot {
                                 bind_address: SocketAddr::new(port_ip, 80),
                                 // This has to be large enough to support:

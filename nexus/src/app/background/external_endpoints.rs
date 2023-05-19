@@ -119,4 +119,93 @@ impl BackgroundTask for ExternalEndpointsWatcher {
     }
 }
 
-// XXX-dap TODO-coverage testing (see dns_servers.rs)
+#[cfg(test)]
+mod test {
+    use crate::app::background::common::BackgroundTask;
+    use crate::app::background::external_endpoints::ExternalEndpointsWatcher;
+    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    use nexus_test_utils::resource_helpers::create_silo;
+    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::shared::SiloIdentityMode;
+    use nexus_types::identity::Resource;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_basic(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Verify the initial state.
+        let mut task = ExternalEndpointsWatcher::new(datastore.clone());
+        let watcher = task.watcher();
+        assert!(watcher.borrow().is_none());
+
+        // The datastore from the ControlPlaneTestContext is initialized with
+        // two Silos: the built-in Silo and the recovery Silo.
+        let recovery_silo_dns_name = format!(
+            "{}.sys.{}",
+            cptestctx.silo_name.as_str(),
+            cptestctx.external_dns_zone_name
+        );
+        let builtin_silo_dns_name = format!(
+            "{}.sys.{}",
+            DEFAULT_SILO.identity().name.as_str(),
+            cptestctx.external_dns_zone_name,
+        );
+        let _ = task.activate(&opctx).await;
+        let initial_state_raw = watcher.borrow();
+        let initial_state = initial_state_raw.as_ref().unwrap().serialize();
+        assert!(initial_state
+            .by_dns_name
+            .contains_key(recovery_silo_dns_name.as_str()));
+        assert!(initial_state
+            .by_dns_name
+            .contains_key(builtin_silo_dns_name.as_str()));
+        // There are no other Silos.
+        assert_eq!(initial_state.by_dns_name.len(), 2);
+        // Neither of these will have a valid certificate in this configuration.
+        assert_eq!(initial_state.warnings.len(), 2);
+        drop(initial_state);
+        drop(initial_state_raw);
+
+        // If we create another Silo, we should see that one, too.
+        let new_silo_name = "test-silo";
+        create_silo(
+            &cptestctx.external_client,
+            new_silo_name,
+            false,
+            SiloIdentityMode::LocalOnly,
+        )
+        .await;
+        let new_silo_dns_name = format!(
+            "{}.sys.{}",
+            new_silo_name, cptestctx.external_dns_zone_name
+        );
+        let _ = task.activate(&opctx).await;
+        let new_state_raw = watcher.borrow();
+        let new_state = new_state_raw.as_ref().unwrap().serialize();
+        assert!(new_state
+            .by_dns_name
+            .contains_key(recovery_silo_dns_name.as_str()));
+        assert!(new_state
+            .by_dns_name
+            .contains_key(builtin_silo_dns_name.as_str()));
+        assert!(new_state.by_dns_name.contains_key(new_silo_dns_name.as_str()));
+        // There are no other Silos.
+        assert_eq!(new_state.by_dns_name.len(), 3);
+        // Neither of these will have a valid certificate in this configuration.
+        assert_eq!(new_state.warnings.len(), 3);
+
+        // That's it.  We're not testing all possible cases.  That's done with
+        // unit tests for the underlying function.  We're just testing that the
+        // background task reports updated state when the underlying state
+        // changes.
+    }
+}

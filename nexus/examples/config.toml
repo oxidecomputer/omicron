@@ -43,8 +43,12 @@ bind_address = "127.0.0.1:12220"
 # Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
 # rule is ~500 bytes)
 request_body_max_bytes = 1048576
-
-# XXX-dap add a commented-out section showing how to enable TLS
+# To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
+# will also need to provide an initial TLS certificate during rack
+# initialization.  If you're using this config file, you're probably running a
+# simulated system.  In that case, the initial certificate is provided to the
+# simulated sled agent (acting as RSS) via command-line arguments.
+#tls = true
 
 [deployment.dropshot_internal]
 # IP Address and TCP port on which to listen for the internal API

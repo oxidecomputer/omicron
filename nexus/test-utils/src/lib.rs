@@ -92,36 +92,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
-
-    pub async fn external_http_client(&self) -> ClientTestContext {
-        self.server
-            .get_http_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external http client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
-
-    pub async fn external_https_client(&self) -> ClientTestContext {
-        self.server
-            .get_https_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external https client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
 }
 
 pub fn load_test_config() -> omicron_common::nexus_config::Config {
@@ -324,8 +294,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
     )
     .await;
 
-    let external_server_addr =
-        server.get_http_server_external_address().await.unwrap();
+    let external_server_addr = server.get_http_server_external_address().await;
     let internal_server_addr = server.get_http_server_internal_address().await;
 
     let testctx_external = ClientTestContext::new(

@@ -347,10 +347,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     // Print out basic information about what was started.
     // NOTE: The stdout strings here are not intended to be stable, but they are
     // used by the test suite.
-    let addr =
-        cptestctx.server.get_http_server_external_address().await.ok_or_else(
-            || anyhow!("Nexus unexpectedly had no external HTTP address"),
-        )?;
+    let addr = cptestctx.external_client.bind_address;
     println!("omicron-dev: nexus external API:    {:?}", addr);
     println!(
         "omicron-dev: nexus internal API:    {:?}",

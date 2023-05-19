@@ -68,8 +68,8 @@ impl ExternalEndpoints {
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
 pub struct ExternalEndpointsDebug<'a> {
-    by_dns_name: BTreeMap<&'a str, SiloDnsCertDebug>,
-    warnings: Vec<String>,
+    pub by_dns_name: BTreeMap<&'a str, SiloDnsCertDebug>,
+    pub warnings: Vec<String>,
 }
 
 struct SiloDnsCert {
@@ -78,7 +78,7 @@ struct SiloDnsCert {
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
-struct SiloDnsCertDebug {
+pub struct SiloDnsCertDebug {
     silo_id: Uuid,
     tls_certs: Vec<CertifiedKeyDebug>,
 }

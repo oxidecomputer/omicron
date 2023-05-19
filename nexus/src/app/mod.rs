@@ -354,7 +354,6 @@ impl Nexus {
                 self.log.new(o!("component" => "NexusCertResolver")),
                 self.background_tasks.external_endpoints.clone(),
             )));
-        // XXX-dap review -- this came from Dropshot
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
         Some(rustls_cfg)
     }
@@ -402,23 +401,9 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_http_external_server_address(
+    pub async fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
-        // XXX-dap what if it's not HTTP?  (update: caller doesn't care, so make
-        // this more generic)
-        self.external_server
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|server| server.local_addr())
-    }
-
-    pub async fn get_https_external_server_address(
-        &self,
-    ) -> Option<std::net::SocketAddr> {
-        // XXX-dap what if it's not HTTPS?  (update: revisit / rip out, only
-        // used by test?)
         self.external_server
             .lock()
             .unwrap()
