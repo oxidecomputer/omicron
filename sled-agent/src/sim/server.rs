@@ -244,30 +244,22 @@ impl Server {
 
         // Record the internal DNS server as though RSS had provisioned it so
         // that Nexus knows about it.
-        let dns_bound = match dns_server.local_address() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
-            SocketAddr::V6(a) => *a,
-        };
+        if let SocketAddr::V4(_) = dns_server.local_address() {
+            panic!("expected internal DNS server to have IPv6 address");
+        }
         let http_bound = match dns_dropshot_server.local_addr() {
-            SocketAddr::V4(_) => panic!("did not expect v4 address"),
+            SocketAddr::V4(_) => panic!(
+                "expected internal DNS config (HTTP) server to have IPv6 address"
+            ),
             SocketAddr::V6(a) => a,
         };
-        let mut services = vec![
-            NexusTypes::ServicePutRequest {
-                address: dns_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDns,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-            NexusTypes::ServicePutRequest {
-                address: http_bound.to_string(),
-                kind: NexusTypes::ServiceKind::InternalDnsConfig,
-                service_id: Uuid::new_v4(),
-                sled_id: config.id,
-                zone_id: Some(Uuid::new_v4()),
-            },
-        ];
+        let mut services = vec![NexusTypes::ServicePutRequest {
+            address: http_bound.to_string(),
+            kind: NexusTypes::ServiceKind::InternalDns,
+            service_id: Uuid::new_v4(),
+            sled_id: config.id,
+            zone_id: Some(Uuid::new_v4()),
+        }];
 
         let mut internal_services_ip_pool_ranges = vec![];
         if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
@@ -296,7 +288,9 @@ impl Server {
         {
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
-                kind: NexusTypes::ServiceKind::ExternalDnsConfig,
+                kind: NexusTypes::ServiceKind::ExternalDns {
+                    external_address: (*external_dns_internal_addr.ip()).into(),
+                },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),

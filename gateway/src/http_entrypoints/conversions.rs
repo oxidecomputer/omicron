@@ -113,17 +113,41 @@ fn stringify_byte_string(bytes: &[u8]) -> String {
         .unwrap_or_else(|_err| hex::encode(bytes))
 }
 
-impl From<gateway_messages::SpState> for SpState {
-    fn from(state: gateway_messages::SpState) -> Self {
+impl From<gateway_messages::SpStateV1> for SpState {
+    fn from(state: gateway_messages::SpStateV1) -> Self {
         Self {
             serial_number: stringify_byte_string(&state.serial_number),
             model: stringify_byte_string(&state.model),
             revision: state.revision,
-            hubris_archive_id: hex::encode(&state.hubris_archive_id),
+            hubris_archive_id: hex::encode(state.hubris_archive_id),
             base_mac_address: state.base_mac_address,
             version: ImageVersion::from(state.version),
             power_state: PowerState::from(state.power_state),
             rot: RotState::from(state.rot),
+        }
+    }
+}
+
+impl From<gateway_messages::SpStateV2> for SpState {
+    fn from(state: gateway_messages::SpStateV2) -> Self {
+        Self {
+            serial_number: stringify_byte_string(&state.serial_number),
+            model: stringify_byte_string(&state.model),
+            revision: state.revision,
+            hubris_archive_id: hex::encode(state.hubris_archive_id),
+            base_mac_address: state.base_mac_address,
+            version: ImageVersion { epoch: 0, version: 0 }, // TODO FIXME
+            power_state: PowerState::from(state.power_state),
+            rot: RotState::from(state.rot),
+        }
+    }
+}
+
+impl From<gateway_sp_comms::VersionedSpState> for SpState {
+    fn from(value: gateway_sp_comms::VersionedSpState) -> Self {
+        match value {
+            gateway_sp_comms::VersionedSpState::V1(s) => Self::from(s),
+            gateway_sp_comms::VersionedSpState::V2(s) => Self::from(s),
         }
     }
 }
@@ -148,11 +172,54 @@ impl From<Result<gateway_messages::RotState, gateway_messages::RotError>>
     }
 }
 
+// TODO FIXME
+impl From<Result<gateway_messages::RotStateV2, gateway_messages::RotError>>
+    for RotState
+{
+    fn from(
+        result: Result<
+            gateway_messages::RotStateV2,
+            gateway_messages::RotError,
+        >,
+    ) -> Self {
+        match result {
+            Ok(state) => {
+                // TODO FIXME: This is wrong for RotStateV2
+                Self::Enabled {
+                    active: state.active.into(),
+                    slot_a: state.slot_a_sha3_256_digest.map(|hash| {
+                        RotImageDetails {
+                            digest: hex::encode(hash),
+                            version: ImageVersion { epoch: 0, version: 0 },
+                        }
+                    }),
+                    slot_b: state.slot_b_sha3_256_digest.map(|hash| {
+                        RotImageDetails {
+                            digest: hex::encode(hash),
+                            version: ImageVersion { epoch: 0, version: 0 },
+                        }
+                    }),
+                }
+            }
+            Err(err) => Self::CommunicationFailed { message: err.to_string() },
+        }
+    }
+}
+
 impl From<gateway_messages::RotSlot> for RotSlot {
     fn from(slot: gateway_messages::RotSlot) -> Self {
         match slot {
             gateway_messages::RotSlot::A => Self::A,
             gateway_messages::RotSlot::B => Self::B,
+        }
+    }
+}
+
+impl From<gateway_messages::SlotId> for RotSlot {
+    fn from(slot: gateway_messages::SlotId) -> Self {
+        match slot {
+            gateway_messages::SlotId::A => Self::A,
+            gateway_messages::SlotId::B => Self::B,
         }
     }
 }

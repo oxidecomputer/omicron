@@ -262,7 +262,7 @@ pub mod test {
                 cptestctx.sled_agent.sled_agent.id,
                 Some(Uuid::new_v4()),
                 new_dns_addr,
-                ServiceKind::InternalDnsConfig.into(),
+                ServiceKind::InternalDns.into(),
             )
             .await
             .unwrap();

@@ -45,6 +45,7 @@ pub mod saga;
 mod session;
 mod silo;
 mod sled;
+mod sled_instance;
 mod snapshot;
 mod switch;
 pub mod test_interfaces;

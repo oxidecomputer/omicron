@@ -50,6 +50,9 @@ lazy_static! {
     pub static ref HARDWARE_SLED_DISK_URL: String =
         format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID);
 
+    pub static ref SLED_INSTANCES_URL: String =
+        format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID);
+
     // Global policy
     pub static ref SYSTEM_POLICY_URL: &'static str = "/v1/system/policy";
 
@@ -1425,6 +1428,13 @@ lazy_static! {
         VerifyEndpoint {
             url: "/v1/system/hardware/sleds",
             visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &SLED_INSTANCES_URL,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
