@@ -9,7 +9,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX, IPADM};
+use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
@@ -229,7 +229,7 @@ impl RunningZone {
                 format!("mtu={}", CONTROL_VNIC_MTU),
                 "-m".to_string(),
                 "ipv6".to_string(),
-                vnic.clone(),
+                vnic,
             ],
         ];
 
