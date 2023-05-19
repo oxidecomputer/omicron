@@ -15,6 +15,7 @@ use wicketd_client::types::{
 };
 
 use crate::events::EventReportMap;
+use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
 use crate::{Cmd, Event};
 
@@ -146,10 +147,9 @@ impl WicketdManager {
                 component_id,
                 response
             );
-            _ = events_tx.send(Event::Term(Cmd::StartUpdateResponse {
-                component_id,
-                response,
-            }));
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::StartUpdateResponse { component_id, response },
+            )));
         });
     }
 

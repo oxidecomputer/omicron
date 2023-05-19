@@ -3074,33 +3074,39 @@
         "oneOf": [
           {
             "description": "Simulate an error where an update fails to start.",
-            "type": "string",
-            "enum": [
-              "start_failed"
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "start_failed"
+                ]
+              }
+            },
+            "required": [
+              "kind"
             ]
           },
           {
             "description": "Simulate an issue where the start operation times out.",
             "type": "object",
             "properties": {
-              "start_timeout": {
-                "type": "object",
-                "properties": {
-                  "secs": {
-                    "type": "integer",
-                    "format": "uint64",
-                    "minimum": 0
-                  }
-                },
-                "required": [
-                  "secs"
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "start_timeout"
                 ]
+              },
+              "secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0
               }
             },
             "required": [
-              "start_timeout"
-            ],
-            "additionalProperties": false
+              "kind",
+              "secs"
+            ]
           }
         ]
       },

@@ -154,7 +154,7 @@ pub(crate) struct StartUpdateOptions {
 }
 
 #[derive(Copy, Clone, Debug, JsonSchema, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub(crate) enum UpdateTestError {
     /// Simulate an error where an update fails to start.
     StartFailed,

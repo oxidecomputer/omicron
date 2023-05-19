@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::{align_by, help_text, push_text_lines, Control};
+use crate::keymap::ShowPopupCmd;
 use crate::state::{
     update_component_title, ComponentId, Inventory, UpdateItemState,
     ALL_COMPONENT_IDS,
@@ -688,7 +689,10 @@ impl UpdatePane {
                     }
                     (
                         popup_state,
-                        Cmd::StartUpdateResponse { component_id, response },
+                        Cmd::ShowPopup(ShowPopupCmd::StartUpdateResponse {
+                            component_id,
+                            response,
+                        }),
                     ) => {
                         let component_id_matches =
                             state.rack_state.selected == component_id;
