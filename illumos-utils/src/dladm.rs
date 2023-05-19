@@ -373,48 +373,6 @@ impl Dladm {
             err,
         })?;
 
-        // After creating, create an IP interface, then explicitly set the IP
-        // MTUs as well
-
-        let commands = vec![
-            vec![
-                IPADM.to_string(),
-                "create-if".to_string(),
-                "-t".to_string(),
-                vnic_name.to_string(),
-            ],
-            vec![
-                IPADM.to_string(),
-                "set-ifprop".to_string(),
-                "-t".to_string(),
-                "-p".to_string(),
-                format!("mtu={}", mtu),
-                "-m".to_string(),
-                "ipv4".to_string(),
-                vnic_name.to_string(),
-            ],
-            vec![
-                IPADM.to_string(),
-                "set-ifprop".to_string(),
-                "-t".to_string(),
-                "-p".to_string(),
-                format!("mtu={}", mtu),
-                "-m".to_string(),
-                "ipv6".to_string(),
-                vnic_name.to_string(),
-            ],
-        ];
-
-        for args in &commands {
-            let mut command = std::process::Command::new(PFEXEC);
-            let cmd = command.args(args);
-            execute(cmd).map_err(|err| CreateVnicError {
-                name: vnic_name.to_string(),
-                link: source.name().to_string(),
-                err,
-            })?;
-        }
-
         Ok(())
     }
 

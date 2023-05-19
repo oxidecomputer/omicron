@@ -9,7 +9,7 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX, IPADM};
 use camino::{Utf8Path, Utf8PathBuf};
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
@@ -41,6 +41,9 @@ pub enum BootError {
 
     #[error("Zone booted, but timed out waiting for {service} in {zone}")]
     Timeout { service: String, zone: String },
+
+    #[error("Zone booted, but running a command experienced an error: {0}")]
+    RunCommandError(#[from] RunCommandError),
 }
 
 /// Errors returned from [`RunningZone::ensure_address`].
@@ -196,7 +199,45 @@ impl RunningZone {
             }
         })?;
 
-        Ok(RunningZone { running: true, inner: zone })
+        let running_zone = RunningZone { running: true, inner: zone };
+
+        // Make sure the control vnic has an IP MTU of 9000 inside the zone
+        const CONTROL_VNIC_MTU: usize = 9000;
+        let vnic = running_zone.inner.control_vnic.name().to_string();
+        let commands = vec![
+            vec![
+                IPADM.to_string(),
+                "create-if".to_string(),
+                "-t".to_string(),
+                vnic.clone(),
+            ],
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", CONTROL_VNIC_MTU),
+                "-m".to_string(),
+                "ipv4".to_string(),
+                vnic.clone(),
+            ],
+            vec![
+                IPADM.to_string(),
+                "set-ifprop".to_string(),
+                "-t".to_string(),
+                "-p".to_string(),
+                format!("mtu={}", CONTROL_VNIC_MTU),
+                "-m".to_string(),
+                "ipv6".to_string(),
+                vnic.clone(),
+            ],
+        ];
+
+        for args in &commands {
+            running_zone.run_cmd(args)?;
+        }
+
+        Ok(running_zone)
     }
 
     pub async fn ensure_address(
