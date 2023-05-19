@@ -1994,7 +1994,7 @@ async fn instance_serial_console(
 async fn instance_serial_console_stream(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
-    query_params: Query<params::InstanceSerialConsoleRequest>,
+    query_params: Query<params::InstanceSerialConsoleStreamRequest>,
     conn: WebsocketConnection,
 ) -> WebsocketChannelResult {
     let apictx = rqctx.context();

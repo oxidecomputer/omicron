@@ -262,3 +262,13 @@ impl From<omicron_common::address::Ipv6Range> for types::Ipv6Range {
         Self { first: r.first, last: r.last }
     }
 }
+
+impl From<&omicron_common::api::internal::shared::SourceNatConfig>
+    for types::SourceNatConfig
+{
+    fn from(
+        r: &omicron_common::api::internal::shared::SourceNatConfig,
+    ) -> Self {
+        Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
+    }
+}
