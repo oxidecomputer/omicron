@@ -64,9 +64,26 @@ async fn services_put(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<ServiceEnsureBody>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let sa = rqctx.context();
+    let sa = rqctx.context().clone();
     let body_args = body.into_inner();
-    sa.services_ensure(body_args).await.map_err(|e| Error::from(e))?;
+
+    // Spawn a separate task to run `services_ensure`: cancellation of this
+    // endpoint's future (as might happen if the client abandons the request or
+    // times out) could result in leaving zones partially configured and the
+    // in-memory state of the service manager invalid. See:
+    // oxidecomputer/omicron#3098.
+    match tokio::spawn(async move { sa.services_ensure(body_args).await }).await
+    {
+        Ok(result) => result.map_err(|e| Error::from(e))?,
+
+        Err(e) => {
+            return Err(HttpError::for_internal_error(format!(
+                "unexpected failure awaiting \"services_ensure\": {:#}",
+                e
+            )));
+        }
+    }
+
     Ok(HttpResponseUpdatedNoContent())
 }
 
