@@ -201,7 +201,7 @@ impl super::Nexus {
             &self.background_tasks.task_internal_dns_servers,
             &self.background_tasks.task_external_dns_config,
             &self.background_tasks.task_external_dns_servers,
-            &self.background_tasks.task_tls_certs,
+            &self.background_tasks.task_external_endpoints,
         ] {
             self.background_tasks.activate(task);
         }

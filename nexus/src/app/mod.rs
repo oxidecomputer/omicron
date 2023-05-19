@@ -342,7 +342,7 @@ impl Nexus {
         // Wait for the background task to complete at least once.  We don't
         // care about its value.  To do this, we need our own copy of the
         // channel.
-        let mut rx = self.background_tasks.tls_certs.clone();
+        let mut rx = self.background_tasks.external_endpoints.clone();
         let _ = rx.wait_for(|s| s.is_some()).await;
         let mut rustls_cfg = rustls::ServerConfig::builder()
             .with_safe_default_cipher_suites()
@@ -352,7 +352,7 @@ impl Nexus {
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
-                self.background_tasks.tls_certs.clone(),
+                self.background_tasks.external_endpoints.clone(),
             )));
         // XXX-dap review -- this came from Dropshot
         rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];

@@ -2,11 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for keeping track of Nexus's external TLS certificates
-// XXX-dap rename this whole thing?
+//! Background task for keeping track of all externally-visible endpoints:
+//! all Silos, their externally-visible DNS names, and the TLS certificates
+//! associated with those names
 
 use super::common::BackgroundTask;
-use crate::app::certificate::silos_load_dns_tls;
+use crate::app::certificate::read_all_endpoints;
+pub use crate::app::certificate::ExternalEndpoints;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
@@ -15,34 +17,31 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-// XXX-dap rename / refactor callers?
-pub type TlsCerts = crate::app::certificate::SiloDnsCerts;
-
 /// Background task that keeps track of the latest list of TLS certificates for
 /// Nexus's external endpoint
-pub struct TlsCertsWatcher {
+pub struct ExternalEndpointsWatcher {
     datastore: Arc<DataStore>,
-    last: Option<TlsCerts>,
-    tx: watch::Sender<Option<TlsCerts>>,
-    rx: watch::Receiver<Option<TlsCerts>>,
+    last: Option<ExternalEndpoints>,
+    tx: watch::Sender<Option<ExternalEndpoints>>,
+    rx: watch::Receiver<Option<ExternalEndpoints>>,
 }
 
-impl TlsCertsWatcher {
-    pub fn new(datastore: Arc<DataStore>) -> TlsCertsWatcher {
+impl ExternalEndpointsWatcher {
+    pub fn new(datastore: Arc<DataStore>) -> ExternalEndpointsWatcher {
         let (tx, rx) = watch::channel(None);
-        TlsCertsWatcher { datastore, last: None, tx, rx }
+        ExternalEndpointsWatcher { datastore, last: None, tx, rx }
     }
 
     /// Exposes the latest set of TLS certificates
     ///
     /// You can use the returned [`watch::Receiver`] to look at the latest
     /// configuration or to be notified when it changes.
-    pub fn watcher(&self) -> watch::Receiver<Option<TlsCerts>> {
+    pub fn watcher(&self) -> watch::Receiver<Option<ExternalEndpoints>> {
         self.rx.clone()
     }
 }
 
-impl BackgroundTask for TlsCertsWatcher {
+impl BackgroundTask for ExternalEndpointsWatcher {
     fn activate<'a, 'b, 'c>(
         &'a mut self,
         opctx: &'b OpContext,
@@ -54,7 +53,7 @@ impl BackgroundTask for TlsCertsWatcher {
         async {
             let log = &opctx.log;
 
-            let result = silos_load_dns_tls(&self.datastore, opctx).await;
+            let result = read_all_endpoints(&self.datastore, opctx).await;
 
             if let Err(error) = result {
                 warn!(

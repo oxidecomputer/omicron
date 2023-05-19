@@ -367,71 +367,9 @@ async fn test_silo_certificates() {
     //    endpoint.  Each client will trust only its own Silo's certificate.  We
     //    will verify that these clients _can't_ make requests to the other Silo
     //    because it doesn't trust the certificate.
-    struct SiloCert {
-        silo_name: oxide_client::types::Name,
-        dns_name: String,
-        cert_name: oxide_client::types::Name,
-        cert: internal_params::Certificate,
-    }
 
-    impl SiloCert {
-        fn new(silo_name: oxide_client::types::Name) -> SiloCert {
-            let dns_name = format!(
-                "{}.sys.{}",
-                silo_name.as_str(),
-                DNS_ZONE_EXTERNAL_TESTING
-            );
-            let chain = CertificateChain::with_params(
-                rcgen::CertificateParams::new(vec![dns_name.clone()]),
-            );
-            let cert_name =
-                format!("cert-{}", silo_name.as_str()).parse().unwrap();
-            let cert = internal_params::Certificate {
-                cert: chain.cert_chain_as_pem(),
-                key: chain.end_cert_private_key_as_pem(),
-            };
-            SiloCert { silo_name, dns_name, cert_name, cert }
-        }
-
-        fn reqwest_client_raw(&self) -> reqwest::ClientBuilder {
-            let rustls_cert =
-                reqwest::tls::Certificate::from_pem(&self.cert.cert).unwrap();
-            reqwest::ClientBuilder::new().add_root_certificate(rustls_cert)
-        }
-
-        fn base_url(&self, port: u16) -> String {
-            format!("https://{}:{}", &self.dns_name, port)
-        }
-
-        fn login_url(&self, port: u16) -> String {
-            format!(
-                "{}/login/{}/local",
-                &self.base_url(port),
-                &self.silo_name.as_str()
-            )
-        }
-
-        fn oxide_client(
-            &self,
-            resolver: Arc<CustomDnsResolver>,
-            authn_mode: AuthnMode,
-            port: u16,
-        ) -> oxide_client::Client {
-            let (header_name, header_value) =
-                authn_mode.authn_header().unwrap();
-            let mut headers = http::header::HeaderMap::new();
-            headers.append(header_name, header_value);
-            let reqwest_client = self
-                .reqwest_client_raw()
-                .default_headers(headers)
-                .dns_resolver(resolver)
-                .build()
-                .unwrap();
-            let base_url = self.base_url(port);
-            oxide_client::Client::new_with_client(&base_url, reqwest_client)
-        }
-    }
-
+    // Create the certificates and metadata for the three Silos that we're going
+    // to test with.
     let silo1 = SiloCert::new("test-suite-silo".parse().unwrap());
     let silo2 = SiloCert::new("silo2".parse().unwrap());
     let silo3 = SiloCert::new("silo3".parse().unwrap());
@@ -451,15 +389,15 @@ async fn test_silo_certificates() {
 
     let nexus_port = cptestctx.external_client.bind_address.port();
 
-    // Set up a client to use the recovery Silo's TLS endpoint.
-    // To use this Silo, we'll need to use the user that was created during rack
-    // initialization.  To do that, we'll need to log in first.
+    // Log into silo1 (the Silo created during rack initialization) as the user
+    // that was created when that Silo was created.  We'll use this session to
+    // create the other Silos and their users.
     let resolver = Arc::new(
         CustomDnsResolver::new(*cptestctx.external_dns_server.local_address())
             .unwrap(),
     );
     let session_token = oxide_client::login(
-        silo1.reqwest_client_raw().dns_resolver(resolver.clone()),
+        silo1.reqwest_client().dns_resolver(resolver.clone()),
         &silo1.login_url(nexus_port),
         cptestctx.user_name.as_ref().parse().unwrap(),
         "oxide".parse().unwrap(),
@@ -468,6 +406,7 @@ async fn test_silo_certificates() {
     .expect("failed to log into recovery silo");
 
     let silo1_client = silo1.oxide_client(
+        silo1.reqwest_client(),
         resolver.clone(),
         AuthnMode::Session(session_token),
         nexus_port,
@@ -608,11 +547,13 @@ async fn test_silo_certificates() {
     // show up.  (We only have to wait for silo3's because they will be
     // propagated in sequential order.)
     let silo2_client = silo2.oxide_client(
+        silo2.reqwest_client(),
         resolver.clone(),
         AuthnMode::SiloUser(silo2_user),
         nexus_port,
     );
     let silo3_client = silo3.oxide_client(
+        silo3.reqwest_client(),
         resolver.clone(),
         AuthnMode::SiloUser(silo3_user),
         nexus_port,
@@ -665,9 +606,126 @@ async fn test_silo_certificates() {
     assert_eq!(certs.len(), 1);
     assert_eq!(certs[0].name, silo3.cert_name);
 
-    // XXX-dap quick checks that things haven't gone off the rails:
-    // - a client with the wrong certificate in its trust store won't work
-    // - a client with the wrong silo user id won't authenticate
+    // For good measure, to make sure we got the certificate stuff right, let's
+    // try to use the wrong certificate to reach each endpoint and confirm that
+    // we get a TLS error.
+    let silo2_client_wrong_cert = silo2.oxide_client(
+        silo3.reqwest_client(),
+        resolver.clone(),
+        AuthnMode::SiloUser(silo2_user),
+        nexus_port,
+    );
+    let error =
+        silo2_client_wrong_cert.current_user_view().send().await.expect_err(
+            "unexpectedly connected with wrong certificate trusted",
+        );
+    if let oxide_client::Error::CommunicationError(error) = error {
+        assert!(error.is_connect());
+        assert!(error.to_string().contains("invalid peer certificate"));
+    } else {
+        panic!(
+            "unexpected error connecting with wrong certificate: {:#}",
+            error
+        );
+    }
+    let silo3_client_wrong_cert = silo3.oxide_client(
+        silo2.reqwest_client(),
+        resolver.clone(),
+        AuthnMode::SiloUser(silo2_user),
+        nexus_port,
+    );
+    let error =
+        silo3_client_wrong_cert.current_user_view().send().await.expect_err(
+            "unexpectedly connected with wrong certificate trusted",
+        );
+    if let oxide_client::Error::CommunicationError(error) = error {
+        assert!(error.is_connect());
+        assert!(error.to_string().contains("invalid peer certificate"));
+    } else {
+        panic!(
+            "unexpected error connecting with wrong certificate: {:#}",
+            error
+        );
+    }
 
     cptestctx.teardown().await;
+}
+
+/// Helper for the certificate test
+///
+/// This structure keeps track of various metadata about a Silo to ensure
+/// that we operate on it consistently.
+struct SiloCert {
+    silo_name: oxide_client::types::Name,
+    dns_name: String,
+    cert_name: oxide_client::types::Name,
+    cert: internal_params::Certificate,
+}
+
+impl SiloCert {
+    /// Given just the silo name, construct the DNS name, a new certificate
+    /// chain for that DNS name, and a name for that certificate.
+    fn new(silo_name: oxide_client::types::Name) -> SiloCert {
+        let dns_name =
+            format!("{}.sys.{}", silo_name.as_str(), DNS_ZONE_EXTERNAL_TESTING);
+        let chain =
+            CertificateChain::with_params(rcgen::CertificateParams::new(vec![
+                dns_name.clone(),
+            ]));
+        let cert_name = format!("cert-{}", silo_name.as_str()).parse().unwrap();
+        let cert = internal_params::Certificate {
+            cert: chain.cert_chain_as_pem(),
+            key: chain.end_cert_private_key_as_pem(),
+        };
+        SiloCert { silo_name, dns_name, cert_name, cert }
+    }
+
+    /// Returns the base URL of the HTTPS endpoint for this Silo
+    fn base_url(&self, port: u16) -> String {
+        format!("https://{}:{}", &self.dns_name, port)
+    }
+
+    /// Returns the full URL to the login endpoint for this Silo
+    fn login_url(&self, port: u16) -> String {
+        format!(
+            "{}/login/{}/local",
+            &self.base_url(port),
+            &self.silo_name.as_str()
+        )
+    }
+
+    /// Returns a new `ReqwestClientBuilder` that's configured to trust this
+    /// client's certificate
+    fn reqwest_client(&self) -> reqwest::ClientBuilder {
+        let rustls_cert =
+            reqwest::tls::Certificate::from_pem(&self.cert.cert).unwrap();
+        reqwest::ClientBuilder::new().add_root_certificate(rustls_cert)
+    }
+
+    /// Returns an `oxide_client::Client` that's configured to talk to this
+    /// Silo's endpoint
+    ///
+    /// You provide the underlying `reqwest_client`.  To actually use this
+    /// Silo's endpoint, use `self.reqwest_client()` to make sure the client
+    /// will trust this Silo's certificate.  These methods are separated so
+    /// that we can test what happens when we _don't_ trust this client's
+    /// certificate.
+    fn oxide_client(
+        &self,
+        reqwest_client: reqwest::ClientBuilder,
+        resolver: Arc<CustomDnsResolver>,
+        authn_mode: AuthnMode,
+        port: u16,
+    ) -> oxide_client::Client {
+        let (header_name, header_value) = authn_mode.authn_header().unwrap();
+        let mut headers = http::header::HeaderMap::new();
+        headers.append(header_name, header_value);
+        let reqwest_client = reqwest_client
+            .default_headers(headers)
+            .dns_resolver(resolver)
+            .build()
+            .unwrap();
+        let base_url = self.base_url(port);
+        oxide_client::Client::new_with_client(&base_url, reqwest_client)
+    }
 }

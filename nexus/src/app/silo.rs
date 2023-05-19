@@ -101,7 +101,7 @@ impl super::Nexus {
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
-        self.background_tasks.activate(&self.background_tasks.task_tls_certs);
+        self.background_tasks.activate(&self.background_tasks.task_external_endpoints);
         Ok(silo)
     }
 
@@ -133,7 +133,7 @@ impl super::Nexus {
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
-        self.background_tasks.activate(&self.background_tasks.task_tls_certs);
+        self.background_tasks.activate(&self.background_tasks.task_external_endpoints);
         Ok(())
     }
 

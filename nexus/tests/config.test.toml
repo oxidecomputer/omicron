@@ -79,4 +79,4 @@ dns_external.max_concurrent_server_updates = 5
 # approximately an upper bound on how soon after updating the list of
 # certificates it will take _other_ Nexus instances to notice and stop serving
 # them (on a sunny day).
-tls_certs.period_secs = 60
+external_endpoints.period_secs = 60

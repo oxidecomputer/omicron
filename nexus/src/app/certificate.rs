@@ -44,14 +44,14 @@ use uuid::Uuid;
 
 // XXX-dap TODO-doc TODO-coverage
 #[derive(Clone)]
-pub struct SiloDnsCerts {
+pub struct ExternalEndpoints {
     by_dns_name: BTreeMap<String, Arc<SiloDnsCert>>,
     warnings: Vec<SiloDnsCertError>,
 }
 
-impl SiloDnsCerts {
-    pub fn serialize(&self) -> SiloDnsCertsDebug<'_> {
-        SiloDnsCertsDebug {
+impl ExternalEndpoints {
+    pub fn serialize(&self) -> ExternalEndpointsDebug<'_> {
+        ExternalEndpointsDebug {
             by_dns_name: self
                 .by_dns_name
                 .iter()
@@ -67,7 +67,7 @@ impl SiloDnsCerts {
 }
 
 #[derive(Debug, Eq, PartialEq, Serialize)]
-pub struct SiloDnsCertsDebug<'a> {
+pub struct ExternalEndpointsDebug<'a> {
     by_dns_name: BTreeMap<&'a str, SiloDnsCertDebug>,
     warnings: Vec<String>,
 }
@@ -180,7 +180,7 @@ impl super::Nexus {
                 // them.  Today, Nexus instances generally don't talk to each
                 // other.  That's a very valuable simplifying assumption.
                 self.background_tasks
-                    .activate(&self.background_tasks.task_tls_certs);
+                    .activate(&self.background_tasks.task_external_endpoints);
                 Ok(cert)
             }
         }
@@ -208,7 +208,7 @@ impl super::Nexus {
             ServiceKind::Nexus => {
                 // See the comment in certificate_create() above.
                 self.background_tasks
-                    .activate(&self.background_tasks.task_tls_certs);
+                    .activate(&self.background_tasks.task_external_endpoints);
             }
             _ => (),
         };
@@ -218,10 +218,10 @@ impl super::Nexus {
 
 // XXX-dap TODO-doc make sure we include a note about this function not
 // failing if we can possibly avoid it.
-pub async fn silos_load_dns_tls(
+pub async fn read_all_endpoints(
     datastore: &DataStore,
     opctx: &OpContext,
-) -> Result<SiloDnsCerts, Error> {
+) -> Result<ExternalEndpoints, Error> {
     let silos = datastore.silos_list_all(opctx).await?;
     const MAX_EXTERNAL_DNS_ZONES: u32 = 10;
     // XXX needs to actually paginate or list all of them
@@ -354,7 +354,7 @@ pub async fn silos_load_dns_tls(
         }
     }
 
-    Ok(SiloDnsCerts { by_dns_name, warnings })
+    Ok(ExternalEndpoints { by_dns_name, warnings })
 }
 
 // XXX-dap TryFrom?  Put it into the model?
@@ -415,13 +415,13 @@ fn db_cert_to_tls_cert(
 
 pub struct NexusCertResolver {
     log: slog::Logger,
-    config_rx: watch::Receiver<Option<SiloDnsCerts>>,
+    config_rx: watch::Receiver<Option<ExternalEndpoints>>,
 }
 
 impl NexusCertResolver {
     pub fn new(
         log: slog::Logger,
-        config_rx: watch::Receiver<Option<SiloDnsCerts>>,
+        config_rx: watch::Receiver<Option<ExternalEndpoints>>,
     ) -> NexusCertResolver {
         NexusCertResolver { log, config_rx }
     }
