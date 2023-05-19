@@ -82,7 +82,7 @@ pub trait ObjectIdentity {
 ///
 /// `NameType` is the type of the field used to sort the returned values and it's
 /// usually `Name`.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DataPageParams<'a, NameType> {
     /// If present, this is the value of the sort field for the last object seen
     pub marker: Option<&'a NameType>,

@@ -16,6 +16,7 @@ use crate::{authn, authz};
 use anyhow::Context;
 use nexus_db_model::{DnsGroup, UserProvisionType};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -101,7 +102,8 @@ impl super::Nexus {
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
-        self.background_tasks.activate(&self.background_tasks.task_external_endpoints);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
         Ok(silo)
     }
 
@@ -110,7 +112,9 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::Silo> {
-        self.db_datastore.silos_list(opctx, pagparams).await
+        self.db_datastore
+            .silos_list(opctx, pagparams, Discoverability::DiscoverableOnly)
+            .await
     }
 
     pub async fn silo_delete(
@@ -133,7 +137,8 @@ impl super::Nexus {
             .await?;
         self.background_tasks
             .activate(&self.background_tasks.task_external_dns_config);
-        self.background_tasks.activate(&self.background_tasks.task_external_endpoints);
+        self.background_tasks
+            .activate(&self.background_tasks.task_external_endpoints);
         Ok(())
     }
 

@@ -78,6 +78,7 @@ mod zpool;
 
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
+pub use silo::Discoverability;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 

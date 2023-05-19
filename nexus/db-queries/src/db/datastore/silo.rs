@@ -42,6 +42,14 @@ use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
+/// Filter a "silo_list" query based on silos' discoverability
+pub enum Discoverability {
+    /// Show all Silos
+    All,
+    /// Show only discoverable Silos
+    DiscoverableOnly,
+}
+
 impl DataStore {
     /// Load built-in silos into the database
     pub async fn load_builtin_silos(
@@ -284,11 +292,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
+        discoverability: Discoverability,
     ) -> ListResultVec<Silo> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         use db::schema::silo::dsl;
-        match pagparams {
+        let mut query = match pagparams {
             PaginatedBy::Id(params) => paginated(dsl::silo, dsl::id, &params),
             PaginatedBy::Name(params) => paginated(
                 dsl::silo,
@@ -296,27 +305,13 @@ impl DataStore {
                 &params.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .filter(dsl::time_deleted.is_null())
-        .filter(dsl::discoverable.eq(true))
-        .select(Silo::as_select())
-        .load_async::<Silo>(self.pool_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
-    }
+        .filter(dsl::time_deleted.is_null());
 
-    pub async fn silos_list_all(
-        &self,
-        opctx: &OpContext,
-    ) -> ListResultVec<Silo> {
-        // TODO-scalability It would be better if this made paginated queries to
-        // the database.  In practice, we are not likely to have a large number
-        // of Silos.
-        // XXX-dap commonize with above
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        if let Discoverability::DiscoverableOnly = discoverability {
+            query = query.filter(dsl::discoverable.eq(true));
+        }
 
-        use db::schema::silo::dsl;
-        dsl::silo
-            .filter(dsl::time_deleted.is_null())
+        query
             .select(Silo::as_select())
             .load_async::<Silo>(self.pool_authorized(opctx).await?)
             .await

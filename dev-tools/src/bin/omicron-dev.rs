@@ -4,7 +4,6 @@
 
 //! Developer tool for easily running bits of Omicron
 
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use camino::Utf8Path;
