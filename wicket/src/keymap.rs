@@ -10,6 +10,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
+use crate::state::ComponentId;
+
 /// All commands handled by [`crate::Control::on`].
 ///
 /// These are mostly user input commands from the keyboard,
@@ -82,6 +84,15 @@ pub enum Cmd {
     /// Trigger any operation that must be executed periodically, like
     /// animations.
     Tick,
+
+    /// A response to a start-update operation.
+    ///
+    /// This isn't a key shortcut but needs to be handled by screens the same
+    /// way keys are.
+    StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
 
     /// Switch to the next pane.
     NextPane,

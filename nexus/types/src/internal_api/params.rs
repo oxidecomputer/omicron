@@ -8,6 +8,7 @@ use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -173,32 +174,28 @@ pub struct DatasetPutRequest {
 )]
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
-    ExternalDns,
-    ExternalDnsConfig,
+    ExternalDns { external_address: IpAddr },
     InternalDns,
-    InternalDnsConfig,
     Nexus { external_address: IpAddr },
     Oximeter,
     Dendrite,
     Tfport,
     CruciblePantry,
-    Ntp,
+    Ntp { snat_cfg: Option<SourceNatConfig> },
 }
 
 impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
         let s = match self {
-            ExternalDnsConfig => "external_dns_config",
-            ExternalDns => "external_dns",
-            InternalDnsConfig => "internal_dns_config",
+            ExternalDns { .. } => "external_dns",
             InternalDns => "internal_dns",
             Nexus { .. } => "nexus",
             Oximeter => "oximeter",
             Dendrite => "dendrite",
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
-            Ntp => "ntp",
+            Ntp { .. } => "ntp",
         };
         write!(f, "{}", s)
     }

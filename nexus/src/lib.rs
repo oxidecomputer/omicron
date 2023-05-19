@@ -31,9 +31,9 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use internal_dns::DnsConfigBuilder;
 use nexus_types::internal_api::params::ServiceKind;
-use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+use omicron_common::address::IpRange;
 use slog::Logger;
-use std::net::{IpAddr, SocketAddr, SocketAddrV6};
+use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -231,11 +231,9 @@ impl nexus_test_interface::NexusServer for Server {
         let internal_services_ip_pool_ranges = services
             .iter()
             .filter_map(|s| match s.kind {
-                ServiceKind::Nexus { external_address: IpAddr::V4(addr) } => {
-                    Some(IpRange::V4(Ipv4Range::new(addr, addr).unwrap()))
-                }
-                ServiceKind::Nexus { external_address: IpAddr::V6(addr) } => {
-                    Some(IpRange::V6(Ipv6Range::new(addr, addr).unwrap()))
+                ServiceKind::ExternalDns { external_address }
+                | ServiceKind::Nexus { external_address } => {
+                    Some(IpRange::from(external_address))
                 }
                 _ => None,
             })

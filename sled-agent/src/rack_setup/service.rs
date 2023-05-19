@@ -639,33 +639,27 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::Dendrite,
                             });
                         }
-                        ServiceType::ExternalDns { http_address, .. } => {
-                            services.push(NexusTypes::ServicePutRequest {
-                                service_id,
-                                zone_id,
-                                sled_id,
-                                address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::ExternalDnsConfig,
-                            });
-                        }
-                        ServiceType::InternalDns {
+                        ServiceType::ExternalDns {
                             http_address,
                             dns_address,
+                            ..
                         } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
                                 address: http_address.to_string(),
-                                kind:
-                                    NexusTypes::ServiceKind::InternalDnsConfig,
+                                kind: NexusTypes::ServiceKind::ExternalDns {
+                                    external_address: dns_address.ip(),
+                                },
                             });
+                        }
+                        ServiceType::InternalDns { http_address, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
                                 sled_id,
-                                address: dns_address.to_string(),
+                                address: http_address.to_string(),
                                 kind: NexusTypes::ServiceKind::InternalDns,
                             });
                         }
@@ -699,8 +693,7 @@ impl ServiceInner {
                                 kind: NexusTypes::ServiceKind::CruciblePantry,
                             });
                         }
-                        ServiceType::BoundaryNtp { .. }
-                        | ServiceType::InternalNtp { .. } => {
+                        ServiceType::BoundaryNtp { snat_cfg, .. } => {
                             services.push(NexusTypes::ServicePutRequest {
                                 service_id,
                                 zone_id,
@@ -712,7 +705,26 @@ impl ServiceInner {
                                     0,
                                 )
                                 .to_string(),
-                                kind: NexusTypes::ServiceKind::Ntp,
+                                kind: NexusTypes::ServiceKind::Ntp {
+                                    snat_cfg: Some(snat_cfg.into()),
+                                },
+                            });
+                        }
+                        ServiceType::InternalNtp { .. } => {
+                            services.push(NexusTypes::ServicePutRequest {
+                                service_id,
+                                zone_id,
+                                sled_id,
+                                address: SocketAddrV6::new(
+                                    zone.addresses[0],
+                                    NTP_PORT,
+                                    0,
+                                    0,
+                                )
+                                .to_string(),
+                                kind: NexusTypes::ServiceKind::Ntp {
+                                    snat_cfg: None,
+                                },
                             });
                         }
                         details => {

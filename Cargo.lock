@@ -2610,7 +2610,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1b3d1a4a074fb8ec2df67a906d41bfa636c261a8#1b3d1a4a074fb8ec2df67a906d41bfa636c261a8"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2624,8 +2624,8 @@ dependencies = [
 
 [[package]]
 name = "gateway-sp-comms"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=1b3d1a4a074fb8ec2df67a906d41bfa636c261a8#1b3d1a4a074fb8ec2df67a906d41bfa636c261a8"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3048,8 +3048,8 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/hubtools.git#e3e938dc5493c30f4c830d2ee2b5d75d51b7775d"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/hubtools.git#8e233e193341a29ef52a23854803f481afe1e838"
 dependencies = [
  "lpc55_areas",
  "lpc55_sign",
@@ -3289,6 +3289,7 @@ dependencies = [
  "installinator-common",
  "ipcc-key-value",
  "itertools",
+ "libc",
  "omicron-common 0.1.0",
  "omicron-test-utils",
  "once_cell",
@@ -3362,6 +3363,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "illumos-utils",
  "omicron-common 0.1.0",
  "schemars",
  "serde",
@@ -8202,8 +8204,8 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tlvc"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#533f0bf26b0a8f32d287af4f2ea09320bc05c2cd"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
 dependencies = [
  "byteorder",
  "crc",
@@ -8212,8 +8214,8 @@ dependencies = [
 
 [[package]]
 name = "tlvc-text"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#533f0bf26b0a8f32d287af4f2ea09320bc05c2cd"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
 dependencies = [
  "ron 0.8.0",
  "serde",

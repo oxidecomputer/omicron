@@ -27,6 +27,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
+use std::time::Duration;
 use uuid::Uuid;
 use wicket_common::update_events::EventReport;
 
@@ -157,6 +158,9 @@ pub(crate) struct StartUpdateOptions {
 pub(crate) enum UpdateTestError {
     /// Simulate an error where an update fails to start.
     StartFailed,
+
+    /// Simulate an issue where the start operation times out.
+    StartTimeout { secs: u64 },
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
@@ -189,6 +193,7 @@ async fn post_start_update(
     target: Path<SpIdentifier>,
     opts: TypedBody<StartUpdateOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let log = &rqctx.log;
     let rqctx = rqctx.context();
     let target = target.into_inner();
 
@@ -267,11 +272,19 @@ async fn post_start_update(
     }
 
     let opts = opts.into_inner();
-    if opts.test_error == Some(UpdateTestError::StartFailed) {
-        return Err(HttpError::for_bad_request(
-            None,
-            "Simulated failure while starting update".into(),
-        ));
+    match opts.test_error {
+        Some(UpdateTestError::StartFailed) => {
+            return Err(HttpError::for_bad_request(
+                None,
+                "Simulated failure while starting update".into(),
+            ));
+        }
+        Some(UpdateTestError::StartTimeout { secs }) => {
+            slog::info!(log, "Simulating timeout while starting update");
+            // 15 seconds should be enough to cause a timeout.
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+        }
+        _ => {}
     }
 
     // All pre-flight update checks look OK: start the update.

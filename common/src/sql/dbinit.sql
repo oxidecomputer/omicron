@@ -187,9 +187,7 @@ CREATE INDEX ON omicron.public.switch (
 CREATE TYPE omicron.public.service_kind AS ENUM (
   'crucible_pantry',
   'dendrite',
-  'external_dns_config',
   'external_dns',
-  'internal_dns_config',
   'internal_dns',
   'nexus',
   'ntp',
@@ -224,19 +222,6 @@ CREATE INDEX ON omicron.public.service (
 CREATE INDEX ON omicron.public.service (
     kind,
     id
-);
-
--- Extended information for services where "service.kind = nexus"
--- The "id" columng of this table should match "id" column of the
--- "omicron.public.service" table exactly.
-CREATE TABLE omicron.public.nexus_service (
-    id UUID PRIMARY KEY,
-    -- The external IP address used for Nexus' external interface.
-    external_ip_id UUID NOT NULL
-);
-
-CREATE UNIQUE INDEX ON omicron.public.nexus_service (
-    external_ip_id
 );
 
 CREATE TYPE omicron.public.physical_disk_kind AS ENUM (
@@ -818,13 +803,14 @@ CREATE TABLE omicron.public.instance (
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     /*
-     * Server where the VM is currently running, if any.  Note that when we
-     * support live migration, there may be multiple servers associated with
+     * Sled where the VM is currently running, if any.  Note that when we
+     * support live migration, there may be multiple sleds associated with
      * this Instance, but only one will be truly active.  Still, consumers of
      * this information should consider whether they also want to know the other
-     * servers involved in the migration.
+     * sleds involved in the migration.
      */
-    active_server_id UUID,
+    active_sled_id UUID,
+
     /* Identifies the underlying propolis-server backing the instance. */
     active_propolis_id UUID NOT NULL,
     active_propolis_ip INET,
@@ -862,9 +848,37 @@ CREATE UNIQUE INDEX ON omicron.public.instance (
 -- Allow looking up instances by server. This is particularly
 -- useful for resource accounting within a sled.
 CREATE INDEX ON omicron.public.instance (
-    active_server_id
+    active_sled_id
 ) WHERE
     time_deleted IS NULL;
+
+/*
+ * A special view of an instance provided to operators for insights into what's running 
+ * on a sled.
+ */
+
+CREATE VIEW omicron.public.sled_instance 
+AS SELECT
+   instance.id,
+   instance.name,
+   silo.name as silo_name,
+   project.name as project_name,
+   instance.active_sled_id,
+   instance.time_created,
+   instance.time_modified,
+   instance.migration_id,
+   instance.ncpus,
+   instance.memory,
+   instance.state
+FROM
+    omicron.public.instance AS instance
+    JOIN omicron.public.project AS project ON
+            instance.project_id = project.id
+    JOIN omicron.public.silo AS silo ON
+            project.silo_id = silo.id
+WHERE
+    instance.time_deleted IS NULL;
+
 
 /*
  * Guest-Visible, Virtual Disks
@@ -1482,27 +1496,24 @@ WHERE time_deleted IS NULL;
 
 /* The kind of external IP address. */
 CREATE TYPE omicron.public.ip_kind AS ENUM (
-    /* Automatic source NAT provided to all guests by default */
+    /*
+     * Source NAT provided to all guests by default or for services that
+     * only require outbound external connectivity.
+     */
     'snat',
 
     /*
      * An ephemeral IP is a fixed, known address whose lifetime is the same as
      * the instance to which it is attached.
+     * Not valid for services.
      */
     'ephemeral',
 
     /*
-     * A floating IP is an independent, named API resource. It is a fixed,
-     * known address that can be moved between instances. Its lifetime is not
-     * fixed to any instance.
+     * A floating IP is an independent, named API resource that can be assigned
+     * to an instance or service.
      */
-    'floating',
-
-    /*
-     * A service IP is an IP address not attached to a project nor an instance.
-     * It's intended to be used for internal services.
-     */
-    'service'
+    'floating'
 );
 
 /*
@@ -1529,8 +1540,11 @@ CREATE TABLE omicron.public.external_ip (
     /* FK to the `ip_pool_range` table. */
     ip_pool_range_id UUID NOT NULL,
 
-    /* FK to the `instance` table. See the constraints below. */
-    instance_id UUID,
+    /* True if this IP is associated with a service rather than an instance. */
+    is_service BOOL NOT NULL,
+
+    /* FK to the `instance` or `service` table. See constraints below. */
+    parent_id UUID,
 
     /* The kind of external address, e.g., ephemeral. */
     kind omicron.public.ip_kind NOT NULL,
@@ -1557,13 +1571,16 @@ CREATE TABLE omicron.public.external_ip (
     ),
 
     /*
-     * Only nullable if this is a floating/service IP, which may exist not
-     * attached to any instance.
+     * Only nullable if this is a floating IP, which may exist not
+     * attached to any instance or service yet.
      */
-    CONSTRAINT null_non_fip_instance_id CHECK (
-        (kind != 'floating' AND instance_id IS NOT NULL) OR
-        (kind = 'floating') OR
-        (kind = 'service')
+    CONSTRAINT null_non_fip_parent_id CHECK (
+        (kind != 'floating' AND parent_id is NOT NULL) OR (kind = 'floating')
+    ),
+
+    /* Ephemeral IPs are not supported for services. */
+    CONSTRAINT ephemeral_kind_service CHECK (
+        (kind = 'ephemeral' AND is_service = FALSE) OR (kind != 'ephemeral')
     )
 );
 
@@ -1591,10 +1608,10 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
     WHERE time_deleted IS NULL;
 
 CREATE UNIQUE INDEX ON omicron.public.external_ip (
-    instance_id,
+    parent_id,
     id
 )
-    WHERE instance_id IS NOT NULL AND time_deleted IS NULL;
+    WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
 
 /*******************************************************************/
 

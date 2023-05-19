@@ -16,7 +16,7 @@ use wicketd_client::types::{
 
 use crate::events::EventReportMap;
 use crate::state::ComponentId;
-use crate::Event;
+use crate::{Cmd, Event};
 
 impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
@@ -146,8 +146,10 @@ impl WicketdManager {
                 component_id,
                 response
             );
-            _ = events_tx
-                .send(Event::StartUpdateResponse { component_id, response });
+            _ = events_tx.send(Event::Term(Cmd::StartUpdateResponse {
+                component_id,
+                response,
+            }));
         });
     }
 

@@ -21,6 +21,7 @@ installinator-artifact-client.workspace = true
 installinator-common.workspace = true
 ipcc-key-value.workspace = true
 itertools.workspace = true
+libc.workspace = true
 once_cell.workspace = true
 omicron-common.workspace = true
 pin-project-lite.workspace = true
@@ -33,6 +34,7 @@ slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
 smf.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true

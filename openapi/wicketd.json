@@ -3078,6 +3078,29 @@
             "enum": [
               "start_failed"
             ]
+          },
+          {
+            "description": "Simulate an issue where the start operation times out.",
+            "type": "object",
+            "properties": {
+              "start_timeout": {
+                "type": "object",
+                "properties": {
+                  "secs": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "secs"
+                ]
+              }
+            },
+            "required": [
+              "start_timeout"
+            ],
+            "additionalProperties": false
           }
         ]
       },

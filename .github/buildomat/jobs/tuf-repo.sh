@@ -5,7 +5,7 @@
 #: target = "helios-latest"
 #: output_rules = [
 #:	"=/work/manifest.toml",
-#:	"=/work/repo.zip.part*",
+#:	"=/work/repo.zip*",
 #: ]
 #:
 #: [dependencies.ci-tools]
@@ -19,6 +19,21 @@
 #:
 #: [dependencies.trampoline]
 #: job = "helios / build trampoline OS image"
+#:
+#: [[publish]]
+#: series = "tuf-repo"
+#: name = "repo.zip.parta"
+#: from_output = "/work/repo.zip.parta"
+#:
+#: [[publish]]
+#: series = "tuf-repo"
+#: name = "repo.zip.partb"
+#: from_output = "/work/repo.zip.partb"
+#:
+#: [[publish]]
+#: series = "tuf-repo"
+#: name = "repo.zip.sha256.txt"
+#: from_output = "/work/repo.zip.sha256.txt"
 #:
 
 set -o errexit
@@ -84,9 +99,13 @@ EOF
 done
 
 /work/tufaceous assemble --no-generate-key --skip-all-present /work/manifest.toml /work/repo.zip
+digest -a sha256 /work/repo.zip > /work/repo.zip.sha256.txt
 
 #
 # XXX: Buildomat currently does not support uploads greater than 1 GiB. This is
 # an awful temporary hack which we need to strip out the moment it does.
 #
 split -a 1 -b 1024m /work/repo.zip /work/repo.zip.part
+rm /work/repo.zip
+# Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
+touch /work/repo.zip.partb

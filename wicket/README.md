@@ -115,6 +115,9 @@ WICKET_UPDATE_TEST_ERROR=<value> cargo run --bin wicket
 Here, `<value>` can be:
 
 * `start_failed`: Simulate a failure while starting an update.
+* `start_timeout`: Simulate a timeout while starting an update.
+  * `start_timeout:<secs>`: Specify a custom number of seconds (15 seconds by
+    default)
 * (implement more options as needed)
 
 ## Adding a test update step

@@ -123,7 +123,7 @@ table! {
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
-        active_server_id -> Uuid,
+        active_sled_id -> Uuid,
         active_propolis_id -> Uuid,
         active_propolis_ip -> Nullable<Inet>,
         target_propolis_id -> Nullable<Uuid>,
@@ -132,6 +132,22 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
+    }
+}
+
+table! {
+    sled_instance (id) {
+        id -> Uuid,
+        name -> Text,
+        silo_name -> Text,
+        project_name -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        state -> crate::InstanceStateEnum,
+        active_sled_id -> Uuid,
+        migration_id -> Nullable<Uuid>,
+        ncpus -> Int8,
+        memory -> Int8,
     }
 }
 
@@ -239,7 +255,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
-        instance_id -> Nullable<Uuid>,
+        is_service -> Bool,
+        parent_id -> Nullable<Uuid>,
         kind -> crate::IpKindEnum,
         ip -> Inet,
         first_port -> Int4,
@@ -489,13 +506,6 @@ table! {
         ip -> Inet,
         port -> Int4,
         kind -> crate::ServiceKindEnum,
-    }
-}
-
-table! {
-    nexus_service (id) {
-        id -> Uuid,
-        external_ip_id -> Uuid,
     }
 }
 
@@ -922,5 +932,4 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
-allow_tables_to_appear_in_same_query!(external_ip, nexus_service);
-joinable!(nexus_service -> external_ip (external_ip_id));
+allow_tables_to_appear_in_same_query!(external_ip, service);

@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::bail;
+use anyhow::Context;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -129,13 +130,6 @@ impl RunnerCore {
                 self.state.inventory.update_inventory(inventory)?;
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Event::StartUpdateResponse { component_id, response } => {
-                self.state.update_state.handle_start_update_response(
-                    &self.log,
-                    component_id,
-                    response,
-                );
-            }
             Event::ArtifactsAndEventReports {
                 system_version,
                 artifacts,
@@ -165,6 +159,9 @@ impl RunnerCore {
          return Ok(());
         };
 
+        // 15 seconds should be enough to cause a timeout.
+        const DEFAULT_START_TIMEOUT_SECS: u64 = 15;
+
         match action {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
@@ -181,6 +178,28 @@ impl RunnerCore {
                     ) {
                         Ok(v) if v == "start_failed" => {
                             Some(UpdateTestError::StartFailed)
+                        }
+                        Ok(v) if v == "start_timeout" => {
+                            Some(UpdateTestError::StartTimeout {
+                                secs: DEFAULT_START_TIMEOUT_SECS,
+                            })
+                        }
+                        Ok(v) if v.starts_with("start_timeout:") => {
+                            // Extended start_timeout syntax with a custom
+                            // number of seconds.
+                            let suffix =
+                                v.strip_prefix("start_timeout:").unwrap();
+                            match suffix.parse::<u64>() {
+                                Ok(secs) => {
+                                    Some(UpdateTestError::StartTimeout { secs })
+                                }
+                                Err(error) => {
+                                    return Err(error).with_context(|| {
+                                        format!("could not parse WICKET_UPDATE_TEST_ERROR \
+                                                 in the form `start_timeout:<secs>`: {v}")
+                                    });
+                                }
+                            }
                         }
                         Ok(value) => {
                             bail!("unrecognized value for WICKET_UPDATE_TEST_ERROR: {value}");

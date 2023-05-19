@@ -66,6 +66,7 @@ mod silo;
 mod silo_group;
 mod silo_user;
 mod sled;
+mod sled_instance;
 mod snapshot;
 mod ssh_key;
 mod switch;
@@ -1298,7 +1299,8 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
-                instance_id: Some(instance_id),
+                is_service: false,
+                parent_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
                     10, 0, 0, i,
@@ -1356,7 +1358,8 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            instance_id: Some(Uuid::new_v4()),
+            is_service: false,
+            parent_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
             ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
                 10, 0, 0, 1,
@@ -1426,7 +1429,8 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
-            instance_id: Some(Uuid::new_v4()),
+            is_service: false,
+            parent_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
             ip: addresses.next().unwrap().into(),
             first_port: crate::db::model::SqlU16(0),
@@ -1436,99 +1440,52 @@ mod test {
         // Combinations of NULL and non-NULL for:
         // - name
         // - description
-        // - instance UUID
+        // - parent (instance / service) UUID
         let names = [
             None,
             Some(db::model::Name(Name::try_from("foo".to_string()).unwrap())),
         ];
         let descriptions = [None, Some("foo".to_string())];
-        let instance_ids = [None, Some(Uuid::new_v4())];
+        let parent_ids = [None, Some(Uuid::new_v4())];
 
         // For Floating IPs, both name and description must be non-NULL
         for name in names.iter() {
             for description in descriptions.iter() {
-                for instance_id in instance_ids.iter() {
-                    let new_ip = ExternalIp {
-                        id: Uuid::new_v4(),
-                        name: name.clone(),
-                        description: description.clone(),
-                        ip: addresses.next().unwrap().into(),
-                        instance_id: *instance_id,
-                        ..ip
-                    };
-                    let res = diesel::insert_into(dsl::external_ip)
-                        .values(new_ip)
-                        .execute_async(datastore.pool())
-                        .await;
-                    if name.is_some() && description.is_some() {
-                        // Name/description must be non-NULL, instance ID can be
-                        // either
-                        res.expect(
-                            "Failed to insert Floating IP with valid \
-                            name, description, and instance ID",
-                        );
-                    } else {
-                        // At least one is not valid, we expect a check violation
-                        let err = res.expect_err(
-                            "Expected a CHECK violation when inserting a \
-                            Floating IP record with NULL name and/or description",
-                        );
-                        assert!(
-                            matches!(
-                                err,
-                                Connection(Query(DatabaseError(
-                                    CheckViolation,
-                                    _
-                                )))
-                            ),
-                            "Expected a CHECK violation when inserting a \
-                        Floating IP record with NULL name and/or description",
-                        );
-                    }
-                }
-            }
-        }
-
-        // For other IP types, both name and description must be NULL
-        for kind in [IpKind::SNat, IpKind::Ephemeral].into_iter() {
-            for name in names.iter() {
-                for description in descriptions.iter() {
-                    for instance_id in instance_ids.iter() {
+                for parent_id in parent_ids.iter() {
+                    for is_service in [false, true] {
                         let new_ip = ExternalIp {
                             id: Uuid::new_v4(),
                             name: name.clone(),
                             description: description.clone(),
-                            kind,
                             ip: addresses.next().unwrap().into(),
-                            instance_id: *instance_id,
+                            is_service,
+                            parent_id: *parent_id,
                             ..ip
                         };
                         let res = diesel::insert_into(dsl::external_ip)
-                            .values(new_ip.clone())
+                            .values(new_ip)
                             .execute_async(datastore.pool())
                             .await;
-                        if name.is_none()
-                            && description.is_none()
-                            && instance_id.is_some()
-                        {
-                            // Name/description must be NULL, instance ID cannot
-                            // be NULL.
-                            assert!(
-                                res.is_ok(),
-                                "Failed to insert {:?} IP with valid \
-                                name, description, and instance ID",
-                                kind,
-                            );
+                        if name.is_some() && description.is_some() {
+                            // Name/description must be non-NULL, instance ID can be
+                            // either
+                            res.unwrap_or_else(|_| {
+                                panic!(
+                                    "Failed to insert Floating IP with valid \
+                                     name, description, and {} ID",
+                                    if is_service {
+                                        "Service"
+                                    } else {
+                                        "Instance"
+                                    }
+                                )
+                            });
                         } else {
-                            // One is not valid, we expect a check violation
-                            assert!(
-                                res.is_err(),
+                            // At least one is not valid, we expect a check violation
+                            let err = res.expect_err(
                                 "Expected a CHECK violation when inserting a \
-                                {:?} IP record with non-NULL name, description, \
-                                and/or instance ID",
-                                kind,
+                                 Floating IP record with NULL name and/or description",
                             );
-                            let err = res.unwrap_err();
                             assert!(
                                 matches!(
                                     err,
@@ -1538,10 +1495,92 @@ mod test {
                                     )))
                                 ),
                                 "Expected a CHECK violation when inserting a \
-                            {:?} IP record with non-NULL name, description, \
-                            and/or instance ID",
-                                kind
+                                 Floating IP record with NULL name and/or description",
                             );
+                        }
+                    }
+                }
+            }
+        }
+
+        // For other IP types, both name and description must be NULL
+        for kind in [IpKind::SNat, IpKind::Ephemeral].into_iter() {
+            for name in names.iter() {
+                for description in descriptions.iter() {
+                    for parent_id in parent_ids.iter() {
+                        for is_service in [false, true] {
+                            let new_ip = ExternalIp {
+                                id: Uuid::new_v4(),
+                                name: name.clone(),
+                                description: description.clone(),
+                                kind,
+                                ip: addresses.next().unwrap().into(),
+                                is_service,
+                                parent_id: *parent_id,
+                                ..ip
+                            };
+                            let res = diesel::insert_into(dsl::external_ip)
+                                .values(new_ip.clone())
+                                .execute_async(datastore.pool())
+                                .await;
+                            let ip_type =
+                                if is_service { "Service" } else { "Instance" };
+                            if name.is_none()
+                                && description.is_none()
+                                && parent_id.is_some()
+                            {
+                                // Name/description must be NULL, instance ID cannot
+                                // be NULL.
+
+                                if kind == IpKind::Ephemeral && is_service {
+                                    // Ephemeral Service IPs aren't supported.
+                                    let err = res.unwrap_err();
+                                    assert!(
+                                        matches!(
+                                            err,
+                                            Connection(Query(DatabaseError(
+                                                CheckViolation,
+                                                _
+                                            )))
+                                        ),
+                                        "Expected a CHECK violation when inserting an \
+                                         Ephemeral Service IP",
+                                    );
+                                } else {
+                                    assert!(
+                                        res.is_ok(),
+                                        "Failed to insert {:?} IP with valid \
+                                         name, description, and {} ID",
+                                        kind,
+                                        ip_type,
+                                    );
+                                }
+                            } else {
+                                // One is not valid, we expect a check violation
+                                assert!(
+                                    res.is_err(),
+                                    "Expected a CHECK violation when inserting a \
+                                     {:?} IP record with non-NULL name, description, \
+                                     and/or {} ID",
+                                    kind,
+                                    ip_type,
+                                );
+                                let err = res.unwrap_err();
+                                assert!(
+                                    matches!(
+                                        err,
+                                        Connection(Query(DatabaseError(
+                                            CheckViolation,
+                                            _
+                                        )))
+                                    ),
+                                    "Expected a CHECK violation when inserting a \
+                                     {:?} IP record with non-NULL name, description, \
+                                     and/or {} ID",
+                                    kind,
+                                    ip_type,
+                                );
+                            }
                         }
                     }
                 }

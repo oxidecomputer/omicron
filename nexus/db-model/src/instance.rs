@@ -124,7 +124,7 @@ pub struct InstanceRuntimeState {
     //
     // TODO(#2315): This should be optional so that it can be cleared when the
     // instance is not active.
-    #[diesel(column_name = active_server_id)]
+    #[diesel(column_name = active_sled_id)]
     pub sled_id: Uuid,
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance.
