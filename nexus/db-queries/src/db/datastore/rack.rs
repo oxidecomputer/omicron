@@ -18,18 +18,13 @@ use crate::db::error::public_error_from_diesel_pool;
 use crate::db::error::ErrorHandler;
 use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
-use crate::db::model::Certificate;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
-use crate::db::model::NexusService;
 use crate::db::model::Rack;
-use crate::db::model::Service;
-use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -37,7 +32,6 @@ use diesel::upsert::excluded;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
-use nexus_db_model::ServiceKind;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_types::external_api::params as external_params;
@@ -62,7 +56,6 @@ pub struct RackInit {
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
-    pub certificates: Vec<external_params::CertificateCreate>,
     pub internal_dns: InitialDnsGroup,
     pub external_dns: InitialDnsGroup,
     pub recovery_silo: external_params::SiloCreate,
@@ -130,19 +123,17 @@ impl DataStore {
         let services = rack_init.services;
         let datasets = rack_init.datasets;
         let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
-        let certificates = rack_init.certificates;
         let internal_dns = rack_init.internal_dns;
         let external_dns = rack_init.external_dns;
 
         #[derive(Debug)]
         enum RackInitError {
             AddingIp(Error),
-            ServiceInsert { err: AsyncInsertError, sled_id: Uuid, svc_id: Uuid },
+            ServiceInsert(Error),
             DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
             RackUpdate(PoolError),
             DnsSerialization(Error),
             Silo(Error),
-            Certificate(nexus_db_model::CertificateError),
             RoleAssignment(Error),
         }
         type TxnError = TransactionError<RackInitError>;
@@ -190,6 +181,8 @@ impl DataStore {
 
                 // Allocate records for all services.
                 for service in services {
+                    use internal_params::ServiceKind;
+
                     let service_db = db::model::Service::new(
                         service.service_id,
                         service.sled_id,
@@ -197,62 +190,52 @@ impl DataStore {
                         service.address,
                         service.kind.into(),
                     );
+                    self.service_upsert_conn(&conn, service_db)
+                        .await
+                        .map_err(|e| {
+                            TxnError::CustomError(RackInitError::ServiceInsert(e))
+                        })?;
 
-                    use db::schema::service::dsl;
-                    let sled_id = service.sled_id;
-                    <Sled as DatastoreCollection<Service>>::insert_resource(
-                        sled_id,
-                        diesel::insert_into(dsl::service)
-                            .values(service_db.clone())
-                            .on_conflict(dsl::id)
-                            .do_update()
-                            .set((
-                                dsl::time_modified.eq(Utc::now()),
-                                dsl::sled_id.eq(excluded(dsl::sled_id)),
-                                dsl::ip.eq(excluded(dsl::ip)),
-                                dsl::kind.eq(excluded(dsl::kind)),
-                            )),
-                    )
-                    .insert_and_get_result_async(&conn)
-                    .await
-                    .map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to insert service");
-                        TxnError::CustomError(RackInitError::ServiceInsert {
-                            err,
-                            sled_id,
-                            svc_id: service.service_id,
-                        })
-                    })?;
-
-                    if let internal_params::ServiceKind::Nexus { external_address } = service.kind {
-                        // Allocate the explicit IP address that is currently
-                        // in-use by this Nexus service.
-                        let ip_id = Uuid::new_v4();
-                        let data = IncompleteExternalIp::for_service_explicit(
-                            ip_id,
-                            service_pool.id(),
-                            external_address
-                        );
+                    // Record explicit IP allocation if service has one
+                    let service_ip = match service.kind {
+                        ServiceKind::ExternalDns { external_address }
+                        | ServiceKind::Nexus { external_address } => {
+                            let name = service.kind.to_string().replace('_', "-").parse().unwrap();
+                            let db_ip = IncompleteExternalIp::for_service_explicit(
+                                Uuid::new_v4(),
+                                &db::model::Name(name),
+                                &format!("{}", service.kind),
+                                service.service_id,
+                                service_pool.id(),
+                                external_address,
+                            );
+                            Some((external_address, db_ip))
+                        }
+                        ServiceKind::Ntp { snat_cfg: Some(snat) } => {
+                            let db_ip = IncompleteExternalIp::for_service_explicit_snat(
+                                Uuid::new_v4(),
+                                service.service_id,
+                                service_pool.id(),
+                                snat.ip,
+                                (snat.first_port, snat.last_port),
+                            );
+                            Some((snat.ip, db_ip))
+                        }
+                        _ => None,
+                    };
+                    if let Some((external_ip, db_ip)) = service_ip {
                         let allocated_ip = Self::allocate_external_ip_on_connection(
                             &conn,
-                            data
+                            db_ip,
                         ).await.map_err(|err| {
-                            warn!(log, "Initializing Rack: Failed to allocate IP address");
+                            warn!(
+                                log,
+                                "Initializing Rack: Failed to allocate IP address for {}",
+                                service.kind,
+                            );
                             TxnError::CustomError(RackInitError::AddingIp(err))
                         })?;
-                        assert_eq!(allocated_ip.ip.ip(), external_address);
-
-                        // Add a service record for Nexus.
-                        let nexus_service = NexusService::new(service.service_id, allocated_ip.id);
-                        use db::schema::nexus_service::dsl;
-                        diesel::insert_into(dsl::nexus_service)
-                            .values(nexus_service)
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                warn!(log, "Initializing Rack: Failed to insert Nexus Service record");
-                                e
-                            })?;
+                        assert_eq!(allocated_ip.ip.ip(), external_ip);
                     }
                 }
                 info!(log, "Inserted services");
@@ -311,29 +294,6 @@ impl DataStore {
                     .map_err(RackInitError::Silo)
                     .map_err(TxnError::CustomError)?;
                 info!(log, "Created recovery silo");
-
-                // Create certificates in that Silo.
-                let certificates = certificates
-                    .into_iter()
-                    .map(|c| {
-                        Certificate::new(
-                            db_silo.id(),
-                            Uuid::new_v4(),
-                            ServiceKind::Nexus,
-                            c
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(RackInitError::Certificate)
-                    .map_err(TxnError::CustomError)?;
-                {
-                    use db::schema::certificate::dsl;
-                    diesel::insert_into(dsl::certificate)
-                        .values(certificates)
-                        .execute_async(&conn)
-                        .await?;
-                }
-                info!(log, "Inserted certificates");
 
                 // Create the first user in the initial Recovery Silo
                 let silo_user_id = Uuid::new_v4();
@@ -466,26 +426,10 @@ impl DataStore {
                         public_error_from_diesel_pool(e, ErrorHandler::Server)
                     }
                 },
-                TxnError::CustomError(RackInitError::ServiceInsert {
-                    err,
-                    sled_id,
-                    svc_id,
-                }) => match err {
-                    AsyncInsertError::CollectionNotFound => {
-                        Error::ObjectNotFound {
-                            type_name: ResourceType::Sled,
-                            lookup_type: LookupType::ById(sled_id),
-                        }
-                    }
-                    AsyncInsertError::DatabaseError(e) => {
-                        public_error_from_diesel_pool(
-                            e,
-                            ErrorHandler::Conflict(
-                                ResourceType::Service,
-                                &svc_id.to_string(),
-                            ),
-                        )
-                    }
+                TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
+                    Error::internal_error(&format!(
+                        "failed to insert Service record: {:#}", err
+                    ))
                 },
                 TxnError::CustomError(RackInitError::RackUpdate(err)) => {
                     public_error_from_diesel_pool(
@@ -504,11 +448,6 @@ impl DataStore {
                 TxnError::CustomError(RackInitError::Silo(err)) => {
                     Error::internal_error(&format!(
                         "failed to create recovery Silo: {:#}", err
-                    ))
-                },
-                TxnError::CustomError(RackInitError::Certificate(err)) => {
-                    Error::internal_error(&format!(
-                        "failed to create certificates: {:#}", err
                     ))
                 },
                 TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
@@ -571,18 +510,20 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
         use crate::db::schema::external_ip::dsl as extip_dsl;
-        use crate::db::schema::nexus_service::dsl as nexus_dsl;
+        use crate::db::schema::service::dsl as service_dsl;
         type TxnError = TransactionError<()>;
         self.pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
-                // This is the rare case where we want to allow table scans.
-                // There must not be enough Nexus instances for this to be a
-                // problem.  If there were, we couldn't fit them in DNS anyway.
-                let sql = crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-                conn.batch_execute_async(sql).await?;
                 Ok(extip_dsl::external_ip
-                    .inner_join(nexus_dsl::nexus_service)
+                    .inner_join(
+                        service_dsl::service.on(service_dsl::id
+                            .eq(extip_dsl::parent_id.assume_not_null())),
+                    )
+                    .filter(extip_dsl::parent_id.is_not_null())
+                    .filter(extip_dsl::time_deleted.is_null())
+                    .filter(extip_dsl::is_service)
+                    .filter(service_dsl::kind.eq(db::model::ServiceKind::Nexus))
                     .select(ExternalIp::as_select())
                     .get_results_async(&conn)
                     .await?
@@ -611,7 +552,9 @@ mod test {
     use crate::db::model::ExternalIp;
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
+    use crate::db::model::Service;
     use crate::db::model::ServiceKind;
+    use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
     use nexus_db_model::{DnsGroup, InitialDnsGroup};
@@ -620,6 +563,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -634,7 +578,6 @@ mod test {
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
-                certificates: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
                     internal_dns::DNS_ZONE,
@@ -657,6 +600,7 @@ mod test {
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
+                    tls_certificates: vec![],
                 },
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password
@@ -833,32 +777,88 @@ mod test {
     }
 
     fn_to_get_all!(service, Service);
-    fn_to_get_all!(nexus_service, NexusService);
     fn_to_get_all!(external_ip, ExternalIp);
     fn_to_get_all!(ip_pool_range, IpPoolRange);
     fn_to_get_all!(dataset, Dataset);
 
     #[tokio::test]
-    async fn rack_set_initialized_with_nexus_service() {
-        let logctx =
-            dev::test_setup_log("rack_set_initialized_with_nexus_service");
+    async fn rack_set_initialized_with_services() {
+        let logctx = dev::test_setup_log("rack_set_initialized_with_services");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled = create_test_sled(&datastore).await;
+        let sled1 = create_test_sled(&datastore).await;
+        let sled2 = create_test_sled(&datastore).await;
+        let sled3 = create_test_sled(&datastore).await;
 
-        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let service_ip_pool_ranges = vec![IpRange::try_from((
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(1, 2, 3, 6),
+        ))
+        .unwrap()];
+
+        let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let external_dns_id = Uuid::new_v4();
+        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_id = Uuid::new_v4();
-        let services = vec![internal_params::ServicePutRequest {
-            service_id: nexus_id,
-            sled_id: sled.id(),
-            zone_id: Some(nexus_id),
-            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-            kind: internal_params::ServiceKind::Nexus {
-                external_address: nexus_ip,
+        let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp1_id = Uuid::new_v4();
+        let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp2_id = Uuid::new_v4();
+        let ntp3_id = Uuid::new_v4();
+        let services = vec![
+            internal_params::ServicePutRequest {
+                service_id: external_dns_id,
+                sled_id: sled1.id(),
+                zone_id: Some(external_dns_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
+                kind: internal_params::ServiceKind::ExternalDns {
+                    external_address: external_dns_ip,
+                },
             },
-        }];
-        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+            internal_params::ServicePutRequest {
+                service_id: ntp1_id,
+                sled_id: sled1.id(),
+                zone_id: Some(ntp1_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
+                kind: internal_params::ServiceKind::Ntp {
+                    snat_cfg: Some(SourceNatConfig {
+                        ip: ntp1_ip,
+                        first_port: 16384,
+                        last_port: 32767,
+                    }),
+                },
+            },
+            internal_params::ServicePutRequest {
+                service_id: nexus_id,
+                sled_id: sled2.id(),
+                zone_id: Some(nexus_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
+                kind: internal_params::ServiceKind::Nexus {
+                    external_address: nexus_ip,
+                },
+            },
+            internal_params::ServicePutRequest {
+                service_id: ntp2_id,
+                sled_id: sled2.id(),
+                zone_id: Some(ntp2_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
+                kind: internal_params::ServiceKind::Ntp {
+                    snat_cfg: Some(SourceNatConfig {
+                        ip: ntp2_ip,
+                        first_port: 0,
+                        last_port: 16383,
+                    }),
+                },
+            },
+            internal_params::ServicePutRequest {
+                service_id: ntp3_id,
+                sled_id: sled3.id(),
+                zone_id: Some(ntp3_id),
+                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
+                kind: internal_params::ServiceKind::Ntp { snat_cfg: None },
+            },
+        ];
 
         let rack = datastore
             .rack_set_initialized(
@@ -876,32 +876,94 @@ mod test {
         assert!(rack.initialized);
 
         let observed_services = get_all_services(&datastore).await;
-        let observed_nexus_services = get_all_nexus_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
-        // We should only see the one nexus we inserted earlier
-        assert_eq!(observed_services.len(), 1);
-        assert_eq!(observed_services[0].sled_id, sled.id());
-        assert_eq!(observed_services[0].kind, ServiceKind::Nexus);
-        assert_eq!(*observed_services[0].ip, Ipv6Addr::LOCALHOST);
-        assert_eq!(*observed_services[0].port, 123);
+        // We should see all the services we initialized
+        assert_eq!(observed_services.len(), 5);
+        let dns_service = observed_services
+            .iter()
+            .find(|s| s.id() == external_dns_id)
+            .unwrap();
+        let nexus_service =
+            observed_services.iter().find(|s| s.id() == nexus_id).unwrap();
+        let ntp1_service =
+            observed_services.iter().find(|s| s.id() == ntp1_id).unwrap();
+        let ntp2_service =
+            observed_services.iter().find(|s| s.id() == ntp2_id).unwrap();
+        let ntp3_service =
+            observed_services.iter().find(|s| s.id() == ntp3_id).unwrap();
 
-        // It should have a corresponding "Nexus service record"
-        assert_eq!(observed_nexus_services.len(), 1);
-        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
+        assert_eq!(dns_service.sled_id, sled1.id());
+        assert_eq!(dns_service.kind, ServiceKind::ExternalDns);
+        assert_eq!(*dns_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*dns_service.port, 123);
 
-        // We should also see the single external IP allocated for this nexus
-        // interface.
+        assert_eq!(nexus_service.sled_id, sled2.id());
+        assert_eq!(nexus_service.kind, ServiceKind::Nexus);
+        assert_eq!(*nexus_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*nexus_service.port, 456);
+
+        assert_eq!(ntp1_service.sled_id, sled1.id());
+        assert_eq!(ntp1_service.kind, ServiceKind::Ntp);
+        assert_eq!(*ntp1_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*ntp1_service.port, 9090);
+
+        assert_eq!(ntp2_service.sled_id, sled2.id());
+        assert_eq!(ntp2_service.kind, ServiceKind::Ntp);
+        assert_eq!(*ntp2_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*ntp2_service.port, 9090);
+
+        assert_eq!(ntp3_service.sled_id, sled3.id());
+        assert_eq!(ntp3_service.kind, ServiceKind::Ntp);
+        assert_eq!(*ntp3_service.ip, Ipv6Addr::LOCALHOST);
+        assert_eq!(*ntp3_service.port, 9090);
+
+        // We should also see the single external IP allocated for each service
+        // save for the non-boundary NTP service.
         let observed_external_ips = get_all_external_ips(&datastore).await;
-        assert_eq!(observed_external_ips.len(), 1);
-        assert_eq!(
-            observed_external_ips[0].id,
-            observed_nexus_services[0].external_ip_id
-        );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
+        assert_eq!(observed_external_ips.len(), 4);
+        let dns_external_ip = observed_external_ips
+            .iter()
+            .find(|e| e.parent_id == Some(external_dns_id))
+            .unwrap();
+        let nexus_external_ip = observed_external_ips
+            .iter()
+            .find(|e| e.parent_id == Some(nexus_id))
+            .unwrap();
+        let ntp1_external_ip = observed_external_ips
+            .iter()
+            .find(|e| e.parent_id == Some(ntp1_id))
+            .unwrap();
+        let ntp2_external_ip = observed_external_ips
+            .iter()
+            .find(|e| e.parent_id == Some(ntp2_id))
+            .unwrap();
+        assert!(!observed_external_ips
+            .iter()
+            .any(|e| e.parent_id == Some(ntp3_id)));
 
-        // Furthermore, we should be able to see that this IP address has been
-        // allocated as a part of the service IP pool.
+        assert_eq!(dns_external_ip.parent_id, Some(dns_service.id()));
+        assert!(dns_external_ip.is_service);
+        assert_eq!(dns_external_ip.kind, IpKind::Floating);
+
+        assert_eq!(nexus_external_ip.parent_id, Some(nexus_service.id()));
+        assert!(nexus_external_ip.is_service);
+        assert_eq!(nexus_external_ip.kind, IpKind::Floating);
+
+        assert_eq!(ntp1_external_ip.parent_id, Some(ntp1_service.id()));
+        assert!(ntp1_external_ip.is_service);
+        assert_eq!(ntp1_external_ip.kind, IpKind::SNat);
+        assert_eq!(ntp1_external_ip.first_port.0, 16384);
+        assert_eq!(ntp1_external_ip.last_port.0, 32767);
+
+        assert_eq!(ntp2_external_ip.parent_id, Some(ntp2_service.id()));
+        assert!(ntp2_external_ip.is_service);
+        assert_eq!(ntp2_external_ip.kind, IpKind::SNat);
+        assert_eq!(ntp2_external_ip.first_port.0, 0);
+        assert_eq!(ntp2_external_ip.last_port.0, 16383);
+
+        // Furthermore, we should be able to see that these IP addresses have
+        // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
         assert!(svc_pool.internal);
@@ -910,14 +972,34 @@ mod test {
         assert_eq!(observed_ip_pool_ranges.len(), 1);
         assert_eq!(observed_ip_pool_ranges[0].ip_pool_id, svc_pool.id());
 
-        // Verify the allocated external IP
-        assert_eq!(observed_external_ips[0].ip_pool_id, svc_pool.id());
+        // Verify the allocated external IPs
+        assert_eq!(dns_external_ip.ip_pool_id, svc_pool.id());
         assert_eq!(
-            observed_external_ips[0].ip_pool_range_id,
+            dns_external_ip.ip_pool_range_id,
             observed_ip_pool_ranges[0].id
         );
-        assert_eq!(observed_external_ips[0].kind, IpKind::Service);
-        assert_eq!(observed_external_ips[0].ip.ip(), nexus_ip,);
+        assert_eq!(dns_external_ip.ip.ip(), external_dns_ip);
+
+        assert_eq!(nexus_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(
+            nexus_external_ip.ip_pool_range_id,
+            observed_ip_pool_ranges[0].id
+        );
+        assert_eq!(nexus_external_ip.ip.ip(), nexus_ip);
+
+        assert_eq!(ntp1_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(
+            ntp1_external_ip.ip_pool_range_id,
+            observed_ip_pool_ranges[0].id
+        );
+        assert_eq!(ntp1_external_ip.ip.ip(), ntp1_ip);
+
+        assert_eq!(ntp2_external_ip.ip_pool_id, svc_pool.id());
+        assert_eq!(
+            ntp2_external_ip.ip_pool_range_id,
+            observed_ip_pool_ranges[0].id
+        );
+        assert_eq!(ntp2_external_ip.ip.ip(), ntp2_ip);
 
         assert!(observed_datasets.is_empty());
 
@@ -1009,8 +1091,6 @@ mod test {
         assert!(rack.initialized);
 
         let mut observed_services = get_all_services(&datastore).await;
-        let mut observed_nexus_services =
-            get_all_nexus_services(&datastore).await;
         let observed_datasets = get_all_datasets(&datastore).await;
 
         // We should see both of the Nexus services we provisioned.
@@ -1026,27 +1106,22 @@ mod test {
         assert_eq!(*observed_services[0].port, services[0].address.port());
         assert_eq!(*observed_services[1].port, services[1].address.port());
 
-        // It should have a corresponding "Nexus service record"
-        assert_eq!(observed_nexus_services.len(), 2);
-        observed_nexus_services
-            .sort_by(|a, b| a.id.partial_cmp(&b.id).unwrap());
-        assert_eq!(observed_services[0].id(), observed_nexus_services[0].id);
-        assert_eq!(observed_services[1].id(), observed_nexus_services[1].id);
-
         // We should see both IPs allocated for these services.
-        let observed_external_ips: HashMap<_, _> =
-            get_all_external_ips(&datastore)
-                .await
-                .into_iter()
-                .map(|ip| (ip.id, ip))
-                .collect();
+        let observed_external_ips = get_all_external_ips(&datastore).await;
+        for external_ip in &observed_external_ips {
+            assert!(external_ip.is_service);
+            assert!(external_ip.parent_id.is_some());
+            assert_eq!(external_ip.kind, IpKind::Floating);
+        }
+        let observed_external_ips: HashMap<_, _> = observed_external_ips
+            .into_iter()
+            .map(|ip| (ip.parent_id.unwrap(), ip))
+            .collect();
         assert_eq!(observed_external_ips.len(), 2);
 
-        // The address referenced by the "NexusService" should match the input.
+        // The address allocated for the service should match the input.
         assert_eq!(
-            observed_external_ips[&observed_nexus_services[0].external_ip_id]
-                .ip
-                .ip(),
+            observed_external_ips[&observed_services[0].id()].ip.ip(),
             if let internal_params::ServiceKind::Nexus { external_address } =
                 services[0].kind
             {
@@ -1056,9 +1131,7 @@ mod test {
             }
         );
         assert_eq!(
-            observed_external_ips[&observed_nexus_services[1].external_ip_id]
-                .ip
-                .ip(),
+            observed_external_ips[&observed_services[1].id()].ip.ip(),
             if let internal_params::ServiceKind::Nexus { external_address } =
                 services[1].kind
             {
@@ -1150,7 +1223,6 @@ mod test {
         );
 
         assert!(get_all_services(&datastore).await.is_empty());
-        assert!(get_all_nexus_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
@@ -1169,31 +1241,31 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         // Request two services which happen to be using the same IP address.
-        let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
-        let nexus_id1 = Uuid::new_v4();
-        let nexus_id2 = Uuid::new_v4();
+        let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let external_dns_id = Uuid::new_v4();
+        let nexus_id = Uuid::new_v4();
 
         let services = vec![
             internal_params::ServicePutRequest {
-                service_id: nexus_id1,
+                service_id: external_dns_id,
                 sled_id: sled.id(),
-                zone_id: Some(nexus_id1),
+                zone_id: Some(external_dns_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-                kind: internal_params::ServiceKind::Nexus {
-                    external_address: nexus_ip,
+                kind: internal_params::ServiceKind::ExternalDns {
+                    external_address: ip,
                 },
             },
             internal_params::ServicePutRequest {
-                service_id: nexus_id2,
+                service_id: nexus_id,
                 sled_id: sled.id(),
-                zone_id: Some(nexus_id2),
+                zone_id: Some(nexus_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
-                    external_address: nexus_ip,
+                    external_address: ip,
                 },
             },
         ];
-        let service_ip_pool_ranges = vec![IpRange::from(nexus_ip)];
+        let service_ip_pool_ranges = vec![IpRange::from(ip)];
 
         let result = datastore
             .rack_set_initialized(
@@ -1213,7 +1285,6 @@ mod test {
         );
 
         assert!(get_all_services(&datastore).await.is_empty());
-        assert!(get_all_nexus_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 

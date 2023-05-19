@@ -290,6 +290,10 @@ pub struct SiloCreate {
     /// group_attribute_name must be set for users to be considered part of a
     /// group. See `SamlIdentityProviderCreate` for more information.
     pub admin_group_name: Option<String>,
+
+    /// Initial TLS certificates to be used for the new Silo's console and API
+    /// endpoints.  These should be valid for the Silo's DNS name(s).
+    pub tls_certificates: Vec<CertificateCreate>,
 }
 
 /// Create-time parameters for a `User`
@@ -969,9 +973,17 @@ pub struct InstanceSerialConsoleRequest {
     /// Maximum number of bytes of buffered serial console contents to return. If the requested
     /// range runs to the end of the available buffer, the data returned will be shorter than
     /// `max_bytes`.
-    /// This parameter is only useful for the non-streaming GET request for serial console data,
-    /// and *ignored* by the streaming websocket endpoint.
     pub max_bytes: Option<u64>,
+}
+
+/// Forwarded to a propolis server to request the contents of an Instance's serial console.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct InstanceSerialConsoleStreamRequest {
+    /// Name or ID of the project, only required if `instance` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Character index in the serial buffer from which to read, counting *backward* from the most
+    /// recently buffered data retrieved from the instance.
+    pub most_recent: Option<u64>,
 }
 
 /// Contents of an Instance's serial console buffer.
