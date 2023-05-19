@@ -1335,7 +1335,6 @@ impl ServiceManager {
                                 // This has to be large enough to support:
                                 // - bulk writes to disks
                                 request_body_max_bytes: 8192 * 1024,
-                                ..Default::default()
                             },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
@@ -1348,7 +1347,6 @@ impl ServiceManager {
                             // certificates provided by the customer during rack
                             // setup.
                             request_body_max_bytes: 10 * 1024 * 1024,
-                            ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             sled_info.underlay_address,

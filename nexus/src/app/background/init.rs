@@ -245,7 +245,6 @@ pub mod test {
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 8 * 1024,
-                ..Default::default()
             },
         )
         .await

@@ -382,13 +382,13 @@ async fn test_silo_certificates() {
                 DNS_ZONE_EXTERNAL_TESTING
             );
             let chain = CertificateChain::with_params(
-                rcgen::CertificateParams::new(vec![dns_name.clone().into()]),
+                rcgen::CertificateParams::new(vec![dns_name.clone()]),
             );
             let cert_name =
                 format!("cert-{}", silo_name.as_str()).parse().unwrap();
             let cert = internal_params::Certificate {
-                cert: chain.cert_chain_as_pem().clone(),
-                key: chain.end_cert_private_key_as_pem().clone(),
+                cert: chain.cert_chain_as_pem(),
+                key: chain.end_cert_private_key_as_pem(),
             };
             SiloCert { silo_name, dns_name, cert_name, cert }
         }

@@ -402,7 +402,6 @@ pub async fn start_sled_agent(
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -585,7 +584,6 @@ pub async fn start_dns_server(
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
-            ..Default::default()
         },
     )
     .await

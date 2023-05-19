@@ -800,7 +800,6 @@ impl PantryServer {
                 // This has to be large enough to support:
                 // - bulk writes into disks
                 request_body_max_bytes: 8192 * 1024,
-                ..Default::default()
             },
             super::http_entrypoints_pantry::api(),
             pantry.clone(),

@@ -98,7 +98,6 @@ async fn do_run() -> Result<(), CmdError> {
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
             request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
         },
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
         storage: ConfigStorage {
