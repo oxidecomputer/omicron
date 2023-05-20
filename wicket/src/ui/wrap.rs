@@ -22,17 +22,17 @@ use textwrap::{
 };
 use tui::text::{Span, Spans, Text};
 
-pub(crate) struct Options<'a> {
+pub struct Options<'a> {
     /// The width in columns at which the text will be wrapped.
-    pub(crate) width: usize,
+    pub width: usize,
     /// Indentation used for the first line of output.
-    pub(crate) initial_indent: Span<'a>,
+    pub initial_indent: Span<'a>,
     /// Indentation used for subsequent lines of output.
-    pub(crate) subsequent_indent: Span<'a>,
+    pub subsequent_indent: Span<'a>,
     /// Allow long words to be broken if they cannot fit on a line.
     /// When set to `false`, some lines may be longer than
     /// `self.width`.
-    pub(crate) break_words: bool,
+    pub break_words: bool,
 }
 
 pub(crate) fn wrap_text<'a>(

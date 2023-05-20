@@ -91,6 +91,18 @@ impl Popup<'_> {
     pub fn max_height(full_screen_height: u16) -> u16 {
         (full_screen_height as u32 * 4 / 5) as u16
     }
+
+    /// Returns the wrap options that should be used in most cases for popups.
+    pub fn default_wrap_options(
+        full_screen_width: u16,
+    ) -> crate::ui::wrap::Options<'static> {
+        crate::ui::wrap::Options {
+            width: Popup::max_content_width(full_screen_width) as usize,
+            initial_indent: Span::raw(""),
+            subsequent_indent: Span::raw(""),
+            break_words: true,
+        }
+    }
 }
 
 impl Widget for Popup<'_> {

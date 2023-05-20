@@ -10,6 +10,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
+use crate::state::ComponentId;
+
 /// All commands handled by [`crate::Control::on`].
 ///
 /// These are mostly user input commands from the keyboard,
@@ -83,6 +85,12 @@ pub enum Cmd {
     /// animations.
     Tick,
 
+    /// Display a popup.
+    ///
+    /// This isn't a key shortcut (it is typically driven by the system) but
+    /// needs to be handled by screens the same way keys are.
+    ShowPopup(ShowPopupCmd),
+
     /// Switch to the next pane.
     NextPane,
 
@@ -91,6 +99,20 @@ pub enum Cmd {
 
     /// Write the current snapshot to a file
     DumpSnapshot,
+}
+
+/// A command to display a popup.
+///
+/// Part of [`Cmd::ShowPopup`].
+///
+/// This isn't a key shortcut (it is typically driven by the system) but
+/// needs to be handled by screens the same way keys are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ShowPopupCmd {
+    StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
 }
 
 /// We allow certain multi-key sequences, and explicitly enumerate the starting

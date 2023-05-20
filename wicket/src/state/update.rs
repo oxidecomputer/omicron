@@ -37,25 +37,28 @@ impl RackUpdateState {
                 .map(|id| match id {
                     ComponentId::Sled(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                            UpdateComponent::Host,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::Sp,
+                                UpdateComponent::Host,
+                            ],
+                        ),
                     ),
                     ComponentId::Switch(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                        ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
-                        UpdateItem::new(vec![
-                            UpdateComponent::Rot,
-                            UpdateComponent::Sp,
-                        ]),
+                        UpdateItem::new(
+                            *id,
+                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                        ),
                     ),
                 })
                 .collect(),
@@ -71,6 +74,9 @@ impl RackUpdateState {
         } else {
             match &self.items[&component].state {
                 UpdateItemStateImpl::NotStarted => UpdateItemState::NotStarted,
+                UpdateItemStateImpl::UpdateStarted => {
+                    UpdateItemState::UpdateStarted
+                }
                 UpdateItemStateImpl::RunningOrCompleted {
                     event_report,
                     ..
@@ -113,9 +119,9 @@ impl RackUpdateState {
         }
 
         // Reset all component IDs that weren't updated.
-        for (id, item_state) in &mut self.items {
+        for (id, item) in &mut self.items {
             if !updated_component_ids.contains(id) {
-                item_state.reset();
+                item.reset();
             }
         }
     }
@@ -130,6 +136,10 @@ pub enum UpdateItemState<'a> {
     /// The update repository has been uploaded but the update hasn't been
     /// started yet.
     NotStarted,
+
+    /// The update has been started, but event reports have not been received
+    /// yet.
+    UpdateStarted,
 
     /// The update is running, or has completed or failed.
     RunningOrCompleted {
@@ -146,13 +156,21 @@ pub enum UpdateItemState<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UpdateItem {
     // A list of all components within this ID.
+    component_id: ComponentId,
     components: Vec<UpdateComponent>,
     state: UpdateItemStateImpl,
 }
 
 impl UpdateItem {
-    pub fn new(components: Vec<UpdateComponent>) -> Self {
-        Self { components, state: UpdateItemStateImpl::NotStarted }
+    pub fn new(
+        component_id: ComponentId,
+        components: Vec<UpdateComponent>,
+    ) -> Self {
+        Self {
+            component_id,
+            components,
+            state: UpdateItemStateImpl::NotStarted,
+        }
     }
 
     pub fn is_running(&self) -> bool {
@@ -161,16 +179,21 @@ impl UpdateItem {
 
     pub fn event_report(&self) -> Option<&EventReport> {
         match &self.state {
-            UpdateItemStateImpl::NotStarted => None,
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::UpdateStarted => None,
             UpdateItemStateImpl::RunningOrCompleted {
                 event_report, ..
             } => Some(event_report),
         }
     }
 
+    /// Resets the state to "not started". This is called when:
+    ///
+    /// * A new TUF repo is uploaded.
+    /// * wicketd stops returning event reports for this component, for any
+    ///   other reason.
     fn reset(&mut self) {
         self.state = UpdateItemStateImpl::NotStarted;
-        return;
     }
 
     fn update(&mut self, new_event_report: EventReport) {
@@ -180,7 +203,8 @@ impl UpdateItem {
         }
 
         match &mut self.state {
-            state @ UpdateItemStateImpl::NotStarted => {
+            state @ UpdateItemStateImpl::NotStarted
+            | state @ UpdateItemStateImpl::UpdateStarted => {
                 // Transition to the running state.
                 let components = self
                     .components
@@ -206,7 +230,8 @@ impl UpdateItem {
                 event_report,
                 ..
             } => (components, &*event_report),
-            UpdateItemStateImpl::NotStarted => {
+            UpdateItemStateImpl::NotStarted
+            | UpdateItemStateImpl::UpdateStarted => {
                 unreachable!(
                     "above block means it's always in the Running state"
                 )
@@ -267,19 +292,23 @@ impl UpdateItem {
     pub fn iter(
         &self,
     ) -> impl Iterator<Item = (UpdateComponent, UpdateState)> + '_ {
-        self.components.iter().map(|component| match &self.state {
-            UpdateItemStateImpl::NotStarted => {
-                (*component, UpdateState::NotStarted)
-            }
-            UpdateItemStateImpl::RunningOrCompleted { components, .. } => {
-                (*component, UpdateState::Running(components[component]))
-            }
+        self.components.iter().map(|component| {
+            let state = match &self.state {
+                UpdateItemStateImpl::NotStarted => UpdateState::NotStarted,
+                UpdateItemStateImpl::UpdateStarted => UpdateState::Starting,
+                UpdateItemStateImpl::RunningOrCompleted {
+                    components, ..
+                } => UpdateState::Running(components[component]),
+            };
+            (*component, state)
         })
     }
 }
 
 pub enum UpdateState {
     NotStarted,
+    Starting,
+    FailedToStart,
     Running(UpdateRunningState),
 }
 
@@ -287,6 +316,8 @@ impl Display for UpdateState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotStarted => write!(f, "NOT STARTED"),
+            Self::Starting => write!(f, "STARTING"),
+            Self::FailedToStart => write!(f, "FAILED TO START"),
             Self::Running(state) => write!(f, "{state}"),
         }
     }
@@ -295,7 +326,10 @@ impl Display for UpdateState {
 impl UpdateState {
     pub fn style(&self) -> Style {
         match self {
-            UpdateState::NotStarted => style::deselected(),
+            UpdateState::NotStarted | UpdateState::Starting => {
+                style::deselected()
+            }
+            UpdateState::FailedToStart => style::failed_update(),
             UpdateState::Running(state) => state.style(),
         }
     }
@@ -304,6 +338,7 @@ impl UpdateState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 enum UpdateItemStateImpl {
     NotStarted,
+    UpdateStarted,
     RunningOrCompleted {
         event_report: EventReport,
         components: BTreeMap<UpdateComponent, UpdateRunningState>,
