@@ -3091,21 +3091,30 @@
             "description": "Simulate an issue where the start operation times out.",
             "type": "object",
             "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "secs": {
+                    "description": "The number of seconds to time out after.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "secs"
+                ]
+              },
               "kind": {
                 "type": "string",
                 "enum": [
                   "start_timeout"
                 ]
-              },
-              "secs": {
-                "type": "integer",
-                "format": "uint64",
-                "minimum": 0
               }
             },
             "required": [
-              "kind",
-              "secs"
+              "content",
+              "kind"
             ]
           }
         ]

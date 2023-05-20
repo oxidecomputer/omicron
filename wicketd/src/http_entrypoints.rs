@@ -154,13 +154,16 @@ pub(crate) struct StartUpdateOptions {
 }
 
 #[derive(Copy, Clone, Debug, JsonSchema, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case", tag = "kind", content = "content")]
 pub(crate) enum UpdateTestError {
     /// Simulate an error where an update fails to start.
     StartFailed,
 
     /// Simulate an issue where the start operation times out.
-    StartTimeout { secs: u64 },
+    StartTimeout {
+        /// The number of seconds to time out after.
+        secs: u64,
+    },
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize)]
