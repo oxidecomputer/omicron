@@ -16,4 +16,8 @@ pub enum TrustQuorumError {
     // Failed to encrypt something
     #[error("Failed to encrypt")]
     FailedToEncrypt,
+
+    // Failed to decrypt something
+    #[error("Failed to encrypt")]
+    FailedToDecrypt,
 }

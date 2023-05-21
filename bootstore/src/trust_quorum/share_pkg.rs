@@ -118,11 +118,13 @@ pub fn create_pkgs(
     let threshold = n / 2 + 1;
     let epoch = 0;
     // We always generate 256 shares to allow new sleds to come online
-    let total_shares = 256;
-    let shares_per_sled = 256 / n;
+    let total_shares = 255;
+    let shares_per_sled = 255 / n;
     let shares = rack_secret.split(threshold, total_shares)?;
     let share_digests = share_digests(&shares);
-    let (cipher, salt) = derive_encryption_key(&rack_uuid, &rack_secret);
+    let mut salt = [0u8; 32];
+    OsRng.fill_bytes(&mut salt);
+    let cipher = derive_encryption_key(&rack_uuid, &rack_secret, &salt);
     let mut pkgs = Vec::with_capacity(n);
     for i in 0..n {
         // Each pkg gets a distinct subset of shares
@@ -175,13 +177,12 @@ fn share_digests(shares: &Vec<Vec<u8>>) -> Vec<Sha3_256Digest> {
         .collect()
 }
 
-// Return a (cipher, salt) pair
+// Return a cipher
 fn derive_encryption_key(
     rack_uuid: &Uuid,
     rack_secret: &RackSecret,
-) -> (ChaCha20Poly1305, [u8; 32]) {
-    let mut salt = [0u8; 32];
-    OsRng.fill_bytes(&mut salt);
+    salt: &[u8; 32],
+) -> ChaCha20Poly1305 {
     let prk =
         Hkdf::<Sha3_256>::new(Some(&salt[..]), rack_secret.as_ref().as_bytes());
 
@@ -192,8 +193,24 @@ fn derive_encryption_key(
         key.as_mut(),
     )
     .unwrap();
-    let cipher = ChaCha20Poly1305::new(Key::from_slice(key.as_ref()));
-    (cipher, salt)
+    ChaCha20Poly1305::new(Key::from_slice(key.as_ref()))
+}
+
+// Return a set of decrypted shares, given a cipher and nonce
+fn decrypt_shares(
+    nonce: [u8; 12],
+    cipher: &ChaCha20Poly1305,
+    ciphertext: &[u8],
+) -> Result<Vec<Vec<u8>>, TrustQuorumError> {
+    // Each share is 33 bytes (one identifier (x-index) byte, and one 32-byte
+    // point on the curve.
+    let share_size = 33;
+    let plaintext = Zeroizing::new(
+        cipher
+            .decrypt((&nonce).into(), ciphertext)
+            .map_err(|_| TrustQuorumError::FailedToDecrypt)?,
+    );
+    Ok(plaintext.chunks(33).map(|share| share.into()).collect())
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement
@@ -224,5 +241,67 @@ impl fmt::Debug for LearnedSharePkgV0 {
             .field("share", &"Share")
             .field("share_digests", &self.share_digests)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrecy::ExposeSecret;
+
+    #[test]
+    fn create_packages() {
+        let uuid = Uuid::new_v4();
+        let num_sleds = 4;
+        let packages = create_pkgs(uuid, 4).unwrap();
+
+        let mut threshold_of_shares = vec![];
+        // Verify basic properties of each pkg
+        for pkg in packages.expose_secret() {
+            assert_eq!(uuid, pkg.rack_uuid);
+            assert_eq!(0, pkg.epoch);
+            assert_eq!(3, pkg.threshold); // n/2 + 1
+            assert_eq!(255, pkg.share_digests.len());
+            threshold_of_shares.push(pkg.share.clone());
+        }
+
+        let rack_secret =
+            RackSecret::combine_shares(&threshold_of_shares).unwrap();
+
+        let salt = packages.expose_secret()[0].salt;
+        let cipher = derive_encryption_key(&uuid, &rack_secret, &salt);
+
+        // We divide all shares among each package, and leave one of them
+        // unencrypted
+        let num_encrypted_shares_per_pkg = 255 / 4 - 1;
+
+        // Decrypt shares for each package
+        let mut decrypted_shares: Vec<Vec<u8>> = vec![];
+        for pkg in packages.expose_secret() {
+            let shares =
+                decrypt_shares(pkg.nonce, &cipher, &pkg.encrypted_shares)
+                    .unwrap();
+            assert_eq!(num_encrypted_shares_per_pkg, shares.len());
+            decrypted_shares.push(pkg.share.clone());
+            decrypted_shares.extend_from_slice(&shares);
+        }
+
+        assert_eq!(
+            decrypted_shares.len(),
+            (num_encrypted_shares_per_pkg + 1) * 4
+        );
+
+        let hashes = packages.expose_secret()[0].share_digests.clone();
+        for (share, hash) in decrypted_shares.iter().zip(hashes.iter()) {
+            // Ensure the length of each share is 33 bytes
+            assert_eq!(share.len(), 33);
+
+            // Ensure the hash of each share matches what is stored in hashes
+            // Share's and hashes match in order
+            let computed_hash = Sha3_256Digest(
+                Sha3_256::digest(share).as_slice().try_into().unwrap(),
+            );
+            assert_eq!(computed_hash, *hash);
+        }
     }
 }
