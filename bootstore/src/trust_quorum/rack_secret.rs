@@ -3,14 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::convert::AsRef;
-use std::fmt::Debug;
 
-use p256::elliptic_curve::group::ff::PrimeField;
-use p256::elliptic_curve::subtle::ConstantTimeEq;
-use p256::{NonZeroScalar, ProjectivePoint, Scalar, SecretKey};
 use rand::rngs::OsRng;
-use serde::{Deserialize, Serialize};
-use vsss_rs::{Feldman, FeldmanVerifier, Share};
+use vsss_rs::curve25519::WrappedScalar;
+use vsss_rs::curve25519_dalek::Scalar;
+use vsss_rs::shamir;
+use vsss_rs::subtle::ConstantTimeEq;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A `RackSecret` is a shared secret used to perform a "rack-level" unlock.
@@ -43,7 +41,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// type and orthogonal to its implementation.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct RackSecret {
-    secret: NonZeroScalar,
+    secret: Scalar,
 }
 
 impl PartialEq for RackSecret {
@@ -54,31 +52,12 @@ impl PartialEq for RackSecret {
 
 impl Eq for RackSecret {}
 
-/// A verifier used to ensure the validity of a given key share for an unknown
-/// secret.
-///
-/// We use verifiable secret sharing to detect invalid shares from being
-/// combined and generating an incorrect secret. Each share must be verified
-/// before the secret is reconstructed.
-// This is just a wrapper around a FeldmanVerifier from the vsss-rs crate.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Verifier {
-    verifier: FeldmanVerifier<Scalar, ProjectivePoint>,
-}
-
-impl Verifier {
-    pub fn verify(&self, share: &Share) -> bool {
-        self.verifier.verify(share)
-    }
-}
-
-// Temporary until the using code is written
 impl RackSecret {
     /// Create a secret based on the NIST P-256 curve
     pub fn new() -> RackSecret {
+        // For some reason curve25519-dalek requires rand_core here
         let mut rng = OsRng::default();
-        let sk = SecretKey::random(&mut rng);
-        RackSecret { secret: sk.to_nonzero_scalar() }
+        RackSecret { secret: Scalar::random(&mut rng) }
     }
 
     /// Split a secert into `total_shares` number of shares, where combining
@@ -87,58 +66,52 @@ impl RackSecret {
         &self,
         threshold: usize,
         total_shares: usize,
-    ) -> Result<(Vec<Share>, Verifier), vsss_rs::Error> {
+    ) -> Result<Vec<Vec<u8>>, vsss_rs::Error> {
         let mut rng = OsRng::default();
-        let (shares, verifier) = Feldman { t: threshold, n: total_shares }
-            .split_secret(*self.as_ref(), None, &mut rng)?;
-        Ok((shares, Verifier { verifier }))
+        shamir::split_secret::<WrappedScalar, u8, Vec<u8>>(
+            threshold,
+            total_shares,
+            self.secret.into(),
+            &mut rng,
+        )
     }
 
     /// Combine a set of shares and return a RackSecret
-    #[allow(dead_code)] // not used yet
+    #[allow(unused)]
     pub fn combine_shares(
-        threshold: usize,
-        total_shares: usize,
-        shares: &[Share],
+        shares: &[Vec<u8>],
     ) -> Result<RackSecret, vsss_rs::Error> {
-        let scalar = Feldman { t: threshold, n: total_shares }
-            .combine_shares::<Scalar>(shares)?;
-        let nzs = NonZeroScalar::from_repr(scalar.to_repr()).unwrap();
-        let sk = SecretKey::from(nzs);
-        Ok(RackSecret { secret: sk.to_nonzero_scalar() })
+        let wrapped_scalar: WrappedScalar = vsss_rs::combine_shares(shares)?;
+        Ok(RackSecret { secret: wrapped_scalar.0 })
     }
 }
 
 impl AsRef<Scalar> for RackSecret {
     fn as_ref(&self) -> &Scalar {
-        self.secret.as_ref()
+        &self.secret
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
+    use std::fmt::{self, Debug};
 
     use super::*;
 
     // This is a secret. Let's not print it outside of tests.
     impl Debug for RackSecret {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.secret.as_ref().fmt(f)
+            self.as_ref().fmt(f)
         }
     }
 
-    fn verify(secret: &RackSecret, verifier: &Verifier, shares: &[Share]) {
-        for s in shares {
-            assert!(verifier.verify(s));
-        }
-
-        let secret2 = RackSecret::combine_shares(3, 5, &shares[..3]).unwrap();
-        let secret3 = RackSecret::combine_shares(3, 5, &shares[1..4]).unwrap();
-        let secret4 = RackSecret::combine_shares(3, 5, &shares[2..5]).unwrap();
+    fn verify(secret: &RackSecret, shares: &[Vec<u8>]) {
+        let secret2 = RackSecret::combine_shares(&shares[..3]).unwrap();
+        let secret3 = RackSecret::combine_shares(&shares[1..4]).unwrap();
+        let secret4 = RackSecret::combine_shares(&shares[2..5]).unwrap();
         let shares2 =
             vec![shares[0].clone(), shares[2].clone(), shares[4].clone()];
-        let secret5 = RackSecret::combine_shares(3, 5, &shares2).unwrap();
+        let secret5 = RackSecret::combine_shares(&shares2).unwrap();
 
         for s in [secret2, secret3, secret4, secret5] {
             assert_eq!(*secret, s);
@@ -148,32 +121,13 @@ mod tests {
     #[test]
     fn create_and_verify() {
         let secret = RackSecret::new();
-        let (shares, verifier) = secret.split(3, 5).unwrap();
-        verify(&secret, &verifier, &shares);
+        let shares = secret.split(3, 5).unwrap();
+        verify(&secret, &shares);
     }
 
     #[test]
     fn secret_splitting_fails_with_threshold_larger_than_total_shares() {
         let secret = RackSecret::new();
         assert!(secret.split(5, 3).is_err());
-    }
-
-    #[test]
-    fn combine_deserialized_shares() {
-        let secret = RackSecret::new();
-        let (shares, verifier) = secret.split(3, 5).unwrap();
-        let verifier_s = bincode::serialize(&verifier).unwrap();
-        let shares_s = bincode::serialize(&shares).unwrap();
-
-        let shares2: Vec<Share> = bincode::deserialize(&shares_s).unwrap();
-        let verifier2: Verifier = bincode::deserialize(&verifier_s).unwrap();
-
-        // Ensure we can reconstruct the secret with the deserialized shares and
-        // verifier.
-        verify(&secret, &verifier2, &shares2);
-
-        // Ensure we can reconstruct the secret with the deserialized shares and
-        // original verifier.
-        verify(&secret, &verifier, &shares2);
     }
 }
