@@ -93,14 +93,14 @@ impl AsRef<Scalar> for RackSecret {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
+    use std::fmt::{self, Debug};
 
     use super::*;
 
     // This is a secret. Let's not print it outside of tests.
     impl Debug for RackSecret {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.secret.as_ref().fmt(f)
+            self.as_ref().fmt(f)
         }
     }
 
