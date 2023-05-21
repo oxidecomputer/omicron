@@ -212,3 +212,17 @@ impl fmt::Debug for SharePkgV0 {
             .finish()
     }
 }
+
+// We don't want to risk debug-logging the actual share contents, so implement
+// `Debug` manually and omit sensitive fields.
+impl fmt::Debug for LearnedSharePkgV0 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SharePkgV0")
+            .field("rack_uuid", &self.rack_uuid)
+            .field("epoch", &self.epoch)
+            .field("threshold", &self.threshold)
+            .field("share", &"Share")
+            .field("share_digests", &self.share_digests)
+            .finish()
+    }
+}
