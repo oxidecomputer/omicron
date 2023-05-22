@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeSet, fmt, net::SocketAddrV6};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    net::SocketAddrV6,
+};
 
 use anyhow::bail;
 use camino::Utf8PathBuf;
@@ -130,8 +134,8 @@ pub enum InstallinatorCompletionMetadata {
         address: SocketAddrV6,
     },
     Write {
-        /// The output of the write operation.
-        output: WriteOutput,
+        /// The drives written by the write operation.
+        drives_written: BTreeSet<M2Slot>,
     },
 
     /// Future variants that might be unknown.
@@ -144,25 +148,11 @@ pub enum InstallinatorCompletionMetadata {
 /// Forms part of [`InstallinatorCompletionMetadata::Write`].
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 pub struct WriteOutput {
-    /// The slots that were requested to be written.
-    pub slots_attempted: BTreeSet<M2Slot>,
-
-    /// The slots that were actually written.
+    /// The slots that were written.
     pub slots_written: BTreeSet<M2Slot>,
-}
 
-impl WriteOutput {
-    /// Returns a list of the slots not written.
-    pub fn slots_not_written(&self) -> Vec<M2Slot> {
-        let mut not_written = Vec::new();
-        for slot in &self.slots_attempted {
-            if !self.slots_written.contains(slot) {
-                not_written.push(*slot);
-            }
-        }
-
-        not_written
-    }
+    /// Slots that failed to write, along with the error they encountered.
+    pub slots_failed_to_write: BTreeMap<M2Slot, String>,
 }
 
 /// An M.2 slot that was written.

@@ -306,25 +306,17 @@ impl InstallOpts {
                     // TODO: verify artifact was correctly written out to disk.
 
                     let write_output = writer.write(&cx, log).await;
-                    let slots_not_written = write_output.slots_not_written();
 
-                    let metadata = InstallinatorCompletionMetadata::Write {
-                        output: write_output,
-                    };
-
-                    if slots_not_written.is_empty() {
+                    if write_output.slots_failed_to_write.is_empty() {
+                        let metadata = InstallinatorCompletionMetadata::Write {
+                            drives_written: write_output.slots_written,
+                        };
                         StepResult::success((), metadata)
                     } else {
-                        // Some slots were not properly written out.
-                        let mut message =
-                            "Some M.2 slots were not written: ".to_owned();
-                        for (i, slot) in slots_not_written.iter().enumerate() {
-                            message.push_str(&format!("{slot}"));
-                            if i + 1 < slots_not_written.len() {
-                                message.push_str(", ");
-                            }
-                        }
-                        StepResult::warning((), metadata, message)
+                        bail!(
+                            "failed to write drives: {:?}",
+                            write_output.slots_failed_to_write
+                        );
                     }
                 },
             )

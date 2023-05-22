@@ -247,10 +247,13 @@ impl<'a> ArtifactWriter<'a> {
         host_phase_2_transport: &mut impl WriteTransport,
         control_plane_transport: &mut impl WriteTransport,
     ) -> WriteOutput {
-        let mut done_drives = BTreeSet::new();
-
         // How many drives did we finish writing during the previous iteration?
         let mut success_prev_iter = 0;
+
+        // Keep track of the last result on each drive. We will keep retrying
+        // until we write at least one drive, but at that point, we will return
+        // an error if we only succeeded in writing to one.
+        let mut last_result = BTreeMap::new();
 
         loop {
             // How many drives did we finish writing during this iteration?
@@ -278,7 +281,24 @@ impl<'a> ArtifactWriter<'a> {
                     })
                     .await;
 
-                match res {
+                // Insert this result into our map tracking result by drive.
+                let prev_result = last_result.insert(*drive, res);
+
+                // We should never replace a "success" with an error: once we've
+                // succeeded, our `register steps` above should do nothing and
+                // we should just get `Ok(_)` back again. Add an assertion here
+                // to be sure.
+                match prev_result {
+                    Some(result) if result.is_ok() => {
+                        assert!(
+                            last_result[drive].is_ok(),
+                            "replaced Ok(_) with Err(_): this is a bug!"
+                        );
+                    }
+                    _ => (),
+                }
+
+                match &last_result[drive] {
                     Ok(_) => {
                         // This drive succeeded in this iteration. This can be
                         // either:
@@ -286,7 +306,6 @@ impl<'a> ArtifactWriter<'a> {
                         // * the drive was successfully written during a
                         //   previous attempt.
                         *progress = DriveWriteProgress::Done;
-                        done_drives.insert(*drive);
                         success_this_iter += 1;
                     }
                     Err(error) => match error {
@@ -338,10 +357,20 @@ impl<'a> ArtifactWriter<'a> {
             success_prev_iter = success_this_iter;
         }
 
-        WriteOutput {
-            slots_attempted: self.drives.keys().copied().collect(),
-            slots_written: done_drives.into_iter().collect(),
+        let mut slots_written = BTreeSet::new();
+        let mut slots_failed_to_write = BTreeMap::new();
+        for (drive, result) in last_result {
+            match result {
+                Ok(_) => {
+                    slots_written.insert(drive);
+                }
+                Err(error) => {
+                    slots_failed_to_write.insert(drive, format!("{error:#}"));
+                }
+            }
         }
+
+        WriteOutput { slots_written, slots_failed_to_write }
     }
 }
 
@@ -1055,7 +1084,7 @@ mod tests {
                     StepResult::success(
                         (),
                         InstallinatorCompletionMetadata::Write {
-                            output: write_output,
+                            drives_written: write_output.slots_written,
                         },
                     )
                 },
@@ -1085,11 +1114,12 @@ mod tests {
                     match last_outcome {
                         StepOutcome::Success {
                             metadata:
-                                InstallinatorCompletionMetadata::Write { output },
+                                InstallinatorCompletionMetadata::Write {
+                                    drives_written,
+                                },
                         } => {
                             assert_eq!(
-                                &output
-                                    .slots_written
+                                &drives_written
                                     .iter()
                                     .copied()
                                     .collect::<Vec<_>>(),
