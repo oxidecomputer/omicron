@@ -95,6 +95,7 @@ async fn do_run() -> Result<(), CmdError> {
         hardware: ConfigHardware {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
+            reservoir_ram: 32 * (1 << 30),
         },
     };
 
