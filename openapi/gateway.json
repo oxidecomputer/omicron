@@ -2808,6 +2808,30 @@
               "id",
               "state"
             ]
+          },
+          {
+            "description": "The update process failed with an RoT-specific error.",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "message": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "rot_error"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "message",
+              "state"
+            ]
           }
         ]
       },

@@ -28,7 +28,7 @@ use gateway_messages::IgnitionCommand;
 use gateway_messages::IgnitionState;
 use gateway_messages::MgsError;
 use gateway_messages::PowerState;
-use gateway_messages::SlotId;
+use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
@@ -344,8 +344,8 @@ impl Handler {
             base_mac_address: [0; 6],
             power_state: self.power_state,
             rot: Ok(gateway_messages::RotStateV2 {
-                active: SlotId::A,
-                persistent_boot_preference: SlotId::A,
+                active: RotSlotId::A,
+                persistent_boot_preference: RotSlotId::A,
                 pending_persistent_boot_preference: None,
                 transient_boot_preference: None,
                 slot_a_sha3_256_digest: None,
