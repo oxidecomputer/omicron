@@ -56,7 +56,7 @@ pub struct SharePkgV0 {
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
     // We aren't planning on doing any reconfigurations with this version of
-    // the protocol. This is here in case we decide otherwise, and becaus an
+    // the protocol. This is here in case we decide otherwise, and because an
     // epoch is used for disk encryption purposes.
     pub epoch: u32,
     pub threshold: u8,

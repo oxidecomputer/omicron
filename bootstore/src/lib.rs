@@ -13,7 +13,8 @@
 //! that information from the trust quorum database, parse it, and write
 //! it to CockroachDB when we start it up.
 
-pub mod trust_quorum;
+mod peer;
+mod trust_quorum;
 
 use serde::{Deserialize, Serialize};
 
