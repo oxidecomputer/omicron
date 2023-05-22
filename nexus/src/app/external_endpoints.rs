@@ -526,7 +526,7 @@ impl NexusCertResolver {
         NexusCertResolver { log, config_rx }
     }
 
-    fn do_resolve(
+    fn do_resolve_endpoint(
         &self,
         server_name: Option<&str>,
     ) -> Result<Arc<ExternalEndpoint>, anyhow::Error> {
@@ -547,19 +547,16 @@ impl NexusCertResolver {
             .ok_or_else(|| anyhow!("unrecognized server name: {}", server_name))
             .cloned()
     }
-}
 
-impl rustls::server::ResolvesServerCert for NexusCertResolver {
-    fn resolve(
+    fn do_resolve(
         &self,
-        client_hello: rustls::server::ClientHello,
+        server_name: Option<&str>,
     ) -> Option<Arc<CertifiedKey>> {
-        let server_name = client_hello.server_name();
         let log =
             self.log.new(o!("server_name" => server_name.map(String::from)));
 
         trace!(&log, "resolving TLS certificate");
-        let resolved = self.do_resolve(server_name);
+        let resolved = self.do_resolve_endpoint(server_name);
         let result = match resolved {
             Ok(ref endpoint) => match endpoint.best_certificate() {
                 Ok(certificate) => Ok((endpoint.silo_id, certificate)),
@@ -592,12 +589,27 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
     }
 }
 
+impl rustls::server::ResolvesServerCert for NexusCertResolver {
+    fn resolve(
+        &self,
+        client_hello: rustls::server::ClientHello,
+    ) -> Option<Arc<CertifiedKey>> {
+        let server_name = client_hello.server_name();
+        self.do_resolve(server_name)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::ExternalEndpoints;
     use super::TlsCertificate;
     use crate::app::external_endpoints::ExternalEndpointError;
+    use crate::app::external_endpoints::NexusCertResolver;
     use chrono::Utc;
+    use dropshot::test_util::LogContext;
+    use dropshot::ConfigLogging;
+    use dropshot::ConfigLoggingIfExists;
+    use dropshot::ConfigLoggingLevel;
     use nexus_db_model::Certificate;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::DnsZone;
@@ -628,9 +640,16 @@ mod test {
         }
     }
 
-    fn create_certificate(domain: &str) -> params::CertificateCreate {
-        let cert = rcgen::generate_simple_self_signed(vec![domain.to_string()])
-            .expect("generating certificate");
+    fn create_certificate(
+        domain: &str,
+        expired: bool,
+    ) -> params::CertificateCreate {
+        let mut cert_params =
+            rcgen::CertificateParams::new(vec![domain.to_string()]);
+        if expired {
+            cert_params.not_after = std::time::UNIX_EPOCH.into();
+        }
+        let cert = rcgen::Certificate::from_params(cert_params).unwrap();
         let cert_pem =
             cert.serialize_pem().expect("serializing certificate as PEM");
         let key_pem = cert.serialize_private_key_pem();
@@ -703,7 +722,7 @@ mod test {
         // else.  This isn't really valid.  But it's useful to verify that we
         // won't crash or otherwise fail if we get a certificate with an invalid
         // silo_id.
-        let cert_create = create_certificate("dummy.sys.oxide1.test");
+        let cert_create = create_certificate("dummy.sys.oxide1.test", false);
         let cert = Certificate::new(
             silo_id,
             Uuid::new_v4(),
@@ -732,7 +751,7 @@ mod test {
             "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
         let silo = create_silo(Some(silo_id), "dummy");
         let dns_zone1 = create_dns_zone("oxide1");
-        let cert_create = create_certificate("dummy.sys.oxide1.test");
+        let cert_create = create_certificate("dummy.sys.oxide1.test", false);
         let cert = Certificate::new(
             silo_id,
             Uuid::new_v4(),
@@ -846,17 +865,21 @@ mod test {
     fn test_external_endpoints_complex() {
         // Set up a somewhat complex scenario:
         //
-        // - three Silos
-        //   - silo1: two certificates
-        //   - silo2: two certificates
-        //   - silo3: one certificates that is invalid
+        // - four Silos
+        //   - silo1: two certificates, one of which is expired
+        //   - silo2: two certificates, one of which is expired
+        //     (in the other order to make sure it's not working by accident)
+        //   - silo3: one certificate that is invalid
+        //   - silo4: one certificate that is expired
         // - two DNS zones
         //
-        // We should wind up with six endpoints and one warning.
+        // We should wind up with eight endpoints and one warning.
         let silo1 = create_silo(None, "silo1");
         let silo2 = create_silo(None, "silo2");
         let silo3 = create_silo(None, "silo3");
-        let silo1_cert1_params = create_certificate("silo1.sys.oxide1.test");
+        let silo4 = create_silo(None, "silo4");
+        let silo1_cert1_params =
+            create_certificate("silo1.sys.oxide1.test", false);
         let silo1_cert1 = Certificate::new(
             silo1.identity().id,
             Uuid::new_v4(),
@@ -864,7 +887,8 @@ mod test {
             silo1_cert1_params,
         )
         .unwrap();
-        let silo1_cert2_params = create_certificate("silo1.sys.oxide1.test");
+        let silo1_cert2_params =
+            create_certificate("silo1.sys.oxide1.test", true);
         let silo1_cert2 = Certificate::new(
             silo1.identity().id,
             Uuid::new_v4(),
@@ -872,7 +896,8 @@ mod test {
             silo1_cert2_params,
         )
         .unwrap();
-        let silo2_cert1_params = create_certificate("silo2.sys.oxide1.test");
+        let silo2_cert1_params =
+            create_certificate("silo2.sys.oxide1.test", true);
         let silo2_cert1 = Certificate::new(
             silo2.identity().id,
             Uuid::new_v4(),
@@ -880,7 +905,8 @@ mod test {
             silo2_cert1_params,
         )
         .unwrap();
-        let silo2_cert2_params = create_certificate("silo2.sys.oxide1.test");
+        let silo2_cert2_params =
+            create_certificate("silo2.sys.oxide1.test", false);
         let silo2_cert2 = Certificate::new(
             silo2.identity().id,
             Uuid::new_v4(),
@@ -888,7 +914,8 @@ mod test {
             silo2_cert2_params,
         )
         .unwrap();
-        let silo3_cert_params = create_certificate("silo3.sys.oxide1.test");
+        let silo3_cert_params =
+            create_certificate("silo3.sys.oxide1.test", false);
         let mut silo3_cert = Certificate::new(
             silo3.identity().id,
             Uuid::new_v4(),
@@ -899,22 +926,32 @@ mod test {
         // Corrupt a byte of this last certificate.  (This has to be done after
         // constructing it or we would fail validation.)
         silo3_cert.cert[0] ^= 1;
+        let silo4_cert_params =
+            create_certificate("silo4.sys.oxide1.test", true);
+        let silo4_cert = Certificate::new(
+            silo4.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo4_cert_params,
+        )
+        .unwrap();
         let dns_zone1 = create_dns_zone("oxide1");
         let dns_zone2 = create_dns_zone("oxide2");
 
         let ee = ExternalEndpoints::new(
-            vec![silo1.clone(), silo2.clone(), silo3.clone()],
+            vec![silo1.clone(), silo2.clone(), silo3.clone(), silo4.clone()],
             vec![
                 silo1_cert1.clone(),
                 silo1_cert2.clone(),
                 silo2_cert1.clone(),
                 silo2_cert2.clone(),
                 silo3_cert.clone(),
+                silo4_cert.clone(),
             ],
             vec![dns_zone1, dns_zone2],
         );
         println!("{:?}", ee);
-        assert_eq!(ee.ndomains(), 6);
+        assert_eq!(ee.ndomains(), 8);
         assert_eq!(ee.nwarnings(), 3);
         assert_eq!(
             2,
@@ -949,32 +986,70 @@ mod test {
             ee.by_dns_name["silo3.sys.oxide1.test"],
             ee.by_dns_name["silo3.sys.oxide2.test"]
         );
+        assert_eq!(
+            ee.by_dns_name["silo4.sys.oxide1.test"],
+            ee.by_dns_name["silo4.sys.oxide2.test"]
+        );
 
         let e1 = &ee.by_dns_name["silo1.sys.oxide1.test"];
         assert_eq!(e1.silo_id, silo1.id());
         let c1 = e1.best_certificate().unwrap();
-        assert!(
-            cert_matches(c1, &silo1_cert1) || cert_matches(c1, &silo1_cert2)
-        );
+        // It must be cert1 because cert2 is expired.
+        assert!(cert_matches(c1, &silo1_cert1));
 
         let e2 = &ee.by_dns_name["silo2.sys.oxide1.test"];
         assert_eq!(e2.silo_id, silo2.id());
         let c2 = e2.best_certificate().unwrap();
-        assert!(
-            cert_matches(c2, &silo2_cert1) || cert_matches(c2, &silo2_cert2)
-        );
+        // It must be cert2 because cert1 is expired.
+        assert!(cert_matches(c2, &silo2_cert2));
         assert!(!cert_matches(c2, &silo1_cert1));
         assert!(!cert_matches(c2, &silo1_cert2));
 
         let e3 = &ee.by_dns_name["silo3.sys.oxide1.test"];
         assert_eq!(e3.silo_id, silo3.id());
         assert!(e3.best_certificate().is_err());
-    }
 
-    // XXX-dap TODO-coverage
-    // - best_certificate(): check that it picks the latest
-    // - exercise the CertResolver in the complex test above
-    // XXX-dap figure out what to do with the fact that you could have multiple
-    // *different* certs for different domains for a Silo?  This is a problem if
-    // there are multiple DNS zones for example, let alone aliases.
+        // We should get an expired cert if it's the only option.
+        let e4 = &ee.by_dns_name["silo4.sys.oxide1.test"];
+        assert_eq!(e4.silo_id, silo4.id());
+        let c4 = e4.best_certificate().unwrap();
+        assert!(cert_matches(c4, &silo4_cert));
+
+        // Now test the NexusCertResolver.
+        let logctx = LogContext::new(
+            "test_external_endpoints_complex",
+            &ConfigLogging::File {
+                level: ConfigLoggingLevel::Trace,
+                path: "UNUSED".into(),
+                if_exists: ConfigLoggingIfExists::Append,
+            },
+        );
+        let (watch_tx, watch_rx) = tokio::sync::watch::channel(None);
+        let cert_resolver =
+            NexusCertResolver::new(logctx.log.clone(), watch_rx);
+
+        // At this point we haven't filled in the configuration so any attempt
+        // to resolve anything should fail.
+        assert!(cert_resolver
+            .do_resolve(Some("silo1.sys.oxide1.test"))
+            .is_none());
+
+        // Now pass along the configuration and try again.
+        watch_tx.send(Some(ee.clone())).unwrap();
+        let resolved_c1 =
+            cert_resolver.do_resolve(Some("silo1.sys.oxide1.test")).unwrap();
+        assert_eq!(resolved_c1.cert, c1.certified_key.cert);
+        let resolved_c2 =
+            cert_resolver.do_resolve(Some("silo2.sys.oxide1.test")).unwrap();
+        assert_eq!(resolved_c2.cert, c2.certified_key.cert);
+        assert!(cert_resolver
+            .do_resolve(Some("silo3.sys.oxide1.test"))
+            .is_none());
+        // We should get an expired cert if it's the only option.
+        let resolved_c4 =
+            cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();
+        assert_eq!(resolved_c4.cert, c4.certified_key.cert);
+
+        logctx.cleanup_successful();
+    }
 }
