@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use buf_list::Cursor;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
@@ -356,8 +356,13 @@ async fn scan_hardware_with_retries(
     const HARDWARE_RETRIES: usize = 60;
     const HARDWARE_RETRY_DELAY: Duration = Duration::from_millis(500);
 
-    let mut retry = 0;
-    let result = loop {
+    // We always expect to find two M.2s! If we do not, fail, so an operator can
+    // flag this sled and fix it before we proceed.
+    const EXPECTED_NUM_DISKS: usize = 2;
+
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
         let log = log.clone();
         let result = tokio::task::spawn_blocking(move || {
             WriteDestination::from_hardware(&log)
@@ -366,29 +371,42 @@ async fn scan_hardware_with_retries(
         .unwrap();
 
         match result {
-            Ok(destination) => break Ok(destination),
-            Err(error) => {
-                if retry < HARDWARE_RETRIES {
+            Ok(destination) => {
+                let disks_found = destination.num_target_disks();
+                if disks_found == EXPECTED_NUM_DISKS {
+                    return StepResult::success(
+                        destination,
+                        InstallinatorCompletionMetadata::HardwareScan {
+                            disks_found,
+                        },
+                    );
+                } else if attempt < HARDWARE_RETRIES {
                     cx.send_progress(StepProgress::retry(format!(
-                        "hardware scan {retry} failed: {error:#}"
+                        "hardware scan {attempt} failed:
+                         found {disks_found} but expected {EXPECTED_NUM_DISKS}"
                     )))
                     .await;
-                    retry += 1;
                     tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
-                    continue;
                 } else {
-                    break Err(error);
+                    bail!(
+                        "hardware scan failed:
+                         found {disks_found} but expected {EXPECTED_NUM_DISKS}"
+                    );
+                }
+            }
+            Err(error) => {
+                if attempt < HARDWARE_RETRIES {
+                    cx.send_progress(StepProgress::retry(format!(
+                        "hardware scan {attempt} failed: {error:#}"
+                    )))
+                    .await;
+                    tokio::time::sleep(HARDWARE_RETRY_DELAY).await;
+                } else {
+                    return Err(error);
                 }
             }
         }
-    };
-
-    let destination = result?;
-    let disks_found = destination.num_target_disks();
-    StepResult::success(
-        destination,
-        InstallinatorCompletionMetadata::HardwareScan { disks_found },
-    )
+    }
 }
 
 async fn fetch_artifact(
