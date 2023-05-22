@@ -656,7 +656,7 @@ dependencies = [
  "slog",
  "thiserror",
  "uuid",
- "vsss-rs",
+ "vsss-rs 3.1.0",
  "zeroize",
 ]
 
@@ -2183,6 +2183,7 @@ dependencies = [
  "ff 0.12.1",
  "generic-array",
  "group 0.12.1",
+ "hkdf",
  "pkcs8 0.9.0",
  "rand_core 0.6.4",
  "sec1",
@@ -4909,7 +4910,7 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.3",
  "uuid",
- "vsss-rs",
+ "vsss-rs 2.7.1",
  "zone",
 ]
 
@@ -9144,6 +9145,24 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "vsss-rs"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135935e2249c1550e2cdfd8ed3a34e9cc530b9149a418eaaf61cef2d1c1281c9"
+dependencies = [
+ "core2",
+ "elliptic-curve 0.12.3",
+ "hex",
+ "rand_chacha 0.2.2",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "serde",
+ "serde-big-array 0.5.1",
+ "uint-zigzag",
+ "zeroize",
 ]
 
 [[package]]
