@@ -359,11 +359,7 @@ async fn scan_hardware_with_retries(
     let mut retry = 0;
     let result = loop {
         let log = log.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            WriteDestination::from_hardware(&log)
-        })
-        .await
-        .unwrap();
+        let result = WriteDestination::from_hardware(&log).await;
 
         match result {
             Ok(destination) => break Ok(destination),
