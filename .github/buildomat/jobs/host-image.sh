@@ -54,6 +54,6 @@ git checkout "$COMMIT"
 
 cd "$TOP"
 ./tools/build-host-image.sh -B \
-    -S /input/package/work/switch-asic.tar.gz \
+    -S /input/package/work/zones/switch-asic.tar.gz \
     /work/helios \
     /input/package/work/global-zone-packages.tar.gz
