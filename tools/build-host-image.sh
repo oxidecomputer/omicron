@@ -15,7 +15,7 @@ function usage
 
 function main
 {
-    while getopts ":hfRB" opt; do
+    while getopts ":hfRBS:" opt; do
         case $opt in
             f)
                 FORCE=1
@@ -27,6 +27,9 @@ function main
             B)
                 BUILD_STANDARD=1
                 HELIOS_BUILD_EXTRA_ARGS=-B
+                ;;
+            S)
+                SWITCH_ZONE=$OPTARG
                 ;;
             h | \?)
                 usage
@@ -51,6 +54,8 @@ function main
     if [ "$#" != "2" ]; then
         usage
     fi
+    HELIOS_PATH=$1
+    GLOBAL_ZONE_TARBALL_PATH=$2
 
     # Read expected helios commit into $COMMIT
     TOOLS_DIR="$(pwd)/$(dirname $0)"
@@ -59,24 +64,23 @@ function main
     # Grab the opte version
     OPTE_VER=$(cat "$TOOLS_DIR/opte_version")
 
-    # Convert args to absolute paths
-    case $1 in
-        /*) HELIOS_PATH=$1 ;;
-        *) HELIOS_PATH=$(pwd)/$1 ;;
-    esac
-    case $2 in
-        /*) GLOBAL_ZONE_TARBALL_PATH=$2 ;;
-        *) GLOBAL_ZONE_TARBALL_PATH=$(pwd)/$2 ;;
-    esac
-
-    # Extract the trampoline global zone tarball into a tmp_gz directory
+    # Assemble global zone files in a temporary directory.
     if ! tmp_gz=$(mktemp -d); then
         exit 1
     fi
     trap 'cd /; rm -rf "$tmp_gz"' EXIT
 
+    # Extract the trampoline global zone tarball into a tmp_gz directory
     echo "Extracting gz packages into $tmp_gz"
     ptime -m tar xvzf $GLOBAL_ZONE_TARBALL_PATH -C $tmp_gz
+
+    # If the user specified a switch zone (which is probably named
+    # `switch-SOME_VARIANT.tar.gz`), stage it in the right place and rename it
+    # to just `switch.tar.gz`.
+    if [ "x$SWITCH_ZONE" != "x" ]; then
+        mkdir -p "$tmp_gz/root/opt/oxide"
+        cp "$SWITCH_ZONE" "$tmp_gz/root/opt/oxide/switch.tar.gz"
+    fi
 
     # Move to the helios checkout
     cd $HELIOS_PATH
