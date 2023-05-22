@@ -889,22 +889,20 @@ mod test {
         .unwrap();
         let silo1_cert2_params =
             create_certificate("silo1.sys.oxide1.test", true);
-        let silo1_cert2 = Certificate::new(
+        let silo1_cert2 = Certificate::new_unvalidated(
             silo1.identity().id,
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert2_params,
-        )
-        .unwrap();
+        );
         let silo2_cert1_params =
             create_certificate("silo2.sys.oxide1.test", true);
-        let silo2_cert1 = Certificate::new(
+        let silo2_cert1 = Certificate::new_unvalidated(
             silo2.identity().id,
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert1_params,
-        )
-        .unwrap();
+        );
         let silo2_cert2_params =
             create_certificate("silo2.sys.oxide1.test", false);
         let silo2_cert2 = Certificate::new(
@@ -928,13 +926,12 @@ mod test {
         silo3_cert.cert[0] ^= 1;
         let silo4_cert_params =
             create_certificate("silo4.sys.oxide1.test", true);
-        let silo4_cert = Certificate::new(
+        let silo4_cert = Certificate::new_unvalidated(
             silo4.identity().id,
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo4_cert_params,
-        )
-        .unwrap();
+        );
         let dns_zone1 = create_dns_zone("oxide1");
         let dns_zone2 = create_dns_zone("oxide2");
 
@@ -943,7 +940,7 @@ mod test {
             vec![
                 silo1_cert1.clone(),
                 silo1_cert2.clone(),
-                silo2_cert1.clone(),
+                silo2_cert1,
                 silo2_cert2.clone(),
                 silo3_cert.clone(),
                 silo4_cert.clone(),

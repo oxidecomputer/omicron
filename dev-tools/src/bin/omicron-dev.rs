@@ -404,7 +404,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
 #[derive(Clone, Debug, Args)]
 struct CertCreateArgs {
     /// path to where the generated certificate and key files should go
-    /// (e.g., "out/initial" would cause the files to be called
+    /// (e.g., "out/initial-" would cause the files to be called
     /// "out/initial-cert.pem" and "out/initial-key.pem")
     #[clap(action)]
     output_base: Utf8PathBuf,
@@ -422,12 +422,12 @@ async fn cmd_cert_create(args: &CertCreateArgs) -> Result<(), anyhow::Error> {
         cert.serialize_pem().context("serializing certificate as PEM")?;
     let key_pem = cert.serialize_private_key_pem();
 
-    let cert_path = Utf8PathBuf::from(format!("{}-cert.pem", args.output_base));
+    let cert_path = Utf8PathBuf::from(format!("{}cert.pem", args.output_base));
     write_private_file(&cert_path, cert_pem.as_bytes())
         .context("writing certificate file")?;
     println!("wrote certificate to {}", cert_path);
 
-    let key_path = Utf8PathBuf::from(format!("{}-key.pem", args.output_base));
+    let key_path = Utf8PathBuf::from(format!("{}key.pem", args.output_base));
     write_private_file(&key_path, key_pem.as_bytes())
         .context("writing private key file")?;
     println!("wrote private key to {}", key_path);

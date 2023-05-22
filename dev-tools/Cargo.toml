@@ -30,9 +30,11 @@ tokio-postgres.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true
 libc.workspace = true
 omicron-test-utils.workspace = true
+openssl.workspace = true
 oxide-client.workspace = true
 subprocess.workspace = true
 

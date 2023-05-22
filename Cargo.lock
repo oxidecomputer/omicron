@@ -4524,6 +4524,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "clap 4.2.7",
  "dropshot",
  "expectorate",
@@ -4536,6 +4537,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "openssl",
  "oxide-client",
  "pq-sys",
  "rcgen",
