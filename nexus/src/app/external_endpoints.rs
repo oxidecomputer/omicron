@@ -190,6 +190,10 @@ impl ExternalEndpoints {
             }
         }
 
+        if by_dns_name.is_empty() {
+            warnings.push(ExternalEndpointError::NoEndpoints);
+        }
+
         ExternalEndpoints { by_dns_name, warnings }
     }
 
@@ -278,8 +282,9 @@ impl ExternalEndpoint {
             }
         }
 
-        latest_expiration
-            .ok_or_else(|| anyhow!("silo {} has no certificates", self.silo_id))
+        latest_expiration.ok_or_else(|| {
+            anyhow!("silo {} has no usable certificates", self.silo_id)
+        })
     }
 }
 
@@ -288,9 +293,9 @@ impl ExternalEndpoint {
 #[derive(Clone, Debug, Error, SerializeDisplay)]
 enum ExternalEndpointError {
     #[error(
-        "ignoring silo {dup_silo_id} ({dup_silo_name}): has the same DNS \
-        name ({dns_name}) as previously-found silo {first_silo_id} \
-        ({first_silo_name})"
+        "ignoring silo {dup_silo_id} ({dup_silo_name:?}): has the same DNS \
+        name ({dns_name:?}) as previously-found silo {first_silo_id} \
+        ({first_silo_name:?})"
     )]
     DupDnsName {
         dup_silo_id: Uuid,
@@ -307,8 +312,13 @@ enum ExternalEndpointError {
         reason: Arc<anyhow::Error>,
     },
 
-    #[error("silo {silo_id} with DNS name {dns_name} has no certificates")]
+    #[error(
+        "silo {silo_id} with DNS name {dns_name:?} has no usable certificates"
+    )]
     NoSiloCerts { silo_id: Uuid, dns_name: String },
+
+    #[error("no external endpoints were found")]
+    NoEndpoints,
 }
 
 impl Eq for ExternalEndpointError {}
@@ -580,4 +590,391 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::ExternalEndpoints;
+    use super::TlsCertificate;
+    use crate::app::external_endpoints::ExternalEndpointError;
+    use chrono::Utc;
+    use nexus_db_model::Certificate;
+    use nexus_db_model::DnsGroup;
+    use nexus_db_model::DnsZone;
+    use nexus_db_model::ServiceKind;
+    use nexus_db_model::Silo;
+    use nexus_types::external_api::params;
+    use nexus_types::external_api::shared;
+    use nexus_types::identity::Resource;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use uuid::Uuid;
+
+    fn create_silo(silo_id: Option<Uuid>, name: &str) -> Silo {
+        let params = params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: String::new(),
+            },
+            discoverable: false,
+            identity_mode: shared::SiloIdentityMode::LocalOnly,
+            admin_group_name: None,
+            tls_certificates: vec![],
+        };
+
+        if let Some(silo_id) = silo_id {
+            Silo::new_with_id(silo_id, params)
+        } else {
+            Silo::new(params)
+        }
+    }
+
+    fn create_certificate(domain: &str) -> params::CertificateCreate {
+        let cert = rcgen::generate_simple_self_signed(vec![domain.to_string()])
+            .expect("generating certificate");
+        let cert_pem =
+            cert.serialize_pem().expect("serializing certificate as PEM");
+        let key_pem = cert.serialize_private_key_pem();
+        let namestr = format!("cert-for-{}", domain.replace('.', "-"));
+        params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: namestr.parse().unwrap(),
+                description: String::new(),
+            },
+            cert: cert_pem.into_bytes(),
+            key: key_pem.into_bytes(),
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        }
+    }
+
+    fn create_dns_zone(domain: &str) -> DnsZone {
+        DnsZone {
+            id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            dns_group: DnsGroup::External,
+            zone_name: format!("{}.test", domain),
+        }
+    }
+
+    fn cert_matches(tls_cert: &TlsCertificate, cert: &Certificate) -> bool {
+        let parse_right = openssl::x509::X509::from_pem(&cert.cert).unwrap();
+        tls_cert.parsed == parse_right
+    }
+
+    #[test]
+    fn test_external_endpoints_empty() {
+        // Truly trivial case: no endpoints at all.
+        let ee1 = ExternalEndpoints::new(vec![], vec![], vec![]);
+        assert_eq!(ee1.ndomains(), 0);
+        assert_eq!(ee1.nwarnings(), 1);
+        assert_eq!(
+            ee1.warnings[0].to_string(),
+            "no external endpoints were found"
+        );
+
+        // There are also no endpoints if there's a Silo but no external DNS
+        // zones.
+        let silo_id: Uuid =
+            "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
+        let silo = create_silo(Some(silo_id), "dummy");
+        let ee2 = ExternalEndpoints::new(vec![silo], vec![], vec![]);
+        assert_eq!(ee2.ndomains(), 0);
+        assert_eq!(ee2.nwarnings(), 1);
+        assert_eq!(
+            ee2.warnings[0].to_string(),
+            "no external endpoints were found"
+        );
+        // Test PartialEq impl.
+        assert_eq!(ee1, ee2);
+
+        // There are also no endpoints if there's an external DNS zone but no
+        // Silo.
+        let dns_zone1 = create_dns_zone("oxide1");
+        let ee2 = ExternalEndpoints::new(vec![], vec![], vec![dns_zone1]);
+        assert_eq!(ee2.ndomains(), 0);
+        assert_eq!(ee2.nwarnings(), 1);
+        assert_eq!(
+            ee2.warnings[0].to_string(),
+            "no external endpoints were found"
+        );
+        // Test PartialEq impl.
+        assert_eq!(ee1, ee2);
+
+        // Finally, there are no endpoints if there's a certificate and nothing
+        // else.  This isn't really valid.  But it's useful to verify that we
+        // won't crash or otherwise fail if we get a certificate with an invalid
+        // silo_id.
+        let cert_create = create_certificate("dummy.sys.oxide1.test");
+        let cert = Certificate::new(
+            silo_id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            cert_create,
+        )
+        .unwrap();
+        let ee2 = ExternalEndpoints::new(vec![], vec![cert], vec![]);
+        assert_eq!(ee2.ndomains(), 0);
+        assert_eq!(ee2.nwarnings(), 1);
+        assert_eq!(
+            ee2.warnings[0].to_string(),
+            "no external endpoints were found"
+        );
+        // Test PartialEq impl.
+        assert_eq!(ee1, ee2);
+    }
+
+    #[test]
+    fn test_external_endpoints_basic() {
+        // Empty case for comparison.
+        let ee1 = ExternalEndpoints::new(vec![], vec![], vec![]);
+
+        // Sample data
+        let silo_id: Uuid =
+            "6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3".parse().unwrap();
+        let silo = create_silo(Some(silo_id), "dummy");
+        let dns_zone1 = create_dns_zone("oxide1");
+        let cert_create = create_certificate("dummy.sys.oxide1.test");
+        let cert = Certificate::new(
+            silo_id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            cert_create,
+        )
+        .unwrap();
+
+        // Simple case: one silo, one DNS zone.  We should see an endpoint for
+        // the Silo.  Since it has no certificates, we'll get a warning.
+        let ee3 = ExternalEndpoints::new(
+            vec![silo.clone()],
+            vec![],
+            vec![dns_zone1.clone()],
+        );
+        // Test PartialEq impl.
+        assert_ne!(ee1, ee3);
+        assert_eq!(ee3.ndomains(), 1);
+        assert!(ee3.has_domain("dummy.sys.oxide1.test"));
+        assert_eq!(ee3.nwarnings(), 1);
+        assert_eq!(
+            ee3.warnings[0].to_string(),
+            "silo 6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3 with DNS name \
+            \"dummy.sys.oxide1.test\" has no usable certificates"
+        );
+        // This also exercises best_certificate() with zero certificates.
+        assert_eq!(
+            ee3.by_dns_name["dummy.sys.oxide1.test"]
+                .best_certificate()
+                .unwrap_err()
+                .to_string(),
+            "silo 6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3 has no usable \
+            certificates"
+        );
+
+        // Now try with a certificate.
+        let ee4 = ExternalEndpoints::new(
+            vec![silo.clone()],
+            vec![cert.clone()],
+            vec![dns_zone1.clone()],
+        );
+        assert_ne!(ee3, ee4);
+        assert_eq!(ee4.ndomains(), 1);
+        assert!(ee4.has_domain("dummy.sys.oxide1.test"));
+        assert_eq!(ee4.nwarnings(), 0);
+        let endpoint = &ee4.by_dns_name["dummy.sys.oxide1.test"];
+        assert_eq!(endpoint.silo_id, silo_id);
+        assert_eq!(endpoint.tls_certs.len(), 1);
+        assert!(cert_matches(&endpoint.tls_certs[0], &cert));
+        // This also exercises best_certificate() with one certificate.
+        assert_eq!(
+            *endpoint.best_certificate().unwrap(),
+            endpoint.tls_certs[0]
+        );
+
+        // Add a second external DNS zone.  There should now be two endpoints,
+        // both pointing to the same Silo.
+        let dns_zone2 = DnsZone {
+            id: Uuid::new_v4(),
+            time_created: Utc::now(),
+            dns_group: DnsGroup::External,
+            zone_name: String::from("oxide2.test"),
+        };
+        let ee5 = ExternalEndpoints::new(
+            vec![silo.clone()],
+            vec![cert.clone()],
+            vec![dns_zone1.clone(), dns_zone2],
+        );
+        assert_ne!(ee4, ee5);
+        assert_eq!(ee5.ndomains(), 2);
+        assert!(ee5.has_domain("dummy.sys.oxide1.test"));
+        assert!(ee5.has_domain("dummy.sys.oxide2.test"));
+        assert_eq!(ee5.nwarnings(), 0);
+        let endpoint1 = &ee5.by_dns_name["dummy.sys.oxide1.test"];
+        let endpoint2 = &ee5.by_dns_name["dummy.sys.oxide2.test"];
+        assert_eq!(endpoint1, endpoint2);
+        assert_eq!(endpoint1.silo_id, silo_id);
+        assert_eq!(endpoint1.tls_certs.len(), 1);
+        assert_eq!(endpoint2.silo_id, silo_id);
+        assert_eq!(endpoint2.tls_certs.len(), 1);
+
+        // Add a second Silo with the same name as the first one.  This should
+        // not be possible in practice.  In the future, we expect other features
+        // (e.g., DNS aliases) to make it possible for silos' DNS names to
+        // overlap like this.
+        let silo2_same_name_id =
+            "e3f36f20-56c3-c545-8320-c19d98b82c1d".parse().unwrap();
+        let silo2_same_name = create_silo(Some(silo2_same_name_id), "dummy");
+        let ee6 = ExternalEndpoints::new(
+            vec![silo, silo2_same_name],
+            vec![cert],
+            vec![dns_zone1],
+        );
+        assert_ne!(ee5, ee6);
+        assert_eq!(ee6.ndomains(), 1);
+        assert!(ee6.has_domain("dummy.sys.oxide1.test"));
+        let endpoint = &ee6.by_dns_name["dummy.sys.oxide1.test"];
+        assert_eq!(endpoint.silo_id, silo_id);
+        assert_eq!(endpoint.tls_certs.len(), 1);
+        assert_eq!(ee6.nwarnings(), 1);
+        assert_eq!(
+            ee6.warnings[0].to_string(),
+            "ignoring silo e3f36f20-56c3-c545-8320-c19d98b82c1d (\"dummy\"): \
+            has the same DNS name (\"dummy.sys.oxide1.test\") as \
+            previously-found silo 6bcbd3bb-f93b-e8b3-d41c-dce6d98281d3 \
+            (\"dummy\")"
+        );
+    }
+
+    #[test]
+    fn test_external_endpoints_complex() {
+        // Set up a somewhat complex scenario:
+        //
+        // - three Silos
+        //   - silo1: two certificates
+        //   - silo2: two certificates
+        //   - silo3: one certificates that is invalid
+        // - two DNS zones
+        //
+        // We should wind up with six endpoints and one warning.
+        let silo1 = create_silo(None, "silo1");
+        let silo2 = create_silo(None, "silo2");
+        let silo3 = create_silo(None, "silo3");
+        let silo1_cert1_params = create_certificate("silo1.sys.oxide1.test");
+        let silo1_cert1 = Certificate::new(
+            silo1.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo1_cert1_params,
+        )
+        .unwrap();
+        let silo1_cert2_params = create_certificate("silo1.sys.oxide1.test");
+        let silo1_cert2 = Certificate::new(
+            silo1.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo1_cert2_params,
+        )
+        .unwrap();
+        let silo2_cert1_params = create_certificate("silo2.sys.oxide1.test");
+        let silo2_cert1 = Certificate::new(
+            silo2.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo2_cert1_params,
+        )
+        .unwrap();
+        let silo2_cert2_params = create_certificate("silo2.sys.oxide1.test");
+        let silo2_cert2 = Certificate::new(
+            silo2.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo2_cert2_params,
+        )
+        .unwrap();
+        let silo3_cert_params = create_certificate("silo3.sys.oxide1.test");
+        let mut silo3_cert = Certificate::new(
+            silo3.identity().id,
+            Uuid::new_v4(),
+            ServiceKind::Nexus,
+            silo3_cert_params,
+        )
+        .unwrap();
+        // Corrupt a byte of this last certificate.  (This has to be done after
+        // constructing it or we would fail validation.)
+        silo3_cert.cert[0] ^= 1;
+        let dns_zone1 = create_dns_zone("oxide1");
+        let dns_zone2 = create_dns_zone("oxide2");
+
+        let ee = ExternalEndpoints::new(
+            vec![silo1.clone(), silo2.clone(), silo3.clone()],
+            vec![
+                silo1_cert1.clone(),
+                silo1_cert2.clone(),
+                silo2_cert1.clone(),
+                silo2_cert2.clone(),
+                silo3_cert.clone(),
+            ],
+            vec![dns_zone1, dns_zone2],
+        );
+        println!("{:?}", ee);
+        assert_eq!(ee.ndomains(), 6);
+        assert_eq!(ee.nwarnings(), 3);
+        assert_eq!(
+            2,
+            ee.warnings
+                .iter()
+                .filter(|warning| matches!(warning,
+                    ExternalEndpointError::NoSiloCerts { silo_id, .. }
+                        if *silo_id == silo3.id()
+                ))
+                .count()
+        );
+        assert_eq!(
+            1,
+            ee.warnings
+                .iter()
+                .filter(|warning| matches!(warning,
+                    ExternalEndpointError::BadCert { silo_id, .. }
+                        if *silo_id == silo3.id()
+                ))
+                .count()
+        );
+
+        assert_eq!(
+            ee.by_dns_name["silo1.sys.oxide1.test"],
+            ee.by_dns_name["silo1.sys.oxide2.test"]
+        );
+        assert_eq!(
+            ee.by_dns_name["silo2.sys.oxide1.test"],
+            ee.by_dns_name["silo2.sys.oxide2.test"]
+        );
+        assert_eq!(
+            ee.by_dns_name["silo3.sys.oxide1.test"],
+            ee.by_dns_name["silo3.sys.oxide2.test"]
+        );
+
+        let e1 = &ee.by_dns_name["silo1.sys.oxide1.test"];
+        assert_eq!(e1.silo_id, silo1.id());
+        let c1 = e1.best_certificate().unwrap();
+        assert!(
+            cert_matches(c1, &silo1_cert1) || cert_matches(c1, &silo1_cert2)
+        );
+
+        let e2 = &ee.by_dns_name["silo2.sys.oxide1.test"];
+        assert_eq!(e2.silo_id, silo2.id());
+        let c2 = e2.best_certificate().unwrap();
+        assert!(
+            cert_matches(c2, &silo2_cert1) || cert_matches(c2, &silo2_cert2)
+        );
+        assert!(!cert_matches(c2, &silo1_cert1));
+        assert!(!cert_matches(c2, &silo1_cert2));
+
+        let e3 = &ee.by_dns_name["silo3.sys.oxide1.test"];
+        assert_eq!(e3.silo_id, silo3.id());
+        assert!(e3.best_certificate().is_err());
+    }
+
+    // XXX-dap TODO-coverage
+    // - best_certificate(): check that it picks the latest
+    // - exercise the CertResolver in the complex test above
+    // XXX-dap figure out what to do with the fact that you could have multiple
+    // *different* certs for different domains for a Silo?  This is a problem if
+    // there are multiple DNS zones for example, let alone aliases.
 }

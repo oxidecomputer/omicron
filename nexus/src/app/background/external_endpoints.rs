@@ -168,8 +168,6 @@ mod test {
         assert_eq!(initial_state.ndomains(), 2);
         // Neither of these will have a valid certificate in this configuration.
         assert_eq!(initial_state.nwarnings(), 2);
-        drop(initial_state);
-        drop(initial_state_raw);
 
         // If we create another Silo, we should see that one, too.
         let new_silo_name = "test-silo";
