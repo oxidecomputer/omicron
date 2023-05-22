@@ -17,8 +17,8 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-// Each share is 33 bytes (one identifier (x-index) byte, and one 32-byte
-// point on the curve.
+// Each share is a point on a polynomial (Curve25519).  Each share is 33 bytes
+// - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
 const SHARE_SIZE: usize = 33;
 
 /// Details about a `SharePkg` or analog, that can be read first to allow
@@ -46,17 +46,18 @@ impl SharePkgHeader {
     }
 }
 
-/// A container used distributed among trust quorum participants for
-/// trust quorum version 0 Scheme: [`crate::SchemeV0`].
+/// A container distributed among trust quorum participants for
+/// trust quorum scheme version 0: [`crate::SchemeV0`].
 ///
 /// This scheme does not verify membership, and will hand out shares
-/// to whoever asks.
+/// to whomever asks.
 #[derive(Clone, PartialEq, Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 pub struct SharePkgV0 {
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
     // We aren't planning on doing any reconfigurations with this version of
-    // the protocol
+    // the protocol. This is here in case we decide otherwise, and becaus an
+    // epoch is used for disk encryption purposes.
     pub epoch: u32,
     pub threshold: u8,
     pub share: Vec<u8>,
@@ -78,16 +79,16 @@ pub struct SharePkgV0 {
     pub nonce: [u8; 12],
 
     /// We include a distinct subset of unused shares for each sled in the
-    /// initial  group. This allows the sled to hand out unique shares when a
+    /// initial group. This allows the sled to hand out unique shares when a
     /// new sled joins the cluster. We keep these encrypted so that a single
-    /// sled does not have enough unencrrypted shares to unlock the rack
+    /// sled does not have enough unencrypted shares to unlock the rack
     /// without participating in trust quorum.
     ///
     /// Each sled should keep local track of which shares it has already handed
     /// out.
     ///
-    /// Note, each sled derives the same encryption key, but uses the unique
-    /// nonce for the pkg.
+    /// Each sled derives the same encryption key, but uses the unique nonce
+    /// for encrypting its unique shares.
     ///
     /// No need for expensive zeroizing
     #[zeroize(skip)]
@@ -122,7 +123,7 @@ pub fn create_pkgs(
     let rack_secret = RackSecret::new();
     let threshold = n / 2 + 1;
     let epoch = 0;
-    // We always generate 256 shares to allow new sleds to come online
+    // We always generate 255 shares to allow new sleds to come online
     let total_shares = 255;
     let shares_per_sled = 255 / n;
     let shares = rack_secret.split(threshold, total_shares)?;
@@ -164,8 +165,8 @@ pub fn create_pkgs(
 // a counter.
 //
 // We know we only have up to 32 packages (1 for each sled), so we fill the
-// first 11 bytes of the nonce with random byes, and the last byte with a
-// counter.
+// first 11 bytes of the nonce with random bytes, and the last byte with
+// a counter.
 fn new_nonce(i: usize) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     OsRng.fill_bytes(&mut nonce[..11]);
@@ -301,7 +302,7 @@ mod tests {
             assert_eq!(share.len(), SHARE_SIZE);
 
             // Ensure the hash of each share matches what is stored in hashes
-            // Share's and hashes match in order
+            // Iteration guarantees that shares match hashes in order
             let computed_hash = Sha3_256Digest(
                 Sha3_256::digest(share).as_slice().try_into().unwrap(),
             );

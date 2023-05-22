@@ -53,9 +53,8 @@ impl PartialEq for RackSecret {
 impl Eq for RackSecret {}
 
 impl RackSecret {
-    /// Create a secret based on the NIST P-256 curve
+    /// Create a secret based on Curve25519
     pub fn new() -> RackSecret {
-        // For some reason curve25519-dalek requires rand_core here
         let mut rng = OsRng::default();
         RackSecret { secret: Scalar::random(&mut rng) }
     }
