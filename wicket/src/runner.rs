@@ -222,8 +222,18 @@ impl RunnerCore {
                                 )
                             });
 
-                    let options =
-                        StartUpdateOptions { test_error, test_step_seconds };
+                    let options = StartUpdateOptions {
+                        test_error,
+                        test_step_seconds,
+                        skip_rot_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_rot,
+                        skip_sp_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_sp,
+                    };
                     wicketd.tx.blocking_send(
                         wicketd::Request::StartUpdate { component_id, options },
                     )?;

@@ -151,6 +151,16 @@ pub(crate) struct StartUpdateOptions {
     ///
     /// This is used for testing.
     pub(crate) test_step_seconds: Option<u64>,
+
+    /// If true, skip the check on the current RoT version and always update it
+    /// regardless of whether the update appears to be neeeded.
+    #[allow(dead_code)] // TODO actually use this
+    pub(crate) skip_rot_version_check: bool,
+
+    /// If true, skip the check on the current SP version and always update it
+    /// regardless of whether the update appears to be neeeded.
+    #[allow(dead_code)] // TODO actually use this
+    pub(crate) skip_sp_version_check: bool,
 }
 
 #[derive(Copy, Clone, Debug, JsonSchema, Deserialize, PartialEq, Eq)]

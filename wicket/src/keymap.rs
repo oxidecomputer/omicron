@@ -25,6 +25,9 @@ pub enum Cmd {
     /// Exit the current context
     Exit,
 
+    /// Toggle the currently-selected item (e.g., checkbox).
+    Toggle,
+
     /// Expand the current tree context
     Expand,
 
@@ -162,6 +165,7 @@ impl KeyHandler {
         let cmd = match event.code {
             KeyCode::Enter => Cmd::Enter,
             KeyCode::Esc => Cmd::Exit,
+            KeyCode::Char(' ') => Cmd::Toggle,
             KeyCode::Char('e') => Cmd::Expand,
             KeyCode::Char('c') => Cmd::Collapse,
             KeyCode::Char('d') => Cmd::Details,
