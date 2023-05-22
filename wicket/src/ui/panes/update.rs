@@ -1165,8 +1165,10 @@ impl ForceUpdateSelectionState {
     fn help_text(&self) -> Vec<(&'static str, &'static str)> {
         match self.num_spans() {
             0 => vec![],
-            1 => vec![("Toggle", "Space")],
-            _ => vec![("Toggle", "Space"), ("Up", "Up"), ("Down", "Down")],
+            1 => vec![("Toggle", "<Space>")],
+            _ => {
+                vec![("Toggle", "<Space>"), ("Up", "<Up>"), ("Down", "<Down>")]
+            }
         }
     }
 
