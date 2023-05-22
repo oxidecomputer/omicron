@@ -80,7 +80,7 @@ impl super::Nexus {
     pub async fn silo_create(
         &self,
         opctx: &OpContext,
-        new_silo_params: params::SiloCreate,
+        new_silo_params: params::SiloCreateInternal,
     ) -> CreateResult<db::model::Silo> {
         // Silo creation involves several operations that ordinary users cannot
         // generally do, like reading and modifying the fleet-wide external DNS

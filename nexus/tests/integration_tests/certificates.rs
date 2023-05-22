@@ -213,7 +213,6 @@ async fn cert_create_expect_error(
         },
         cert,
         key,
-        service: shared::ServiceUsingCertificate::ExternalApi,
     };
 
     NexusRequest::expect_failure_with_body(
@@ -445,12 +444,11 @@ async fn test_silo_with_certificates(cptestctx: &ControlPlaneTestContext) {
         },
         cert,
         key,
-        service: shared::ServiceUsingCertificate::ExternalApi,
     };
     let silo: Silo = object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &params::SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: "silo-name".parse().unwrap(),
                 description: "a silo".to_string(),

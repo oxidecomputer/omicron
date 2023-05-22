@@ -57,7 +57,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
             StatusCode::BAD_REQUEST,
             Method::POST,
             "/v1/system/silos",
-            &params::SiloCreate {
+            &params::SiloCreateInternal {
                 identity: IdentityMetadataCreateParams {
                     name: cptestctx.silo_name.clone(),
                     description: "a silo".to_string(),
@@ -276,7 +276,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let silo: Silo = object_create(
         client,
         "/v1/system/silos",
-        &params::SiloCreate {
+        &params::SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: "silo-name".parse().unwrap(),
                 description: "a silo".to_string(),

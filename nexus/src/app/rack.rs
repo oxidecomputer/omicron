@@ -8,14 +8,13 @@ use crate::authz;
 use crate::db;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
-use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
-use nexus_types::external_api::params::SiloCreate;
+use nexus_types::external_api::params::SiloCreateInternal;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::DataPageParams;
@@ -104,7 +103,6 @@ impl super::Nexus {
                     },
                     cert: c.cert,
                     key: c.key,
-                    service: ServiceUsingCertificate::ExternalApi,
                 }
             })
             .collect();
@@ -160,7 +158,7 @@ impl super::Nexus {
         );
         dns_update.add_name(Self::silo_dns_name(silo_name), dns_records)?;
 
-        let recovery_silo = SiloCreate {
+        let recovery_silo = SiloCreateInternal {
             identity: IdentityMetadataCreateParams {
                 name: request.recovery_silo.silo_name,
                 description: "built-in recovery Silo".to_string(),
