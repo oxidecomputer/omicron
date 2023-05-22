@@ -1324,6 +1324,7 @@ impl ServiceManager {
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
+                    let nexus_port = if *external_tls { 443 } else { 80 };
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
@@ -1331,7 +1332,9 @@ impl ServiceManager {
                         dropshot_external: ConfigDropshotWithTls {
                             tls: *external_tls,
                             dropshot: dropshot::ConfigDropshot {
-                                bind_address: SocketAddr::new(port_ip, 80),
+                                bind_address: SocketAddr::new(
+                                    port_ip, nexus_port,
+                                ),
                                 // This has to be large enough to support:
                                 // - bulk writes to disks
                                 request_body_max_bytes: 8192 * 1024,
