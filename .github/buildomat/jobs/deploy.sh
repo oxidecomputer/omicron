@@ -254,10 +254,10 @@ pfexec ipadm create-addr -T static -a $GATEWAY_IP/24 igb0/sidehatch
 ./tools/scrimlet/softnpu-init.sh
 
 export RUST_BACKTRACE=1
+export E2E_TLS_CERT
 ./tests/bootstrap
 
 rm ./tests/bootstrap
-export E2E_TLS_CERT
 for test_bin in tests/*; do
 	./"$test_bin"
 done
