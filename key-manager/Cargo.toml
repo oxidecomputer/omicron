@@ -6,7 +6,7 @@ license = "MPL-2.0"
 
 [dependencies]
 async-trait.workspace = true
-hkdf = "0.12.3"
+hkdf.workspace = true
 secrecy.workspace = true
 sha3.workspace = true
 sled-hardware.workspace = true
