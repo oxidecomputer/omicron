@@ -68,6 +68,13 @@ ptime -m ./tools/build-global-zone-packages.sh $tarball_src_dir /work
 # Non-Global Zones
 
 # Assemble Zone Images into their respective output locations.
+#
+# Zones that are included into another are intentionally omitted from this list
+# (e.g., the switch zone tarballs contain several other zone tarballs: dendrite,
+# mg-ddm, etc.).
+#
+# Note that when building for a real gimlet, `propolis-server` and `switch-*`
+# should be included in the OS ramdisk.
 mkdir -p /work/zones
 zones=(
 	out/clickhouse.tar.gz
@@ -82,7 +89,6 @@ zones=(
 	out/switch-asic.tar.gz
 	out/switch-softnpu.tar.gz
 	out/ntp.tar.gz
-	out/mg-ddm.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 
