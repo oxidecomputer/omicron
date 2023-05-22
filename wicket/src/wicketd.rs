@@ -11,12 +11,13 @@ use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
     GetInventoryParams, GetInventoryResponse, IgnitionCommand, SpIdentifier,
-    SpType,
+    SpType, StartUpdateOptions,
 };
 
 use crate::events::EventReportMap;
+use crate::keymap::ShowPopupCmd;
 use crate::state::ComponentId;
-use crate::Event;
+use crate::{Cmd, Event};
 
 impl From<ComponentId> for SpIdentifier {
     fn from(id: ComponentId) -> Self {
@@ -46,7 +47,7 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[allow(unused)]
 #[derive(Debug)]
 pub enum Request {
-    StartUpdate { component_id: ComponentId, test_step_seconds: Option<u64> },
+    StartUpdate { component_id: ComponentId, options: StartUpdateOptions },
     IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
@@ -100,8 +101,8 @@ impl WicketdManager {
                 Some(request) = self.rx.recv() => {
                     slog::info!(self.log, "Got wicketd req: {:?}", request);
                     match request {
-                        Request::StartUpdate { component_id, test_step_seconds } => {
-                            self.start_update(component_id, test_step_seconds);
+                        Request::StartUpdate { component_id, options } => {
+                            self.start_update(component_id, options);
                         }
                         Request::IgnitionCommand(component_id, command) => {
                             self.start_ignition_command(
@@ -123,23 +124,32 @@ impl WicketdManager {
     fn start_update(
         &self,
         component_id: ComponentId,
-        test_step_seconds: Option<u64>,
+        options: StartUpdateOptions,
     ) {
         let log = self.log.clone();
         let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
-            let res = update_client
-                .post_start_update(sp.type_, sp.slot, test_step_seconds)
-                .await;
-            // We don't return errors or success values, as there's nobody to
-            // return them to. Instead, all updates are periodically polled
-            // and global state mutated. This allows the update pane to
-            // report current status to users in a more detailed and holistic
-            // fashion.
-            slog::info!(log, "Update response for {}: {:?}", component_id, res);
+            let response = match update_client
+                .post_start_update(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Update response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::StartUpdateResponse { component_id, response },
+            )));
         });
     }
 

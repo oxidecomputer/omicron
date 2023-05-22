@@ -220,6 +220,8 @@ enum SpUpdateStatus {
     Aborted { id: Uuid },
     /// The update process failed.
     Failed { id: Uuid, code: u32 },
+    /// The update process failed with an RoT-specific error.
+    RotError { id: Uuid, message: String },
 }
 
 /// Progress of an SP preparing to update.

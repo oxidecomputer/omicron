@@ -285,6 +285,7 @@ source.commit = "ae633485f570554455ce180acf0091db79d46850"
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 source.sha256 = "bb4ce993eae149c7a94ae889b9c835a4415bd14c5f4fd45bd18d4bea2c197329"
 output.type = "zone"
+output.intermediate_only = true
 
 [package.dendrite-stub]
 service_name = "dendrite"
