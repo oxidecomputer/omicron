@@ -665,6 +665,14 @@ async fn update(
                 }
                 bail!("update failed (code {code})");
             }
+            SpUpdateStatus::RotError { id, message } => {
+                if id != update_id {
+                    bail!(
+                        "different update failed ({id:?}, rot error {message})"
+                    );
+                }
+                bail!("update failed (rot error {message})");
+            }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

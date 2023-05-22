@@ -248,10 +248,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source.commit = "5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "31b845a4635a5f0f04608fd496e5ee4c6d7fc91e98d32e8b1353dcfd86759253"
+source.sha256 = "22e553aa69d25ea85eb40e718deae0d2ab4d11b8ef29950acf1fb9b92a60a46f"
 output.type = "zone"
 
 [package.maghemite]
@@ -285,6 +285,7 @@ source.commit = "ae633485f570554455ce180acf0091db79d46850"
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 source.sha256 = "bb4ce993eae149c7a94ae889b9c835a4415bd14c5f4fd45bd18d4bea2c197329"
 output.type = "zone"
+output.intermediate_only = true
 
 [package.dendrite-stub]
 service_name = "dendrite"

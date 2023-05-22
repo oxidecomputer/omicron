@@ -17,21 +17,17 @@ use gateway_messages::ignition::{self, LinkEvents};
 use gateway_messages::sp_impl::SpHandler;
 use gateway_messages::sp_impl::{BoundsChecked, DeviceDescription};
 use gateway_messages::ComponentAction;
-use gateway_messages::RotBootState;
-use gateway_messages::RotSlot;
-use gateway_messages::RotUpdateDetails;
+use gateway_messages::Header;
+use gateway_messages::RotSlotId;
 use gateway_messages::SpComponent;
 use gateway_messages::SpError;
 use gateway_messages::SpPort;
 use gateway_messages::SpRequest;
-use gateway_messages::SpState;
+use gateway_messages::SpStateV2;
 use gateway_messages::UpdateId;
 use gateway_messages::{version, MessageKind};
 use gateway_messages::{ComponentDetails, Message, MgsError, StartupOptions};
-use gateway_messages::{
-    DiscoverResponse, IgnitionState, ImageVersion, PowerState,
-};
-use gateway_messages::{Header, RotState};
+use gateway_messages::{DiscoverResponse, IgnitionState, PowerState};
 use slog::{debug, error, info, warn, Logger};
 use sprockets_rot::common::msgs::{RotRequestV1, RotResponseV1};
 use sprockets_rot::common::Ed25519PublicKey;
@@ -49,8 +45,6 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::{self, JoinHandle};
-
-const SIM_GIMLET_VERSION: ImageVersion = ImageVersion { epoch: 0, version: 0 };
 
 pub struct Gimlet {
     rot: Mutex<RotSprocket>,
@@ -539,30 +533,26 @@ impl Handler {
         }
     }
 
-    fn sp_state_impl(&self) -> SpState {
+    fn sp_state_impl(&self) -> SpStateV2 {
         const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
 
         let mut model = [0; 32];
         model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
 
-        SpState {
+        SpStateV2 {
             hubris_archive_id: [0; 8],
             serial_number: serial_number_padded(&self.serial_number),
             model,
             revision: 0,
             base_mac_address: [0; 6],
-            version: SIM_GIMLET_VERSION,
             power_state: self.power_state,
-            rot: Ok(RotState {
-                rot_updates: RotUpdateDetails {
-                    // TODO replace with configurable data once something cares
-                    // about this?
-                    boot_state: RotBootState {
-                        active: RotSlot::A,
-                        slot_a: None,
-                        slot_b: None,
-                    },
-                },
+            rot: Ok(gateway_messages::RotStateV2 {
+                active: RotSlotId::A,
+                persistent_boot_preference: RotSlotId::A,
+                pending_persistent_boot_preference: None,
+                transient_boot_preference: None,
+                slot_a_sha3_256_digest: None,
+                slot_b_sha3_256_digest: None,
             }),
         }
     }
@@ -842,7 +832,7 @@ impl SpHandler for Handler {
         &mut self,
         sender: SocketAddrV6,
         port: SpPort,
-    ) -> Result<SpState, SpError> {
+    ) -> Result<SpStateV2, SpError> {
         let state = self.sp_state_impl();
         debug!(
             &self.log, "received state request";
@@ -1243,22 +1233,37 @@ impl SpHandler for Handler {
         Err(SpError::RequestUnsupportedForSp)
     }
 
-    fn get_caboose_value(
+    fn get_component_caboose_value(
         &mut self,
+        component: SpComponent,
+        _slot: u16,
         key: [u8; 4],
-    ) -> std::result::Result<&'static [u8], SpError> {
-        static GITC: &[u8] = b"ffffffff";
-        static BORD: &[u8] = b"SimGimletSp";
-        static NAME: &[u8] = b"SimGimlet";
-        static VERS: &[u8] = b"0.0.1";
+        buf: &mut [u8],
+    ) -> std::result::Result<usize, SpError> {
+        static SP_GITC: &[u8] = b"ffffffff";
+        static SP_BORD: &[u8] = b"SimGimletSp";
+        static SP_NAME: &[u8] = b"SimGimlet";
+        static SP_VERS: &[u8] = b"0.0.1";
 
-        match &key {
-            b"GITC" => Ok(GITC),
-            b"BORD" => Ok(BORD),
-            b"NAME" => Ok(NAME),
-            b"VERS" => Ok(VERS),
-            _ => Err(SpError::NoSuchCabooseKey(key)),
-        }
+        static ROT_GITC: &[u8] = b"eeeeeeee";
+        static ROT_BORD: &[u8] = b"SimGimletRot";
+        static ROT_NAME: &[u8] = b"SimGimlet";
+        static ROT_VERS: &[u8] = b"0.0.1";
+
+        let val = match (component, &key) {
+            (SpComponent::SP_ITSELF, b"GITC") => SP_GITC,
+            (SpComponent::SP_ITSELF, b"BORD") => SP_BORD,
+            (SpComponent::SP_ITSELF, b"NAME") => SP_NAME,
+            (SpComponent::SP_ITSELF, b"VERS") => SP_VERS,
+            (SpComponent::ROT, b"GITC") => ROT_GITC,
+            (SpComponent::ROT, b"BORD") => ROT_BORD,
+            (SpComponent::ROT, b"NAME") => ROT_NAME,
+            (SpComponent::ROT, b"VERS") => ROT_VERS,
+            _ => return Err(SpError::NoSuchCabooseKey(key)),
+        };
+
+        buf[..val.len()].copy_from_slice(val);
+        Ok(val.len())
     }
 }
 

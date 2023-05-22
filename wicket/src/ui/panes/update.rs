@@ -4,7 +4,8 @@
 
 use std::collections::BTreeMap;
 
-use super::{align_by, help_text, Control};
+use super::{align_by, help_text, push_text_lines, Control};
+use crate::keymap::ShowPopupCmd;
 use crate::state::{
     update_component_title, ComponentId, Inventory, UpdateItemState,
     ALL_COMPONENT_IDS,
@@ -12,6 +13,7 @@ use crate::state::{
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
     BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
+    StatusView,
 };
 use crate::ui::wrap::wrap_text;
 use crate::{Action, Cmd, Frame, State};
@@ -33,10 +35,18 @@ use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
+#[derive(Debug)]
 enum PopupKind {
-    StartUpdate,
+    StartUpdate { popup_state: StartUpdatePopupState },
     StepLogs,
     Ignition,
+}
+
+#[derive(Debug)]
+enum StartUpdatePopupState {
+    Prompting,
+    Waiting,
+    Failed { message: String },
 }
 
 /// Overview of update status and ability to install updates
@@ -45,6 +55,7 @@ pub struct UpdatePane {
     #[allow(unused)]
     log: Logger,
     help: Vec<(&'static str, &'static str)>,
+    not_started_help: Vec<(&'static str, &'static str)>,
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
@@ -91,6 +102,7 @@ impl UpdatePane {
                 ("Ignition", "<i>"),
                 ("Update", "<Enter>"),
             ],
+            not_started_help: vec![("Start", "<Ctrl-U>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, ComponentUpdateListState::default()))
@@ -254,11 +266,9 @@ impl UpdatePane {
 
                 if let Some(message) = message {
                     body.lines.push(Spans::default());
-                    let message_spans = vec![
-                        Span::styled("Message: ", style::selected()),
-                        Span::styled(message.as_ref(), style::plain_text()),
-                    ];
-                    body.lines.push(Spans::from(message_spans));
+                    let prefix =
+                        vec![Span::styled("Message: ", style::selected())];
+                    push_text_lines(&message, prefix, &mut body.lines);
                 }
             }
             StepStatus::Completed { info: None } => {
@@ -292,11 +302,8 @@ impl UpdatePane {
                 body.lines.push(Spans::default());
 
                 // Show the message.
-                let message_spans = vec![
-                    Span::styled("Message: ", style::selected()),
-                    Span::styled(&info.message, style::plain_text()),
-                ];
-                body.lines.push(Spans::from(message_spans));
+                let prefix = vec![Span::styled("Message: ", style::selected())];
+                push_text_lines(&info.message, prefix, &mut body.lines);
 
                 // Show causes.
                 if !info.causes.is_empty() {
@@ -369,11 +376,12 @@ impl UpdatePane {
         frame.render_widget(popup, full_screen);
     }
 
-    pub fn draw_start_update_popup(
+    pub fn draw_start_update_prompting_popup(
         &mut self,
         state: &State,
         frame: &mut Frame<'_>,
     ) {
+        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE: {}", state.rack_state.selected),
@@ -387,6 +395,61 @@ impl UpdatePane {
                 ButtonText { instruction: "YES", key: "Y" },
                 ButtonText { instruction: "NO", key: "N" },
             ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn draw_start_update_waiting_popup(
+        &self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        // What we show here depends on the current status.
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(" START UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )])]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                " Waiting for update to start",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn draw_start_update_failed_popup(
+        &self,
+        state: &State,
+        message: &str,
+        frame: &mut Frame<'_>,
+    ) {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+        let options = Popup::default_wrap_options(state.screen_width);
+        let wrapped_body = wrap_text(&body, options);
+
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(" START UPDATE FAILED: {}", state.rack_state.selected),
+                style::failed_update(),
+            )])]),
+            body: wrapped_body,
+            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
         };
         let full_screen = Rect {
             width: state.screen_width,
@@ -481,20 +544,39 @@ impl UpdatePane {
         );
         match cmd {
             Cmd::Up => {
-                let id_state = self
-                    .component_state
-                    .get_mut(&state.rack_state.selected)
-                    .unwrap();
-                id_state.prev_item();
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .prev_component(state);
+                } else {
+                    let id_state = self
+                        .component_state
+                        .get_mut(&state.rack_state.selected)
+                        .unwrap();
+                    id_state.prev_item();
+                }
                 Some(Action::Redraw)
             }
             Cmd::Down => {
-                let id_state = self
-                    .component_state
-                    .get_mut(&state.rack_state.selected)
-                    .unwrap();
-                id_state.next_item();
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .next_component(state);
+                } else {
+                    let id_state = self
+                        .component_state
+                        .get_mut(&state.rack_state.selected)
+                        .unwrap();
+                    id_state.next_item();
+                }
                 Some(Action::Redraw)
+            }
+            Cmd::Toggle => {
+                if self.is_force_update_visible(state) {
+                    ForceUpdateSelectionState::from(&*state)
+                        .toggle_currently_selected(state);
+                    Some(Action::Redraw)
+                } else {
+                    None
+                }
             }
             Cmd::Left => {
                 state.rack_state.prev();
@@ -523,14 +605,18 @@ impl UpdatePane {
             }
             Cmd::StartUpdate => {
                 let selected = state.rack_state.selected;
-                if state.update_state.item_state(selected)
-                    == UpdateItemState::NotStarted
-                {
-                    // NotStarted means that "Press ... to start" is displayed.
-                    self.popup = Some(PopupKind::StartUpdate);
-                    Some(Action::Redraw)
-                } else {
-                    None
+                match state.update_state.item_state(selected) {
+                    UpdateItemState::NotStarted => {
+                        // If an update hasn't been started or has failed to
+                        // start, "Press ... to start" is displayed.
+                        self.popup = Some(PopupKind::StartUpdate {
+                            popup_state: StartUpdatePopupState::Prompting,
+                        });
+                        Some(Action::Redraw)
+                    }
+                    UpdateItemState::AwaitingRepository
+                    | UpdateItemState::UpdateStarted
+                    | UpdateItemState::RunningOrCompleted { .. } => None,
                 }
             }
             Cmd::GotoTop => {
@@ -553,6 +639,17 @@ impl UpdatePane {
         }
     }
 
+    fn is_force_update_visible(&self, state: &State) -> bool {
+        // We only show the toggle spans for force updating the SP/RoT when the
+        // user could potentially start an update.
+        match state.update_state.item_state(state.rack_state.selected) {
+            UpdateItemState::NotStarted => true,
+            UpdateItemState::AwaitingRepository
+            | UpdateItemState::UpdateStarted
+            | UpdateItemState::RunningOrCompleted { .. } => false,
+        }
+    }
+
     fn handle_cmd_in_popup(
         &mut self,
         state: &mut State,
@@ -562,7 +659,7 @@ impl UpdatePane {
             self.popup = None;
             return Some(Action::Redraw);
         }
-        match self.popup.as_ref().unwrap() {
+        match self.popup.as_mut().unwrap() {
             PopupKind::StepLogs => match cmd {
                 // TODO: up/down for scrolling popup data
                 Cmd::Left => {
@@ -604,18 +701,58 @@ impl UpdatePane {
                 }
                 _ => None,
             },
-            PopupKind::StartUpdate => {
-                match cmd {
-                    Cmd::Yes => {
+            PopupKind::StartUpdate { popup_state } => {
+                match (popup_state, cmd) {
+                    (
+                        popup_state @ StartUpdatePopupState::Prompting,
+                        Cmd::Yes,
+                    ) => {
                         // Trigger the update
                         let selected = state.rack_state.selected;
                         info!(self.log, "Updating {}", selected);
-                        self.popup = None;
-                        Some(Action::Update(selected))
+                        *popup_state = StartUpdatePopupState::Waiting;
+                        Some(Action::StartUpdate(selected))
                     }
-                    Cmd::No => {
+                    (StartUpdatePopupState::Prompting, Cmd::No) => {
                         self.popup = None;
                         Some(Action::Redraw)
+                    }
+                    (
+                        popup_state,
+                        Cmd::ShowPopup(ShowPopupCmd::StartUpdateResponse {
+                            component_id,
+                            response,
+                        }),
+                    ) => {
+                        let component_id_matches =
+                            state.rack_state.selected == component_id;
+                        match (component_id_matches, response) {
+                            (true, Ok(())) => {
+                                // We're done waiting, close the popup.
+                                self.popup = None;
+                                Some(Action::Redraw)
+                            }
+                            (true, Err(message)) => {
+                                *popup_state =
+                                    StartUpdatePopupState::Failed { message };
+                                Some(Action::Redraw)
+                            }
+                            (false, _) => {
+                                // This message isn't meant for this component.
+                                // It's a bit of a weird situation (we should
+                                // only be making one start-update request at a
+                                // time, and shouldn't let
+                                // state.rack_state.selected be changed in the
+                                // meantime) so log this.
+                                slog::warn!(
+                                self.log,
+                                "currently waiting on start update response \
+                                 for {} but received response for {component_id}",
+                                 state.rack_state.selected
+                            );
+                                None
+                            }
+                        }
                     }
                     _ => None,
                 }
@@ -791,6 +928,10 @@ impl UpdatePane {
 
         match state.update_state.item_state(state.rack_state.selected) {
             UpdateItemState::AwaitingRepository => {
+                // No status bar, so make the main rect bigger.
+                let mut rect = self.status_view_main_rect;
+                rect.height += 3;
+
                 // Show this command.
                 let text = Text::from(vec![
                     Spans::from(Vec::new()),
@@ -813,10 +954,13 @@ impl UpdatePane {
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
                     .block(block.clone().title("AWAITING REPOSITORY"));
-                frame.render_widget(paragraph, self.status_view_main_rect);
+                frame.render_widget(paragraph, rect);
             }
             UpdateItemState::NotStarted => {
-                let text = Text::from(vec![
+                // Need to make space for the command bar at the bottom.
+                let force_update = ForceUpdateSelectionState::from(state);
+                let mut text = force_update.spans();
+                text.extend_from_slice(&[
                     Spans::from(Vec::new()),
                     Spans::from(vec![
                         Span::styled(
@@ -827,55 +971,243 @@ impl UpdatePane {
                         Span::styled(" to start", style::plain_text()),
                     ]),
                 ]);
+                let text = Text::from(text);
                 let paragraph = Paragraph::new(text)
-                    .alignment(Alignment::Center)
-                    .block(block.clone().title("UPDATE READY"));
+                    .alignment(Alignment::Left)
+                    .block(block.clone().title("UPDATE READY").borders(
+                        Borders::LEFT | Borders::RIGHT | Borders::TOP,
+                    ));
                 frame.render_widget(paragraph, self.status_view_main_rect);
+
+                let mut help = force_update.help_text();
+                help.extend_from_slice(&self.not_started_help);
+
+                frame.render_widget(
+                    help_text(&help).block(block.clone()),
+                    self.help_rect,
+                );
+                frame.render_widget(
+                    BoxConnector::new(BoxConnectorKind::Bottom),
+                    self.status_view_main_rect,
+                );
+            }
+            UpdateItemState::UpdateStarted => {
+                // This should show up very briefly, if at all, and then
+                // be replaced with the events list.
+                let status_text = Text::from(Spans::from(vec![
+                    Span::styled("Update ", style::plain_text()),
+                    Span::styled("started", style::successful_update_bold()),
+                    Span::styled(", waiting for events", style::plain_text()),
+                ]));
+
+                // Don't display any text here; status_text should be
+                // enough for the user.
+                let message_text = Text::from(Vec::new());
+
+                // Wrap the text to the screen width.
+                let options = crate::ui::wrap::Options {
+                    // Subtract 2 for borders.
+                    width: self.status_view_main_rect.width.saturating_sub(2)
+                        as usize,
+                    initial_indent: Span::raw(""),
+                    subsequent_indent: Span::raw(""),
+                    break_words: true,
+                };
+                let wrapped_text = wrap_text(&message_text, options);
+
+                let status_view = StatusView {
+                    status_view_rect: self.status_view_main_rect,
+                    help_rect: self.help_rect,
+                    title: "UPDATE STATUS".into(),
+                    status_text,
+                    widget: Paragraph::new(wrapped_text),
+                    help_text: None,
+                    block,
+                };
+                status_view.render(frame);
             }
             UpdateItemState::RunningOrCompleted { .. } => {
-                // Split the status view rect into two rects:
-                // * status text (3 lines including borders)
-                // * the list (everything else)
-                let mut status_text_rect = self.status_view_main_rect;
-                status_text_rect.height = 3;
-
-                let mut list_rect = self.status_view_main_rect;
-                list_rect.y += 3;
-                list_rect.height = list_rect.height.saturating_sub(3);
-
                 let id_state = self
                     .component_state
                     .get_mut(&state.rack_state.selected)
                     .unwrap();
 
-                let text = Text::from(id_state.status_text.clone());
-
-                let paragraph = Paragraph::new(text)
-                    .block(block.clone().title("UPDATE STATUS"))
-                    .alignment(Alignment::Center);
-                frame.render_widget(paragraph, status_text_rect);
+                let status_text = Text::from(id_state.status_text.clone());
 
                 let list = List::new(
                     id_state.list_items.values().cloned().collect::<Vec<_>>(),
                 )
-                .block(
-                    block.clone().borders(
-                        Borders::LEFT | Borders::RIGHT | Borders::BOTTOM,
-                    ),
-                )
                 .highlight_style(style::highlighted());
-                frame.render_stateful_widget(
-                    list,
-                    list_rect,
-                    &mut id_state.tui_list_state,
-                );
 
-                frame.render_widget(
-                    BoxConnector::new(BoxConnectorKind::Top),
-                    list_rect,
-                );
+                let status_view = StatusView {
+                    status_view_rect: self.status_view_main_rect,
+                    help_rect: self.help_rect,
+                    title: "UPDATE STATUS".into(),
+                    status_text,
+                    widget: list,
+                    help_text: None,
+                    block,
+                };
+                status_view
+                    .render_stateful(frame, &mut id_state.tui_list_state);
             }
         }
+    }
+}
+
+struct ComponentForceUpdateSelectionState {
+    version: String,
+    toggled_on: bool,
+    selected: bool,
+}
+
+struct ForceUpdateSelectionState {
+    rot: Option<ComponentForceUpdateSelectionState>,
+    sp: Option<ComponentForceUpdateSelectionState>,
+}
+
+impl From<&'_ State> for ForceUpdateSelectionState {
+    fn from(state: &'_ State) -> Self {
+        let component_id = state.rack_state.selected;
+        let versions = &state.update_state.artifact_versions;
+        let inventory = &state.inventory;
+        let update_item = &state.update_state.items[&component_id];
+
+        let mut rot = None;
+        let mut sp = None;
+
+        for &component in update_item.components() {
+            // We only allow force updating the SP/RoT; host is effectively
+            // always force updated (we always update it regardless of version).
+            if matches!(component, UpdateComponent::Host) {
+                continue;
+            }
+
+            let artifact_version =
+                artifact_version(&component_id, component, versions);
+            let installed_version =
+                installed_version(&component_id, component, inventory);
+            match component {
+                UpdateComponent::Rot => {
+                    assert!(
+                        rot.is_none(),
+                        "update item contains multiple RoT entries"
+                    );
+                    if artifact_version == installed_version {
+                        rot = Some(ComponentForceUpdateSelectionState {
+                            version: artifact_version,
+                            toggled_on: state
+                                .force_update_state
+                                .force_update_rot,
+                            selected: false, // set below
+                        });
+                    }
+                }
+                UpdateComponent::Sp => {
+                    assert!(
+                        sp.is_none(),
+                        "update item contains multiple RoT entries"
+                    );
+                    if artifact_version == installed_version {
+                        sp = Some(ComponentForceUpdateSelectionState {
+                            version: artifact_version,
+                            toggled_on: state
+                                .force_update_state
+                                .force_update_sp,
+                            selected: false, // set below
+                        });
+                    }
+                }
+                UpdateComponent::Host => unreachable!(), // skipped above
+            }
+        }
+
+        // If we only have one force-updateable component, mark it as selected;
+        // otherwise, respect the option currently selected in `State`.
+        match (rot.as_mut(), sp.as_mut()) {
+            (Some(rot), None) => rot.selected = true,
+            (None, Some(sp)) => sp.selected = true,
+            (Some(rot), Some(sp)) => {
+                if state.force_update_state.selected_component()
+                    == UpdateComponent::Rot
+                {
+                    rot.selected = true;
+                } else {
+                    sp.selected = true;
+                }
+            }
+            (None, None) => (),
+        }
+
+        Self { rot, sp }
+    }
+}
+
+impl ForceUpdateSelectionState {
+    fn num_spans(&self) -> usize {
+        usize::from(self.rot.is_some()) + usize::from(self.sp.is_some())
+    }
+
+    fn next_component(&self, state: &mut State) {
+        // Only move to the next component if we're showing more than 1.
+        if self.num_spans() > 1 {
+            state.force_update_state.next_component();
+        }
+    }
+
+    fn prev_component(&self, state: &mut State) {
+        // Only move to the prev component if we're showing more than 1.
+        if self.num_spans() > 1 {
+            state.force_update_state.prev_component();
+        }
+    }
+
+    fn help_text(&self) -> Vec<(&'static str, &'static str)> {
+        match self.num_spans() {
+            0 => vec![],
+            1 => vec![("Toggle", "<Space>")],
+            _ => {
+                vec![("Toggle", "<Space>"), ("Up", "<Up>"), ("Down", "<Down>")]
+            }
+        }
+    }
+
+    fn toggle_currently_selected(&self, state: &mut State) {
+        if self.rot.as_ref().map(|rot| rot.selected).unwrap_or(false) {
+            state.force_update_state.toggle(UpdateComponent::Rot);
+        } else if self.sp.as_ref().map(|sp| sp.selected).unwrap_or(false) {
+            state.force_update_state.toggle(UpdateComponent::Sp);
+        }
+    }
+
+    fn spans(&self) -> Vec<Spans<'static>> {
+        fn make_spans(
+            name: &str,
+            c: &ComponentForceUpdateSelectionState,
+        ) -> Spans<'static> {
+            let prefix = if c.toggled_on { "[✔]" } else { "[ ]" };
+            let style = if c.selected {
+                style::highlighted()
+            } else {
+                style::plain_text()
+            };
+            Spans::from(vec![Span::styled(
+                format!(
+                    "{prefix} Force update {name} (version is already {})",
+                    c.version
+                ),
+                style,
+            )])
+        }
+
+        let mut spans = Vec::new();
+        if let Some(rot) = self.rot.as_ref() {
+            spans.push(make_spans("RoT", rot));
+        }
+        if let Some(sp) = self.sp.as_ref() {
+            spans.push(make_spans("SP", sp));
+        }
+        spans
     }
 }
 
@@ -1243,6 +1575,7 @@ impl Control for UpdatePane {
                     Constraint::Length(3),
                     Constraint::Length(4),
                     Constraint::Min(0),
+                    Constraint::Length(3),
                 ]
                 .as_ref(),
             )
@@ -1251,6 +1584,7 @@ impl Control for UpdatePane {
         // status_view_chunks[1] is table_headers_rect as above.
         self.status_view_version_rect = status_view_chunks[2];
         self.status_view_main_rect = status_view_chunks[3];
+        // status_view_chunks[2] is help_rect as above.
 
         self.update_items(state);
     }
@@ -1331,11 +1665,19 @@ impl Control for UpdatePane {
             self.draw_tree_view(state, frame, active);
         }
 
-        match self.popup {
+        match &self.popup {
             Some(PopupKind::StepLogs) => self.draw_step_log_popup(state, frame),
-            Some(PopupKind::StartUpdate) => {
-                self.draw_start_update_popup(state, frame)
-            }
+            Some(PopupKind::StartUpdate { popup_state }) => match popup_state {
+                StartUpdatePopupState::Prompting => {
+                    self.draw_start_update_prompting_popup(state, frame)
+                }
+                StartUpdatePopupState::Waiting => {
+                    self.draw_start_update_waiting_popup(state, frame)
+                }
+                StartUpdatePopupState::Failed { message } => {
+                    self.draw_start_update_failed_popup(state, &message, frame)
+                }
+            },
             Some(PopupKind::Ignition) => self.draw_ignition_popup(state, frame),
             None => (),
         }

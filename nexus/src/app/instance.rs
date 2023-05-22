@@ -1396,7 +1396,7 @@ impl super::Nexus {
         &self,
         conn: dropshot::WebsocketConnection,
         instance_lookup: &lookup::Instance<'_>,
-        params: &params::InstanceSerialConsoleRequest,
+        params: &params::InstanceSerialConsoleStreamRequest,
     ) -> Result<(), Error> {
         let client = self
             .propolis_client_for_instance(
@@ -1405,9 +1405,7 @@ impl super::Nexus {
             )
             .await?;
         let mut req = client.instance_serial();
-        if let Some(from_start) = params.from_start {
-            req = req.from_start(from_start);
-        } else if let Some(most_recent) = params.most_recent {
+        if let Some(most_recent) = params.most_recent {
             req = req.most_recent(most_recent);
         }
         let propolis_upgraded = req

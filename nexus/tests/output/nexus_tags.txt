@@ -135,6 +135,7 @@ silo_policy_view                         GET      /v1/system/silos/{silo}/policy
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
 silo_view                                GET      /v1/system/silos/{silo}
+sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}

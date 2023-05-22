@@ -456,7 +456,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -466,12 +466,10 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "libc",
  "num_enum",
- "serde",
- "serde_arrays",
 ]
 
 [[package]]
@@ -1896,7 +1894,7 @@ checksum = "7e1a8646b2c125eeb9a84ef0faa6d2d102ea0d5da60b824ade2743263117b848"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "libc",
  "num_enum",
@@ -2209,6 +2207,26 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "enum-iterator"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7add3873b5dd076766ee79c8e406ad1a472c385476b9e38849f8eec24f1be689"
+dependencies = [
+ "enum-iterator-derive",
+]
+
+[[package]]
+name = "enum-iterator-derive"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eecf8589574ce9b895052fa12d69af7a233f99e6107f5cb8dd1044f2a17bfdcb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.15",
 ]
 
 [[package]]
@@ -2610,7 +2628,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2624,8 +2642,8 @@ dependencies = [
 
 [[package]]
 name = "gateway-sp-comms"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=5ab6fbe65b24c6018fc0bbf95917370a8b9cb349#5ab6fbe65b24c6018fc0bbf95917370a8b9cb349"
+version = "0.1.1"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3048,8 +3066,8 @@ dependencies = [
 
 [[package]]
 name = "hubtools"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/hubtools.git#e3e938dc5493c30f4c830d2ee2b5d75d51b7775d"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/hubtools.git#8e233e193341a29ef52a23854803f481afe1e838"
 dependencies = [
  "lpc55_areas",
  "lpc55_sign",
@@ -5966,7 +5984,7 @@ checksum = "8bccbff07d5ed689c4087d20d7307a52ab6141edeedf487c3876a55b86cf63df"
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "anyhow",
  "bhyve_api",
@@ -5990,14 +6008,13 @@ dependencies = [
  "tokio",
  "usdt",
  "uuid",
- "version_check",
  "viona_api",
 ]
 
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "base64 0.21.0",
  "crucible-client-types",
@@ -6020,10 +6037,11 @@ dependencies = [
 [[package]]
 name = "propolis-server"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "anyhow",
  "async-trait",
+ "atty",
  "base64 0.21.0",
  "bit_field",
  "bitvec",
@@ -6033,9 +6051,11 @@ dependencies = [
  "clap 4.2.7",
  "const_format",
  "dropshot",
+ "enum-iterator",
  "erased-serde",
  "futures",
  "hyper",
+ "lazy_static",
  "num_enum",
  "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "oximeter 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
@@ -6050,6 +6070,10 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-dtrace",
+ "slog-term",
  "thiserror",
  "tokio",
  "tokio-tungstenite 0.17.2",
@@ -6057,13 +6081,12 @@ dependencies = [
  "toml 0.5.11",
  "usdt",
  "uuid",
- "version_check",
 ]
 
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "serde",
  "serde_derive",
@@ -6074,7 +6097,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "schemars",
  "serde",
@@ -8206,8 +8229,8 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tlvc"
-version = "0.2.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#533f0bf26b0a8f32d287af4f2ea09320bc05c2cd"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
 dependencies = [
  "byteorder",
  "crc",
@@ -8216,8 +8239,8 @@ dependencies = [
 
 [[package]]
 name = "tlvc-text"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tlvc.git#533f0bf26b0a8f32d287af4f2ea09320bc05c2cd"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/tlvc.git#559c72856a215ae217e9e6f25ff317edde0b0041"
 dependencies = [
  "ron 0.8.0",
  "serde",
@@ -9009,7 +9032,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "libc",
  "num_enum",
@@ -9019,7 +9042,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f54b863bbf91953ad0bb2c2010aaff04b789eec7#f54b863bbf91953ad0bb2c2010aaff04b789eec7"
+source = "git+https://github.com/oxidecomputer/propolis?rev=5f694f4833a4368e05764a3b4b0fcaa6feed54df#5f694f4833a4368e05764a3b4b0fcaa6feed54df"
 dependencies = [
  "libc",
 ]

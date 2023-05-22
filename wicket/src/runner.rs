@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
+use anyhow::Context;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13,6 +15,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use slog::Logger;
 use slog::{debug, error, info};
+use std::env::VarError;
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
@@ -22,6 +25,8 @@ use tokio::sync::mpsc::{
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
+use wicketd_client::types::StartUpdateOptions;
+use wicketd_client::types::UpdateTestError;
 
 use crate::events::EventReportMap;
 use crate::ui::Screen;
@@ -154,14 +159,59 @@ impl RunnerCore {
          return Ok(());
         };
 
+        // 15 seconds should be enough to cause a timeout.
+        const DEFAULT_START_TIMEOUT_SECS: u64 = 15;
+
         match action {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(component_id) => {
+            Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    // This is a debug environment variable used to add a test
-                    // step.
+                    // The variables here must be kept in sync with the
+                    // "Manually testing wicket" section of README.md.
+
+                    // This is a debug environment variable used to simulate a
+                    // failure.
+                    let test_error = match std::env::var(
+                        "WICKET_UPDATE_TEST_ERROR",
+                    ) {
+                        Ok(v) if v == "start_failed" => {
+                            Some(UpdateTestError::StartFailed)
+                        }
+                        Ok(v) if v == "start_timeout" => {
+                            Some(UpdateTestError::StartTimeout {
+                                secs: DEFAULT_START_TIMEOUT_SECS,
+                            })
+                        }
+                        Ok(v) if v.starts_with("start_timeout:") => {
+                            // Extended start_timeout syntax with a custom
+                            // number of seconds.
+                            let suffix =
+                                v.strip_prefix("start_timeout:").unwrap();
+                            match suffix.parse::<u64>() {
+                                Ok(secs) => {
+                                    Some(UpdateTestError::StartTimeout { secs })
+                                }
+                                Err(error) => {
+                                    return Err(error).with_context(|| {
+                                        format!("could not parse WICKET_UPDATE_TEST_ERROR \
+                                                 in the form `start_timeout:<secs>`: {v}")
+                                    });
+                                }
+                            }
+                        }
+                        Ok(value) => {
+                            bail!("unrecognized value for WICKET_UPDATE_TEST_ERROR: {value}");
+                        }
+                        Err(VarError::NotPresent) => None,
+                        Err(VarError::NotUnicode(value)) => {
+                            bail!("invalid Unicode for WICKET_UPDATE_TEST_ERROR: {}", value.to_string_lossy());
+                        }
+                    };
+
+                    // This is a debug environment variable used to
+                    // add a test step.
                     let test_step_seconds =
                         std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS")
                             .ok()
@@ -171,11 +221,21 @@ impl RunnerCore {
                                         as a u64",
                                 )
                             });
+
+                    let options = StartUpdateOptions {
+                        test_error,
+                        test_step_seconds,
+                        skip_rot_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_rot,
+                        skip_sp_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_sp,
+                    };
                     wicketd.tx.blocking_send(
-                        wicketd::Request::StartUpdate {
-                            component_id,
-                            test_step_seconds,
-                        },
+                        wicketd::Request::StartUpdate { component_id, options },
                     )?;
                 }
             }
