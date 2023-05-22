@@ -1394,6 +1394,10 @@ impl UpdateContext {
                     ensure!(id == update_id, "SP processing different update");
                     bail!("update failed (error code {code})");
                 }
+                SpUpdateStatus::RotError { message, id } => {
+                    ensure!(id == update_id, "SP processing different update");
+                    bail!("update failed (rot error message {message})");
+                }
             }
 
             tokio::time::sleep(STATUS_POLL_FREQ).await;

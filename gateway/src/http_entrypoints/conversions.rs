@@ -65,6 +65,9 @@ impl From<UpdateStatus> for SpUpdateStatus {
             UpdateStatus::Failed { id, code } => {
                 Self::Failed { id: id.into(), code }
             }
+            UpdateStatus::RotError { id, error } => {
+                Self::RotError { id: id.into(), message: format!("{error:?}") }
+            }
         }
     }
 }
@@ -206,20 +209,11 @@ impl From<Result<gateway_messages::RotStateV2, gateway_messages::RotError>>
     }
 }
 
-impl From<gateway_messages::RotSlot> for RotSlot {
-    fn from(slot: gateway_messages::RotSlot) -> Self {
+impl From<gateway_messages::RotSlotId> for RotSlot {
+    fn from(slot: gateway_messages::RotSlotId) -> Self {
         match slot {
-            gateway_messages::RotSlot::A => Self::A,
-            gateway_messages::RotSlot::B => Self::B,
-        }
-    }
-}
-
-impl From<gateway_messages::SlotId> for RotSlot {
-    fn from(slot: gateway_messages::SlotId) -> Self {
-        match slot {
-            gateway_messages::SlotId::A => Self::A,
-            gateway_messages::SlotId::B => Self::B,
+            gateway_messages::RotSlotId::A => Self::A,
+            gateway_messages::RotSlotId::B => Self::B,
         }
     }
 }
