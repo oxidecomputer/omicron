@@ -4,7 +4,6 @@
 
 //! Bootstrap-related APIs.
 
-use super::client::Client as BootstrapAgentClient;
 use super::config::{
     Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
 };
@@ -12,17 +11,11 @@ use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
 use super::params::SledAgentRequest;
 use super::rss_handle::RssHandle;
-use super::server::TrustQuorumMembership;
-use super::trust_quorum::{
-    RackSecret, SerializableShareDistribution, ShareDistribution,
-    TrustQuorumError,
-};
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::server::Server as SledServer;
 use crate::services::ServiceManager;
-use crate::sp::SpHandle;
 use crate::storage_manager::{StorageManager, StorageResources};
 use crate::updates::UpdateManager;
 use camino::Utf8PathBuf;
@@ -38,17 +31,12 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
-use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
-};
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
 use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
-use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -79,9 +67,6 @@ pub enum BootstrapError {
 
     #[error("Error managing sled agent: {0}")]
     SledError(String),
-
-    #[error(transparent)]
-    TrustQuorum(#[from] TrustQuorumError),
 
     #[error("Error collecting peer addresses: {0}")]
     PeerAddresses(String),
@@ -190,14 +175,10 @@ pub struct Agent {
     /// concurrently.
     rss_access: Mutex<()>,
 
-    /// Our share of the rack secret, if we have one.
-    share: Mutex<Option<ShareDistribution>>,
-
     sled_state: Mutex<SledAgentState>,
     storage_resources: StorageResources,
     config: Config,
     sled_config: SledConfig,
-    sp: Option<SpHandle>,
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
@@ -274,8 +255,7 @@ impl Agent {
         log: Logger,
         config: Config,
         sled_config: SledConfig,
-        sp: Option<SpHandle>,
-    ) -> Result<(Self, TrustQuorumMembership), BootstrapError> {
+    ) -> Result<Self, BootstrapError> {
         let ba_log = log.new(o!(
             "component" => "BootstrapAgent",
         ));
@@ -380,14 +360,12 @@ impl Agent {
             parent_log: log,
             ip,
             rss_access: Mutex::new(()),
-            share: Mutex::new(None),
             sled_state: Mutex::new(SledAgentState::Before(Some(
                 hardware_monitor,
             ))),
             storage_resources,
             config: config.clone(),
             sled_config,
-            sp,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
         };
@@ -411,24 +389,15 @@ impl Agent {
         }
 
         let paths = sled_config_paths(&agent.storage_resources).await;
-        let trust_quorum = if let Some(ledger) =
+        if let Some(ledger) =
             Ledger::<PersistentSledAgentRequest>::new(&agent.log, paths).await
         {
             info!(agent.log, "Sled already configured, loading sled agent");
             let sled_request = ledger.data();
-            let trust_quorum_share = sled_request
-                .trust_quorum_share
-                .clone()
-                .map(ShareDistribution::from);
-            agent
-                .request_agent(&sled_request.request, &trust_quorum_share)
-                .await?;
-            TrustQuorumMembership::Known(Arc::new(trust_quorum_share))
-        } else {
-            TrustQuorumMembership::Uninitialized
-        };
+            agent.request_agent(&sled_request.request).await?;
+        }
 
-        Ok((agent, trust_quorum))
+        Ok(agent)
     }
 
     async fn start_hardware_monitor(
@@ -476,7 +445,6 @@ impl Agent {
     pub async fn request_agent(
         &self,
         request: &SledAgentRequest,
-        trust_quorum_share: &Option<ShareDistribution>,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
@@ -487,10 +455,8 @@ impl Agent {
         match &mut *state {
             // We have not previously initialized a sled agent.
             SledAgentState::Before(hardware_monitor) => {
-                if let Some(share) = trust_quorum_share.clone() {
-                    self.establish_sled_quorum(share.clone()).await?;
-                    *self.share.lock().await = Some(share);
-                }
+                // TODO(AJS): Re-insert trust quorum rack secret reconstruction
+                // and key-gen/disk-unlock here
 
                 // Stop the bootstrap agent from monitoring for hardware, and
                 // pass control of service management to the sled agent.
@@ -576,9 +542,6 @@ impl Agent {
                     paths,
                     PersistentSledAgentRequest {
                         request: Cow::Borrowed(request),
-                        trust_quorum_share: trust_quorum_share
-                            .clone()
-                            .map(Into::into),
                     },
                 );
                 ledger.commit().await?;
@@ -623,155 +586,17 @@ impl Agent {
                     return Err(BootstrapError::SledError(err_str));
                 }
 
+                // TODO(AJS): Re-implement this check described by the comment below?
+                //
                 // Bail out if this request includes a trust quorum share that
                 // doesn't match ours. TODO-correctness Do we need to handle a
                 // partially-initialized rack where we may have a share from a
                 // previously-started-but-not-completed init process? If rerunning
                 // it produces different shares this check will fail.
-                if *trust_quorum_share != *self.share.lock().await {
-                    let err_str = concat!(
-                        "Sled Agent already running with",
-                        " a different trust quorum share"
-                    )
-                    .to_string();
-                    return Err(BootstrapError::SledError(err_str));
-                }
 
                 return Ok(SledAgentResponse { id: server.id() });
             }
         }
-    }
-
-    /// Communicates with peers, sharing secrets, until the rack has been
-    /// sufficiently unlocked.
-    async fn establish_sled_quorum(
-        &self,
-        share: ShareDistribution,
-    ) -> Result<RackSecret, BootstrapError> {
-        let ddm_admin_client = DdmAdminClient::localhost(&self.log)?;
-        let rack_secret = retry_notify(
-            retry_policy_internal_service_aggressive(),
-            || async {
-                let other_agents = {
-                    // Manually build up a `HashSet` instead of `.collect()`ing
-                    // so we can log if we see any duplicates.
-                    let mut addrs = HashSet::new();
-                    for addr in ddm_admin_client
-                        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
-                        .await
-                        .map_err(BootstrapError::DdmError)
-                        .map_err(|err| BackoffError::transient(err))?
-                    {
-                        // We should never see duplicates; that would mean
-                        // maghemite thinks two different sleds have the same
-                        // bootstrap address!
-                        if !addrs.insert(addr) {
-                            let msg = format!("Duplicate peer addresses received from ddmd: {addr}");
-                            error!(&self.log, "{}", msg);
-                            return Err(BackoffError::permanent(
-                                BootstrapError::PeerAddresses(msg),
-                            ));
-                        }
-                    }
-                    addrs
-                };
-                info!(
-                    &self.log,
-                    "Bootstrap: Communicating with peers: {:?}", other_agents
-                );
-
-                // "-1" to account for ourselves.
-                if other_agents.len() < share.threshold - 1 {
-                    warn!(
-                        &self.log,
-                        "Not enough peers to start establishing quorum"
-                    );
-                    return Err(BackoffError::transient(
-                        BootstrapError::TrustQuorum(
-                            TrustQuorumError::NotEnoughPeers,
-                        ),
-                    ));
-                }
-                info!(
-                    &self.log,
-                    "Bootstrap: Enough peers to start share transfer"
-                );
-
-                // Retrieve verified rack_secret shares from a quorum of agents
-                let other_agents: Vec<BootstrapAgentClient> = other_agents
-                    .into_iter()
-                    .map(|addr| {
-                        let addr = SocketAddrV6::new(
-                            addr,
-                            BOOTSTRAP_AGENT_SPROCKETS_PORT,
-                            0,
-                            0,
-                        );
-                        BootstrapAgentClient::new(
-                            addr,
-                            &self.sp,
-                            &share.member_device_id_certs,
-                            self.log.new(o!(
-                                "BootstrapAgentClient" => addr.to_string()),
-                            ),
-                        )
-                    })
-                    .collect();
-
-                // TODO: Parallelize this and keep track of whose shares we've
-                // already retrieved and don't resend. See
-                // https://github.com/oxidecomputer/omicron/issues/514
-                let mut shares = vec![share.share.clone()];
-                for agent in &other_agents {
-                    let share = agent.request_share().await
-                        .map_err(|e| {
-                            info!(&self.log, "Bootstrap: failed to retreive share from peer: {:?}", e);
-                            BackoffError::transient(
-                                BootstrapError::TrustQuorum(e.into()),
-                            )
-                        })?;
-                    info!(
-                        &self.log,
-                        "Bootstrap: retreived share from peer: {}",
-                        agent.addr()
-                    );
-                    shares.push(share);
-                }
-                let rack_secret = RackSecret::combine_shares(
-                    share.threshold,
-                    share.total_shares(),
-                    &shares,
-                )
-                .map_err(|e| {
-                    warn!(
-                        &self.log,
-                        "Bootstrap: failed to construct rack secret: {:?}", e
-                    );
-                    // TODO: We probably need to actually write an error
-                    // handling routine that gives up in some cases based on
-                    // the error returned from `RackSecret::combine_shares`.
-                    // See https://github.com/oxidecomputer/omicron/issues/516
-                    BackoffError::transient(
-                        BootstrapError::TrustQuorum(
-                            TrustQuorumError::RackSecretConstructionFailed(e),
-                        ),
-                    )
-                })?;
-                info!(self.log, "RackSecret computed from shares.");
-                Ok(rack_secret)
-            },
-            |error, duration| {
-                warn!(
-                    self.log,
-                    "Failed to unlock sleds (will retry after {:?}: {:#}",
-                    duration,
-                    error,
-                )
-            },
-        )
-        .await?;
-
-        Ok(rack_secret)
     }
 
     /// Runs the rack setup service to completion
@@ -789,14 +614,6 @@ impl Agent {
             &self.parent_log,
             request,
             self.ip,
-            self.sp.clone(),
-            // TODO-cleanup: Remove this arg once RSS can discover the trust
-            // quorum members over the management network.
-            self.config
-                .sp_config
-                .as_ref()
-                .map(|sp_config| sp_config.trust_quorum_members.clone())
-                .unwrap_or_default(),
             self.storage_resources.clone(),
         )
         .await?;
@@ -811,7 +628,7 @@ impl Agent {
             .try_lock()
             .map_err(|_| BootstrapError::ConcurrentRSSAccess)?;
 
-        RssHandle::run_rss_reset(&self.parent_log, self.ip, None).await?;
+        RssHandle::run_rss_reset(&self.parent_log, self.ip).await?;
         Ok(())
     }
 
@@ -994,11 +811,9 @@ impl Agent {
     }
 }
 
-// TODO-correctness: remove / rework trust quorum share storage
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct PersistentSledAgentRequest<'a> {
     request: Cow<'a, SledAgentRequest>,
-    trust_quorum_share: Option<SerializableShareDistribution>,
 }
 
 impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
@@ -1020,9 +835,6 @@ mod tests {
             test_setup_log("persistent_sled_agent_request_serialization");
         let log = &logctx.log;
 
-        let secret = RackSecret::new();
-        let (mut shares, verifier) = secret.split(2, 4).unwrap();
-
         let request = PersistentSledAgentRequest {
             request: Cow::Owned(SledAgentRequest {
                 id: Uuid::new_v4(),
@@ -1031,15 +843,6 @@ mod tests {
                 dns_servers: vec![String::from("1.1.1.1")],
                 subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             }),
-            trust_quorum_share: Some(
-                ShareDistribution {
-                    threshold: 2,
-                    verifier,
-                    share: shares.pop().unwrap(),
-                    member_device_id_certs: vec![],
-                }
-                .into(),
-            ),
         };
 
         let tempdir = camino_tempfile::Utf8TempDir::new().unwrap();

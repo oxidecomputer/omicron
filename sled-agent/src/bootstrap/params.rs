@@ -4,7 +4,6 @@
 
 //! Request types for the bootstrap agent
 
-use super::trust_quorum::SerializableShareDistribution;
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -107,13 +106,7 @@ impl SledAgentRequest {
 #[allow(clippy::large_enum_variant)]
 pub enum Request<'a> {
     /// Send configuration information for launching a Sled Agent.
-    SledAgentRequest(
-        Cow<'a, SledAgentRequest>,
-        Option<SerializableShareDistribution>,
-    ),
-
-    /// Request the sled's share of the rack secret.
-    ShareRequest,
+    SledAgentRequest(Cow<'a, SledAgentRequest>),
 }
 
 #[derive(Clone, Deserialize, PartialEq)]
@@ -134,13 +127,7 @@ impl RequestEnvelope<'_> {
         #[allow(clippy::large_enum_variant)]
         pub enum RequestDef<'a> {
             /// Send configuration information for launching a Sled Agent.
-            SledAgentRequest(
-                Cow<'a, SledAgentRequest>,
-                Option<SerializableShareDistribution>,
-            ),
-
-            /// Request the sled's share of the rack secret.
-            ShareRequest,
+            SledAgentRequest(Cow<'a, SledAgentRequest>),
         }
 
         #[derive(Serialize)]
@@ -167,8 +154,6 @@ mod tests {
     use std::net::Ipv6Addr;
 
     use super::*;
-    use crate::bootstrap::trust_quorum::RackSecret;
-    use crate::bootstrap::trust_quorum::ShareDistribution;
     use camino::Utf8PathBuf;
 
     #[test]
@@ -220,29 +205,15 @@ mod tests {
 
     #[test]
     fn json_serialization_round_trips() {
-        let secret = RackSecret::new();
-        let (mut shares, verifier) = secret.split(2, 4).unwrap();
-
         let envelope = RequestEnvelope {
             version: 1,
-            request: Request::SledAgentRequest(
-                Cow::Owned(SledAgentRequest {
-                    id: Uuid::new_v4(),
-                    rack_id: Uuid::new_v4(),
-                    ntp_servers: vec![String::from("test.pool.example.com")],
-                    dns_servers: vec![String::from("1.1.1.1")],
-                    subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
-                }),
-                Some(
-                    ShareDistribution {
-                        threshold: 2,
-                        verifier,
-                        share: shares.pop().unwrap(),
-                        member_device_id_certs: vec![],
-                    }
-                    .into(),
-                ),
-            ),
+            request: Request::SledAgentRequest(Cow::Owned(SledAgentRequest {
+                id: Uuid::new_v4(),
+                rack_id: Uuid::new_v4(),
+                ntp_servers: vec![String::from("test.pool.example.com")],
+                dns_servers: vec![String::from("1.1.1.1")],
+                subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
+            })),
         };
 
         let serialized = envelope.danger_serialize_as_json().unwrap();

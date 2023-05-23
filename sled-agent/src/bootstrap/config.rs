@@ -4,7 +4,6 @@
 
 //! Interfaces for working with bootstrap agent configuration
 
-use crate::sp::SimSpConfig;
 use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::PhysicalLink;
@@ -22,5 +21,4 @@ pub struct Config {
     pub link: PhysicalLink,
     pub log: ConfigLogging,
     pub updates: ConfigUpdates,
-    pub sp_config: Option<SimSpConfig>,
 }
