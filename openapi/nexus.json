@@ -101,35 +101,6 @@
         }
       }
     },
-    "/login": {
-      "post": {
-        "tags": [
-          "hidden"
-        ],
-        "operationId": "login_spoof",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SpoofLoginBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/local": {
       "post": {
         "tags": [
@@ -291,6 +262,7 @@
         "tags": [
           "hidden"
         ],
+        "summary": "Log user out by deleting session on client and server",
         "operationId": "logout",
         "responses": {
           "204": {
@@ -11016,17 +10988,6 @@
           "ready",
           "faulted",
           "destroyed"
-        ]
-      },
-      "SpoofLoginBody": {
-        "type": "object",
-        "properties": {
-          "username": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "username"
         ]
       },
       "SshKey": {

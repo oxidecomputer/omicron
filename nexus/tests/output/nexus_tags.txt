@@ -16,7 +16,6 @@ OPERATION ID                             METHOD   URL PATH
 device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
-login_spoof                              POST     /login
 logout                                   POST     /logout
 
 API operations found with tag "images"

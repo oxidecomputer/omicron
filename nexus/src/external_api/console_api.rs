@@ -7,9 +7,7 @@
 //! This was originally conceived as a separate dropshot server from the
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
-use crate::authn::{
-    silos::IdentityProviderType, USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED,
-};
+use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
 use crate::{
     authn::external::{
@@ -25,7 +23,7 @@ use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, Path, Query, RequestContext, TypedBody,
+    HttpResponseUpdatedNoContent, Path, RequestContext,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
@@ -38,67 +36,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
-use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SpoofLoginBody {
-    pub username: String,
-}
-
-// This is just for demo purposes. we will probably end up with a real
-// username/password login endpoint, but I think it will only be for use while
-// setting up the rack
-#[endpoint {
-   method = POST,
-   path = "/login",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
-   tags = ["hidden"],
-}]
-pub async fn login_spoof(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    params: TypedBody<SpoofLoginBody>,
-) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let params = params.into_inner();
-        let user_id: Option<Uuid> = match params.username.as_str() {
-            "privileged" => Some(USER_TEST_PRIVILEGED.id()),
-            "unprivileged" => Some(USER_TEST_UNPRIVILEGED.id()),
-            _ => None,
-        };
-
-        if user_id.is_none() {
-            Err(Error::Unauthenticated {
-                internal_message: String::from("unknown user specified"),
-            })?;
-        }
-
-        let user_id = user_id.unwrap();
-
-        // For now, we use the external authn context to create the session.
-        // Once we have real SAML login, maybe we can cons up a real OpContext
-        // for this user and use their own privileges to create the session.
-        let authn_opctx = nexus.opctx_external_authn();
-        let session = nexus.session_create(&authn_opctx, user_id).await?;
-
-        let mut response =
-            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
-        {
-            let headers = response.headers_mut();
-            headers.append(
-                header::SET_COOKIE,
-                session_cookie_header_value(
-                    &session.token,
-                    apictx.session_absolute_timeout(),
-                )?,
-            );
-        };
-        Ok(response)
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
 // Silos have one or more identity providers, and an unauthenticated user will
 // be asked to authenticate to one of those below. Silo identity provider
@@ -387,6 +324,44 @@ pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
+#[derive(Serialize)]
+pub struct LoginUrlQuery {
+    state: Option<String>,
+}
+
+/// Join provided path and optional `redirect_url`, which represents the URL to
+/// send the user back to after successful login, and is included in `state`
+/// query param if present
+fn path_with_state_param(path: &str, redirect_url: Option<String>) -> String {
+    // assume redirect_url is not already encoded
+    match serde_urlencoded::to_string(LoginUrlQuery { state: redirect_url }) {
+        // only put the ? in front if there's something there
+        Ok(encoded) if !encoded.is_empty() => format!("{path}?{encoded}"),
+        // redirect_url is either None or not url-encodable for some reason
+        _ => path.to_string(),
+    }
+}
+
+/// Username/password login for the specified silo
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/local",
+   unpublished = true,
+}]
+pub async fn login_local_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    // TODO: look up silo and 404 if not local? or ignore and let the post fail
+    // to avoid leaking silo names
+
+    // TODO: wrap in instrumenting code
+
+    // TODO: if the user is logged in, redirect to / or /projects? or detect
+    // this on the client-side and show a link?
+    serve_console_index(rqctx.context()).await
+}
+
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
@@ -454,14 +429,12 @@ async fn login_finish(
     Ok(response_with_headers)
 }
 
-// Log user out of web console by deleting session in both server and browser
+/// Log user out by deleting session on client and server
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,
    path = "/logout",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
-   tags = ["hidden"],
+   tags = ["hidden"], // hide in docs
 }]
 pub async fn logout(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -509,55 +482,9 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-#[derive(Deserialize, JsonSchema)]
-pub struct StateParam {
-    state: Option<String>,
-}
-
-// this happens to be the same as StateParam, but it may include other things
-// later
-#[derive(Serialize)]
-pub struct LoginUrlQuery {
-    // TODO: give state param the correct name. In SAML it's called RelayState.
-    // If/when we support auth protocols other than SAML, we will need to have
-    // separate implementations here for each one
-    state: Option<String>,
-}
-
-/// Generate URI to IdP login form. Optional `redirect_url` represents the URL
-/// to send the user back to after successful login, and is included in `state`
-/// query param if present
-fn get_login_url(redirect_url: Option<String>) -> String {
-    // TODO: Once we have IdP integration, this will be a URL for the IdP login
-    // page. For now we point to our own placeholder login page. When the user
-    // is logged out and hits an auth-gated route, if there are multiple IdPs
-    // and we don't known which one they want to use, we need to send them to a
-    // page that will allow them to choose among discoverable IdPs. However,
-    // there may be ways to give ourselves a hint about which one they want, for
-    // example, by storing that info in a browser cookie when they log in. When
-    // their session ends, we will not be able to look at the dead session to
-    // find the silo or IdP (well, maybe we can but we probably shouldn't) but
-    // we can look at the cookie and default to sending them to the IdP
-    // indicated (though if they don't want that one we need to make sure they
-    // can get to a different one). If there is no cookie, we send them to the
-    // selector page. In any case, none of this is done here yet. We go to
-    // /spoof_login no matter what.
-    let login_uri = "/spoof_login";
-
-    // Stick redirect_url into the state param and URL encode it so it can be
-    // used as a query string. We assume it's not already encoded.
-    let query_data = LoginUrlQuery { state: redirect_url };
-
-    match serde_urlencoded::to_string(query_data) {
-        // only put the ? in front if there's something there
-        Ok(encoded) if !encoded.is_empty() => format!("{login_uri}?{encoded}"),
-        // redirect_url is either None or not url-encodable for some reason
-        _ => login_uri.to_string(),
-    }
-}
-
-/// Redirect to IdP login URL
-// Currently hard-coded to redirect to our own fake login form.
+// Generic login form, works for both local and SAML. Console client is
+// responsible for hitting an API endpoint (TODO) that tells it whether to show
+// username/password login or a link to the SAML IdP.
 #[endpoint {
    method = GET,
    path = "/login",
@@ -565,16 +492,12 @@ fn get_login_url(redirect_url: Option<String>) -> String {
 }]
 pub async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<StateParam>,
-) -> Result<HttpResponseFound, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let query = query_params.into_inner();
-        let redirect_url = query.state.filter(|s| !s.trim().is_empty());
-        let login_url = get_login_url(redirect_url);
-        http_response_found(login_url)
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+) -> Result<Response<Body>, HttpError> {
+    // TODO: wrap in instrumenting code
+
+    // TODO: if the user is logged in, redirect to / or /projects? or detect
+    // this on the client-side and show a link?
+    serve_console_index(rqctx.context()).await
 }
 
 pub async fn console_index_or_login_redirect(
@@ -589,36 +512,19 @@ pub async fn console_index_or_login_redirect(
         }
     }
 
-    // otherwise redirect to idp
+    // otherwise redirect to login
 
-    // Put the current URI in the query string to redirect back to after login.
-    // Right now this is a relative path, which only works as long as we're
-    // using the spoof login page, which is hosted by Nexus. Once we start
-    // sending users to a real external IdP login page, this will need to be a
-    // full URL.
+    // Current path (to put in the query string to redirect back after login)
     let redirect_url =
         rqctx.request.uri().path_and_query().map(|p| p.to_string());
 
     Ok(Response::builder()
         .status(StatusCode::FOUND)
-        .header(http::header::LOCATION, get_login_url(redirect_url))
+        .header(
+            http::header::LOCATION,
+            path_with_state_param("/login", redirect_url),
+        )
         .body("".into())?)
-}
-
-// Serve the console bundle without an auth gate just for the login form. This
-// is meant to stand in for the customers identity provider. Since this is a
-// placeholder, it's easiest to build the form into the console bundle. If we
-// really wanted a login form, we would probably make it a standalone page,
-// otherwise the user is downloading a bunch of JS for nothing.
-#[endpoint {
-   method = GET,
-   path = "/spoof_login",
-   unpublished = true,
-}]
-pub async fn login_spoof_begin(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<Response<Body>, HttpError> {
-    serve_console_index(rqctx.context()).await
 }
 
 // Dropshot does not have route match ranking and does not allow overlapping

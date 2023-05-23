@@ -71,7 +71,7 @@ async fn test_device_auth_flow(cptestctx: &ControlPlaneTestContext) {
         .expect_status(Some(StatusCode::FOUND))
         .expect_response_header(
             header::LOCATION,
-            "/spoof_login?state=%2Fdevice%2Fverify",
+            "/login?state=%2Fdevice%2Fverify",
         )
         .execute()
         .await

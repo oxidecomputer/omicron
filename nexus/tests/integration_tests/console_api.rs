@@ -19,8 +19,9 @@ use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
-use omicron_nexus::external_api::console_api::SpoofLoginBody;
-use omicron_nexus::external_api::params::ProjectCreate;
+use omicron_nexus::external_api::params::{
+    ProjectCreate, UsernamePasswordCredentials,
+};
 use omicron_nexus::external_api::{shared, views};
 use omicron_sled_agent::sim;
 
@@ -148,23 +149,21 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // request to console page route without auth should redirect to IdP
-    let _ =
-        RequestBuilder::new(&testctx, Method::GET, "/projects/irrelevant-path")
-            .expect_status(Some(StatusCode::FOUND))
-            .expect_response_header(
-                header::LOCATION,
-                "/spoof_login?state=%2Fprojects%2Firrelevant-path",
-            )
-            .execute()
-            .await
-            .expect("failed to redirect to IdP on auth failure");
+    // request to console page route without auth should redirect to login
+    // with original path in state param
+    expect_redirect(
+        testctx,
+        "/projects/irrelevant-path",
+        "/login?state=%2Fprojects%2Firrelevant-path",
+    )
+    .await;
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
         "/",
+        "/login/irrelevant-silo/local",
         "/projects/irrelevant-path",
         "/projects-new",
         "/settings/irrelevant-path",
@@ -194,20 +193,23 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_login_form(cptestctx: &ControlPlaneTestContext) {
+async fn test_local_login_page(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // login route returns bundle too, but is not auth gated
-    let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/spoof_login")
-            .expect_status(Some(StatusCode::OK))
-            .expect_response_header(
-                http::header::CONTENT_TYPE,
-                "text/html; charset=UTF-8",
-            )
-            .execute()
-            .await
-            .expect("failed to get login form");
+    // login route returns bundle but is not auth gated
+    let console_page = RequestBuilder::new(
+        &testctx,
+        Method::GET,
+        "/login/test-suite-silo/local",
+    )
+    .expect_status(Some(StatusCode::OK))
+    .expect_response_header(
+        http::header::CONTENT_TYPE,
+        "text/html; charset=UTF-8",
+    )
+    .execute()
+    .await
+    .expect("failed to get login form");
 
     assert_eq!(console_page.body, "<html></html>".as_bytes());
 }
@@ -426,44 +428,24 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(unpriv_user_groups.items, vec![]);
 }
 
-#[nexus_test]
-async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
-    let testctx = &cptestctx.external_client;
-
-    expect_redirect(testctx, "/login", "/spoof_login").await;
-
-    // pass through state param to login redirect URL. keep it URL encoded, don't double encode
-    // encoded path is /abc/def
-    expect_redirect(
-        testctx,
-        "/login?state=%2Fabc%2Fdef",
-        "/spoof_login?state=%2Fabc%2Fdef",
-    )
-    .await;
-
-    // if state param comes in not URL encoded, we should still URL encode it
-    expect_redirect(
-        testctx,
-        "/login?state=/abc/def",
-        "/spoof_login?state=%2Fabc%2Fdef",
-    )
-    .await;
-
-    // empty state param gets dropped
-    expect_redirect(testctx, "/login?state=", "/spoof_login").await;
-}
-
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
     resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
 }
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
-    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
-        .expect_status(Some(StatusCode::NO_CONTENT))
-        .execute()
-        .await
-        .expect("failed to log in");
+    let login = RequestBuilder::new(
+        &testctx,
+        Method::POST,
+        "/login/test-suite-silo/local",
+    )
+    .body(Some(&UsernamePasswordCredentials {
+        username: "test-privileged".parse().unwrap(),
+        password: "oxide".parse().unwrap(),
+    }))
+    .expect_status(Some(StatusCode::SEE_OTHER))
+    .execute()
+    .await
+    .expect("failed to log in");
 
     let session_cookie = get_header_value(login, header::SET_COOKIE);
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();
