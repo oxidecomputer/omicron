@@ -367,7 +367,7 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &&header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -395,7 +395,7 @@ impl UpdatePane {
             ButtonText { instruction: "NO", key: "N" },
         ];
 
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -420,7 +420,7 @@ impl UpdatePane {
         )])]);
         let buttons = Vec::new();
 
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -447,7 +447,7 @@ impl UpdatePane {
 
         let buttons = vec![ButtonText { instruction: "CLOSE", key: "ESC" }];
 
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -472,7 +472,7 @@ impl UpdatePane {
         )])]);
         let buttons = Vec::new();
 
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -498,7 +498,7 @@ impl UpdatePane {
         push_text_lines(message, prefix, &mut body.lines);
         let buttons = vec![ButtonText { instruction: "CLOSE", key: "ESC" }];
 
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 
@@ -515,7 +515,7 @@ impl UpdatePane {
         };
         let (header, body, buttons) =
             self.ignition.popup_components(state.rack_state.selected);
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &&header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 

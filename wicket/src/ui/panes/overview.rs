@@ -241,7 +241,7 @@ impl InventoryView {
         };
         let (header, body, buttons) =
             self.ignition.popup_components(state.rack_state.selected);
-        let popup = Popup::new(full_screen, header, &body, buttons);
+        let popup = Popup::new(full_screen, &header, &body, buttons);
         frame.render_widget(popup, full_screen);
     }
 

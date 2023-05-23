@@ -12,9 +12,12 @@ use tui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::ui::defaults::{colors::*, style};
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Fade};
 use crate::ui::{defaults::dimensions::RectExt, wrap::wrap_text};
+use crate::ui::{
+    defaults::{colors::*, style},
+    wrap::wrap_line,
+};
 use std::iter;
 
 const BUTTON_HEIGHT: u16 = 3;
@@ -29,9 +32,8 @@ pub struct Popup<'a> {
     // Fields are private because we always want users to go through the
     // constructor.
 
-    // This is the header as passed in, except a space is added before the
-    // header for padding.
-    header: Spans<'a>,
+    // This is the header as passed in, except wrapped.
+    wrapped_header: Text<'a>,
 
     // We store the *wrapped body* rather than the unwrapped body to make
     // `self.height()` and `self.width()` be computed correctly.
@@ -42,15 +44,15 @@ pub struct Popup<'a> {
 impl<'a> Popup<'a> {
     pub fn new(
         full_screen: Rect,
-        mut header: Spans<'a>,
+        header: &'a Spans<'_>,
         body: &'a Text<'_>,
         buttons: Vec<ButtonText<'a>>,
     ) -> Self {
-        // Add a space to the header for padding.
-        header.0.insert(0, Span::raw(" "));
+        let wrapped_header =
+            wrap_line(header, Self::default_wrap_options(full_screen.width));
         let wrapped_body =
             wrap_text(body, Self::default_wrap_options(full_screen.width));
-        Self { header, wrapped_body, buttons }
+        Self { wrapped_header, wrapped_body, buttons }
     }
 
     pub fn height(&self) -> u16 {
@@ -58,8 +60,7 @@ impl<'a> Popup<'a> {
             if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };
         let bottom_margin: u16 = 1;
         let borders: u16 = 3;
-        // header.height is 1
-        u16::try_from(1).unwrap()
+        u16::try_from(self.wrapped_header.height()).unwrap()
             + u16::try_from(self.wrapped_body.height()).unwrap()
             + button_height
             + bottom_margin
@@ -74,7 +75,7 @@ impl<'a> Popup<'a> {
         let body_width = u16::try_from(self.wrapped_body.width()).unwrap()
             + borders
             + right_padding;
-        let header_width = u16::try_from(self.header.width()).unwrap()
+        let header_width = u16::try_from(self.wrapped_header.width()).unwrap()
             + borders
             + right_padding;
         let width = u16::max(body_width, header_width);
@@ -160,7 +161,7 @@ impl Widget for Popup<'_> {
             .constraints(
                 [
                     // Top titlebar
-                    Constraint::Length(3),
+                    Constraint::Length(self.wrapped_header.height() as u16 + 2),
                     Constraint::Min(0),
                     // Buttons at the bottom will be accounted for while
                     // rendering the body
@@ -169,7 +170,7 @@ impl Widget for Popup<'_> {
             )
             .split(rect);
 
-        let header = Paragraph::new(self.header).block(block.clone());
+        let header = Paragraph::new(self.wrapped_header).block(block.clone());
         header.render(chunks[0], buf);
 
         block
