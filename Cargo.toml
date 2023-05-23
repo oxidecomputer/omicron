@@ -138,7 +138,7 @@ camino-tempfile = "1.0.2"
 ciborium = "0.2.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.2", features = ["derive"] }
+clap = { version = "4.3", features = ["derive"] }
 cookie = "0.16"
 criterion = { version = "0.4", features = [ "async_tokio" ] }
 crossbeam = "0.8"
