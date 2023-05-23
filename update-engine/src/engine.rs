@@ -421,6 +421,7 @@ impl<'engine, 'a, S: StepSpec, T> NewStep<'engine, 'a, S, T> {
 /// The result of a step.
 ///
 /// Returned by the callback passed to `register_step`.
+#[derive_where(Debug; T: std::fmt::Debug)]
 #[must_use = "StepResult must be used"]
 pub struct StepResult<T, S: StepSpec> {
     /// The output of the step.
@@ -432,39 +433,148 @@ pub struct StepResult<T, S: StepSpec> {
     pub outcome: StepOutcome<S>,
 }
 
-impl<T, S: StepSpec> StepResult<T, S> {
-    /// Creates a new `StepResult` corresponding to a successful output.
-    pub fn success(
-        output: T,
-        metadata: S::CompletionMetadata,
-    ) -> Result<Self, S::Error> {
-        Ok(Self { output, outcome: StepOutcome::Success { metadata } })
+/// A success result produced by a step.
+#[derive_where(Debug; T: std::fmt::Debug)]
+#[must_use = "StepSuccess must be used"]
+pub struct StepSuccess<T, S: StepSpec> {
+    /// The output of the step.
+    pub output: T,
+
+    /// An optional message associated with this result.
+    pub message: Option<Cow<'static, str>>,
+
+    /// Optional metadata associated with this step.
+    pub metadata: Option<S::CompletionMetadata>,
+}
+
+impl<T, S: StepSpec> StepSuccess<T, S> {
+    /// Creates a new `StepSuccess`.
+    pub fn new(output: T) -> Self {
+        Self { output, metadata: None, message: None }
     }
 
-    /// Creates a new `StepResult` corresponding to a successful output, with a
-    /// warning and metadata attached.
-    pub fn warning(
-        output: T,
-        metadata: S::CompletionMetadata,
+    /// Adds a message to this step.
+    pub fn with_message(
+        mut self,
         message: impl Into<Cow<'static, str>>,
-    ) -> Result<Self, S::Error> {
-        Ok(Self {
-            output,
-            outcome: StepOutcome::Warning { metadata, message: message.into() },
-        })
+    ) -> Self {
+        self.message = Some(message.into());
+        self
     }
 
-    /// Creates a new `StepResult` corresponding to a skipped step, with a
-    /// message and metadata attached.
-    pub fn skipped(
-        output: T,
-        metadata: S::SkippedMetadata,
-        message: impl Into<Cow<'static, str>>,
-    ) -> Result<Self, S::Error> {
-        Ok(Self {
-            output,
-            outcome: StepOutcome::Skipped { metadata, message: message.into() },
-        })
+    /// Adds metadata to this step.
+    pub fn with_metadata(mut self, metadata: S::CompletionMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Creates a `StepResult` from this `StepSuccess`.
+    pub fn build(self) -> StepResult<T, S> {
+        StepResult {
+            output: self.output,
+            outcome: StepOutcome::Success {
+                message: self.message,
+                metadata: self.metadata,
+            },
+        }
+    }
+}
+
+impl<T, S: StepSpec> From<StepSuccess<T, S>>
+    for Result<StepResult<T, S>, S::Error>
+{
+    fn from(value: StepSuccess<T, S>) -> Self {
+        Ok(value.build())
+    }
+}
+
+#[derive_where(Debug; T: std::fmt::Debug)]
+#[must_use = "StepWarning must be used"]
+pub struct StepWarning<T, S: StepSpec> {
+    /// The output of the step.
+    pub output: T,
+
+    /// A message associated with this result.
+    pub message: Cow<'static, str>,
+
+    /// Optional metadata associated with this step.
+    pub metadata: Option<S::CompletionMetadata>,
+}
+
+impl<T, S: StepSpec> StepWarning<T, S> {
+    /// Creates a new `StepWarning`.
+    pub fn new(output: T, message: impl Into<Cow<'static, str>>) -> Self {
+        Self { output, message: message.into(), metadata: None }
+    }
+
+    /// Adds metadata to this step.
+    pub fn with_metadata(mut self, metadata: S::CompletionMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Creates a `StepResult` from this `StepSuccess`.
+    pub fn build(self) -> StepResult<T, S> {
+        StepResult {
+            output: self.output,
+            outcome: StepOutcome::Warning {
+                message: self.message,
+                metadata: self.metadata,
+            },
+        }
+    }
+}
+
+impl<T, S: StepSpec> From<StepWarning<T, S>>
+    for Result<StepResult<T, S>, S::Error>
+{
+    fn from(value: StepWarning<T, S>) -> Self {
+        Ok(value.build())
+    }
+}
+
+#[derive_where(Debug; T: std::fmt::Debug)]
+#[must_use = "StepSkipped must be used"]
+pub struct StepSkipped<T, S: StepSpec> {
+    /// The output of the step.
+    pub output: T,
+
+    /// A message associated with this step.
+    pub message: Cow<'static, str>,
+
+    /// Optional metadata associated with this step.
+    pub metadata: Option<S::SkippedMetadata>,
+}
+
+impl<T, S: StepSpec> StepSkipped<T, S> {
+    /// Creates a new `StepSuccess`.
+    pub fn new(output: T, message: impl Into<Cow<'static, str>>) -> Self {
+        Self { output, message: message.into(), metadata: None }
+    }
+
+    /// Adds metadata to this step.
+    pub fn with_metadata(mut self, metadata: S::SkippedMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Creates a `StepResult` from this `StepSuccess`.
+    pub fn build(self) -> StepResult<T, S> {
+        StepResult {
+            output: self.output,
+            outcome: StepOutcome::Skipped {
+                message: self.message,
+                metadata: self.metadata,
+            },
+        }
+    }
+}
+
+impl<T, S: StepSpec> From<StepSkipped<T, S>>
+    for Result<StepResult<T, S>, S::Error>
+{
+    fn from(value: StepSkipped<T, S>) -> Self {
+        Ok(value.build())
     }
 }
 
@@ -895,7 +1005,7 @@ mod tests {
         engine
             .new_step("foo".to_owned(), 0, "Step 1", |_| async {
                 step_1_run = true;
-                StepResult::success((), serde_json::Value::Null)
+                StepSuccess::new(()).into()
             })
             .register();
 
@@ -909,7 +1019,7 @@ mod tests {
         engine
             .new_step("baz".to_owned(), 0, "Step 3", |_| async {
                 step_3_run = true;
-                StepResult::success((), serde_json::Value::Null)
+                StepSuccess::new(()).into()
             })
             .register();
 

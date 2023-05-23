@@ -2083,13 +2083,18 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2107,13 +2112,13 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step."
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2127,17 +2132,17 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step."
+                "nullable": true,
+                "description": "Optional metadata associated with the skip."
               }
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]
@@ -2154,8 +2159,14 @@
                   "success"
                 ]
               },
+              "message": {
+                "nullable": true,
+                "description": "An optional message associated with this step.",
+                "type": "string"
+              },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
@@ -2164,8 +2175,7 @@
               }
             },
             "required": [
-              "kind",
-              "metadata"
+              "kind"
             ]
           },
           {
@@ -2183,7 +2193,8 @@
                 "type": "string"
               },
               "metadata": {
-                "description": "Completion metadata associated with the step.",
+                "nullable": true,
+                "description": "Optional completion metadata associated with the step.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/InstallinatorCompletionMetadata"
@@ -2193,8 +2204,7 @@
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           },
           {
@@ -2208,11 +2218,12 @@
                 ]
               },
               "message": {
-                "description": "Metadata associated with the step.",
+                "description": "Message associated with the skip.",
                 "type": "string"
               },
               "metadata": {
-                "description": "Skipped metadata associated with the step.",
+                "nullable": true,
+                "description": "Optional metadata associated with the skip.",
                 "type": "string",
                 "enum": [
                   null
@@ -2221,8 +2232,7 @@
             },
             "required": [
               "kind",
-              "message",
-              "metadata"
+              "message"
             ]
           }
         ]

@@ -225,12 +225,12 @@ impl UpdatePane {
                     vec![Span::styled("Status: ", style::selected())];
 
                 let message = match &info.outcome {
-                    StepOutcome::Success { .. } => {
+                    StepOutcome::Success { message, .. } => {
                         spans.push(Span::styled(
                             "Completed",
                             style::successful_update_bold(),
                         ));
-                        None
+                        message.as_ref()
                     }
                     StepOutcome::Warning { message, .. } => {
                         spans.push(Span::styled(
