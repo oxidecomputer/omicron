@@ -5,7 +5,6 @@
 //! A popup dialog box widget for ignition control
 
 use super::ButtonText;
-use super::Popup;
 use crate::state::ComponentId;
 use crate::ui::defaults::style;
 use tui::text::Span;
@@ -48,36 +47,41 @@ impl IgnitionPopup {
         };
     }
 
-    pub fn popup(&self, component: ComponentId) -> Popup<'static> {
-        Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" IGNITION: {}", component),
-                style::header(true),
-            )])]),
-            body: Text {
-                lines: vec![
-                    Spans::from(vec![Span::styled(
-                        "Power On",
-                        style::line(
-                            self.selected_command == IgnitionCommand::PowerOn,
-                        ),
-                    )]),
-                    Spans::from(vec![Span::styled(
-                        "Power Off",
-                        style::line(
-                            self.selected_command == IgnitionCommand::PowerOff,
-                        ),
-                    )]),
-                    Spans::from(vec![Span::styled(
-                        "Power Reset",
-                        style::line(
-                            self.selected_command
-                                == IgnitionCommand::PowerReset,
-                        ),
-                    )]),
-                ],
-            },
-            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
-        }
+    /// Return the components to create a popup -- the header, body and button
+    /// text.
+    ///
+    /// Can't return a `Popup` here due to lifetime issues.
+    pub fn popup_components(
+        &self,
+        component: ComponentId,
+    ) -> (Spans<'static>, Text<'static>, Vec<ButtonText>) {
+        let header = Spans::from(vec![Span::styled(
+            format!("IGNITION: {}", component),
+            style::header(true),
+        )]);
+        let body = Text {
+            lines: vec![
+                Spans::from(vec![Span::styled(
+                    "Power On",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerOn,
+                    ),
+                )]),
+                Spans::from(vec![Span::styled(
+                    "Power Off",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerOff,
+                    ),
+                )]),
+                Spans::from(vec![Span::styled(
+                    "Power Reset",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerReset,
+                    ),
+                )]),
+            ],
+        };
+        let buttons = vec![ButtonText { instruction: "CLOSE", key: "ESC" }];
+        (header, body, buttons)
     }
 }

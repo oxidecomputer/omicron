@@ -72,6 +72,9 @@ pub enum Cmd {
     /// Begin an update.
     StartUpdate,
 
+    /// Reset update state.
+    ClearUpdateState,
+
     /// Goto top of list/screen/etc...
     GotoTop,
 
@@ -112,7 +115,14 @@ pub enum Cmd {
 /// needs to be handled by screens the same way keys are.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShowPopupCmd {
+    /// A response to a start-update request.
     StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a clear-update-state request.
+    ClearUpdateStateResponse {
         component_id: ComponentId,
         response: Result<(), String>,
     },
@@ -177,6 +187,12 @@ impl KeyHandler {
             KeyCode::Char('y') => Cmd::Yes,
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate
+            }
+            KeyCode::Char('r')
+                if event.modifiers
+                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                Cmd::ClearUpdateState
             }
             KeyCode::Char('n') => Cmd::No,
             KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {

@@ -10,8 +10,8 @@ use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use wicketd_client::types::{
-    GetInventoryParams, GetInventoryResponse, IgnitionCommand, SpIdentifier,
-    SpType, StartUpdateOptions,
+    ClearUpdateStateOptions, GetInventoryParams, GetInventoryResponse,
+    IgnitionCommand, SpIdentifier, SpType, StartUpdateOptions,
 };
 
 use crate::events::EventReportMap;
@@ -47,7 +47,14 @@ const CHANNEL_CAPACITY: usize = 1000;
 #[allow(unused)]
 #[derive(Debug)]
 pub enum Request {
-    StartUpdate { component_id: ComponentId, options: StartUpdateOptions },
+    StartUpdate {
+        component_id: ComponentId,
+        options: StartUpdateOptions,
+    },
+    ClearUpdateState {
+        component_id: ComponentId,
+        options: ClearUpdateStateOptions,
+    },
     IgnitionCommand(ComponentId, IgnitionCommand),
 }
 
@@ -104,6 +111,9 @@ impl WicketdManager {
                         Request::StartUpdate { component_id, options } => {
                             self.start_update(component_id, options);
                         }
+                        Request::ClearUpdateState { component_id, options } => {
+                            self.clear_update_state(component_id, options);
+                        }
                         Request::IgnitionCommand(component_id, command) => {
                             self.start_ignition_command(
                                 component_id,
@@ -149,6 +159,41 @@ impl WicketdManager {
             );
             _ = events_tx.send(Event::Term(Cmd::ShowPopup(
                 ShowPopupCmd::StartUpdateResponse { component_id, response },
+            )));
+        });
+    }
+
+    fn clear_update_state(
+        &self,
+        component_id: ComponentId,
+        options: ClearUpdateStateOptions,
+    ) {
+        let log = self.log.clone();
+        let addr = self.wicketd_addr;
+        let events_tx = self.events_tx.clone();
+        tokio::spawn(async move {
+            let update_client =
+                create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let sp: SpIdentifier = component_id.into();
+            let response = match update_client
+                .post_clear_update_state(sp.type_, sp.slot, &options)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            };
+
+            slog::info!(
+                log,
+                "Clear update state response for {}: {:?}",
+                component_id,
+                response
+            );
+            _ = events_tx.send(Event::Term(Cmd::ShowPopup(
+                ShowPopupCmd::ClearUpdateStateResponse {
+                    component_id,
+                    response,
+                },
             )));
         });
     }
