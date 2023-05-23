@@ -53,7 +53,7 @@ You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** usin
 
 Omicron is a pretty large repo containing a bunch of related components.  The repo is structured as one large Cargo workspace.  When you run `cargo build` or `cargo test`, you'll wind up building and testing everything.  In practice, people are usually only working on one or two components at a time.  You can usually iterate faster by specifying a specific package, like `cargo build -p omicron-nexus`.
 
-Here are some of the big components in the control plane:
+Here are some of the big components in the control plane that live in this repo:
 
 [cols="1,1,4",options="header"]
 |===
