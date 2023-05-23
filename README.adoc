@@ -49,6 +49,93 @@ You can **format the code** using `cargo fmt`.  Make sure to run this before pus
 
 You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy --all-targets \-- --deny warnings --allow clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
 
+== Working in Omicron
+
+Omicron is a pretty large repo containing a bunch of related components.  The repo is structured as one large Cargo workspace.  When you run `cargo build` or `cargo test`, you'll wind up building and testing everything.  In practice, people are usually only working on one or two components at a time.  You can usually iterate faster by specifying a specific package, like `cargo build -p omicron-nexus`.
+
+Here are some of the big components in the control plane:
+
+[cols="1,1,4",options="header"]
+|===
+|Main rust package
+|Component
+|Description
+
+|omicron-nexus
+|Nexus
+|Service responsible for handling external API requests and orchestrating the rest of the control plane.
+
+|omicron-sled-agent
+|Sled Agent
+|Service that runs on each compute sled (server) to manage resources on that Sled
+
+|dns-server
+|Internal DNS server, External DNS server
+|DNS server component used for both internal service discovery and external DNS
+
+|omicron-gateway
+|Management Gateway Service
+|Connects Nexus (and other control plane services) to services on the rack management network (e.g., service processors)
+
+|oximeter/oximeter
+|Oximeter
+|Collects telemetry from other services and stores it into Clickhouse
+
+|wicket/wicketd
+|Wicket
+|CLI interface made available to operators on the rack technician port for rack setup and recovery
+
+|===
+
+For those with access to Oxide RFDs, RFD 61 discusses the organization principles and key components in more detail.
+
+Many of these components themselves are made up of subpackages (e.g., `nexus-db-queries` is under `omicron-nexus`).  There are also many more top-level packages than what's mentioned above.  These are used for common code, clients, tools, etc.  For more, see the Rustdoc for each module.  (Where docs are missing or incomplete, please contribute!)
+
+=== Generated Service Clients and Updating
+
+Each service is a Dropshot server that presents an HTTP API. The description of
+that API is serialized as an
+https://github.com/OAI/OpenAPI-Specification[OpenAPI] document which we store
+in link:./openapi[`omicron/openapi`] and check in to this repo. In order to
+ensure that changes to those APIs are made intentionally, each service contains
+a test that validates that the current API matches. This allows us 1. to catch
+accidental changes as test failures and 2. to explicitly observe API changes
+during code review (and in the git history).
+
+We also use these OpenAPI documents as the source for the clients we generate
+using https://github.com/oxidecomputer/progenitor[Progenitor]. Clients are
+automatically updated when the coresponding OpenAPI document is modified.
+
+Note that Omicron contains a nominally circular dependency:
+
+* Nexus depends on the Sled Agent client
+* The Sled Agent client is derived from the OpenAPI document emitted by Sled Agent
+* Sled Agent depends on the Nexus client
+* The Nexus client is derived from the OpenAPI document emitted by Nexus
+
+We effectively "break" this circular dependency by virtue of the OpenAPI
+documents being checked in.
+
+In general, changes any service API **require the following set of build steps**:
+
+* Make changes to the service API
+* Build the package for the modified service alone. This can be done by changing
+  directories there, or `cargo build -p <package>`. This is step is important,
+  to avoid the circular dependency at this point. One needs to update this one
+  OpenAPI document, without rebuilding the other components that depend on a
+  now-outdated spec.
+* Update the OpenAPI document by running the relevant test with overwrite set:
+  `EXPECTORATE=overwrite cargo test test_nexus_openapi_internal` (changing the
+  test name as necessary)
+* This will cause the generated client to be updated which may break the build
+  for dependent consumers
+* Modify any dependent services to fix calls to the generated client
+
+Note that if you make changes to both Nexus and Sled Agent simultaneously, you
+may end up in a spot where neither can build and therefore neither OpenAPI
+document can be generated. In this case, revert or comment out changes in one
+so that the OpenAPI document can be generated.
+
 == Configuration reference
 
 `nexus` requires a TOML configuration file.  There's an example in
@@ -156,48 +243,3 @@ many of them on the command-line with:
 
 [source,text]
 $ /path/to/clickhouse server --config-file /path/to/config.xml -- --param_name param_value ...
-
-=== Generated Service Clients and Updating
-
-Each service is a Dropshot server that presents an HTTP API. The description of
-that API is serialized as an
-https://github.com/OAI/OpenAPI-Specification[OpenAPI] document which we store
-in link:./openapi[`omicron/openapi`] and check in to this repo. In order to
-ensure that changes to those APIs are made intentionally, each service contains
-a test that validates that the current API matches. This allows us 1. to catch
-accidental changes as test failures and 2. to explicitly observe API changes
-during code review (and in the git history).
-
-We also use these OpenAPI documents as the source for the clients we generate
-using https://github.com/oxidecomputer/progenitor[Progenitor]. Clients are
-automatically updated when the coresponding OpenAPI document is modified.
-
-Note that Omicron contains a nominally circular dependency:
-
-* Nexus depends on the Sled Agent client
-* The Sled Agent client is derived from the OpenAPI document emitted by Sled Agent
-* Sled Agent depends on the Nexus client
-* The Nexus client is derived from the OpenAPI document emitted by Nexus
-
-We effectively "break" this circular dependency by virtue of the OpenAPI
-documents being checked in.
-
-In general, changes any service API **require the following set of build steps**:
-
-* Make changes to the service API
-* Build the package for the modified service alone. This can be done by changing
-  directories there, or `cargo build -p <package>`. This is step is important,
-  to avoid the circular dependency at this point. One needs to update this one
-  OpenAPI document, without rebuilding the other components that depend on a
-  now-outdated spec.
-* Update the OpenAPI document by running the relevant test with overwrite set:
-  `EXPECTORATE=overwrite cargo test test_nexus_openapi_internal` (changing the
-  test name as necessary)
-* This will cause the generated client to be updated which may break the build
-  for dependent consumers
-* Modify any dependent services to fix calls to the generated client
-
-Note that if you make changes to both Nexus and Sled Agent simultaneously, you
-may end up in a spot where neither can build and therefore neither OpenAPI
-document can be generated. In this case, revert or comment out changes in one
-so that the OpenAPI document can be generated.
