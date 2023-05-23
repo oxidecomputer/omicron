@@ -66,6 +66,7 @@ impl Event {
 pub enum Action {
     Redraw,
     StartUpdate(ComponentId),
+    ClearUpdateState(ComponentId),
     Ignition(ComponentId, IgnitionCommand),
 }
 
@@ -78,6 +79,7 @@ impl Action {
         match self {
             Action::Redraw
             | Action::StartUpdate(_)
+            | Action::ClearUpdateState(_)
             | Action::Ignition(_, _) => true,
         }
     }

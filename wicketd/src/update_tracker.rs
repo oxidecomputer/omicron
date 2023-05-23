@@ -269,6 +269,14 @@ impl UpdateTracker {
         .await
     }
 
+    pub(crate) async fn clear_update_state(
+        &self,
+        sp: SpIdentifier,
+    ) -> Result<(), ClearUpdateStateError> {
+        let mut update_data = self.sp_update_data.lock().await;
+        update_data.clear_update_state(sp)
+    }
+
     async fn start_impl<F, Fut>(
         &self,
         sp: SpIdentifier,
@@ -380,6 +388,26 @@ impl UpdateTrackerData {
         Self { artifact_store, sp_update_data: BTreeMap::new() }
     }
 
+    fn clear_update_state(
+        &mut self,
+        sp: SpIdentifier,
+    ) -> Result<(), ClearUpdateStateError> {
+        // Is an update currently running? If so, then reject the request.
+        //
+        // TODO: maybe add a way to force state to be cleared (this is
+        // dangerous!)
+        let is_running = self
+            .sp_update_data
+            .get(&sp)
+            .map_or(false, |update_data| !update_data.task.is_finished());
+        if is_running {
+            return Err(ClearUpdateStateError::UpdateInProgress);
+        }
+
+        self.sp_update_data.remove(&sp);
+        Ok(())
+    }
+
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
         // Are there any updates currently running? If so, then reject the new
         // repository.
@@ -422,6 +450,24 @@ impl StartUpdateError {
         match self {
             StartUpdateError::TufRepositoryUnavailable
             | StartUpdateError::UpdateInProgress(_) => {
+                HttpError::for_bad_request(None, message)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Error, Eq, PartialEq)]
+pub enum ClearUpdateStateError {
+    #[error("target is currently being updated")]
+    UpdateInProgress,
+}
+
+impl ClearUpdateStateError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            ClearUpdateStateError::UpdateInProgress => {
                 HttpError::for_bad_request(None, message)
             }
         }
