@@ -65,7 +65,7 @@ where
 pub fn retry_policy_internal_service() -> ::backoff::ExponentialBackoff {
     backoff_builder()
         .with_initial_interval(Duration::from_millis(250))
-        .with_max_interval(Duration::from_secs(60 * 60))
+        .with_max_interval(Duration::from_secs(60 * 3))
         .build()
 }
 
@@ -82,7 +82,7 @@ pub fn retry_policy_internal_service_aggressive(
     backoff_builder()
         .with_initial_interval(Duration::from_millis(100))
         .with_multiplier(1.2)
-        .with_max_interval(Duration::from_secs(60 * 60))
+        .with_max_interval(Duration::from_secs(60 * 3))
         .build()
 }
 
