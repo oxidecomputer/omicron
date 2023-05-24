@@ -141,6 +141,7 @@ impl super::Nexus {
         &self,
         runnable_saga: RunnableSaga,
     ) -> Result<SagaResultOk, Error> {
+        let log = self.log;
         self.sec_client
             .saga_start(runnable_saga.id)
             .await
@@ -162,7 +163,13 @@ impl super::Nexus {
                     "UNDO ACTION failed (node {:?}, error {:#}) after",
                     undo_node, undo_error
                 ));
+
+                error!(log, "saga stuck";
+                    "saga_id" => runnable_saga.id.to_string(),
+                    "error" => format!("{:#}", e),
+                );
             }
+
             error
         })
     }
