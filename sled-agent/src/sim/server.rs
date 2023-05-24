@@ -286,15 +286,19 @@ impl Server {
         if let Some(external_dns_internal_addr) =
             rss_args.external_dns_internal_addr
         {
+            let ip = *external_dns_internal_addr.ip();
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
                 kind: NexusTypes::ServiceKind::ExternalDns {
-                    external_address: (*external_dns_internal_addr.ip()).into(),
+                    external_address: ip.into(),
                 },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),
             });
+
+            internal_services_ip_pool_ranges
+                .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
         }
 
         let recovery_silo = NexusTypes::RecoverySiloConfig {

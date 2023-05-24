@@ -390,7 +390,6 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE: {}", state.rack_state.selected),
@@ -419,7 +418,6 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE: {}", state.rack_state.selected),
@@ -474,7 +472,6 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" CLEAR UPDATE STATE: {}", state.rack_state.selected),
@@ -846,11 +843,12 @@ impl UpdatePane {
                                 // state.rack_state.selected be changed in the
                                 // meantime) so log this.
                                 slog::warn!(
-                                self.log,
-                                "currently waiting on start update response \
-                                 for {} but received response for {component_id}",
-                                 state.rack_state.selected
-                            );
+                                    self.log,
+                                    "currently waiting on start update \
+                                    response for {}, but received response \
+                                    for {component_id}",
+                                    state.rack_state.selected
+                                );
                                 None
                             }
                         }

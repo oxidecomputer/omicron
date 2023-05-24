@@ -125,7 +125,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 async-trait = "0.1.68"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
-base64 = "0.21.0"
+base64 = "0.21.1"
 bb8 = "0.8.0"
 bcs = "0.1.5"
 bincode = "1.3.3"
@@ -217,7 +217,7 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.8.3"
 oxide-client = { path = "oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "3f92917953d4e2d2ee2792ce530cace2bd055127", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f2614ac9ba40df08edddffe8ceaa91d5c3e73803", features = [ "api", "std" ] }
 once_cell = "1.17.1"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "1.0"
@@ -225,7 +225,7 @@ openapiv3 = "1.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.2"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "3f92917953d4e2d2ee2792ce530cace2bd055127" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f2614ac9ba40df08edddffe8ceaa91d5c3e73803" }
 oso = "0.26"
 owo-colors = "3.5.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -250,8 +250,8 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "f54b863bbf91953ad0bb2c2010aaff04b789eec7", features = [ "generated-migration" ] }
-propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "f54b863bbf91953ad0bb2c2010aaff04b789eec7", default-features = false, features = ["mock-only"] }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5f694f4833a4368e05764a3b4b0fcaa6feed54df", features = [ "generated-migration" ] }
+propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5f694f4833a4368e05764a3b4b0fcaa6feed54df", default-features = false, features = ["mock-only"] }
 proptest = "1.1.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -318,7 +318,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.18"
 tokio-util = "0.7.8"
-toml = "0.7.3"
+toml = "0.7.4"
 tough = { version = "0.12", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
