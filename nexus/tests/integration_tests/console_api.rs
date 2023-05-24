@@ -433,19 +433,15 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
 }
 
 async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
-    let login = RequestBuilder::new(
-        &testctx,
-        Method::POST,
-        "/login/test-suite-silo/local",
-    )
-    .body(Some(&UsernamePasswordCredentials {
-        username: "test-privileged".parse().unwrap(),
-        password: "oxide".parse().unwrap(),
-    }))
-    .expect_status(Some(StatusCode::SEE_OTHER))
-    .execute()
-    .await
-    .expect("failed to log in");
+    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
+        .body(Some(&UsernamePasswordCredentials {
+            username: "test-privileged".parse().unwrap(),
+            password: "oxide".parse().unwrap(),
+        }))
+        .expect_status(Some(StatusCode::SEE_OTHER))
+        .execute()
+        .await
+        .expect("failed to log in");
 
     let session_cookie = get_header_value(login, header::SET_COOKIE);
     let (session_token, rest) = session_cookie.split_once("; ").unwrap();

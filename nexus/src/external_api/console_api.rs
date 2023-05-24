@@ -23,18 +23,22 @@ use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, Path, RequestContext,
+    HttpResponseUpdatedNoContent, PaginationOrder, Path, RequestContext,
+    TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_queries::context::OpContext;
-use nexus_types::external_api::params;
-use omicron_common::api::external::Error;
+use nexus_types::{external_api::params, identity::Resource};
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::{DataPageParams, Error, Name, NameOrId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
+use std::num::NonZeroU32;
+use std::str::FromStr;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
 // Silos have one or more identity providers, and an unauthenticated user will
@@ -359,7 +363,7 @@ pub async fn login_local_begin(
 
     // TODO: if the user is logged in, redirect to / or /projects? or detect
     // this on the client-side and show a link?
-    serve_console_index(rqctx.context()).await
+    serve_console_index(rqctx).await
 }
 
 /// Authenticate a user via username and password
@@ -371,7 +375,7 @@ pub async fn login_local_begin(
 pub async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
-    credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
+    credentials: TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseSeeOther, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -482,9 +486,9 @@ pub struct RestPathParam {
     path: Vec<String>,
 }
 
-// Generic login form, works for both local and SAML. Console client is
-// responsible for hitting an API endpoint (TODO) that tells it whether to show
-// username/password login or a link to the SAML IdP.
+/// Generic login form, works for both local and SAML. Console client is
+/// responsible for hitting an API endpoint (TODO) that tells it whether to show
+/// username/password login or a link to the SAML IdP.
 #[endpoint {
    method = GET,
    path = "/login",
@@ -494,10 +498,62 @@ pub async fn login_begin(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: wrap in instrumenting code
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await;
 
-    // TODO: if the user is logged in, redirect to / or /projects? or detect
-    // this on the client-side and show a link?
-    serve_console_index(rqctx.context()).await
+    // if the user is already logged in, redirect to /. they can log out if needed
+    if let Ok(opctx) = opctx {
+        if opctx.authn.actor().is_some() {
+            return Ok(Response::builder()
+                .status(StatusCode::FOUND)
+                .header(http::header::LOCATION, "/")
+                .body("".into())?);
+        }
+    }
+
+    serve_console_index(rqctx).await
+}
+
+/// Generic login post endpoint. Designed to work the same way as
+/// `/login/{silo_name}/local`, but pulling the silo name from the host.
+#[endpoint {
+   method = POST,
+   path = "/login",
+   tags = ["login"],
+}]
+pub async fn login(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    credentials: TypedBody<params::UsernamePasswordCredentials>,
+) -> Result<HttpResponseSeeOther, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let credentials = credentials.into_inner();
+
+        // By definition, this request is not authenticated.  These operations
+        // happen using the Nexus "external authentication" context, which we
+        // keep specifically for this purpose.
+        let opctx = nexus.opctx_external_authn();
+
+        // TODO: get silo name from host. In the meantime, hard code silo
+        let silos = nexus
+            .silos_list(
+                &opctx,
+                &PaginatedBy::Id(DataPageParams {
+                    marker: None,
+                    direction: PaginationOrder::Ascending,
+                    limit: NonZeroU32::new(1).unwrap(),
+                }),
+            )
+            .await?;
+        let silo_name = silos[0].name().clone();
+        // let silo_name = Name::from_str("test-suite-silo").unwrap().into();
+
+        // TODO: get silo name from host. In the meantime, hard code silo
+        let silo_lookup = nexus.silo_lookup(&opctx, silo_name.into())?;
+        let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
+        login_finish(&opctx, apictx, user, None).await
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 pub async fn console_index_or_login_redirect(
@@ -508,7 +564,7 @@ pub async fn console_index_or_login_redirect(
     // if authed, serve console index.html with JS bundle in script tag
     if let Ok(opctx) = opctx {
         if opctx.authn.actor().is_some() {
-            return serve_console_index(rqctx.context()).await;
+            return serve_console_index(rqctx).await;
         }
     }
 
@@ -647,8 +703,9 @@ pub async fn asset(
 }
 
 pub async fn serve_console_index(
-    apictx: &ServerContext,
+    rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<Response<Body>, HttpError> {
+    let apictx = rqctx.context();
     let static_dir = &apictx
         .console_config
         .static_dir

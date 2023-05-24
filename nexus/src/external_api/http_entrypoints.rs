@@ -253,6 +253,7 @@ pub fn external_api() -> NexusApiDescription {
 
         // Console API operations
         api.register(console_api::login_begin)?;
+        api.register(console_api::login)?;
         api.register(console_api::login_local_begin)?;
         api.register(console_api::login_local)?;
         api.register(console_api::login_saml_begin)?;
