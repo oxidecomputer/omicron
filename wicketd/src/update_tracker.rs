@@ -635,44 +635,6 @@ impl UpdateDriver {
                 .register();
         }
 
-        // Reset the RoT into the updated build we just sent.
-        rot_registrar
-            .new_step(
-                UpdateStepId::ResetRot,
-                "Resetting RoT",
-                |cx| async move {
-                    let (rot_firmware_slot, _) = rot_firmware_slot_and_artifact
-                        .into_value(cx.token())
-                        .await;
-
-                    // Mark the slot we just updated as the slot to use,
-                    // persistently.
-                    update_cx
-                        .set_component_active_slot(
-                            SpComponent::ROT.const_as_str(),
-                            rot_firmware_slot,
-                            true,
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::SetRotActiveSlotFailed {
-                                error,
-                            }
-                        })?;
-
-                    // Reset the RoT.
-                    update_cx
-                        .reset_sp_component(SpComponent::ROT.const_as_str())
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::RotResetFailed { error }
-                        })?;
-
-                    StepSuccess::new(()).into()
-                },
-            )
-            .register();
-
         // The SP only has one updateable firmware slot ("the inactive bank") -
         // we always pass 0.
         let sp_firmware_slot = 0;
@@ -697,17 +659,6 @@ impl UpdateDriver {
                     StepSuccess::new(()).into()
                 },
             )
-            .register();
-        sp_registrar
-            .new_step(UpdateStepId::ResetSp, "Resetting SP", |_cx| async move {
-                update_cx
-                    .reset_sp_component(SpComponent::SP_ITSELF.const_as_str())
-                    .await
-                    .map_err(|error| UpdateTerminalError::SpResetFailed {
-                        error,
-                    })?;
-                StepSuccess::new(()).into()
-            })
             .register();
 
         if update_cx.sp.type_ == SpType::Sled {
@@ -1623,5 +1574,77 @@ impl<'a> SpComponentUpdateContext<'a> {
                 },
             )
             .register();
+
+        // If we just updated the RoT or SP, immediately reboot it into the new
+        // update. (One can imagine an update process _not_ wanting to do this,
+        // to stage updates for example, but for wicketd-driven recovery it's
+        // fine to do this immediately.)
+        match component {
+            UpdateComponent::Rot => {
+                // Prior to rebooting the RoT, we have to tell it to boot into
+                // the firmware slot we just updated.
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::SettingActiveBootSlot,
+                        format!("Setting RoT active slot to {firmware_slot}"),
+                        move |_cx| async move {
+                            update_cx
+                                .set_component_active_slot(
+                                    component_name,
+                                    firmware_slot,
+                                    true,
+                                )
+                                .await
+                                .map_err(|error| {
+                                    UpdateTerminalError::SetRotActiveSlotFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+
+                // Reset the RoT.
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting RoT",
+                        move |_cx| async move {
+                            update_cx
+                                .reset_sp_component(component_name)
+                                .await
+                                .map_err(|error| {
+                                    UpdateTerminalError::RotResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+            }
+            UpdateComponent::Sp => {
+                // Nothing special to do on the SP - just reset it.
+                registrar
+                    .new_step(
+                        SpComponentUpdateStepId::Resetting,
+                        "Resetting SP",
+                        move |_cx| async move {
+                            update_cx
+                                .reset_sp_component(component_name)
+                                .await
+                                .map_err(|error| {
+                                    UpdateTerminalError::SpResetFailed {
+                                        error,
+                                    }
+                                })?;
+                            StepSuccess::new(()).into()
+                        },
+                    )
+                    .register();
+            }
+            UpdateComponent::Host => (),
+        }
     }
 }

@@ -73,6 +73,8 @@ pub enum SpComponentUpdateStepId {
     Sending,
     Preparing,
     Writing,
+    SettingActiveBootSlot,
+    Resetting,
 }
 
 impl StepSpec for SpComponentUpdateSpec {
