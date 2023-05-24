@@ -144,21 +144,42 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to get 302 for unauthed console request");
 }
 
+async fn expect_console_page(
+    testctx: &ClientTestContext,
+    path: &str,
+    session_token: Option<String>,
+) {
+    let mut builder = RequestBuilder::new(testctx, Method::GET, path);
+
+    if let Some(session_token) = session_token {
+        builder = builder.header(http::header::COOKIE, &session_token)
+    }
+
+    let console_page = builder
+        .expect_status(Some(StatusCode::OK))
+        .expect_response_header(
+            http::header::CONTENT_TYPE,
+            "text/html; charset=UTF-8",
+        )
+        .expect_response_header(http::header::CACHE_CONTROL, "no-store")
+        .execute()
+        .await
+        .expect("failed to get console index");
+
+    assert_eq!(console_page.body, "<html></html>".as_bytes());
+}
+
 #[nexus_test]
 async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let _ =
-        RequestBuilder::new(&testctx, Method::GET, "/projects/irrelevant-path")
-            .expect_status(Some(StatusCode::FOUND))
-            .expect_response_header(
-                header::LOCATION,
-                "/spoof_login?state=%2Fprojects%2Firrelevant-path",
-            )
-            .execute()
-            .await
-            .expect("failed to redirect to IdP on auth failure");
+    expect_redirect(
+        testctx,
+        "/projects/irrelevant-path",
+        "/spoof_login?state=%2Fprojects%2Firrelevant-path",
+    )
+    .await;
 
     let session_token = log_in_and_extract_token(&testctx).await;
 
@@ -177,39 +198,20 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     ];
 
     for path in console_paths {
-        let console_page = RequestBuilder::new(&testctx, Method::GET, path)
-            .header(http::header::COOKIE, session_token.clone())
-            .expect_status(Some(StatusCode::OK))
-            .expect_response_header(
-                http::header::CONTENT_TYPE,
-                "text/html; charset=UTF-8",
-            )
-            .expect_response_header(http::header::CACHE_CONTROL, "no-store")
-            .execute()
-            .await
-            .expect("failed to get console index");
-
-        assert_eq!(console_page.body, "<html></html>".as_bytes());
+        expect_console_page(testctx, path, Some(session_token.clone())).await;
     }
 }
 
 #[nexus_test]
-async fn test_login_form(cptestctx: &ControlPlaneTestContext) {
+async fn test_unauthed_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    // login route returns bundle too, but is not auth gated
-    let console_page =
-        RequestBuilder::new(&testctx, Method::GET, "/spoof_login")
-            .expect_status(Some(StatusCode::OK))
-            .expect_response_header(
-                http::header::CONTENT_TYPE,
-                "text/html; charset=UTF-8",
-            )
-            .execute()
-            .await
-            .expect("failed to get login form");
+    let unauthed_console_paths =
+        &["/spoof_login", "/login/irrelevant-silo/local"];
 
-    assert_eq!(console_page.body, "<html></html>".as_bytes());
+    for path in unauthed_console_paths {
+        expect_console_page(testctx, path, None).await;
+    }
 }
 
 #[nexus_test]

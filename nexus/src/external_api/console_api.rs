@@ -387,6 +387,23 @@ pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+   unpublished = true,
+}]
+pub async fn login_local_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    // TODO: figure out why instrumenting doesn't work
+    // let apictx = rqctx.context();
+    // let handler = async { serve_console_index(rqctx.context()).await };
+    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    serve_console_index(rqctx.context()).await
+}
+
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
