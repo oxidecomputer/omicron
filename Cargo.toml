@@ -299,7 +299,7 @@ sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.3.1"
+steno = "0.4.0"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.2.4", features = ["tokio"] }
@@ -379,8 +379,10 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-#[patch."https://github.com/oxidecomputer/steno"]
-#steno = { path = "../steno" }
+# XXX-dap
+[patch.crates-io]
+steno = { path = "../steno-3.1" }
+steno32 = { package = "steno", path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]

@@ -1625,7 +1625,8 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
 CREATE TYPE omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',
-    'done'
+    'done',
+    'stuck'
 );
 
 

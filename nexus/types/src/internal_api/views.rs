@@ -7,6 +7,8 @@ use futures::stream::StreamExt;
 use omicron_common::api::external::ObjectStream;
 use schemars::JsonSchema;
 use serde::Serialize;
+use steno::SagaResultErr;
+use steno::UndoActionError;
 use uuid::Uuid;
 
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
@@ -42,7 +44,16 @@ impl From<steno::SagaView> for Saga {
 pub enum SagaState {
     Running,
     Succeeded,
-    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
+    Failed {
+        error_node_name: steno::NodeName,
+        error_info: SagaErrorInfo,
+    },
+    Stuck {
+        error_node_name: steno::NodeName,
+        error_info: SagaErrorInfo,
+        undo_error_node_name: steno::NodeName,
+        undo_source_error: serde_json::Value,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -55,6 +66,26 @@ pub enum SagaErrorInfo {
     SubsagaCreateFailed { message: String },
 }
 
+impl From<steno::ActionError> for SagaErrorInfo {
+    fn from(error_source: steno::ActionError) -> Self {
+        match error_source {
+            steno::ActionError::ActionFailed { source_error } => {
+                SagaErrorInfo::ActionFailed { source_error }
+            }
+            steno::ActionError::DeserializeFailed { message } => {
+                SagaErrorInfo::DeserializeFailed { message }
+            }
+            steno::ActionError::InjectedError => SagaErrorInfo::InjectedError,
+            steno::ActionError::SerializeFailed { message } => {
+                SagaErrorInfo::SerializeFailed { message }
+            }
+            steno::ActionError::SubsagaCreateFailed { message } => {
+                SagaErrorInfo::SubsagaCreateFailed { message }
+            }
+        }
+    }
+}
+
 impl From<steno::SagaStateView> for SagaState {
     fn from(st: steno::SagaStateView) -> Self {
         match st {
@@ -65,27 +96,43 @@ impl From<steno::SagaStateView> for SagaState {
                 ..
             } => SagaState::Succeeded,
             steno::SagaStateView::Done {
-                result: steno::SagaResult { kind: Err(e), .. },
+                result:
+                    steno::SagaResult {
+                        kind:
+                            Err(SagaResultErr {
+                                error_node_name,
+                                error_source,
+                                undo_failure: Some((undo_node_name, undo_error)),
+                            }),
+                        ..
+                    },
+                ..
+            } => {
+                let UndoActionError::PermanentFailure {
+                    source_error: undo_source_error,
+                } = undo_error;
+                SagaState::Stuck {
+                    error_node_name,
+                    error_info: SagaErrorInfo::from(error_source),
+                    undo_error_node_name: undo_node_name,
+                    undo_source_error,
+                }
+            }
+            steno::SagaStateView::Done {
+                result:
+                    steno::SagaResult {
+                        kind:
+                            Err(SagaResultErr {
+                                error_node_name,
+                                error_source,
+                                undo_failure: None,
+                            }),
+                        ..
+                    },
                 ..
             } => SagaState::Failed {
-                error_node_name: e.error_node_name,
-                error_info: match e.error_source {
-                    steno::ActionError::ActionFailed { source_error } => {
-                        SagaErrorInfo::ActionFailed { source_error }
-                    }
-                    steno::ActionError::DeserializeFailed { message } => {
-                        SagaErrorInfo::DeserializeFailed { message }
-                    }
-                    steno::ActionError::InjectedError => {
-                        SagaErrorInfo::InjectedError
-                    }
-                    steno::ActionError::SerializeFailed { message } => {
-                        SagaErrorInfo::SerializeFailed { message }
-                    }
-                    steno::ActionError::SubsagaCreateFailed { message } => {
-                        SagaErrorInfo::SubsagaCreateFailed { message }
-                    }
-                },
+                error_node_name: error_node_name,
+                error_info: SagaErrorInfo::from(error_source),
             },
         }
     }

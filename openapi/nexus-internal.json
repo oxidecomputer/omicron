@@ -2531,6 +2531,22 @@
               "error",
               "message"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string",
+                "enum": [
+                  "undo_action_failed"
+                ]
+              },
+              "source_error": {}
+            },
+            "required": [
+              "error",
+              "source_error"
+            ]
           }
         ]
       },
@@ -2598,6 +2614,28 @@
                 "type": "string",
                 "enum": [
                   "failed"
+                ]
+              }
+            },
+            "required": [
+              "error_info",
+              "error_node_name",
+              "state"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "error_info": {
+                "$ref": "#/components/schemas/SagaErrorInfo"
+              },
+              "error_node_name": {
+                "$ref": "#/components/schemas/NodeName"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "stuck"
                 ]
               }
             },
