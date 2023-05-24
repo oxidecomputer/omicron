@@ -32,7 +32,9 @@ use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
+use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
+use installinator_common::WriteOutput;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
 use slog::error;
@@ -53,6 +55,8 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use update_engine::events::StepEventKind;
+use update_engine::events::StepOutcome;
 use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
@@ -1134,14 +1138,61 @@ impl UpdateContext {
         &self,
         cx: &StepContext,
         mut ipr_receiver: mpsc::Receiver<EventReport<InstallinatorSpec>>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<WriteOutput> {
+        let mut write_output = None;
+
         while let Some(report) = ipr_receiver.recv().await {
+            // Prior to processing the report, check for the completion metadata
+            // that indicates which disks installinator attempt to /
+            // successfully wrote. We only need to do this if we haven't already
+            // seen the metadata we care about in a previous report; we should
+            // never get multiple completion events that differ in this
+            // metadata.
+            if write_output.is_none() {
+                for event in &report.step_events {
+                    // We only care about the outcome of completion events.
+                    let outcome = match &event.kind {
+                        StepEventKind::StepCompleted { outcome, .. }
+                        | StepEventKind::ExecutionCompleted {
+                            last_outcome: outcome,
+                            ..
+                        } => outcome,
+                        StepEventKind::NoStepsDefined
+                        | StepEventKind::ExecutionStarted { .. }
+                        | StepEventKind::ProgressReset { .. }
+                        | StepEventKind::AttemptRetry { .. }
+                        | StepEventKind::ExecutionFailed { .. }
+                        | StepEventKind::Nested { .. }
+                        | StepEventKind::Unknown => continue,
+                    };
+
+                    // We only care about successful (including "success with
+                    // warning") outcomes.
+                    let metadata = match outcome {
+                        StepOutcome::Success { metadata }
+                        | StepOutcome::Warning { metadata, .. } => metadata,
+                        StepOutcome::Skipped { .. } => continue,
+                    };
+
+                    match metadata {
+                        InstallinatorCompletionMetadata::Write { output } => {
+                            write_output = Some(output.clone());
+                        }
+                        InstallinatorCompletionMetadata::HardwareScan { .. }
+                        | InstallinatorCompletionMetadata::ControlPlaneZones { .. }
+                        | InstallinatorCompletionMetadata::Download { .. }
+                        | InstallinatorCompletionMetadata::Unknown => (),
+                    }
+                }
+            }
             cx.send_nested_report(report).await?;
         }
 
         // The receiver being closed means that the installinator has completed.
 
-        Ok(())
+        write_output.ok_or_else(|| {
+            anyhow!("installinator completed without reporting disks written")
+        })
     }
 
     async fn wait_for_first_installinator_progress(
