@@ -56,8 +56,6 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use update_engine::events::StepEventKind;
-use update_engine::events::StepOutcome;
 use update_engine::StepSpec;
 use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
