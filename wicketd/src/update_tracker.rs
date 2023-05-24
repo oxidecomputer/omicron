@@ -1102,27 +1102,14 @@ impl UpdateContext {
             if write_output.is_none() {
                 for event in &report.step_events {
                     // We only care about the outcome of completion events.
-                    let outcome = match &event.kind {
-                        StepEventKind::StepCompleted { outcome, .. }
-                        | StepEventKind::ExecutionCompleted {
-                            last_outcome: outcome,
-                            ..
-                        } => outcome,
-                        StepEventKind::NoStepsDefined
-                        | StepEventKind::ExecutionStarted { .. }
-                        | StepEventKind::ProgressReset { .. }
-                        | StepEventKind::AttemptRetry { .. }
-                        | StepEventKind::ExecutionFailed { .. }
-                        | StepEventKind::Nested { .. }
-                        | StepEventKind::Unknown => continue,
+                    let Some(outcome) = event.kind.step_outcome() else {
+                        continue;
                     };
 
                     // We only care about successful (including "success with
                     // warning") outcomes.
-                    let metadata = match outcome {
-                        StepOutcome::Success { metadata }
-                        | StepOutcome::Warning { metadata, .. } => metadata,
-                        StepOutcome::Skipped { .. } => continue,
+                    let Some(metadata) = outcome.completion_metadata() else {
+                        continue;
                     };
 
                     match metadata {

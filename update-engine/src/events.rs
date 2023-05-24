@@ -702,6 +702,25 @@ impl<S: StepSpec> StepEventKind<S> {
             StepEventKind::Unknown => StepEventKind::Unknown,
         }
     }
+
+    /// If this represents a successfully-completed step, returns the outcome.
+    ///
+    /// This does not recurse into nested events.
+    pub fn step_outcome(&self) -> Option<&StepOutcome<S>> {
+        match self {
+            StepEventKind::StepCompleted { outcome, .. }
+            | StepEventKind::ExecutionCompleted {
+                last_outcome: outcome, ..
+            } => Some(outcome),
+            StepEventKind::NoStepsDefined
+            | StepEventKind::ExecutionStarted { .. }
+            | StepEventKind::ProgressReset { .. }
+            | StepEventKind::AttemptRetry { .. }
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::Nested { .. }
+            | StepEventKind::Unknown => None,
+        }
+    }
 }
 
 /// Whether a [`StepEvent`] is a terminal event.
@@ -809,6 +828,18 @@ impl<S: StepSpec> StepOutcome<S> {
             }
         };
         Ok(ret)
+    }
+
+    /// If this outcome represents completion, returns the metadata associated
+    /// with this event.
+    ///
+    /// Returns `None` if this outcome represents "skipped".
+    pub fn completion_metadata(&self) -> Option<&S::CompletionMetadata> {
+        match self {
+            StepOutcome::Success { metadata }
+            | StepOutcome::Warning { metadata, .. } => Some(metadata),
+            StepOutcome::Skipped { .. } => None,
+        }
     }
 
     /// Converts self into its generic version.
