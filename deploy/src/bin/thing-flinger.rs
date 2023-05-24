@@ -626,53 +626,24 @@ fn do_overlay(config: &Config) -> Result<()> {
     // As we're doing so, record which directory is the one for the server that
     // will run RSS.
     let mut rss_server_dir = None;
-    let sled_agent_dirs = config
-        .deployment
-        .servers
-        .iter()
-        .map(|server_name| {
-            let mut dir = root_path.clone();
-            dir.push(server_name);
-            dir.push("sled-agent/pkg");
-            if *server_name == config.deployment.rss_server {
-                rss_server_dir = Some(dir.clone());
-            }
-            dir
-        })
-        .collect::<Vec<_>>();
+
+    for server_name in &config.deployment.servers {
+        let mut dir = root_path.clone();
+        dir.push(server_name);
+        dir.push("sled-agent/pkg");
+        if *server_name == config.deployment.rss_server {
+            rss_server_dir = Some(dir.clone());
+            break;
+        }
+    }
 
     // we know exactly one of the servers matches `rss_server` from our config
     // validation, so we can unwrap here
     let rss_server_dir = rss_server_dir.unwrap();
 
-    overlay_sled_agent(builder, config, &sled_agent_dirs)?;
     overlay_rss_config(builder, config, &rss_server_dir)?;
 
     Ok(())
-}
-
-fn overlay_sled_agent(
-    builder: &Server,
-    config: &Config,
-    sled_agent_dirs: &[PathBuf],
-) -> Result<()> {
-    // Send SSH command to create directories on builder and generate secret
-    // shares.
-
-    // TODO do we need any escaping here? this will definitely break if any dir
-    // names have spaces
-    let dirs = sled_agent_dirs.iter().map(|dir| format!(" {}", dir.display()));
-
-    let cmd = format!(
-        "sh -c 'for dir in {}; do mkdir -p $dir; done' && \
-            cd {} && \
-            cargo run {} --bin sled-agent-overlay-files -- {}",
-        dirs.clone().collect::<String>(),
-        config.builder.omicron_path.to_string_lossy(),
-        config.release_arg(),
-        dirs.map(|dir| format!(" --directories {}", dir)).collect::<String>(),
-    );
-    ssh_exec(builder, &cmd, SshStrategy::NoForward)
 }
 
 fn overlay_rss_config(

@@ -1969,6 +1969,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
+ "http",
+ "ipnetwork",
  "omicron-zone-package",
  "progenitor",
  "progenitor-client",
@@ -1986,7 +1988,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#61c035b1f70d7b2c2e2ee2481e850105bf15ff31"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2029,7 +2031,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#61c035b1f70d7b2c2e2ee2481e850105bf15ff31"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4722,7 +4724,6 @@ dependencies = [
  "oxide-vpc",
  "oximeter 0.1.0",
  "oximeter-producer 0.1.0",
- "p256",
  "percent-encoding",
  "pretty_assertions",
  "progenitor",
@@ -4744,8 +4745,6 @@ dependencies = [
  "slog-term",
  "smf",
  "sp-sim",
- "sprockets-common",
- "sprockets-host",
  "subprocess",
  "tar",
  "tempfile",
@@ -4755,7 +4754,6 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.4",
  "uuid",
- "vsss-rs",
  "zone",
 ]
 

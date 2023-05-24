@@ -57,7 +57,7 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
@@ -69,7 +69,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
-    generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
+    Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
@@ -92,7 +92,6 @@ use sled_agent_client::{
 };
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -148,7 +147,7 @@ pub enum SetupServiceError {
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
-    initialization_request: SledAgentRequest,
+    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -172,21 +171,11 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        // TODO-cleanup: We should be collecting the device ID certs of all
-        // trust quorum members over the management network. Currently we don't
-        // have a management network, so we hard-code the list of members and
-        // accept it as a parameter instead.
-        member_device_id_certs: Vec<Ed25519Certificate>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(
-                    &config,
-                    &storage_resources,
-                    local_bootstrap_agent,
-                    &member_device_id_certs,
-                )
+                .run(&config, &storage_resources, local_bootstrap_agent)
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -838,7 +827,6 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        member_device_id_certs: &[Ed25519Certificate],
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -927,44 +915,13 @@ impl ServiceInner {
         };
         let config = &plan.config;
 
-        // Generate our rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            &self.log,
-        )?;
-
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                plan.sleds.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of sleds in the plan"
-                )
-            );
-        }
-
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.sleds
                     .iter()
                     .map(move |(bootstrap_addr, initialization_request)| {
-                        (
-                            *bootstrap_addr,
-                            initialization_request.clone(),
-                            maybe_rack_secret_shares
-                                .as_mut()
-                                .map(|shares| shares.next().unwrap()),
-                        )
+                        (*bootstrap_addr, initialization_request.clone())
                     })
                     .collect(),
             )
