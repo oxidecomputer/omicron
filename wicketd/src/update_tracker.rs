@@ -36,6 +36,7 @@ use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
 use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
 use slog::error;
@@ -69,7 +70,9 @@ use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
 use wicket_common::update_events::StepResult;
+use wicket_common::update_events::StepSkipped;
 use wicket_common::update_events::StepSuccess;
+use wicket_common::update_events::StepWarning;
 use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
@@ -635,11 +638,47 @@ impl UpdateDriver {
                 .register();
         }
 
-        // The SP only has one updateable firmware slot ("the inactive bank") -
-        // we always pass 0.
-        let sp_firmware_slot = 0;
-
         let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        let sp_current_version = sp_registrar
+            .new_step(
+                UpdateStepId::InterrogateSp,
+                "Checking current SP version",
+                move |_cx| async move {
+                    let caboose = update_cx
+                        .mgs_client
+                        .sp_component_caboose_get(
+                            update_cx.sp.type_,
+                            update_cx.sp.slot,
+                            SpComponent::SP_ITSELF.const_as_str(),
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::GetSpCabooseFailed { error }
+                        })?
+                        .into_inner();
+
+                    let message = format!(
+                        "SP version {} (git commit {})",
+                        caboose.version.as_deref().unwrap_or("unknown"),
+                        caboose.git_commit
+                    );
+                    match caboose.version.map(|v| v.parse::<SemverVersion>()) {
+                        Some(Ok(version)) => StepSuccess::new(Some(version))
+                            .with_message(message)
+                            .into(),
+                        Some(Err(err)) => StepWarning::new(
+                            None,
+                            format!(
+                                "{message} (failed to parse SP version: {err})"
+                            ),
+                        )
+                        .into(),
+                        None => StepWarning::new(None, message).into(),
+                    }
+                },
+            )
+            .register();
         let inner_cx =
             SpComponentUpdateContext::new(update_cx, UpdateComponent::Sp);
         sp_registrar
@@ -647,6 +686,29 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 "Updating SP",
                 move |cx| async move {
+                    let sp_current_version =
+                        sp_current_version.into_value(cx.token()).await;
+
+                    let sp_has_this_version = Some(&sp_artifact.id.version)
+                        == sp_current_version.as_ref();
+
+                    // If this SP already has this version, skip the rest of
+                    // this step, UNLESS we've been told to skip this version
+                    // check.
+                    if sp_has_this_version && !opts.skip_sp_version_check {
+                        return StepSkipped::new(
+                            (),
+                            format!(
+                                "SP already at version {}",
+                                sp_artifact.id.version
+                            ),
+                        )
+                        .into();
+                    }
+
+                    // The SP only has one updateable firmware slot ("the
+                    // inactive bank") - we always pass 0.
+                    let sp_firmware_slot = 0;
                     cx.with_nested_engine(|engine| {
                         inner_cx.register_steps(
                             engine,
@@ -656,7 +718,22 @@ impl UpdateDriver {
                         Ok(())
                     })
                     .await?;
-                    StepSuccess::new(()).into()
+
+                    // If we updated despite the SP already having the version
+                    // we updated to, make this step return a warning with that
+                    // message; otherwise, this is a normal success.
+                    if sp_has_this_version {
+                        StepWarning::new(
+                            (),
+                            format!(
+                                "SP updated despite already having version {}",
+                                sp_artifact.id.version
+                            ),
+                        )
+                        .into()
+                    } else {
+                        StepSuccess::new(()).into()
+                    }
                 },
             )
             .register();
@@ -1635,9 +1712,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 .reset_sp_component(component_name)
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::SpResetFailed {
-                                        error,
-                                    }
+                                    UpdateTerminalError::SpResetFailed { error }
                                 })?;
                             StepSuccess::new(()).into()
                         },

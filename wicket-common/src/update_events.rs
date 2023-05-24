@@ -41,8 +41,7 @@ pub enum UpdateStepId {
     TestStep,
     SetHostPowerState { state: PowerState },
     InterrogateRot,
-    ResetRot,
-    ResetSp,
+    InterrogateSp,
     SpComponentUpdate,
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,
@@ -115,6 +114,11 @@ pub enum UpdateTerminalError {
     RotResetFailed {
         #[source]
         error: anyhow::Error,
+    },
+    #[error("getting SP caboose failed")]
+    GetSpCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
     },
     #[error("SP reset failed")]
     SpResetFailed {
