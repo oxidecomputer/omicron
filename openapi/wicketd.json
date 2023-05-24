@@ -1296,14 +1296,6 @@
           }
         ]
       },
-      "SpComponentUpdateStage": {
-        "type": "string",
-        "enum": [
-          "sending",
-          "preparing",
-          "writing"
-        ]
-      },
       "SpIdentifier": {
         "type": "object",
         "properties": {
@@ -2986,14 +2978,10 @@
                 "enum": [
                   "sp_component_update"
                 ]
-              },
-              "stage": {
-                "$ref": "#/components/schemas/SpComponentUpdateStage"
               }
             },
             "required": [
-              "id",
-              "stage"
+              "id"
             ]
           },
           {
