@@ -40,11 +40,18 @@ enum PopupKind {
     StartUpdate { popup_state: StartUpdatePopupState },
     StepLogs,
     Ignition,
+    ClearUpdateState { popup_state: ClearUpdateStatePopupState },
 }
 
 #[derive(Debug)]
 enum StartUpdatePopupState {
     Prompting,
+    Waiting,
+    Failed { message: String },
+}
+
+#[derive(Debug)]
+enum ClearUpdateStatePopupState {
     Waiting,
     Failed { message: String },
 }
@@ -56,6 +63,7 @@ pub struct UpdatePane {
     log: Logger,
     help: Vec<(&'static str, &'static str)>,
     not_started_help: Vec<(&'static str, &'static str)>,
+    completed_help: Vec<(&'static str, &'static str)>,
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
@@ -103,6 +111,7 @@ impl UpdatePane {
                 ("Update", "<Enter>"),
             ],
             not_started_help: vec![("Start", "<Ctrl-U>")],
+            completed_help: vec![("Clear", "<Ctrl-Alt-R>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
                 .map(|id| (*id, ComponentUpdateListState::default()))
@@ -381,7 +390,6 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE: {}", state.rack_state.selected),
@@ -410,7 +418,6 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        // What we show here depends on the current status.
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE: {}", state.rack_state.selected),
@@ -446,6 +453,63 @@ impl UpdatePane {
         let popup = Popup {
             header: Text::from(vec![Spans::from(vec![Span::styled(
                 format!(" START UPDATE FAILED: {}", state.rack_state.selected),
+                style::failed_update(),
+            )])]),
+            body: wrapped_body,
+            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn draw_clear_update_state_waiting_popup(
+        &self,
+        state: &State,
+        frame: &mut Frame<'_>,
+    ) {
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(" CLEAR UPDATE STATE: {}", state.rack_state.selected),
+                style::header(true),
+            )])]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                " Waiting for update state to be cleared",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+        frame.render_widget(popup, full_screen);
+    }
+
+    fn draw_clear_update_state_failed_popup(
+        &self,
+        state: &State,
+        message: &str,
+        frame: &mut Frame<'_>,
+    ) {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+        let options = Popup::default_wrap_options(state.screen_width);
+        let wrapped_body = wrap_text(&body, options);
+
+        let popup = Popup {
+            header: Text::from(vec![Spans::from(vec![Span::styled(
+                format!(
+                    " CLEAR UPDATE STATE FAILED: {}",
+                    state.rack_state.selected
+                ),
                 style::failed_update(),
             )])]),
             body: wrapped_body,
@@ -619,6 +683,40 @@ impl UpdatePane {
                     | UpdateItemState::RunningOrCompleted { .. } => None,
                 }
             }
+            Cmd::ClearUpdateState => {
+                let selected = state.rack_state.selected;
+                match state.update_state.item_state(selected) {
+                    UpdateItemState::RunningOrCompleted { .. } => {
+                        let id_state =
+                            self.component_state.get(&selected).unwrap();
+                        let event_buffer = &id_state.event_buffer;
+                        if let Some(root_execution_id) =
+                            event_buffer.root_execution_id()
+                        {
+                            let summary = event_buffer.steps().summarize();
+                            let summary = summary.get(&root_execution_id).expect(
+                                "root execution ID should have a summary associated with it",
+                            );
+                            match summary.execution_status {
+                                ExecutionStatus::Completed { .. }
+                                | ExecutionStatus::Failed { .. } => {
+                                    // If execution has reached a terminal
+                                    // state, we can clear it.
+                                    self.popup = Some(PopupKind::ClearUpdateState { popup_state: ClearUpdateStatePopupState::Waiting });
+                                    Some(Action::ClearUpdateState(selected))
+                                }
+                                ExecutionStatus::NotStarted
+                                | ExecutionStatus::Running { .. } => None,
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    UpdateItemState::AwaitingRepository
+                    | UpdateItemState::NotStarted
+                    | UpdateItemState::UpdateStarted => None,
+                }
+            }
             Cmd::GotoTop => {
                 let id_state = self
                     .component_state
@@ -745,11 +843,56 @@ impl UpdatePane {
                                 // state.rack_state.selected be changed in the
                                 // meantime) so log this.
                                 slog::warn!(
-                                self.log,
-                                "currently waiting on start update response \
-                                 for {} but received response for {component_id}",
-                                 state.rack_state.selected
-                            );
+                                    self.log,
+                                    "currently waiting on start update \
+                                    response for {}, but received response \
+                                    for {component_id}",
+                                    state.rack_state.selected
+                                );
+                                None
+                            }
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            PopupKind::ClearUpdateState { popup_state } => {
+                // The popup state doesn't matter here.
+                match cmd {
+                    Cmd::ShowPopup(
+                        ShowPopupCmd::ClearUpdateStateResponse {
+                            component_id,
+                            response,
+                        },
+                    ) => {
+                        let component_id_matches =
+                            state.rack_state.selected == component_id;
+                        match (component_id_matches, response) {
+                            (true, Ok(())) => {
+                                // We're done waiting, close the popup.
+                                self.popup = None;
+                                Some(Action::Redraw)
+                            }
+                            (true, Err(message)) => {
+                                *popup_state =
+                                    ClearUpdateStatePopupState::Failed {
+                                        message,
+                                    };
+                                Some(Action::Redraw)
+                            }
+                            (false, _) => {
+                                // This message isn't meant for this component.
+                                // It's a bit of a weird situation (we should
+                                // only be making one start-update request at a
+                                // time, and shouldn't let
+                                // state.rack_state.selected be changed in the
+                                // meantime) so log this.
+                                slog::warn!(
+                            self.log,
+                            "currently waiting on start update response \
+                             for {} but received response for {component_id}",
+                             state.rack_state.selected
+                        );
                                 None
                             }
                         }
@@ -1039,13 +1182,20 @@ impl UpdatePane {
                 )
                 .highlight_style(style::highlighted());
 
+                let help_text = match id_state.show_help {
+                    Some(ComponentUpdateShowHelp::Completed) => {
+                        Some(help_text(&self.completed_help))
+                    }
+                    None => None,
+                };
+
                 let status_view = StatusView {
                     status_view_rect: self.status_view_main_rect,
                     help_rect: self.help_rect,
                     title: "UPDATE STATUS".into(),
                     status_text,
                     widget: list,
-                    help_text: None,
+                    help_text,
                     block,
                 };
                 status_view
@@ -1216,6 +1366,9 @@ struct ComponentUpdateListState {
     event_buffer: EventBuffer,
     status_text: Spans<'static>,
     list_items: IndexMap<StepKey, ListItem<'static>>,
+    // The help text lives on the `UpdatePane`, not here, so all we can do here
+    // is figure out which help text to show (if any).
+    show_help: Option<ComponentUpdateShowHelp>,
 
     // For the selected item, we use the step key rather than the numerical
     // index as canonical because it's possible for steps to move around (e.g.
@@ -1240,7 +1393,9 @@ impl ComponentUpdateListState {
 
         // Generate the status text (displayed in a single line at the top.)
         let mut status_text = Vec::new();
-        if let Some(root_execution_id) = event_buffer.root_execution_id() {
+        let show_help = if let Some(root_execution_id) =
+            event_buffer.root_execution_id()
+        {
             let summary = steps.summarize();
             let summary = summary.get(&root_execution_id).expect(
                 "root execution ID should have a summary associated with it",
@@ -1252,6 +1407,7 @@ impl ComponentUpdateListState {
                         "Update not started",
                         style::plain_text(),
                     ));
+                    None
                 }
                 ExecutionStatus::Running { step_key } => {
                     status_text
@@ -1268,6 +1424,7 @@ impl ComponentUpdateListState {
                         ),
                         style::plain_text(),
                     ));
+                    None
                 }
                 ExecutionStatus::Completed { .. } => {
                     status_text
@@ -1276,6 +1433,7 @@ impl ComponentUpdateListState {
                         "completed",
                         style::successful_update_bold(),
                     ));
+                    Some(ComponentUpdateShowHelp::Completed)
                 }
                 ExecutionStatus::Failed { step_key } => {
                     status_text
@@ -1292,12 +1450,14 @@ impl ComponentUpdateListState {
                         ),
                         style::plain_text(),
                     ));
+                    Some(ComponentUpdateShowHelp::Completed)
                 }
             }
         } else {
             status_text
                 .push(Span::styled("Update not started", style::plain_text()));
-        }
+            None
+        };
 
         let mut list_items = IndexMap::new();
         for &(step_key, value) in steps.as_slice() {
@@ -1386,6 +1546,7 @@ impl ComponentUpdateListState {
 
         self.event_buffer = event_buffer;
         self.status_text = Spans::from(status_text);
+        self.show_help = show_help;
         self.list_items = list_items;
         let selected_needs_reset = match self.selected {
             Some(step_key) => {
@@ -1480,6 +1641,13 @@ impl ComponentUpdateListState {
             // The list is empty. Don't need to do anything here.
         }
     }
+}
+
+/// The kind of help text to display under the component update.
+#[derive(Clone, Copy, Debug)]
+enum ComponentUpdateShowHelp {
+    /// Show completed or failed help text.
+    Completed,
 }
 
 fn installed_version(
@@ -1678,6 +1846,17 @@ impl Control for UpdatePane {
                     self.draw_start_update_failed_popup(state, &message, frame)
                 }
             },
+            Some(PopupKind::ClearUpdateState { popup_state }) => {
+                match popup_state {
+                    ClearUpdateStatePopupState::Waiting => {
+                        self.draw_clear_update_state_waiting_popup(state, frame)
+                    }
+                    ClearUpdateStatePopupState::Failed { message } => self
+                        .draw_clear_update_state_failed_popup(
+                            state, message, frame,
+                        ),
+                }
+            }
             Some(PopupKind::Ignition) => self.draw_ignition_popup(state, frame),
             None => (),
         }
