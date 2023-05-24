@@ -51,8 +51,9 @@ instance_view                            GET      /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
+login                                    POST     /v1/login
 login_local                              POST     /login/{silo_name}/local
-login_saml                               POST     /login/{silo_name}/saml/{provider_name}
+login_saml                               POST     /v1/login/{silo_name}/saml/{provider_name}
 login_saml_begin                         GET      /login/{silo_name}/saml/{provider_name}
 
 API operations found with tag "policy"

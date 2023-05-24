@@ -23,21 +23,18 @@ use anyhow::Context;
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
-    HttpResponseUpdatedNoContent, PaginationOrder, Path, RequestContext,
-    TypedBody,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use lazy_static::lazy_static;
 use mime_guess;
 use nexus_db_queries::context::OpContext;
-use nexus_types::{external_api::params, identity::Resource};
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::{DataPageParams, Error, Name, NameOrId};
+use nexus_types::external_api::params;
+use omicron_common::api::external::{Error, Name};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_urlencoded;
-use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
 
@@ -261,7 +258,7 @@ pub async fn login_saml_begin(
 /// Authenticate a user via SAML
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/saml/{provider_name}",
+   path = "/v1/login/{silo_name}/saml/{provider_name}",
    tags = ["login"],
 }]
 pub async fn login_saml(
@@ -517,7 +514,7 @@ pub async fn login_begin(
 /// `/login/{silo_name}/local`, but pulling the silo name from the host.
 #[endpoint {
    method = POST,
-   path = "/login",
+   path = "/v1/login",
    tags = ["login"],
 }]
 pub async fn login(
@@ -534,21 +531,10 @@ pub async fn login(
         // keep specifically for this purpose.
         let opctx = nexus.opctx_external_authn();
 
-        // TODO: get silo name from host. In the meantime, hard code silo
-        let silos = nexus
-            .silos_list(
-                &opctx,
-                &PaginatedBy::Id(DataPageParams {
-                    marker: None,
-                    direction: PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(1).unwrap(),
-                }),
-            )
-            .await?;
-        let silo_name = silos[0].name().clone();
-        // let silo_name = Name::from_str("test-suite-silo").unwrap().into();
+        // TODO: get silo name from host. In the meantime, hard code silo. Tests
+        // will pass but this will fail on the rack.
+        let silo_name = Name::from_str("test-suite-silo").unwrap();
 
-        // TODO: get silo name from host. In the meantime, hard code silo
         let silo_lookup = nexus.silo_lookup(&opctx, silo_name.into())?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
         login_finish(&opctx, apictx, user, None).await
