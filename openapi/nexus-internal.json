@@ -2531,22 +2531,6 @@
               "error",
               "message"
             ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "error": {
-                "type": "string",
-                "enum": [
-                  "undo_action_failed"
-                ]
-              },
-              "source_error": {}
-            },
-            "required": [
-              "error",
-              "source_error"
-            ]
           }
         ]
       },
@@ -2637,12 +2621,18 @@
                 "enum": [
                   "stuck"
                 ]
-              }
+              },
+              "undo_error_node_name": {
+                "$ref": "#/components/schemas/NodeName"
+              },
+              "undo_source_error": {}
             },
             "required": [
               "error_info",
               "error_node_name",
-              "state"
+              "state",
+              "undo_error_node_name",
+              "undo_source_error"
             ]
           }
         ]
