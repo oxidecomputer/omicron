@@ -16,6 +16,6 @@ pub use animated_logo::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
 pub use box_connector::{BoxConnector, BoxConnectorKind};
 pub use fade::Fade;
 pub use ignition::IgnitionPopup;
-pub use popup::{ButtonText, Popup};
+pub use popup::{ButtonText, Popup, PopupBuilder};
 pub use rack::Rack;
 pub use status_view::StatusView;

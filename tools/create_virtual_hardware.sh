@@ -84,7 +84,6 @@ function ensure_simulated_chelsios {
             dladm create-simnet -t "net$I"
             dladm create-simnet -t "sc${I}_0"
             dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "net$I" # encap headroom
             dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
 
             # corresponding scrimlet ports

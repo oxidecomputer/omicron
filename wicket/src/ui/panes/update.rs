@@ -12,7 +12,7 @@ use crate::state::{
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
-    BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
+    BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, PopupBuilder,
     StatusView,
 };
 use crate::ui::wrap::wrap_text;
@@ -367,7 +367,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
-        let popup = Popup::new(full_screen, &&header, &body, buttons);
+        let popup_builder = PopupBuilder { header, body, buttons };
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -376,26 +377,28 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                "Would you like to start an update?",
+                style::plain_text(),
+            )])]),
+            buttons: vec![
+                ButtonText { instruction: "YES", key: "Y" },
+                ButtonText { instruction: "NO", key: "N" },
+            ],
+        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
-        let header = Spans::from(vec![Span::styled(
-            format!("START UPDATE: {}", state.rack_state.selected),
-            style::header(true),
-        )]);
-        let body = Text::from(vec![Spans::from(vec![Span::styled(
-            "Would you like to start an update?",
-            style::plain_text(),
-        )])]);
-        let buttons = vec![
-            ButtonText { instruction: "YES", key: "Y" },
-            ButtonText { instruction: "NO", key: "N" },
-        ];
 
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -404,23 +407,25 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for update to start",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
-        let header = Spans::from(vec![Span::styled(
-            format!("START UPDATE: {}", state.rack_state.selected),
-            style::header(true),
-        )]);
-        let body = Text::from(vec![Spans::from(vec![Span::styled(
-            "Waiting for update to start",
-            style::plain_text(),
-        )])]);
-        let buttons = Vec::new();
 
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -430,24 +435,26 @@ impl UpdatePane {
         message: &str,
         frame: &mut Frame<'_>,
     ) {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE FAILED: {}", state.rack_state.selected),
+                style::failed_update(),
+            )]),
+            body,
+            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
+        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
-        let header = Spans::from(vec![Span::styled(
-            format!("START UPDATE FAILED: {}", state.rack_state.selected),
-            style::failed_update(),
-        )]);
 
-        let mut body = Text::default();
-        let prefix = vec![Span::styled("Message: ", style::selected())];
-        push_text_lines(message, prefix, &mut body.lines);
-
-        let buttons = vec![ButtonText { instruction: "CLOSE", key: "ESC" }];
-
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -456,23 +463,25 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for update state to be cleared",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
-        let header = Spans::from(vec![Span::styled(
-            format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
-            style::header(true),
-        )]);
-        let body = Text::from(vec![Spans::from(vec![Span::styled(
-            "Waiting for update state to be cleared",
-            style::plain_text(),
-        )])]);
-        let buttons = Vec::new();
 
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -482,23 +491,29 @@ impl UpdatePane {
         message: &str,
         frame: &mut Frame<'_>,
     ) {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!(
+                    "CLEAR UPDATE STATE FAILED: {}",
+                    state.rack_state.selected
+                ),
+                style::failed_update(),
+            )]),
+            body,
+            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
+        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
-        let header = Spans::from(vec![Span::styled(
-            format!("CLEAR UPDATE STATE FAILED: {}", state.rack_state.selected),
-            style::failed_update(),
-        )]);
 
-        let mut body = Text::default();
-        let prefix = vec![Span::styled("Message: ", style::selected())];
-        push_text_lines(message, prefix, &mut body.lines);
-        let buttons = vec![ButtonText { instruction: "CLOSE", key: "ESC" }];
-
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -513,9 +528,9 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
-        let (header, body, buttons) =
-            self.ignition.popup_components(state.rack_state.selected);
-        let popup = Popup::new(full_screen, &&header, &body, buttons);
+        let popup_builder =
+            self.ignition.to_popup_builder(state.rack_state.selected);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -823,11 +838,12 @@ impl UpdatePane {
                                 // state.rack_state.selected be changed in the
                                 // meantime) so log this.
                                 slog::warn!(
-                                self.log,
-                                "currently waiting on start update response \
-                                 for {} but received response for {component_id}",
-                                 state.rack_state.selected
-                            );
+                                    self.log,
+                                    "currently waiting on start update \
+                                    response for {}, but received response \
+                                    for {component_id}",
+                                    state.rack_state.selected
+                                );
                                 None
                             }
                         }

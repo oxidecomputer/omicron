@@ -22,9 +22,23 @@ use std::iter;
 
 const BUTTON_HEIGHT: u16 = 3;
 
+#[derive(Clone, Debug)]
 pub struct ButtonText<'a> {
     pub instruction: &'a str,
     pub key: &'a str,
+}
+
+#[derive(Default)]
+pub struct PopupBuilder<'a> {
+    pub header: Spans<'a>,
+    pub body: Text<'a>,
+    pub buttons: Vec<ButtonText<'a>>,
+}
+
+impl<'a> PopupBuilder<'a> {
+    pub fn build(&self, full_screen: Rect) -> Popup<'_> {
+        Popup::new(full_screen, &self.header, &self.body, self.buttons.clone())
+    }
 }
 
 #[derive(Default)]
@@ -42,7 +56,7 @@ pub struct Popup<'a> {
 }
 
 impl<'a> Popup<'a> {
-    pub fn new(
+    fn new(
         full_screen: Rect,
         header: &'a Spans<'_>,
         body: &'a Text<'_>,

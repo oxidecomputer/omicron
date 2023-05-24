@@ -393,9 +393,6 @@ impl UpdateTrackerData {
         sp: SpIdentifier,
     ) -> Result<(), ClearUpdateStateError> {
         // Is an update currently running? If so, then reject the request.
-        //
-        // TODO: maybe add a way to force state to be cleared (this is
-        // dangerous!)
         let is_running = self
             .sp_update_data
             .get(&sp)

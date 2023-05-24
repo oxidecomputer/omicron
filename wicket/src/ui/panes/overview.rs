@@ -11,7 +11,6 @@ use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::panes::compute_scroll_offset;
 use crate::ui::widgets::IgnitionPopup;
-use crate::ui::widgets::Popup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -239,9 +238,9 @@ impl InventoryView {
             x: 0,
             y: 0,
         };
-        let (header, body, buttons) =
-            self.ignition.popup_components(state.rack_state.selected);
-        let popup = Popup::new(full_screen, &header, &body, buttons);
+        let popup_builder =
+            self.ignition.to_popup_builder(state.rack_state.selected);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
