@@ -4,7 +4,7 @@
 
 //! Sled agent implementation
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
@@ -191,7 +191,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
-        request: SledAgentRequest,
+        request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
     ) -> Result<SledAgent, Error> {
