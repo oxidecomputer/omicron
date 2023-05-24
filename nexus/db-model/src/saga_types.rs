@@ -164,7 +164,6 @@ impl ToSql<SagaCachedStateEnum, Pg> for SagaCachedState {
             SagaCachedState::Running => b"running",
             SagaCachedState::Unwinding => b"unwinding",
             SagaCachedState::Done => b"done",
-            SagaCachedState::Stuck => b"stuck",
         })?;
         Ok(serialize::IsNull::No)
     }
