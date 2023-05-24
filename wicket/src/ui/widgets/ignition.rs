@@ -5,7 +5,7 @@
 //! A popup dialog box widget for ignition control
 
 use super::ButtonText;
-use super::Popup;
+use super::PopupBuilder;
 use crate::state::ComponentId;
 use crate::ui::defaults::style;
 use tui::text::Span;
@@ -48,12 +48,19 @@ impl IgnitionPopup {
         };
     }
 
-    pub fn popup(&self, component: ComponentId) -> Popup<'static> {
-        Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" IGNITION: {}", component),
+    /// Return the `PopupBuilder` for this popup -- the header, body and button
+    /// text.
+    ///
+    /// Can't return a `Popup` here due to lifetime issues.
+    pub fn to_popup_builder(
+        &self,
+        component: ComponentId,
+    ) -> PopupBuilder<'static> {
+        PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("IGNITION: {}", component),
                 style::header(true),
-            )])]),
+            )]),
             body: Text {
                 lines: vec![
                     Spans::from(vec![Span::styled(
@@ -77,7 +84,7 @@ impl IgnitionPopup {
                     )]),
                 ],
             },
-            buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
+            buttons: vec![ButtonText::new("CLOSE", "ESC")],
         }
     }
 }

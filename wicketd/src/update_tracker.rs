@@ -63,6 +63,7 @@ use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
 use wicket_common::update_events::StepResult;
+use wicket_common::update_events::StepSuccess;
 use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
@@ -238,7 +239,7 @@ impl UpdateTracker {
                         "Fake step that waits for receiver to resolve",
                         move |_cx| async move {
                             _ = oneshot_receiver.await;
-                            StepResult::success((), Default::default())
+                            StepSuccess::new(()).into()
                         },
                     )
                     .register();
@@ -524,7 +525,11 @@ impl UpdateDriver {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                         }
 
-                        StepResult::success((), serde_json::Value::Null)
+                        StepSuccess::new(())
+                            .with_message(format!(
+                                "Step completed after {secs} seconds"
+                            ))
+                            .into()
                     },
                 )
                 .register();
@@ -569,20 +574,25 @@ impl UpdateDriver {
 
                     // Flip these around: if 0 (A) is active, we want to
                     // update 1 (B), and vice versa.
-                    let (slot_to_update, artifact) = match rot_active_slot {
-                        0 => (1, rot_b),
-                        1 => (0, rot_a),
-                        _ => return Err(
-                            UpdateTerminalError::GetRotActiveSlotFailed {
-                                error: anyhow!("unexpected RoT active slot {rot_active_slot}"),
-                            }
-                        ),
-                    };
+                    let (rot_active_slot_char, slot_to_update, artifact) =
+                        match rot_active_slot {
+                            0 => ('A', 1, rot_b),
+                            1 => ('B', 0, rot_a),
+                            _ => return Err(
+                                UpdateTerminalError::GetRotActiveSlotFailed {
+                                    error: anyhow!(
+                                        "unexpected RoT active slot \
+                                         {rot_active_slot}"
+                                    ),
+                                },
+                            ),
+                        };
 
-                    StepResult::success(
-                        (slot_to_update, artifact),
-                        Default::default(),
-                    )
+                    StepSuccess::new((slot_to_update, artifact))
+                        .with_message(format!(
+                            "Currently active slot is {rot_active_slot_char}"
+                        ))
+                        .into()
                 },
             )
             .register()
@@ -630,7 +640,7 @@ impl UpdateDriver {
                             UpdateTerminalError::RotResetFailed { error }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -655,7 +665,7 @@ impl UpdateDriver {
                     .map_err(|error| UpdateTerminalError::SpResetFailed {
                         error,
                     })?;
-                StepResult::success((), Default::default())
+                StepSuccess::new(()).into()
             })
             .register();
 
@@ -730,7 +740,7 @@ impl UpdateDriver {
                                 error: anyhow!(error),
                             }
                         })?;
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -780,7 +790,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -810,7 +820,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -848,8 +858,8 @@ impl UpdateDriver {
                             UpdateTerminalError::DownloadingInstallinatorFailed { error }
                         })?;
 
-                    StepResult::success(report_receiver, Default::default())
-                },
+                        StepSuccess::new(report_receiver).into()
+                    },
             )
             .register();
 
@@ -869,7 +879,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -928,10 +938,7 @@ impl UpdateDriver {
                         .uploaded_image_id
                         .as_ref()
                     {
-                        return StepResult::success(
-                            image_id.clone(),
-                            Default::default(),
-                        );
+                        return StepSuccess::new(image_id.clone()).into();
                     }
                 }
             },
@@ -962,7 +969,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1010,7 +1017,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1079,7 +1086,7 @@ impl UpdateDriver {
                     );
                 }
 
-                StepResult::success((), Default::default())
+                StepSuccess::new(()).into()
             }).register();
 
         registrar
@@ -1113,7 +1120,7 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1310,7 +1317,7 @@ impl UpdateContext {
             .map_err(|error| UpdateTerminalError::UpdatePowerStateFailed {
                 error,
             })?;
-        StepResult::success((), Default::default())
+        StepSuccess::new(()).into()
     }
 
     async fn get_component_active_slot(

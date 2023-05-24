@@ -1056,7 +1056,7 @@ mod tests {
     use tokio_stream::wrappers::ReceiverStream;
 
     use crate::{
-        events::StepProgress, test_utils::TestSpec, StepContext, StepResult,
+        events::StepProgress, test_utils::TestSpec, StepContext, StepSuccess,
         UpdateEngine,
     };
 
@@ -1072,7 +1072,7 @@ mod tests {
 
         engine
             .new_step("foo".to_owned(), 1, "Step 1", move |_cx| async move {
-                StepResult::success((), Default::default())
+                StepSuccess::new(()).into()
             })
             .register();
 
@@ -1094,7 +1094,7 @@ mod tests {
 
                     cx.send_progress(StepProgress::retry("retry step 2")).await;
                 }
-                StepResult::success((), Default::default())
+                StepSuccess::new(()).into()
             })
             .register();
 
@@ -1112,7 +1112,7 @@ mod tests {
                         .await
                         .expect_err("this is expected to fail");
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1150,7 +1150,7 @@ mod tests {
                         }
                     }
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1159,7 +1159,7 @@ mod tests {
         // steps.
         engine
             .new_step("baz".to_owned(), 100, "Step 5", move |_cx| async move {
-                StepResult::success((), Default::default())
+                StepSuccess::new(()).into()
             })
             .register();
 
@@ -1671,7 +1671,7 @@ mod tests {
                         StepProgress::progress(Default::default()),
                     )
                     .await;
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1716,7 +1716,7 @@ mod tests {
                         StepProgress::progress(Default::default()),
                     )
                     .await;
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1733,7 +1733,7 @@ mod tests {
                     ))
                     .await;
 
-                    StepResult::success((), Default::default())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();

@@ -554,7 +554,7 @@ mod tests {
     use installinator_common::{
         InstallinatorCompletionMetadata, InstallinatorComponent,
         InstallinatorProgressMetadata, InstallinatorStepId, StepContext,
-        StepEvent, StepEventKind, StepOutcome, StepResult, UpdateEngine,
+        StepEvent, StepEventKind, StepOutcome, StepSuccess, UpdateEngine,
     };
     use omicron_common::api::internal::nexus::KnownArtifactKind;
     use omicron_test_utils::dev::test_setup_log;
@@ -617,12 +617,13 @@ mod tests {
                             fetch_artifact(&cx, &log, attempts, timeout)
                                 .await?;
                         let address = artifact.addr;
-                        StepResult::success(
-                            artifact,
-                            InstallinatorCompletionMetadata::Download {
-                                address,
-                            },
-                        )
+                        StepSuccess::new(artifact)
+                            .with_metadata(
+                                InstallinatorCompletionMetadata::Download {
+                                    address,
+                                },
+                            )
+                            .into()
                     },
                 )
                 .register();
@@ -778,9 +779,10 @@ mod tests {
                     match last_outcome {
                         StepOutcome::Success {
                             metadata:
-                                InstallinatorCompletionMetadata::Download {
+                                Some(InstallinatorCompletionMetadata::Download {
                                     address,
-                                },
+                                }),
+                            ..
                         } => {
                             assert_eq!(
                                 *address, expected_addr,
