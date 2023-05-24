@@ -112,9 +112,6 @@ impl Client {
 
         // Build and serialize our request.
         let envelope = RequestEnvelope { version: version::V1, request };
-
-        // "danger" note: `buf` contains a raw trust quorum share; we must not
-        // log or otherwise persist it! We only write it to `stream`.
         let buf = serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
         let request_length = u32::try_from(buf.len())
             .expect("serialized bootstrap-agent request length overflowed u32");
