@@ -419,9 +419,9 @@ impl UpdatePane {
 
         let popup_builder = PopupBuilder { header, body, buttons };
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     pub fn draw_start_update_prompting_popup(
@@ -452,9 +452,9 @@ impl UpdatePane {
         };
 
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     fn draw_start_update_waiting_popup(
@@ -482,9 +482,9 @@ impl UpdatePane {
         };
 
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     fn draw_start_update_failed_popup(
@@ -514,9 +514,9 @@ impl UpdatePane {
         };
 
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     fn draw_clear_update_state_waiting_popup(
@@ -544,9 +544,9 @@ impl UpdatePane {
         };
 
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     fn draw_clear_update_state_failed_popup(
@@ -579,9 +579,9 @@ impl UpdatePane {
         };
 
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     pub fn draw_ignition_popup(
@@ -607,9 +607,9 @@ impl UpdatePane {
             "scrolling in ignition popup is always disabled"
         );
         let popup = popup_builder.build(full_screen, scroll_kind);
-        let actual_offset = popup.actual_kind();
+        let actual_scroll_kind = popup.actual_scroll_kind();
         frame.render_widget(popup, full_screen);
-        actual_offset
+        actual_scroll_kind
     }
 
     fn update_items(&mut self, state: &State) {
@@ -1936,11 +1936,11 @@ impl Control for UpdatePane {
             self.draw_tree_view(state, frame, active);
         }
 
-        let mut actual_offset = None;
+        let mut actual_scroll_kind = None;
 
         if let Some(popup) = &self.popup {
             // The functions called return the effective scroll offset.
-            actual_offset = Some(match &popup.kind {
+            actual_scroll_kind = Some(match &popup.kind {
                 PopupKind::StepLogs => {
                     self.draw_step_log_popup(state, frame, popup.scroll_kind)
                 }
@@ -1989,7 +1989,7 @@ impl Control for UpdatePane {
         }
 
         if let Some(popup) = &mut self.popup {
-            popup.scroll_kind = actual_offset.unwrap();
+            popup.scroll_kind = actual_scroll_kind.unwrap();
         }
     }
 }

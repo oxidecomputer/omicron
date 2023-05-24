@@ -89,6 +89,224 @@ table! {
 }
 
 table! {
+    switch_port (id) {
+        id -> Uuid,
+        rack_id -> Uuid,
+        switch_location -> Text,
+        port_name -> Text,
+        port_settings_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    switch_port_settings_group (id) {
+        id -> Uuid,
+        port_settings_id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    switch_port_settings_groups (port_settings_id, port_settings_group_id) {
+        port_settings_id -> Uuid,
+        port_settings_group_id -> Uuid,
+    }
+}
+
+table! {
+    switch_port_settings (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    switch_port_settings_port_config (port_settings_id) {
+        port_settings_id -> Uuid,
+        geometry -> crate::SwitchPortGeometryEnum,
+    }
+}
+
+table! {
+    switch_port_settings_link_config (port_settings_id, link_name) {
+        port_settings_id -> Uuid,
+        lldp_service_config_id -> Uuid,
+        link_name -> Text,
+        mtu -> Int4,
+    }
+}
+
+table! {
+    lldp_service_config (id) {
+        id -> Uuid,
+        enabled -> Bool,
+        lldp_config_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    lldp_config (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        chassis_id -> Text,
+        system_name -> Text,
+        system_description -> Text,
+        management_ip -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_interface_config (id) {
+        port_settings_id -> Uuid,
+        id -> Uuid,
+        interface_name -> Text,
+        v6_enabled -> Bool,
+        kind -> crate::DbSwitchInterfaceKindEnum,
+    }
+}
+
+table! {
+    switch_vlan_interface_config (interface_config_id, vid) {
+        interface_config_id -> Uuid,
+        vid -> Int4,
+    }
+}
+
+table! {
+    switch_port_settings_route_config (port_settings_id, interface_name, dst, gw) {
+        port_settings_id -> Uuid,
+        interface_name -> Text,
+        dst -> Inet,
+        gw -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_bgp_peer_config (port_settings_id, interface_name, addr) {
+        port_settings_id -> Uuid,
+        bgp_announce_set_id -> Uuid,
+        bgp_config_id -> Uuid,
+        interface_name -> Text,
+        addr -> Inet,
+    }
+}
+
+table! {
+    bgp_config (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        asn -> Int8,
+        vrf -> Nullable<Text>,
+    }
+}
+
+table! {
+    bgp_announce_set (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    bgp_announcement (announce_set_id, network) {
+        announce_set_id -> Uuid,
+        address_lot_block_id -> Uuid,
+        network -> Inet,
+    }
+}
+
+table! {
+    switch_port_settings_address_config (port_settings_id, address, interface_name) {
+        port_settings_id -> Uuid,
+        address_lot_block_id -> Uuid,
+        rsvd_address_lot_block_id -> Uuid,
+        address -> Inet,
+        interface_name -> Text,
+    }
+}
+
+table! {
+    address_lot (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        kind -> crate::AddressLotKindEnum,
+    }
+}
+
+table! {
+    address_lot_block (id) {
+        id -> Uuid,
+        address_lot_id -> Uuid,
+        first_address -> Inet,
+        last_address -> Inet,
+    }
+}
+
+table! {
+    address_lot_rsvd_block (id) {
+        id -> Uuid,
+        address_lot_id -> Uuid,
+        first_address -> Inet,
+        last_address -> Inet,
+    }
+}
+
+table! {
+    loopback_address (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        address_lot_block_id -> Uuid,
+        rsvd_address_lot_block_id -> Uuid,
+        rack_id -> Uuid,
+        switch_location -> Text,
+        address -> Inet,
+    }
+}
+
+table! {
+    global_image (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        volume_id -> Uuid,
+        url -> Nullable<Text>,
+        distribution -> Text,
+        version -> Text,
+        digest -> Nullable<Text>,
+        block_size -> crate::BlockSizeEnum,
+        size_bytes -> Int8,
+    }
+}
+
+table! {
     snapshot (id) {
         id -> Uuid,
         name -> Text,

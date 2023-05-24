@@ -5,6 +5,7 @@
 //! Request types for the bootstrap agent
 
 use omicron_common::address::{self, Ipv6Subnet, SLED_PREFIX};
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
@@ -59,6 +60,9 @@ pub struct RackInitializeRequest {
 
     /// Configuration of the Recovery Silo (the initial Silo)
     pub recovery_silo: RecoverySiloConfig,
+
+    /// Initial rack network configuration
+    pub rack_network_config: Option<RackNetworkConfig>,
 }
 
 pub type Certificate = nexus_client::types::Certificate;

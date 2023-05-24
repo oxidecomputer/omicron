@@ -1975,9 +1975,11 @@ dependencies = [
  "progenitor",
  "progenitor-client",
  "quote",
+ "rand 0.8.5",
  "regress 0.6.0",
  "reqwest",
  "rustfmt-wrapper",
+ "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -2166,6 +2168,7 @@ dependencies = [
  "tokio",
  "toml 0.7.4",
  "trust-dns-resolver",
+ "uuid",
 ]
 
 [[package]]

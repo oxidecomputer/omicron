@@ -71,7 +71,7 @@ pub struct Popup<'a> {
     rect: Rect,
     chunks: Vec<Rect>,
     body_rect: Rect,
-    actual_kind: PopupScrollKind,
+    actual_scroll_kind: PopupScrollKind,
 }
 
 impl<'a> Popup<'a> {
@@ -147,7 +147,7 @@ impl<'a> Popup<'a> {
             }
         };
 
-        let actual_offset = match scroll_kind {
+        let actual_scroll_kind = match scroll_kind {
             ScrollKind::Disabled => PopupScrollKind::Disabled,
             ScrollKind::NotRequired => PopupScrollKind::Enabled { offset: 0 },
             ScrollKind::Scrolling(offset) => {
@@ -185,7 +185,7 @@ impl<'a> Popup<'a> {
             }
         };
 
-        Self { data, rect, chunks, body_rect, actual_kind: actual_offset }
+        Self { data, rect, chunks, body_rect, actual_scroll_kind }
     }
 
     /// Returns the effective, or actual, scroll kind after the text is laid
@@ -193,8 +193,8 @@ impl<'a> Popup<'a> {
     ///
     /// If this is a `PopupScrollKind::Enabled` popup, the offset is is capped
     /// to the maximum degree to which text can be scrolled.
-    pub fn actual_kind(&self) -> PopupScrollKind {
-        self.actual_kind
+    pub fn actual_scroll_kind(&self) -> PopupScrollKind {
+        self.actual_scroll_kind
     }
 
     /// Returns the maximum width that this popup can have, including outer
@@ -259,7 +259,7 @@ impl Widget for Popup<'_> {
             .render(self.chunks[1], buf);
 
         let mut body = Paragraph::new(self.data.wrapped_body);
-        match self.actual_kind {
+        match self.actual_scroll_kind {
             PopupScrollKind::Disabled => {}
             PopupScrollKind::Enabled { offset } => {
                 body = body.scroll((offset, 0));
@@ -315,6 +315,10 @@ impl PopupScrollKind {
     }
 
     /// Scrolls down.
+    ///
+    /// This method doesn't account for scrolling past the bottom of the text.
+    /// That will be considered and fixed up while creating the `Popup`, and the
+    /// fixed value returned in [`Popup::actual_offset`].
     pub fn scroll_down(&mut self) {
         match self {
             PopupScrollKind::Disabled => {}

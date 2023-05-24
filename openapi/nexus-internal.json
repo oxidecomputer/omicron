@@ -2369,6 +2369,12 @@
             "description": "delegated DNS name for external DNS",
             "type": "string"
           },
+          "external_port_count": {
+            "description": "The number of external qsfp ports per sidecar",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "internal_dns_zone_config": {
             "description": "initial internal DNS config",
             "allOf": [
@@ -2383,6 +2389,15 @@
             "items": {
               "$ref": "#/components/schemas/IpRange"
             }
+          },
+          "rack_network_config": {
+            "nullable": true,
+            "description": "Initial rack network configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfig"
+              }
+            ]
           },
           "recovery_silo": {
             "description": "configuration for the initial (recovery) Silo",
@@ -2404,10 +2419,44 @@
           "certs",
           "datasets",
           "external_dns_zone_name",
+          "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
           "recovery_silo",
           "services"
+        ]
+      },
+      "RackNetworkConfig": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "gateway_ip": {
+            "description": "Gateway address",
+            "type": "string"
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "uplink_ip": {
+            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
+            "type": "string"
+          },
+          "uplink_port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_ip",
+          "infra_ip_first",
+          "infra_ip_last",
+          "uplink_ip",
+          "uplink_port"
         ]
       },
       "RecoverySiloConfig": {

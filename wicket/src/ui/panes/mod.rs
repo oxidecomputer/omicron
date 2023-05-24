@@ -73,9 +73,10 @@ pub fn align_by(
     Text::from(Spans::from(text))
 }
 
-/// A computed scroll offset 
-/// 
-/// 
+/// A computed scroll offset.
+///
+/// This scroll offset is computed by [`Self::new`], and is capped so that we
+/// don't allow scrolling past the bottom of content.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComputedScrollOffset {
     Top,
