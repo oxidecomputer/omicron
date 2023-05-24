@@ -12,7 +12,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 pub const BOOTSTRAP_AGENT_HTTP_PORT: u16 = 80;
-pub const BOOTSTRAP_AGENT_SPROCKETS_PORT: u16 = 12346;
+pub const BOOTSTRAP_AGENT_RACK_INIT_PORT: u16 = 12346;
 
 /// Configuration for a bootstrap agent
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]

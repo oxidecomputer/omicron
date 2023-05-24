@@ -25,9 +25,6 @@ pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
     Connect { addr: SocketAddrV6, err: io::Error },
 
-    #[error("Could not establish sprockets session: {0}")]
-    SprocketsSession(String),
-
     #[error("Failed serializing request: {0}")]
     Serialize(serde_json::Error),
 

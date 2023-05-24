@@ -90,17 +90,17 @@ impl Server {
         .map_err(|error| format!("initializing server: {}", error))?
         .start();
 
-        let sprockets_log =
-            log.new(o!("component" => "sprockets (BootstrapAgent)"));
-        let sprockets_server_handle = Inner::start_rack_init_server(
+        let inner_log =
+            log.new(o!("component" => "rack init server (BootstrapAgent)"));
+        let rack_init_server_handle = Inner::start_rack_init_server(
             Arc::clone(&bootstrap_agent),
-            sprockets_log,
+            inner_log,
         )
         .await?;
 
         let server = Server {
             bootstrap_agent,
-            rack_init_server_handle: sprockets_server_handle,
+            rack_init_server_handle,
             _http_server: http_server,
         };
         Ok(server)
@@ -115,7 +115,7 @@ impl Server {
             Ok(result) => result,
             Err(err) => {
                 if err.is_cancelled() {
-                    // We control cancellation of `sprockets_server_handle`,
+                    // We control cancellation of `rack_init_server_handle`,
                     // which only happens if we intentionally abort it in
                     // `close()`; that should not result in an error here.
                     Ok(())
@@ -143,7 +143,7 @@ impl Inner {
         bootstrap_agent: Arc<Agent>,
         log: Logger,
     ) -> Result<JoinHandle<Result<(), String>>, String> {
-        let bind_address = bootstrap_agent.sprockets_address();
+        let bind_address = bootstrap_agent.rack_init_address();
 
         let listener =
             TcpListener::bind(bind_address).await.map_err(|err| {

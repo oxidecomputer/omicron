@@ -5,7 +5,7 @@
 //! Bootstrap-related APIs.
 
 use super::config::{
-    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_SPROCKETS_PORT,
+    Config, BOOTSTRAP_AGENT_HTTP_PORT, BOOTSTRAP_AGENT_RACK_INIT_PORT,
 };
 use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
@@ -800,9 +800,10 @@ impl Agent {
         Ok(components)
     }
 
-    /// The GZ address used by the bootstrap agent for Sprockets.
-    pub fn sprockets_address(&self) -> SocketAddrV6 {
-        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_SPROCKETS_PORT, 0, 0)
+    /// The GZ address used by the bootstrap agent for rack initialization by
+    /// bootstrap agent running local to RSS on a scrimlet.
+    pub fn rack_init_address(&self) -> SocketAddrV6 {
+        SocketAddrV6::new(self.ip, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0)
     }
 
     /// The address used by the bootstrap agent to serve a dropshot interface.

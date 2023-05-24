@@ -5,7 +5,7 @@
 //! Plan generation for "how should sleds be initialized".
 
 use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_SPROCKETS_PORT, params::StartSledAgentRequest,
+    config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
 };
 use crate::ledger::{Ledger, Ledgerable};
 use crate::rack_setup::config::SetupServiceConfig as Config;
@@ -86,7 +86,7 @@ impl Plan {
             info!(log, "Creating plan for the sled at {:?}", bootstrap_addr);
             let bootstrap_addr = SocketAddrV6::new(
                 bootstrap_addr,
-                BOOTSTRAP_AGENT_SPROCKETS_PORT,
+                BOOTSTRAP_AGENT_RACK_INIT_PORT,
                 0,
                 0,
             );

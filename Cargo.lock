@@ -4756,8 +4756,6 @@ dependencies = [
  "slog-term",
  "smf",
  "sp-sim",
- "sprockets-common",
- "sprockets-host",
  "subprocess",
  "tar",
  "tempfile",
