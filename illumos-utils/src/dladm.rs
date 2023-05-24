@@ -196,15 +196,15 @@ impl Dladm {
     pub fn ensure_etherstub_vnic(
         source: &Etherstub,
     ) -> Result<EtherstubVnic, CreateVnicError> {
-        let vnic_name = match source.0.as_str() {
-            UNDERLAY_ETHERSTUB_NAME => UNDERLAY_ETHERSTUB_VNIC_NAME,
-            BOOTSTRAP_ETHERSTUB_NAME => BOOTSTRAP_ETHERSTUB_VNIC_NAME,
+        let (vnic_name, mtu) = match source.0.as_str() {
+            UNDERLAY_ETHERSTUB_NAME => (UNDERLAY_ETHERSTUB_VNIC_NAME, 9000),
+            BOOTSTRAP_ETHERSTUB_NAME => (BOOTSTRAP_ETHERSTUB_VNIC_NAME, 1500),
             _ => unreachable!(),
         };
         if let Ok(vnic) = Self::get_etherstub_vnic(vnic_name) {
             return Ok(vnic);
         }
-        Self::create_vnic(source, vnic_name, None, None, 9000)?;
+        Self::create_vnic(source, vnic_name, None, None, mtu)?;
         Ok(EtherstubVnic(vnic_name.to_string()))
     }
 
@@ -367,6 +367,26 @@ impl Dladm {
         args.push(vnic_name.to_string());
 
         let cmd = command.args(&args);
+        execute(cmd).map_err(|err| CreateVnicError {
+            name: vnic_name.to_string(),
+            link: source.name().to_string(),
+            err,
+        })?;
+
+        // In certain situations, `create-vnic -p mtu=N` does not actually set
+        // the mtu to N. Set it here using `set-linkprop`.
+        //
+        // See https://www.illumos.org/issues/15695 for the illumos bug.
+        let mut command = std::process::Command::new(PFEXEC);
+        let prop = format!("mtu={}", mtu);
+        let cmd = command.args(&[
+            DLADM,
+            "set-linkprop",
+            "-t",
+            "-p",
+            &prop,
+            vnic_name,
+        ]);
         execute(cmd).map_err(|err| CreateVnicError {
             name: vnic_name.to_string(),
             link: source.name().to_string(),
