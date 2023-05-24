@@ -12,7 +12,7 @@ use crate::state::{
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
-    BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, Popup,
+    BoxConnector, BoxConnectorKind, ButtonText, IgnitionPopup, PopupBuilder,
     StatusView,
 };
 use crate::ui::wrap::wrap_text;
@@ -151,11 +151,10 @@ impl UpdatePane {
             .expect("selected_key is always valid");
         let step_info = value.step_info();
 
-        let mut header = Text::default();
-        header.lines.push(Spans::from(vec![Span::styled(
+        let header = Spans::from(vec![Span::styled(
             step_info.description.clone(),
             style::header(true),
-        )]));
+        )]);
 
         let mut body = Text::default();
 
@@ -234,12 +233,12 @@ impl UpdatePane {
                     vec![Span::styled("Status: ", style::selected())];
 
                 let message = match &info.outcome {
-                    StepOutcome::Success { .. } => {
+                    StepOutcome::Success { message, .. } => {
                         spans.push(Span::styled(
                             "Completed",
                             style::successful_update_bold(),
                         ));
-                        None
+                        message.as_ref()
                     }
                     StepOutcome::Warning { message, .. } => {
                         spans.push(Span::styled(
@@ -359,29 +358,17 @@ impl UpdatePane {
             }
         }
 
-        // Wrap the text to the maximum popup width.
-        let options = crate::ui::wrap::Options {
-            width: Popup::max_content_width(state.screen_width) as usize,
-            initial_indent: Span::raw(""),
-            subsequent_indent: Span::raw(""),
-            break_words: true,
-        };
-        let wrapped_body = wrap_text(&body, options);
+        let buttons =
+            vec![ButtonText { instruction: "NAVIGATE", key: "LEFT/RIGHT" }];
 
-        let popup = Popup {
-            header,
-            body: wrapped_body,
-            buttons: vec![ButtonText {
-                instruction: "NAVIGATE",
-                key: "LEFT/RIGHT",
-            }],
-        };
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
+        let popup_builder = PopupBuilder { header, body, buttons };
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -390,13 +377,13 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" START UPDATE: {}", state.rack_state.selected),
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
-            )])]),
+            )]),
             body: Text::from(vec![Spans::from(vec![Span::styled(
-                " Would you like to start an update?",
+                "Would you like to start an update?",
                 style::plain_text(),
             )])]),
             buttons: vec![
@@ -410,6 +397,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
+
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -418,13 +407,13 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" START UPDATE: {}", state.rack_state.selected),
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE: {}", state.rack_state.selected),
                 style::header(true),
-            )])]),
+            )]),
             body: Text::from(vec![Spans::from(vec![Span::styled(
-                " Waiting for update to start",
+                "Waiting for update to start",
                 style::plain_text(),
             )])]),
             buttons: Vec::new(),
@@ -435,6 +424,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
+
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -447,15 +438,13 @@ impl UpdatePane {
         let mut body = Text::default();
         let prefix = vec![Span::styled("Message: ", style::selected())];
         push_text_lines(message, prefix, &mut body.lines);
-        let options = Popup::default_wrap_options(state.screen_width);
-        let wrapped_body = wrap_text(&body, options);
 
-        let popup = Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" START UPDATE FAILED: {}", state.rack_state.selected),
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("START UPDATE FAILED: {}", state.rack_state.selected),
                 style::failed_update(),
-            )])]),
-            body: wrapped_body,
+            )]),
+            body,
             buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
         };
         let full_screen = Rect {
@@ -464,6 +453,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
+
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -472,13 +463,13 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
-                format!(" CLEAR UPDATE STATE: {}", state.rack_state.selected),
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("CLEAR UPDATE STATE: {}", state.rack_state.selected),
                 style::header(true),
-            )])]),
+            )]),
             body: Text::from(vec![Spans::from(vec![Span::styled(
-                " Waiting for update state to be cleared",
+                "Waiting for update state to be cleared",
                 style::plain_text(),
             )])]),
             buttons: Vec::new(),
@@ -489,6 +480,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
+
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -501,18 +494,16 @@ impl UpdatePane {
         let mut body = Text::default();
         let prefix = vec![Span::styled("Message: ", style::selected())];
         push_text_lines(message, prefix, &mut body.lines);
-        let options = Popup::default_wrap_options(state.screen_width);
-        let wrapped_body = wrap_text(&body, options);
 
-        let popup = Popup {
-            header: Text::from(vec![Spans::from(vec![Span::styled(
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
                 format!(
-                    " CLEAR UPDATE STATE FAILED: {}",
+                    "CLEAR UPDATE STATE FAILED: {}",
                     state.rack_state.selected
                 ),
                 style::failed_update(),
-            )])]),
-            body: wrapped_body,
+            )]),
+            body,
             buttons: vec![ButtonText { instruction: "CLOSE", key: "ESC" }],
         };
         let full_screen = Rect {
@@ -521,6 +512,8 @@ impl UpdatePane {
             x: 0,
             y: 0,
         };
+
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 
@@ -529,13 +522,15 @@ impl UpdatePane {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = self.ignition.popup(state.rack_state.selected);
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
+        let popup_builder =
+            self.ignition.to_popup_builder(state.rack_state.selected);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 

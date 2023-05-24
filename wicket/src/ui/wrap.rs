@@ -35,6 +35,9 @@ pub struct Options<'a> {
     pub break_words: bool,
 }
 
+/// Wraps a [`Text`] block.
+///
+/// `text` should be broken up into lines at the time it's passed in.
 pub(crate) fn wrap_text<'a>(
     text: &'a Text<'_>,
     options: Options<'a>,
@@ -46,6 +49,18 @@ pub(crate) fn wrap_text<'a>(
         wrap_single_line(line, &options, &mut lines);
     }
 
+    Text::from(lines)
+}
+
+/// Wraps a [`Spans`] representing a single line.
+///
+/// If the text contains multiple lines, use [`wrap_text`] instead.
+pub(crate) fn wrap_line<'a>(
+    line: &'a Spans<'_>,
+    options: Options<'a>,
+) -> Text<'a> {
+    let mut lines = Vec::new();
+    wrap_single_line(line, &options, &mut lines);
     Text::from(lines)
 }
 

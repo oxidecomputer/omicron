@@ -754,26 +754,29 @@ pub enum StepEventPriority {
 pub enum StepOutcome<S: StepSpec> {
     /// The step completed successfully.
     Success {
-        /// Completion metadata associated with the step.
-        metadata: S::CompletionMetadata,
+        /// An optional message associated with this step.
+        message: Option<Cow<'static, str>>,
+
+        /// Optional completion metadata associated with the step.
+        metadata: Option<S::CompletionMetadata>,
     },
 
     /// The step completed with a warning.
     Warning {
-        /// Completion metadata associated with the step.
-        metadata: S::CompletionMetadata,
-
         /// A warning message.
         message: Cow<'static, str>,
+
+        /// Optional completion metadata associated with the step.
+        metadata: Option<S::CompletionMetadata>,
     },
 
     /// The step was skipped with a message.
     Skipped {
-        /// Skipped metadata associated with the step.
-        metadata: S::SkippedMetadata,
-
-        /// Metadata associated with the step.
+        /// Message associated with the skip.
         message: Cow<'static, str>,
+
+        /// Optional metadata associated with the skip.
+        metadata: Option<S::SkippedMetadata>,
     },
 }
 
@@ -786,25 +789,40 @@ impl<S: StepSpec> StepOutcome<S> {
         value: StepOutcome<GenericSpec<E>>,
     ) -> Result<Self, ConvertGenericError> {
         let ret = match value {
-            StepOutcome::Success { metadata } => StepOutcome::Success {
-                metadata: serde_json::from_value(metadata).map_err(
-                    |error| ConvertGenericError::new("metadata", error),
-                )?,
-            },
-            StepOutcome::Warning { metadata, message } => {
-                StepOutcome::Warning {
-                    metadata: serde_json::from_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+            StepOutcome::Success { message, metadata } => {
+                StepOutcome::Success {
                     message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
                 }
             }
-            StepOutcome::Skipped { metadata, message } => {
-                StepOutcome::Skipped {
-                    metadata: serde_json::from_value(metadata).map_err(
-                        |error| ConvertGenericError::new("metadata", error),
-                    )?,
+            StepOutcome::Warning { message, metadata } => {
+                StepOutcome::Warning {
                     message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
+                }
+            }
+            StepOutcome::Skipped { message, metadata } => {
+                StepOutcome::Skipped {
+                    message,
+                    metadata: metadata
+                        .map(|metadata| {
+                            serde_json::from_value(metadata).map_err(|error| {
+                                ConvertGenericError::new("metadata", error)
+                            })
+                        })
+                        .transpose()?,
                 }
             }
         };
@@ -823,22 +841,31 @@ impl<S: StepSpec> StepOutcome<S> {
     /// anyway.
     pub fn into_generic<E: AsError>(self) -> StepOutcome<GenericSpec<E>> {
         match self {
-            StepOutcome::Success { metadata } => StepOutcome::Success {
-                metadata: serde_json::to_value(metadata)
-                    .unwrap_or_else(|_| serde_json::Value::Null),
-            },
+            StepOutcome::Success { message, metadata } => {
+                StepOutcome::Success {
+                    message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
+                }
+            }
             StepOutcome::Warning { metadata, message } => {
                 StepOutcome::Warning {
-                    metadata: serde_json::to_value(metadata)
-                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
                 }
             }
             StepOutcome::Skipped { metadata, message } => {
                 StepOutcome::Skipped {
-                    metadata: serde_json::to_value(metadata)
-                        .unwrap_or_else(|_| serde_json::Value::Null),
                     message,
+                    metadata: metadata.map(|metadata| {
+                        serde_json::to_value(metadata)
+                            .unwrap_or_else(|_| serde_json::Value::Null)
+                    }),
                 }
             }
         }
@@ -1596,6 +1623,7 @@ mod tests {
                       "last_attempt": 1,
                       "last_outcome": {
                         "kind": "success",
+                        "message": null,
                         "metadata": null
                       },
                       "step_elapsed": {
@@ -1629,7 +1657,8 @@ mod tests {
                         },
                         last_attempt: 1,
                         last_outcome: StepOutcome::Success {
-                            metadata: serde_json::Value::Null,
+                            message: None,
+                            metadata: None,
                         },
                         step_elapsed: Duration::ZERO,
                         attempt_elapsed: Duration::ZERO,
