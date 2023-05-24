@@ -44,13 +44,13 @@ pub enum Error {
     #[error("Could not determine if host is a Gimlet: {0}")]
     SystemDetection(#[source] anyhow::Error),
 
-    #[error("Could not enumerate physical links")]
+    #[error("Could not enumerate physical links: {0}")]
     FindLinks(#[from] FindPhysicalLinkError),
 
-    #[error("Could not set linkprop")]
+    #[error("Could not set linkprop: {0}")]
     SetLinkprop(#[from] SetLinkpropError),
 
-    #[error("Could not get linkprop")]
+    #[error("Could not get linkprop: {0}")]
     GetLinkprop(#[from] GetLinkpropError),
 }
 
