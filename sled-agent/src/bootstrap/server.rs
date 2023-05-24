@@ -27,10 +27,10 @@ use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
 
 /// Wraps a [Agent] object, and provides helper methods for exposing it
-/// via an HTTP interface.
+/// via an HTTP interface and a tcp server used for rack initialization.
 pub struct Server {
     bootstrap_agent: Arc<Agent>,
-    sprockets_server_handle: JoinHandle<Result<(), String>>,
+    rack_init_server_handle: JoinHandle<Result<(), String>>,
     _http_server: dropshot::HttpServer<Arc<Agent>>,
 }
 
@@ -92,13 +92,15 @@ impl Server {
 
         let sprockets_log =
             log.new(o!("component" => "sprockets (BootstrapAgent)"));
-        let sprockets_server_handle =
-            Inner::start_sprockets(Arc::clone(&bootstrap_agent), sprockets_log)
-                .await?;
+        let sprockets_server_handle = Inner::start_rack_init_server(
+            Arc::clone(&bootstrap_agent),
+            sprockets_log,
+        )
+        .await?;
 
         let server = Server {
             bootstrap_agent,
-            sprockets_server_handle,
+            rack_init_server_handle: sprockets_server_handle,
             _http_server: http_server,
         };
         Ok(server)
@@ -109,7 +111,7 @@ impl Server {
     }
 
     pub async fn wait_for_finish(self) -> Result<(), String> {
-        match self.sprockets_server_handle.await {
+        match self.rack_init_server_handle.await {
             Ok(result) => result,
             Err(err) => {
                 if err.is_cancelled() {
@@ -125,7 +127,7 @@ impl Server {
     }
 
     pub async fn close(self) -> Result<(), String> {
-        self.sprockets_server_handle.abort();
+        self.rack_init_server_handle.abort();
         self.wait_for_finish().await
     }
 }
@@ -137,7 +139,7 @@ struct Inner {
 }
 
 impl Inner {
-    async fn start_sprockets(
+    async fn start_rack_init_server(
         bootstrap_agent: Arc<Agent>,
         log: Logger,
     ) -> Result<JoinHandle<Result<(), String>>, String> {
@@ -164,7 +166,7 @@ impl Inner {
 
             let bootstrap_agent = self.bootstrap_agent.clone();
             tokio::spawn(async move {
-                match serve_request_after_quorum_initialization(
+                match handle_start_sled_agent_request(
                     stream,
                     bootstrap_agent,
                     &log,
@@ -179,7 +181,7 @@ impl Inner {
     }
 }
 
-async fn serve_request_after_quorum_initialization(
+async fn handle_start_sled_agent_request(
     stream: TcpStream,
     bootstrap_agent: Arc<Agent>,
     log: &Logger,
@@ -187,7 +189,7 @@ async fn serve_request_after_quorum_initialization(
     let mut stream = Box::new(tokio::io::BufStream::new(stream));
 
     let response = match read_request(&mut stream).await? {
-        Request::SledAgentRequest(request) => {
+        Request::StartSledAgentRequest(request) => {
             // The call to `request_agent` should be idempotent if the request
             // was the same.
             bootstrap_agent

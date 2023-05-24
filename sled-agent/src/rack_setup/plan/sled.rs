@@ -5,7 +5,7 @@
 //! Plan generation for "how should sleds be initialized".
 
 use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_SPROCKETS_PORT, params::SledAgentRequest,
+    config::BOOTSTRAP_AGENT_SPROCKETS_PORT, params::StartSledAgentRequest,
 };
 use crate::ledger::{Ledger, Ledgerable};
 use crate::rack_setup::config::SetupServiceConfig as Config;
@@ -43,7 +43,7 @@ const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.toml";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Plan {
     pub rack_id: Uuid,
-    pub sleds: HashMap<SocketAddrV6, SledAgentRequest>,
+    pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
 
     // Store the provided RSS configuration as part of the sled plan; if it
     // changes after reboot, we need to know.
@@ -96,7 +96,7 @@ impl Plan {
 
             (
                 bootstrap_addr,
-                SledAgentRequest {
+                StartSledAgentRequest {
                     id: Uuid::new_v4(),
                     subnet,
                     ntp_servers: config.ntp_servers.clone(),

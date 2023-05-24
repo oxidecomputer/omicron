@@ -7,7 +7,7 @@
 use super::params::version;
 use super::params::Request;
 use super::params::RequestEnvelope;
-use super::params::SledAgentRequest;
+use super::params::StartSledAgentRequest;
 use super::views::SledAgentResponse;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
@@ -62,7 +62,7 @@ pub enum Error {
     InvalidResponse { expected: &'static str, received: &'static str },
 }
 
-/// A TCP channel between bootstrap agents used for rack initialization
+/// A TCP client used to connect to bootstrap agents for rack initialization
 ///
 /// TODO: This will transition to a sprockets channel in the fullness of time.
 /// In all likelyhood, the sprockets channels will actually be managed by
@@ -78,11 +78,14 @@ impl Client {
         Self { addr, _log }
     }
 
-    pub(crate) async fn start_sled(
+    /// Start sled agent by sending an initialization request determined from
+    /// RSS input. This client is on the same scrimlet as RSS, and is talking
+    /// over TCP to all other bootstrap agents.
+    pub(crate) async fn start_sled_agent(
         &self,
-        request: &SledAgentRequest,
+        request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, Error> {
-        let request = Request::SledAgentRequest(Cow::Borrowed(request));
+        let request = Request::StartSledAgentRequest(Cow::Borrowed(request));
 
         match self.request_response(request).await? {
             Response::SledAgentResponse(response) => Ok(response),
@@ -112,8 +115,7 @@ impl Client {
 
         // "danger" note: `buf` contains a raw trust quorum share; we must not
         // log or otherwise persist it! We only write it to `stream`.
-        let buf =
-            envelope.danger_serialize_as_json().map_err(Error::Serialize)?;
+        let buf = serde_json::to_vec(&envelope).map_err(Error::Serialize)?;
         let request_length = u32::try_from(buf.len())
             .expect("serialized bootstrap-agent request length overflowed u32");
 

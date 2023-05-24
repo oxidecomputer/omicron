@@ -57,7 +57,7 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
@@ -147,7 +147,7 @@ pub enum SetupServiceError {
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
-    initialization_request: SledAgentRequest,
+    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.

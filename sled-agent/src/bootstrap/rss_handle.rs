@@ -5,7 +5,7 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::params::SledAgentRequest;
+use super::params::StartSledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
@@ -56,7 +56,7 @@ impl RssHandle {
             tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_request(&log).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 
@@ -72,15 +72,16 @@ impl RssHandle {
             tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
-        rx.await_local_request(&log).await;
+        rx.await_local_rss_request(&log).await;
         rss.join().await
     }
 }
 
+// Send a message to start a sled agent via bootstrap agent client
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
-    request: &SledAgentRequest,
+    request: &StartSledAgentRequest,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
@@ -88,7 +89,10 @@ async fn initialize_sled_agent(
     );
 
     let sled_agent_initialize = || async {
-        client.start_sled(request).await.map_err(BackoffError::transient)?;
+        client
+            .start_sled_agent(request)
+            .await
+            .map_err(BackoffError::transient)?;
 
         Ok::<(), BackoffError<bootstrap_agent_client::Error>>(())
     };
@@ -119,7 +123,7 @@ fn rss_channel(
     )
 }
 
-type InnerInitRequest = Vec<(SocketAddrV6, SledAgentRequest)>;
+type InnerInitRequest = Vec<(SocketAddrV6, StartSledAgentRequest)>;
 type InnerResetRequest = Vec<SocketAddrV6>;
 
 #[derive(Debug)]
@@ -150,7 +154,7 @@ impl BootstrapAgentHandle {
     /// that failed to initialize).
     pub(crate) async fn initialize_sleds(
         self,
-        requests: Vec<(SocketAddrV6, SledAgentRequest)>,
+        requests: Vec<(SocketAddrV6, StartSledAgentRequest)>,
     ) -> Result<(), String> {
         let (tx, rx) = oneshot::channel();
 
@@ -189,7 +193,9 @@ struct BootstrapAgentHandleReceiver {
 }
 
 impl BootstrapAgentHandleReceiver {
-    async fn await_local_request(mut self, log: &Logger) {
+    // Wait for a request from RSS telling us to initialize or reset all sled agents
+    // via the bootstrap client.
+    async fn await_local_rss_request(mut self, log: &Logger) {
         let Request { kind, tx } = match self.inner.recv().await {
             Some(requests) => requests,
             None => {

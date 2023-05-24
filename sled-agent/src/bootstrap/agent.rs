@@ -9,7 +9,7 @@ use super::config::{
 };
 use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
-use super::params::SledAgentRequest;
+use super::params::StartSledAgentRequest;
 use super::rss_handle::RssHandle;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
@@ -444,7 +444,7 @@ impl Agent {
     /// - Thie method returns an error for different requests
     pub async fn request_agent(
         &self,
-        request: &SledAgentRequest,
+        request: &StartSledAgentRequest,
     ) -> Result<SledAgentResponse, BootstrapError> {
         info!(&self.log, "Loading Sled Agent: {:?}", request);
 
@@ -813,7 +813,7 @@ impl Agent {
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 struct PersistentSledAgentRequest<'a> {
-    request: Cow<'a, SledAgentRequest>,
+    request: Cow<'a, StartSledAgentRequest>,
 }
 
 impl<'a> Ledgerable for PersistentSledAgentRequest<'a> {
@@ -836,7 +836,7 @@ mod tests {
         let log = &logctx.log;
 
         let request = PersistentSledAgentRequest {
-            request: Cow::Owned(SledAgentRequest {
+            request: Cow::Owned(StartSledAgentRequest {
                 id: Uuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
