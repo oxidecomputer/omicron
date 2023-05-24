@@ -232,8 +232,10 @@ impl RunnerCore {
 fn get_update_test_error(
     env_var: &str,
 ) -> Result<Option<UpdateTestError>, anyhow::Error> {
-    // 15 seconds should be enough to cause a timeout.
-    const DEFAULT_TEST_TIMEOUT_SECS: u64 = 15;
+    // 30 seconds should always be enough to cause a timeout. (The default
+    // timeout for progenitor is 15 seconds, and in wicket we set an even
+    // shorter timeout.)
+    const DEFAULT_TEST_TIMEOUT_SECS: u64 = 30;
 
     let test_error = match std::env::var(env_var) {
         Ok(v) if v == "fail" => Some(UpdateTestError::Fail),

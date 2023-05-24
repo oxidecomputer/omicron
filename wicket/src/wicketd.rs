@@ -36,7 +36,10 @@ impl From<ComponentId> for SpIdentifier {
 }
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
-const WICKETD_TIMEOUT: Duration = Duration::from_millis(1000);
+// WICKETD_TIMEOUT used to be 1 second, but that might be too short (and in
+// particular might be responsible for
+// https://github.com/oxidecomputer/omicron/issues/3103).
+const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty

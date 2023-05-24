@@ -184,6 +184,30 @@ pub(crate) enum UpdateTestError {
     },
 }
 
+impl UpdateTestError {
+    pub(crate) async fn into_http_error(
+        self,
+        log: &slog::Logger,
+        reason: &str,
+    ) -> HttpError {
+        match self {
+            UpdateTestError::Fail => HttpError::for_bad_request(
+                None,
+                format!("Simulated failure while {reason}"),
+            ),
+            UpdateTestError::Timeout { secs } => {
+                slog::info!(log, "Simulating timeout while {reason}");
+                // 15 seconds should be enough to cause a timeout.
+                tokio::time::sleep(Duration::from_secs(secs)).await;
+                HttpError::for_bad_request(
+                    None,
+                    "XXX request should time out before this is hit".into(),
+                )
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub struct GetBaseboardResponse {
@@ -293,19 +317,8 @@ async fn post_start_update(
     }
 
     let opts = opts.into_inner();
-    match opts.test_error {
-        Some(UpdateTestError::Fail) => {
-            return Err(HttpError::for_bad_request(
-                None,
-                "Simulated failure while starting update".into(),
-            ));
-        }
-        Some(UpdateTestError::Timeout { secs }) => {
-            slog::info!(log, "Simulating timeout while starting update");
-            // 15 seconds should be enough to cause a timeout.
-            tokio::time::sleep(Duration::from_secs(secs)).await;
-        }
-        _ => {}
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error.into_http_error(log, "starting update").await);
     }
 
     // All pre-flight update checks look OK: start the update.
@@ -352,19 +365,10 @@ async fn post_clear_update_state(
     let target = target.into_inner();
 
     let opts = opts.into_inner();
-    match opts.test_error {
-        Some(UpdateTestError::Fail) => {
-            return Err(HttpError::for_bad_request(
-                None,
-                "Simulated failure while clearing update state".into(),
-            ));
-        }
-        Some(UpdateTestError::Timeout { secs }) => {
-            slog::info!(log, "Simulating timeout while clearing update state");
-            // 15 seconds should be enough to cause a timeout.
-            tokio::time::sleep(Duration::from_secs(secs)).await;
-        }
-        _ => {}
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error
+            .into_http_error(log, "clearing update state")
+            .await);
     }
 
     match rqctx.context().update_tracker.clear_update_state(target).await {
