@@ -18,12 +18,6 @@ sprockets-rot.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
-# Disable doc builds by default for our binaries to work around issue
-# rust-lang/cargo#8373.  These docs would not be very useful anyway.
-[[bin]]
-name = "sled-agent-overlay-files"
-doc = false
-
 [[bin]]
 name = "thing-flinger"
 doc = false

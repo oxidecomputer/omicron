@@ -4735,7 +4735,6 @@ dependencies = [
  "oxide-vpc",
  "oximeter 0.1.0",
  "oximeter-producer 0.1.0",
- "p256",
  "percent-encoding",
  "pretty_assertions",
  "progenitor",
@@ -4768,7 +4767,6 @@ dependencies = [
  "tokio-tungstenite 0.18.0",
  "toml 0.7.4",
  "uuid",
- "vsss-rs",
  "zone",
 ]
 
