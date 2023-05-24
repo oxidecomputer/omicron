@@ -119,7 +119,7 @@ impl OmicronRepoAssembler {
         repository.sign_and_finish(self.keys.clone(), self.expiry)?;
 
         // Now reopen the repository to archive it into a zip file.
-        let repo2 = OmicronRepo::load(&self.log, build_dir)
+        let repo2 = OmicronRepo::load_untrusted(&self.log, build_dir)
             .context("error reopening repository to archive")?;
         repo2
             .archive(&self.output_path)

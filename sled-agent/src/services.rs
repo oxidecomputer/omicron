@@ -757,14 +757,6 @@ impl ServiceManager {
             })?;
 
             // We also need to update the switch with the NAT mappings
-            let nat_target = dpd_client::types::NatTarget {
-                inner_mac: dpd_client::types::MacAddr {
-                    a: port.0.mac().into_array(),
-                },
-                internal_ip: *underlay_address,
-                vni: port.0.vni().as_u32().into(),
-            };
-
             let (target_ip, first_port, last_port) = match snat {
                 Some(s) => (s.ip, s.first_port, s.last_port),
                 None => (external_ips[0], 0, u16::MAX),
@@ -777,29 +769,22 @@ impl ServiceManager {
                     self.inner.log, "creating NAT entry for service";
                     "service" => ?svc,
                 );
-                match &target_ip {
-                    IpAddr::V4(ip) => {
-                        dpd_client
-                            .nat_ipv4_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                    IpAddr::V6(ip) => {
-                        dpd_client
-                            .nat_ipv6_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                }
-                .map_err(BackoffError::transient)?;
+
+                dpd_client
+                    .ensure_nat_entry(
+                        &self.inner.log,
+                        target_ip.into(),
+                        dpd_client::types::MacAddr {
+                            a: port.0.mac().into_array(),
+                        },
+                        first_port,
+                        last_port,
+                        port.0.vni().as_u32(),
+                        underlay_address,
+                    )
+                    .await
+                    .map_err(BackoffError::transient)?;
+
                 Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
             };
             let log_failure = |error, _| {

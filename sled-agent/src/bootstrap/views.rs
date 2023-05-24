@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use vsss_rs::Share;
 
 /// Describes the Sled Agent running on the device.
 #[derive(Serialize, Deserialize, PartialEq)]
@@ -19,7 +18,6 @@ pub struct SledAgentResponse {
 // accidentally debug-logging the secret share.
 pub enum Response {
     SledAgentResponse(SledAgentResponse),
-    ShareResponse(Share),
 }
 
 #[derive(Serialize, Deserialize, PartialEq)]
