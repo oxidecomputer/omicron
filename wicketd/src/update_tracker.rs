@@ -34,6 +34,7 @@ use gateway_client::types::SpUpdateStatus;
 use gateway_messages::SpComponent;
 use installinator_common::InstallinatorCompletionMetadata;
 use installinator_common::InstallinatorSpec;
+use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
 use omicron_common::backoff;
 use omicron_common::update::ArtifactId;
@@ -44,6 +45,7 @@ use slog::warn;
 use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -61,6 +63,7 @@ use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
 use wicket_common::update_events::EventBuffer;
 use wicket_common::update_events::EventReport;
+use wicket_common::update_events::SharedStepHandle;
 use wicket_common::update_events::SpComponentUpdateSpec;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::SpComponentUpdateStepId;
@@ -720,14 +723,14 @@ impl UpdateDriver {
             )
             .register();
 
-        host_registrar
+        let slots_to_update = host_registrar
             .new_step(
                 UpdateStepId::RunningInstallinator,
                 "Running installinator",
                 move |cx| async move {
                     let report_receiver =
                         start_handle.into_value(cx.token()).await;
-                    update_cx
+                    let write_output = update_cx
                         .process_installinator_reports(&cx, report_receiver)
                         .await
                         .map_err(|error| {
@@ -736,7 +739,16 @@ impl UpdateDriver {
                             }
                         })?;
 
-                    StepResult::success((), Default::default())
+                    let slots_to_update = write_output
+                        .slots_written
+                        .into_iter()
+                        .map(|slot| match slot {
+                            M2Slot::A => 0,
+                            M2Slot::B => 1,
+                        })
+                        .collect::<BTreeSet<u16>>();
+
+                    StepResult::success(slots_to_update, Default::default())
                 },
             )
             .register();
@@ -747,6 +759,7 @@ impl UpdateDriver {
             update_cx,
             &mut host_registrar,
             plan,
+            slots_to_update,
         );
     }
 
@@ -760,15 +773,18 @@ impl UpdateDriver {
         plan: &'a UpdatePlan,
     ) -> StepHandle<HostPhase2RecoveryImageId> {
         // We arbitrarily choose to store the trampoline phase 1 in host boot
-        // slot 0.
-        let trampoline_phase_1_boot_slot = 0;
+        // slot 0. We put this in a set for compatibility with the later step
+        // that updates both slots.
+        const TRAMPOLINE_PHASE_1_BOOT_SLOT: u16 = 0;
+        let mut trampoline_phase_1_boot_slots = BTreeSet::new();
+        trampoline_phase_1_boot_slots.insert(TRAMPOLINE_PHASE_1_BOOT_SLOT);
 
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
             &plan.trampoline_phase_1,
             "trampoline",
-            trampoline_phase_1_boot_slot,
+            StepHandle::ready(trampoline_phase_1_boot_slots).into_shared(),
         );
 
         // Wait (if necessary) for the trampoline phase 2 upload to MGS to
@@ -842,7 +858,7 @@ impl UpdateDriver {
                     update_cx
                         .set_component_active_slot(
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
-                            trampoline_phase_1_boot_slot,
+                            TRAMPOLINE_PHASE_1_BOOT_SLOT,
                             false,
                         )
                         .await
@@ -901,27 +917,19 @@ impl UpdateDriver {
         update_cx: &'a UpdateContext,
         registrar: &mut ComponentRegistrar<'engine, 'a>,
         plan: &'a UpdatePlan,
+        slots_to_update: StepHandle<BTreeSet<u16>>,
     ) {
         // Installinator is done - set the stage for the real host to boot.
 
-        // Deliver the real host phase 1 image.
-        //
-        // TODO-correctness This choice of boot slot MUST match installinator.
-        // We could install it into both slots (and maybe we should!), but we
-        // still need to know which M.2 installinator copied the OS onto so we
-        // can set the correct boot device. Thinking out loud: Even if it
-        // doesn't do it today, installinator probably wants to _dynamically_
-        // choose an M.2 to account for missing or failed drives. Maybe its
-        // final completion message should tell us which slot (or both!) it
-        // wrote to, and then we echo that choice here?
-        let host_phase_1_boot_slot = 0;
-
+        // Deliver the real host phase 1 image to whichever slots installinator
+        // wrote.
+        let slots_to_update = slots_to_update.into_shared();
         self.register_deliver_host_phase1_steps(
             update_cx,
             registrar,
             &plan.host_phase_1,
             "host",
-            host_phase_1_boot_slot,
+            slots_to_update.clone(),
         );
 
         // Clear the installinator image ID; failing to do this is _not_ fatal,
@@ -953,7 +961,34 @@ impl UpdateDriver {
             .new_step(
                 UpdateStepId::SettingHostStartupOptions,
                 "Setting startup options for standard boot",
-                move |_cx| async move {
+                move |cx| async move {
+                    // Persistently set to boot off of the first disk
+                    // installinator successfully updated (usually 0, unless it
+                    // only updated 1).
+                    let mut slots_to_update =
+                        slots_to_update.into_value(cx.token()).await;
+                    let slot_to_boot =
+                        slots_to_update.pop_first().ok_or_else(|| {
+                            UpdateTerminalError::SetHostBootFlashSlotFailed {
+                                error: anyhow!(
+                                    "installinator reported 0 disks written"
+                                ),
+                            }
+                        })?;
+                    update_cx
+                        .set_component_active_slot(
+                            SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
+                            slot_to_boot,
+                            true,
+                        )
+                        .await
+                        .map_err(|error| {
+                            UpdateTerminalError::SetHostBootFlashSlotFailed {
+                                error,
+                            }
+                        })?;
+
+                    // Set "standard boot".
                     update_cx
                         .mgs_client
                         .sp_startup_options_set(
@@ -1003,7 +1038,7 @@ impl UpdateDriver {
         registrar: &mut ComponentRegistrar<'_, 'a>,
         artifact: &'a ArtifactIdData,
         kind: &str, // "host" or "trampoline"
-        boot_slot: u16,
+        slots_to_update: SharedStepHandle<BTreeSet<u16>>,
     ) {
         registrar
             .new_step(
@@ -1022,11 +1057,17 @@ impl UpdateDriver {
                 UpdateStepId::SpComponentUpdate,
                 format!("Updating {kind} phase 1"),
                 move |cx| async move {
-                    cx.with_nested_engine(|engine| {
-                        inner_cx.register_steps(engine, boot_slot, artifact);
-                        Ok(())
-                    })
-                    .await?;
+                    let slots_to_update =
+                        slots_to_update.into_value(cx.token()).await;
+
+                    for boot_slot in slots_to_update {
+                        cx.with_nested_engine(|engine| {
+                            inner_cx
+                                .register_steps(engine, boot_slot, artifact);
+                            Ok(())
+                        })
+                        .await?;
+                    }
                     StepResult::success((), Default::default())
                 },
             )
@@ -1465,7 +1506,7 @@ impl<'a> SpComponentUpdateContext<'a> {
         registrar
             .new_step(
                 SpComponentUpdateStepId::Sending,
-                "Sending data to MGS",
+                format!("Sending data to MGS (slot {firmware_slot})"),
                 move |_cx| async move {
                     // TODO: we should be able to report some sort of progress
                     // here for the file upload.
@@ -1497,7 +1538,7 @@ impl<'a> SpComponentUpdateContext<'a> {
         registrar
             .new_step(
                 SpComponentUpdateStepId::Preparing,
-                "Preparing for update",
+                format!("Preparing for update (slot {firmware_slot})"),
                 move |cx| async move {
                     update_cx
                         .poll_component_update(
@@ -1523,7 +1564,7 @@ impl<'a> SpComponentUpdateContext<'a> {
         registrar
             .new_step(
                 SpComponentUpdateStepId::Writing,
-                "Writing update",
+                format!("Writing update (slot {firmware_slot})"),
                 move |cx| async move {
                     update_cx
                         .poll_component_update(
