@@ -1240,118 +1240,22 @@ impl super::Nexus {
             })
             .map(|(_, ip)| ip)
         {
-            info!(log, "setting up dpd for external IP";
-                  "instance_id" => %instance_id,
-                  "external_ip" => ?target_ip);
-
-            let existing_nat = match target_ip.ip {
-                ipnetwork::IpNetwork::V4(network) => {
-                    dpd_client
-                        .nat_ipv4_get(&network.ip(), *target_ip.first_port)
-                        .await
-                }
-                ipnetwork::IpNetwork::V6(network) => {
-                    dpd_client
-                        .nat_ipv6_get(&network.ip(), *target_ip.first_port)
-                        .await
-                }
-            };
-
-            // If a NAT entry already exists, but has the wrong internal
-            // IP address, delete the old entry before continuing (the
-            // DPD entry-creation API won't replace an existing entry).
-            // If the entry exists and has the right internal IP, there's
-            // no more work to do for this external IP.
-            match existing_nat {
-                Ok(existing) => {
-                    let existing = existing.into_inner();
-                    if existing.internal_ip != *sled_ip_address.ip() {
-                        info!(log, "deleting old nat entry";
-                          "instance_id" => %instance_id,
-                          "external_ip" => ?target_ip);
-
-                        match target_ip.ip {
-                            ipnetwork::IpNetwork::V4(network) => {
-                                dpd_client
-                                    .nat_ipv4_delete(
-                                        &network.ip(),
-                                        *target_ip.first_port,
-                                    )
-                                    .await
-                            }
-                            ipnetwork::IpNetwork::V6(network) => {
-                                dpd_client
-                                    .nat_ipv6_delete(
-                                        &network.ip(),
-                                        *target_ip.first_port,
-                                    )
-                                    .await
-                            }
-                        }
-                        .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "failed to clear dpd entry: {e}"
-                            ))
-                        })?;
-                    } else {
-                        info!(log,
-                          "nat entry with expected internal ip exists, continuing";
-                          "instance_id" => %instance_id,
-                          "external_ip" => ?target_ip,
-                          "existing_entry" => ?existing);
-
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                        info!(log, "no nat entry found for: {target_ip:#?}");
-                    } else {
-                        return Err(Error::internal_error(&format!(
-                            "failed to query dpd: {e}"
-                        )));
-                    }
-                }
-            }
-
-            info!(log, "creating nat entry for: {target_ip:#?}");
-            let nat_target = dpd_client::types::NatTarget {
-                inner_mac: dpd_client::types::MacAddr {
-                    a: mac_address.into_array(),
-                },
-                internal_ip: *sled_ip_address.ip(),
-                vni: vni.into(),
-            };
-
-            match target_ip.ip {
-                ipnetwork::IpNetwork::V4(network) => {
-                    dpd_client
-                        .nat_ipv4_create(
-                            &network.ip(),
-                            *target_ip.first_port,
-                            *target_ip.last_port,
-                            &nat_target,
-                        )
-                        .await
-                }
-                ipnetwork::IpNetwork::V6(network) => {
-                    dpd_client
-                        .nat_ipv6_create(
-                            &network.ip(),
-                            *target_ip.first_port,
-                            *target_ip.last_port,
-                            &nat_target,
-                        )
-                        .await
-                }
-            }
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to create nat entry: {e}"
-                ))
-            })?;
-
-            info!(log, "creation of nat entry successful for: {target_ip:#?}");
+            dpd_client
+                .ensure_nat_entry(
+                    &log,
+                    target_ip.ip,
+                    dpd_client::types::MacAddr { a: mac_address.into_array() },
+                    *target_ip.first_port,
+                    *target_ip.last_port,
+                    vni,
+                    sled_ip_address.ip(),
+                )
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to ensure dpd entry: {e}"
+                    ))
+                })?;
         }
 
         Ok(())
