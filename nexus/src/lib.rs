@@ -253,6 +253,8 @@ impl nexus_test_interface::NexusServer for Server {
                     internal_dns_zone_config: DnsConfigBuilder::new().build(),
                     external_dns_zone_name: external_dns_zone_name.to_owned(),
                     recovery_silo,
+                    external_port_count: 1,
+                    rack_network_config: None,
                 },
             )
             .await

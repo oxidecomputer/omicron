@@ -24,6 +24,21 @@ pub enum SledMode {
     Scrimlet,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SidecarRevision {
+    Physical(String),
+    Soft(SoftPortConfig),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SoftPortConfig {
+    /// Number of front ports
+    pub front_port_count: u8,
+    /// Number of rear ports
+    pub rear_port_count: u8,
+}
+
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
@@ -32,7 +47,7 @@ pub struct Config {
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
-    pub sidecar_revision: String,
+    pub sidecar_revision: SidecarRevision,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".
