@@ -52,3 +52,15 @@ user_name = "recovery"
 # more on what's supported, see the API docs for this type and the specific
 # constraints in the omicron-passwords crate.
 user_password_hash = "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
+
+# TODO - this configuration is subject to change going forward. Ultimately these parameters
+# should be provided to the control plane via wicket, but we need to put these parameters
+# somewhere in the meantime so that the Nexus API will be reachable upon Rack startup.
+
+# Configuration to bring up boundary services and make nexus reachable from the outside
+[rack_network_config]
+gateway_ip = "192.168.1.199"
+infra_ip_first = "192.168.1.30"
+infra_ip_last = "192.168.1.50"
+uplink_port = "qsfp0"
+uplink_ip = "192.168.1.32"

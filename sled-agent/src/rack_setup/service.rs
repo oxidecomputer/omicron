@@ -171,11 +171,17 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        external_port_count: u8,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(&config, &storage_resources, local_bootstrap_agent)
+                .run(
+                    &config,
+                    &storage_resources,
+                    local_bootstrap_agent,
+                    external_port_count,
+                )
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -532,6 +538,7 @@ impl ServiceInner {
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -743,6 +750,23 @@ impl ServiceInner {
             .into_iter()
             .map(Into::into)
             .collect();
+
+        let rack_network_config = match &config.rack_network_config {
+            Some(config) => {
+                let value = NexusTypes::RackNetworkConfig {
+                    gateway_ip: config.gateway_ip.clone(),
+                    infra_ip_first: config.infra_ip_first.clone(),
+                    infra_ip_last: config.infra_ip_last.clone(),
+                    uplink_ip: config.uplink_ip.clone(),
+                    uplink_port: config.uplink_port.clone(),
+                };
+                Some(value)
+            }
+            None => None,
+        };
+
+        info!(self.log, "rack_network_config: {:#?}", rack_network_config);
+
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
@@ -751,6 +775,8 @@ impl ServiceInner {
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
+            external_port_count,
+            rack_network_config,
         };
 
         let notify_nexus = || async {
@@ -827,6 +853,7 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -864,7 +891,13 @@ impl ServiceInner {
             let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
-            self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
+            self.handoff_to_nexus(
+                &config,
+                &sled_plan,
+                &service_plan,
+                external_port_count,
+            )
+            .await?;
             return Ok(());
         } else {
             info!(self.log, "RSS configuration has not been fully applied yet",);
@@ -1046,7 +1079,13 @@ impl ServiceInner {
 
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
-        self.handoff_to_nexus(&config, &plan, &service_plan).await?;
+        self.handoff_to_nexus(
+            &config,
+            &plan,
+            &service_plan,
+            external_port_count,
+        )
+        .await?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does
