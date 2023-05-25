@@ -188,8 +188,8 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     let password: oxide_client::types::Password = "oxide".parse().unwrap();
     let login_request_body =
         serde_json::to_string(&UsernamePasswordCredentials {
-            username: username,
-            password: password,
+            username,
+            password,
         })
         .context("serializing login request body")?;
 
@@ -319,6 +319,11 @@ impl CustomDnsResolver {
             )
         })
     }
+}
+
+pub fn gateway_ip() -> String {
+    std::env::var("GATEWAY_IP")
+        .expect("GATEWAY_IP environment variable required")
 }
 
 impl reqwest::dns::Resolve for CustomDnsResolver {

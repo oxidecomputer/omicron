@@ -22,6 +22,7 @@ use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::SemverVersion;
@@ -342,6 +343,76 @@ lazy_static! {
             cert: DEMO_CERTIFICATE.cert_chain_as_pem(),
             key: DEMO_CERTIFICATE.end_cert_private_key_as_pem(),
             service: shared::ServiceUsingCertificate::ExternalApi,
+        };
+}
+
+lazy_static! {
+    pub static ref DEMO_SWITCH_PORT_URL: String =
+        format!("/v1/system/hardware/switch-port");
+
+    pub static ref DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: String =
+        format!(
+            "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
+            uuid::Uuid::new_v4(),
+            "switch0",
+        );
+
+    pub static ref DEMO_SWITCH_PORT_SETTINGS: params::SwitchPortApplySettings =
+        params::SwitchPortApplySettings {
+            port_settings: NameOrId::Name("portofino".parse().unwrap()),
+        };
+}
+
+lazy_static! {
+    pub static ref DEMO_LOOPBACK_CREATE_URL: String =
+        "/v1/system/networking/loopback-address".into();
+    pub static ref DEMO_LOOPBACK_URL: String = format!(
+        "/v1/system/networking/loopback-address/{}/{}/{}",
+        uuid::Uuid::new_v4(),
+        "switch0",
+        "203.0.113.99/24",
+    );
+    pub static ref DEMO_LOOPBACK_CREATE: params::LoopbackAddressCreate =
+        params::LoopbackAddressCreate {
+            address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
+            rack_id: uuid::Uuid::new_v4(),
+            switch_location: "switch0".parse().unwrap(),
+            address: "203.0.113.99".parse().unwrap(),
+            mask: 24,
+        };
+}
+
+lazy_static! {
+    pub static ref DEMO_SWITCH_PORT_SETTINGS_URL: String = format!(
+        "/v1/system/networking/switch-port-settings?port_settings=portofino"
+    );
+    pub static ref DEMO_SWITCH_PORT_SETTINGS_INFO_URL: String =
+        format!("/v1/system/networking/switch-port-settings/protofino/info");
+    pub static ref DEMO_SWITCH_PORT_SETTINGS_CREATE: params::SwitchPortSettingsCreate =
+        params::SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
+            name: "portofino".parse().unwrap(),
+            description: "just a port".into(),
+        });
+}
+
+lazy_static! {
+    pub static ref DEMO_ADDRESS_LOTS_URL: String =
+        format!("/v1/system/networking/address-lot");
+    pub static ref DEMO_ADDRESS_LOT_URL: String =
+        format!("/v1/system/networking/address-lot/parkinglot");
+    pub static ref DEMO_ADDRESS_LOT_BLOCKS_URL: String =
+        format!("/v1/system/networking/address-lot/parkinglot/blocks");
+    pub static ref DEMO_ADDRESS_LOT_CREATE: params::AddressLotCreate =
+        params::AddressLotCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "parkinglot".parse().unwrap(),
+                description: "an address parking lot".into(),
+            },
+            kind: params::AddressLotKind::Infra,
+            blocks: vec![params::AddressLotBlockCreate {
+                first_address: "203.0.113.10".parse().unwrap(),
+                last_address: "203.0.113.20".parse().unwrap(),
+            }],
         };
 }
 
@@ -1660,6 +1731,104 @@ lazy_static! {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+
+        /* External Networking */
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+            ],
+        },
+
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_SETTINGS_APPLY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOTS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_ADDRESS_LOT_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+            ]
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_ADDRESS_LOT_BLOCKS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_LOOPBACK_CREATE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_LOOPBACK_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_LOOPBACK_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_SETTINGS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(
+                        &*DEMO_SWITCH_PORT_SETTINGS_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
+                AllowedMethod::Delete
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_SETTINGS_INFO_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent
             ],
         },
 

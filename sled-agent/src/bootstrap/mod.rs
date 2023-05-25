@@ -13,5 +13,4 @@ mod maghemite;
 pub(crate) mod params;
 pub(crate) mod rss_handle;
 pub mod server;
-pub mod trust_quorum;
 mod views;

@@ -26,9 +26,14 @@ pub mod import_blocks_from_url;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
+pub mod loopback_address_create;
+pub mod loopback_address_delete;
 pub mod project_create;
 pub mod snapshot_create;
 pub mod snapshot_delete;
+pub mod switch_port_settings_apply;
+pub mod switch_port_settings_clear;
+pub mod switch_port_settings_update;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -122,6 +127,20 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <loopback_address_create::SagaLoopbackAddressCreate
+        as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <loopback_address_delete::SagaLoopbackAddressDelete
+        as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
@@ -282,6 +301,8 @@ macro_rules! declare_saga_actions {
         }
     };
 }
+
+pub(crate) const NEXUS_DPD_TAG: &str = "nexus";
 
 pub(crate) use __action_name;
 pub(crate) use __emit_action;

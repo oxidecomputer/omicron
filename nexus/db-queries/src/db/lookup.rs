@@ -16,6 +16,7 @@ use crate::{
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use ipnetwork::IpNetwork;
 use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
@@ -391,6 +392,28 @@ impl<'a> LookupPath<'a> {
                 SiloImage::Error(root, error)
             }
         }
+    }
+
+    pub fn address_lot_id(self, id: Uuid) -> AddressLot<'a> {
+        AddressLot::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    pub fn address_lot_name_owned(self, name: Name) -> AddressLot<'a> {
+        AddressLot::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    pub fn loopback_address(
+        self,
+        rack_id: Uuid,
+        switch_location: Name,
+        address: IpNetwork,
+    ) -> LoopbackAddress<'a> {
+        LoopbackAddress::PrimaryKey(
+            Root { lookup_root: self },
+            address,
+            rack_id,
+            switch_location.to_string(),
+        )
     }
 
     /// Select a resource of type UpdateArtifact, identified by its
@@ -838,6 +861,28 @@ lookup_resource! {
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "AddressLot",
+    ancestors = [],
+    children = [], // TODO: Should this include AddressLotBlock?
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "LoopbackAddress",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [
+        { column_name = "address", rust_type = IpNetwork },
+        { column_name = "rack_id", rust_type = Uuid },
+        { column_name = "switch_location", rust_type = String }
+    ]
 }
 
 // Helpers for unifying the interfaces around images

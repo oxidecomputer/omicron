@@ -61,3 +61,18 @@ pub struct SourceNatConfig {
     /// The last port used for source NAT, also inclusive.
     pub last_port: u16,
 }
+
+/// Initial network configuration
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+pub struct RackNetworkConfig {
+    /// Gateway address
+    pub gateway_ip: String,
+    /// First ip address to be used for configuring network infrastructure
+    pub infra_ip_first: String,
+    /// Last ip address to be used for configuring network infrastructure
+    pub infra_ip_last: String,
+    /// Switchport to use for external connectivity
+    pub uplink_port: String,
+    /// IP Address to apply to switchport (must be in infra_ip pool)
+    pub uplink_ip: String,
+}
