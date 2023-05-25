@@ -376,8 +376,24 @@ pub async fn login_saml(
             )
             .await?;
 
-        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
-            .await
+        let session = create_session(opctx, apictx, user).await?;
+        let next_url = relay_state
+            .and_then(|r| r.referer)
+            .unwrap_or_else(|| "/".to_string());
+        let mut response = http_response_see_other(next_url)?;
+
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
+                &session.token,
+                // use absolute timeout even though session might idle out first.
+                // browser expiration is mostly for convenience, as the API will
+                // reject requests with an expired session regardless
+                apictx.session_absolute_timeout(),
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -414,7 +430,7 @@ pub async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -428,47 +444,42 @@ pub async fn login_local(
         let opctx = nexus.opctx_external_authn();
         let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
-        login_finish(&opctx, apictx, user, None).await
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
-async fn login_finish(
-    opctx: &OpContext,
-    apictx: &ServerContext,
-    user: Option<crate::db::model::SiloUser>,
-    next_url: Option<String>,
-) -> Result<HttpResponseSeeOther, HttpError> {
-    let nexus = &apictx.nexus;
+        let session = create_session(opctx, apictx, user).await?;
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
 
-    if user.is_none() {
-        Err(Error::Unauthenticated {
-            internal_message: String::from(
-                "no matching user found or credentials were not valid",
-            ),
-        })?;
-    }
-
-    let user = user.unwrap();
-    let session = nexus.session_create(&opctx, user.id()).await?;
-    let next_url = next_url.unwrap_or_else(|| "/".to_string());
-
-    let mut response_with_headers = http_response_see_other(next_url)?;
-
-    {
-        let headers = response_with_headers.headers_mut();
-        headers.append(
-            header::SET_COOKIE,
-            session_cookie_header_value(
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
                 &session.token,
                 // use absolute timeout even though session might idle out first.
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
-            )?,
-        );
-    }
-    Ok(response_with_headers)
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+async fn create_session(
+    opctx: &OpContext,
+    apictx: &ServerContext,
+    user: Option<crate::db::model::SiloUser>,
+) -> Result<crate::db::model::ConsoleSession, HttpError> {
+    let nexus = &apictx.nexus;
+    let session = match user {
+        Some(user) => nexus.session_create(&opctx, user.id()).await?,
+        None => Err(Error::Unauthenticated {
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
+            ),
+        })?,
+    };
+    Ok(session)
 }
 
 // Log user out of web console by deleting session in both server and browser

@@ -433,7 +433,7 @@ async fn expect_login_success(
     let login_url = format!("/login/{}/local", silo_name);
     let response = RequestBuilder::new(client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("expected successful login, but it failed");
