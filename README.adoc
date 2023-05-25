@@ -210,7 +210,7 @@ so that the OpenAPI document can be generated.
 This is a particular problem if you find yourself resolving merge conflicts in the generated files.  You have basically two options for this:
 
 * Resolve the merge conflicts by hand.  This is usually not too bad in practice.
-* Take the upstream copy of the file, back out your client side changes (`git stash` can be helpful for this), follow the steps above to regenerate the file using the automated test, and finally re-apply your changes to the client side.  This is essentially getting yourself back to step 1 above and then following the procedure above.
+* Take the upstream copy of the file, back out your client side changes (`git stash` and its `-p` option can be helpful for this), follow the steps above to regenerate the file using the automated test, and finally re-apply your changes to the client side.  This is essentially getting yourself back to step 1 above and then following the procedure above.
 
 === Resolving merge conflicts in Cargo.lock
 
