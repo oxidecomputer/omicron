@@ -172,7 +172,8 @@ impl<'a> Popup<'a> {
                 data.buttons.insert(
                     0,
                     ButtonText {
-                        instruction: Span::raw("SCROLL").into(),
+                        instruction: Span::styled("SCROLL", style::selected())
+                            .into(),
                         key: Spans::from(vec![
                             Span::styled("UP", up_style),
                             Span::raw("/"),

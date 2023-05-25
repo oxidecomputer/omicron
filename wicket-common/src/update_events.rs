@@ -43,7 +43,7 @@ pub enum UpdateStepId {
     InterrogateRot,
     ResetRot,
     ResetSp,
-    SpComponentUpdate { stage: SpComponentUpdateStage },
+    SpComponentUpdate,
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,
     SettingHostStartupOptions,
@@ -63,6 +63,27 @@ impl StepSpec for WicketdEngineSpec {
 }
 
 update_engine::define_update_engine!(pub WicketdEngineSpec);
+
+#[derive(JsonSchema)]
+pub enum SpComponentUpdateSpec {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "id", rename_all = "snake_case")]
+pub enum SpComponentUpdateStepId {
+    Sending,
+    Preparing,
+    Writing,
+}
+
+impl StepSpec for SpComponentUpdateSpec {
+    type Component = UpdateComponent;
+    type StepId = SpComponentUpdateStepId;
+    type StepMetadata = serde_json::Value;
+    type ProgressMetadata = serde_json::Value;
+    type CompletionMetadata = serde_json::Value;
+    type SkippedMetadata = serde_json::Value;
+    type Error = UpdateTerminalError;
+}
 
 #[derive(Debug, Error)]
 pub enum UpdateTerminalError {
