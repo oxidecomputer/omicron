@@ -3977,7 +3977,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno",
+ "steno 0.4.0",
  "thiserror",
  "uuid",
 ]
@@ -4050,7 +4050,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -4154,7 +4154,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "steno",
+ "steno 0.4.0",
  "uuid",
 ]
 
@@ -4394,7 +4394,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "test-strategy",
  "thiserror",
@@ -4433,7 +4433,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.3.1",
  "strum",
  "thiserror",
  "tokio",
@@ -4617,7 +4617,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -7699,6 +7699,28 @@ name = "steno"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee007f34597a281684e1ab95e5c62d4c330db52644ad81dbaa53204f1ff7ba9f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "newtype_derive",
+ "petgraph",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "steno"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1e7ccea133c197729abfd16dccf91a3c4d0da1e94bb0c0aa164c2b8a227481"
 dependencies = [
  "anyhow",
  "async-trait",
