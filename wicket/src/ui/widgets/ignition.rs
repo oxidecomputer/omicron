@@ -84,7 +84,7 @@ impl IgnitionPopup {
                     )]),
                 ],
             },
-            buttons: vec![ButtonText::new("CLOSE", "ESC")],
+            buttons: vec![ButtonText::new("Close", "Esc")],
         }
     }
 }

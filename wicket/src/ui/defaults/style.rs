@@ -30,7 +30,7 @@ pub fn help_function() -> Style {
 }
 
 pub fn help_keys() -> Style {
-    Style::default().fg(TUI_PURPLE_DIM)
+    selected_line()
 }
 
 pub fn divider() -> Style {

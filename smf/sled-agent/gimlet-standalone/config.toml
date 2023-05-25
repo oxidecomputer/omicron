@@ -18,6 +18,10 @@ sidecar_revision.physical = "b"
 # in-sync, rather than querying its NTP zone.
 skip_timesync = true
 
+# Percentage of usable physical DRAM to use for the VMM reservoir, which
+# guest memory is pulled from.
+vmm_reservoir_percentage = 0
+
 # An optional data link from which we extract a MAC address.
 # This is used as a unique identifier for the bootstrap address.
 #

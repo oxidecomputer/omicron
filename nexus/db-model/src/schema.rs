@@ -680,6 +680,7 @@ table! {
 
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
+        reservoir_size -> Int8,
 
         ip -> Inet,
         port -> Int4,

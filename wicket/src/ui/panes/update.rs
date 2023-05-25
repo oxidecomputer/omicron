@@ -201,10 +201,10 @@ impl UpdatePane {
             .expect("selected_key is always valid");
         let step_info = value.step_info();
 
-        let header = Spans::from(vec![Span::styled(
-            step_info.description.clone(),
-            style::header(true),
-        )]);
+        let header = Spans::from(vec![
+            Span::styled("Step: ", style::header(true)),
+            Span::styled(step_info.description.clone(), style::header(true)),
+        ]);
 
         let mut body = Text::default();
 
@@ -408,7 +408,7 @@ impl UpdatePane {
             }
         }
 
-        let buttons = vec![ButtonText::new("NAVIGATE", "LEFT/RIGHT")];
+        let buttons = vec![ButtonText::new("Navigate", "Left/Right")];
 
         let full_screen = Rect {
             width: state.screen_width,
@@ -440,8 +440,8 @@ impl UpdatePane {
                 style::plain_text(),
             )])]),
             buttons: vec![
-                ButtonText::new("YES", "Y"),
-                ButtonText::new("NO", "N"),
+                ButtonText::new("Yes", "Y"),
+                ButtonText::new("No", "N"),
             ],
         };
         let full_screen = Rect {
@@ -504,7 +504,7 @@ impl UpdatePane {
                 style::failed_update(),
             )]),
             body,
-            buttons: vec![ButtonText::new("CLOSE", "ESC")],
+            buttons: vec![ButtonText::new("Close", "Esc")],
         };
         let full_screen = Rect {
             width: state.screen_width,
@@ -569,7 +569,7 @@ impl UpdatePane {
                 style::failed_update(),
             )]),
             body,
-            buttons: vec![ButtonText::new("CLOSE", "ESC")],
+            buttons: vec![ButtonText::new("Close", "Esc")],
         };
         let full_screen = Rect {
             width: state.screen_width,

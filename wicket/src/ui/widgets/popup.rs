@@ -35,10 +35,18 @@ impl<'a> ButtonText<'a> {
         Self {
             instruction: Spans::from(Span::styled(
                 instruction,
-                style::selected(),
+                Self::default_instruction_style(),
             )),
-            key: Spans::from(Span::styled(key, style::selected_line())),
+            key: Spans::from(Span::styled(key, Self::default_key_style())),
         }
+    }
+
+    pub fn default_instruction_style() -> Style {
+        style::help_function()
+    }
+
+    pub fn default_key_style() -> Style {
+        style::help_keys()
     }
 }
 
@@ -161,23 +169,26 @@ impl<'a> Popup<'a> {
                 let up_style = if offset.can_scroll_up() {
                     style::selected()
                 } else {
-                    style::selected_line()
+                    ButtonText::default_key_style()
                 };
                 let down_style = if offset.can_scroll_down() {
                     style::selected()
                 } else {
-                    style::selected_line()
+                    ButtonText::default_key_style()
                 };
 
                 data.buttons.insert(
                     0,
                     ButtonText {
-                        instruction: Span::styled("SCROLL", style::selected())
-                            .into(),
+                        instruction: Span::styled(
+                            "Scroll",
+                            ButtonText::default_instruction_style(),
+                        )
+                        .into(),
                         key: Spans::from(vec![
-                            Span::styled("UP", up_style),
-                            Span::raw("/"),
-                            Span::styled("DOWN", down_style),
+                            Span::styled("Up", up_style),
+                            Span::styled("/", ButtonText::default_key_style()),
+                            Span::styled("Down", down_style),
                         ]),
                     },
                 );
@@ -432,9 +443,9 @@ pub fn draw_buttons(
     for (i, button) in buttons.into_iter().enumerate() {
         let mut spans = vec![Span::raw(" ")];
         spans.extend(button.instruction.0);
-        spans.push(Span::styled(" <", style::selected_line()));
+        spans.push(Span::styled(" <", ButtonText::default_key_style()));
         spans.extend(button.key.0);
-        spans.push(Span::styled(">", style::selected_line()));
+        spans.push(Span::styled(">", ButtonText::default_key_style()));
 
         let b = Paragraph::new(Spans(spans)).block(block.clone());
         b.render(button_rects[i + 1], buf);
