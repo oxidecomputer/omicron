@@ -10,6 +10,7 @@ use crate::authn;
 use crate::authz;
 use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
+use crate::retry_until_known_result;
 use anyhow::Error;
 use dpd_client::types::{Ipv4Entry, Ipv6Entry};
 use serde::{Deserialize, Serialize};
@@ -135,10 +136,10 @@ async fn slc_loopback_address_create(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     // TODO: https://github.com/oxidecomputer/omicron/issues/2629
     if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        let log = sagactx.user_data().log();
         debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
         return Ok(());
     };
@@ -151,20 +152,20 @@ async fn slc_loopback_address_create(
 
     let result = match &params.loopback_address.address {
         IpAddr::V4(a) => {
-            dpd_client
-                .loopback_ipv4_create(&Ipv4Entry {
+            retry_until_known_result!(log, {
+                dpd_client.loopback_ipv4_create(&Ipv4Entry {
                     addr: *a,
                     tag: NEXUS_DPD_TAG.into(),
                 })
-                .await
+            })
         }
         IpAddr::V6(a) => {
-            dpd_client
-                .loopback_ipv6_create(&Ipv6Entry {
+            retry_until_known_result!(log, {
+                dpd_client.loopback_ipv6_create(&Ipv6Entry {
                     addr: *a,
                     tag: NEXUS_DPD_TAG.into(),
                 })
-                .await
+            })
         }
     };
 

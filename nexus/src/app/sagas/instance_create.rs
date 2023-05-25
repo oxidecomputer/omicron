@@ -15,6 +15,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount as DbByteCount;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
+use crate::retry_until_known_result;
 use crate::{authn, authz, db};
 use chrono::Utc;
 use nexus_db_model::NetworkInterfaceKind;
@@ -437,16 +438,17 @@ async fn sic_remove_network_config(
 
     let result = match target_ip.ip {
         ipnetwork::IpNetwork::V4(network) => {
-            dpd_client
-                .nat_ipv4_delete(&network.ip(), *target_ip.first_port)
-                .await
+            retry_until_known_result!(log, {
+                dpd_client.nat_ipv4_delete(&network.ip(), *target_ip.first_port)
+            })
         }
         ipnetwork::IpNetwork::V6(network) => {
-            dpd_client
-                .nat_ipv6_delete(&network.ip(), *target_ip.first_port)
-                .await
+            retry_until_known_result!(log, {
+                dpd_client.nat_ipv6_delete(&network.ip(), *target_ip.first_port)
+            })
         }
     };
+
     match result {
         Ok(_) => {
             debug!(log, "deletion of nat entry successful for: {target_ip:#?}");

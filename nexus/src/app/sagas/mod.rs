@@ -304,3 +304,51 @@ pub(crate) use __action_name;
 pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
+
+/// Retry a progenitor client operation until a known result is returned.
+///
+/// Saga execution relies on the outcome of an external call being known: since
+/// they are idempotent, reissue the external call until a known result comes
+/// back. Retry if a communication error is seen.
+#[macro_export]
+macro_rules! retry_until_known_result {
+    ( $log:ident, $func:block ) => {{
+        use omicron_common::backoff;
+
+        backoff::retry_notify(
+            backoff::retry_policy_internal_service(),
+            || async {
+                match ($func).await {
+                    Err(progenitor_client::Error::CommunicationError(e)) => {
+                        warn!(
+                            $log,
+                            "saw transient communication error {}, retrying...",
+                            e,
+                        );
+
+                        Err(backoff::BackoffError::transient(
+                            progenitor_client::Error::CommunicationError(e),
+                        ))
+                    }
+
+                    Err(e) => {
+                        warn!($log, "saw permanent error {}, aborting", e,);
+
+                        Err(backoff::BackoffError::Permanent(e))
+                    }
+
+                    Ok(v) => Ok(v),
+                }
+            },
+            |error: progenitor_client::Error<_>, delay| {
+                warn!(
+                    $log,
+                    "failed external call ({:?}), will retry in {:?}",
+                    error,
+                    delay,
+                );
+            },
+        )
+        .await
+    }};
+}

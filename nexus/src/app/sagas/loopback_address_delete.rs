@@ -10,6 +10,7 @@ use crate::authn;
 use crate::authz;
 use crate::db::model::{LoopbackAddress, Name};
 use crate::external_api::params;
+use crate::retry_until_known_result;
 use anyhow::{anyhow, Error};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{IpNet, NameOrId};
@@ -162,10 +163,10 @@ async fn slc_loopback_address_delete(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     // TODO: https://github.com/oxidecomputer/omicron/issues/2629
     if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        let log = sagactx.user_data().log();
         debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
         return Ok(());
     };
@@ -177,8 +178,12 @@ async fn slc_loopback_address_delete(
         Arc::clone(&osagactx.nexus().dpd_client);
 
     match &params.address {
-        IpNet::V4(a) => dpd_client.loopback_ipv4_delete(&a.ip()).await,
-        IpNet::V6(a) => dpd_client.loopback_ipv6_delete(&a.ip()).await,
+        IpNet::V4(a) => retry_until_known_result!(log, {
+            dpd_client.loopback_ipv4_delete(&a.ip())
+        }),
+        IpNet::V6(a) => retry_until_known_result!(log, {
+            dpd_client.loopback_ipv6_delete(&a.ip())
+        }),
     }
     .map_err(|e| ActionError::action_failed(e.to_string()))?;
 

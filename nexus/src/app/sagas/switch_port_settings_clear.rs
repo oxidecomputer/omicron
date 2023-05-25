@@ -9,6 +9,7 @@ use crate::app::sagas::{
 };
 use crate::authn;
 use crate::db::datastore::UpdatePrecondition;
+use crate::retry_until_known_result;
 use anyhow::Error;
 use dpd_client::types::PortId;
 use omicron_common::api::external::{self, NameOrId};
@@ -123,6 +124,7 @@ async fn spa_clear_switch_port_settings(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.port_name)
         .map_err(|e| ActionError::action_failed(e.to_string()))?;
@@ -130,10 +132,10 @@ async fn spa_clear_switch_port_settings(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    dpd_client
-        .port_settings_clear(&port_id)
-        .await
-        .map_err(|e| ActionError::action_failed(e.to_string()))?;
+    retry_until_known_result!(log, {
+        dpd_client.port_settings_clear(&port_id)
+    })
+    .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     Ok(())
 }
@@ -148,6 +150,7 @@ async fn spa_undo_clear_switch_port_settings(
         &sagactx,
         &params.serialized_authn,
     );
+    let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.port_name)
         .map_err(|e| external::Error::internal_error(e))?;
@@ -172,10 +175,10 @@ async fn spa_undo_clear_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    dpd_client
-        .port_settings_apply(&port_id, &dpd_port_settings)
-        .await
-        .map_err(|e| external::Error::internal_error(&e.to_string()))?;
+    retry_until_known_result!(log, {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings)
+    })
+    .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     Ok(())
 }

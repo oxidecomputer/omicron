@@ -8,6 +8,7 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use crate::db;
 use crate::db::lookup::LookupPath;
+use crate::retry_until_known_result;
 use crate::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
@@ -167,14 +168,14 @@ async fn sid_delete_network_config(
         debug!(log, "deleting nat mapping for entry: {entry:#?}");
         let result = match entry.ip {
             ipnetwork::IpNetwork::V4(network) => {
-                dpd_client
-                    .nat_ipv4_delete(&network.ip(), *entry.first_port)
-                    .await
+                retry_until_known_result!(log, {
+                    dpd_client.nat_ipv4_delete(&network.ip(), *entry.first_port)
+                })
             }
             ipnetwork::IpNetwork::V6(network) => {
-                dpd_client
-                    .nat_ipv6_delete(&network.ip(), *entry.first_port)
-                    .await
+                retry_until_known_result!(log, {
+                    dpd_client.nat_ipv6_delete(&network.ip(), *entry.first_port)
+                })
             }
         };
 
