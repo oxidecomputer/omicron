@@ -16,10 +16,11 @@ use omicron_test_utils::dev::test_setup_log;
 use spec::{
     ComponentRegistrar, ExampleCompletionMetadata, ExampleComponent,
     ExampleSpec, ExampleStepId, ExampleStepMetadata, ExampleWriteSpec,
-    ExampleWriteStepId, StepHandle, StepProgress, StepResult, UpdateEngine,
+    ExampleWriteStepId, StepHandle, StepProgress, StepSkipped, StepWarning,
+    UpdateEngine,
 };
 use tokio::io::AsyncWriteExt;
-use update_engine::StepContext;
+use update_engine::{StepContext, StepSuccess};
 
 mod display;
 mod spec;
@@ -156,10 +157,11 @@ impl ExampleContext {
                         buf_list.push_chunk(&b"downloaded-data"[..]);
                     }
 
-                    StepResult::success(
-                        buf_list,
-                        ExampleCompletionMetadata::Download { num_bytes },
-                    )
+                    StepSuccess::new(buf_list)
+                        .with_metadata(ExampleCompletionMetadata::Download {
+                            num_bytes,
+                        })
+                        .into()
                 },
             )
             .register()
@@ -193,10 +195,11 @@ impl ExampleContext {
                         .await;
                     }
 
-                    StepResult::success(
-                        dirs,
-                        ExampleCompletionMetadata::CreateTempDir { paths },
-                    )
+                    StepSuccess::new(dirs)
+                        .with_metadata(
+                            ExampleCompletionMetadata::CreateTempDir { paths },
+                        )
+                        .into()
                 },
             )
             .register()
@@ -226,7 +229,6 @@ impl ExampleContext {
                     let buf_list = download_handle.into_value(cx.token()).await;
                     let temp_dirs =
                         temp_dirs_handle.into_value(cx.token()).await;
-                    let num_bytes = buf_list.num_bytes() as u64;
 
                     let destinations: Vec<_> = temp_dirs
                         .iter()
@@ -249,14 +251,7 @@ impl ExampleContext {
                     .await?;
 
                     // Demonstrate how to show a warning.
-                    StepResult::warning(
-                        (),
-                        ExampleCompletionMetadata::Write {
-                            num_bytes,
-                            destinations,
-                        },
-                        "Example warning",
-                    )
+                    StepWarning::new((), "Example warning").into()
                 },
             )
             .with_metadata_fn(move |cx| async move {
@@ -273,9 +268,11 @@ impl ExampleContext {
         registrar: &ComponentRegistrar<'_, 'a>,
     ) {
         registrar
-            .new_step(ExampleStepId::Skipped, "This step does nothing", |_cx| async move {
-                StepResult::skipped((), (), "Step skipped")
-            })
+            .new_step(
+                ExampleStepId::Skipped,
+                "This step does nothing",
+                |_cx| async move { StepSkipped::new((), "Step skipped").into() },
+            )
             .register();
     }
 }
@@ -336,7 +333,7 @@ fn register_nested_write_steps<'a>(
                         }
                     }
 
-                    StepResult::success((), ())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
