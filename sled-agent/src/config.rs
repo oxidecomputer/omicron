@@ -41,6 +41,7 @@ pub struct SoftPortConfig {
 
 /// Configuration for a sled agent
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
@@ -48,6 +49,8 @@ pub struct Config {
     pub sled_mode: SledMode,
     // TODO: Remove once this can be auto-detected.
     pub sidecar_revision: SidecarRevision,
+    /// Optional percentage of DRAM to reserve for guest memory
+    pub vmm_reservoir_percentage: Option<u8>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
     /// Optional list of zpools to be used as "discovered disks".

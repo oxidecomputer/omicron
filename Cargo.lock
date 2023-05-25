@@ -1990,7 +1990,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#61c035b1f70d7b2c2e2ee2481e850105bf15ff31"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2033,7 +2033,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#61c035b1f70d7b2c2e2ee2481e850105bf15ff31"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3168,6 +3168,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bhyve_api",
  "camino",
  "cfg-if 1.0.0",
  "futures",
