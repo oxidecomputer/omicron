@@ -379,10 +379,8 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-# XXX-dap
-[patch.crates-io]
-steno = { path = "../steno-3.1" }
-steno32 = { package = "steno", path = "../steno" }
+#[patch.crates-io]
+#steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }
 #[patch."https://github.com/oxidecomputer/crucible"]
