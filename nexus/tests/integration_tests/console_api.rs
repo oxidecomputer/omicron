@@ -32,7 +32,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // logout always gives the same response whether you have a session or not
-    RequestBuilder::new(&testctx, Method::POST, "/logout")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
         .expect_status(Some(StatusCode::NO_CONTENT))
         .expect_response_header(
             header::SET_COOKIE,
@@ -114,7 +114,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to restore Silo policy");
 
     // logout with an actual session should delete the session in the db
-    RequestBuilder::new(&testctx, Method::POST, "/logout")
+    RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
         .header(header::COOKIE, &session_token)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
