@@ -281,10 +281,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
         user_password_hash,
     };
 
-    let tls_certificates = match initial_cert {
-        Some(cert) => vec![cert],
-        None => vec![],
-    };
+    let tls_certificates = initial_cert.into_iter().collect();
 
     let server = N::start(
         nexus_internal,

@@ -109,10 +109,8 @@ impl ExternalEndpoints {
                     }
                     Entry::Occupied(occ) => {
                         let first_silo_id = *occ.get();
-                        let first_silo_name = silo_names
-                            .get(&first_silo_id)
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| "<unknown>".to_string());
+                        let first_silo_name =
+                            silo_names.get(&first_silo_id).unwrap().to_string();
                         warnings.push(ExternalEndpointError::DupDnsName {
                             dup_silo_id: s.id(),
                             dup_silo_name: s.name().to_string(),
@@ -177,18 +175,17 @@ impl ExternalEndpoints {
                             tls_certs: vec![],
                         })
                     });
+
+                if silo_info.tls_certs.is_empty() {
+                    warnings.push(ExternalEndpointError::NoSiloCerts {
+                        silo_id,
+                        dns_name: dns_name.clone(),
+                    })
+                }
+
                 (dns_name, silo_info)
             })
             .collect();
-
-        for (dns_name, silo_dns_cert) in &by_dns_name {
-            if silo_dns_cert.tls_certs.is_empty() {
-                warnings.push(ExternalEndpointError::NoSiloCerts {
-                    silo_id: silo_dns_cert.silo_id,
-                    dns_name: dns_name.clone(),
-                })
-            }
-        }
 
         if by_dns_name.is_empty() {
             warnings.push(ExternalEndpointError::NoEndpoints);
@@ -444,7 +441,7 @@ pub async fn read_all_endpoints(
         limit: NonZeroU32::new(MAX).unwrap(),
         direction: dropshot::PaginationOrder::Ascending,
     };
-    let pagbyid = PaginatedBy::Id(pagparams_id.clone());
+    let pagbyid = PaginatedBy::Id(pagparams_id);
     let pagparams_name = DataPageParams {
         marker: None,
         limit: NonZeroU32::new(MAX).unwrap(),
@@ -493,7 +490,7 @@ pub async fn read_all_endpoints(
     if certs.len() >= max {
         error!(
             &opctx.log,
-            "reading endpoints: expected at most {} external DNS zones, but \
+            "reading endpoints: expected at most {} certificates, but \
             found at least {}.  TLS may not work on some Silos' external \
             endpoints.",
             MAX,
@@ -530,9 +527,8 @@ impl NexusCertResolver {
         &self,
         server_name: Option<&str>,
     ) -> Result<Arc<ExternalEndpoint>, anyhow::Error> {
-        let server_name = match server_name {
-            Some(s) => s,
-            None => bail!("TLS session had no server name"),
+        let Some(server_name) = server_name else {
+            bail!("TLS session had no server name")
         };
 
         let config_ref = self.config_rx.borrow();
