@@ -199,18 +199,35 @@ impl RunningZone {
             }
         })?;
 
+        let site_profile_xml_exists =
+            std::path::Path::new(&zone.site_profile_xml_path()).exists();
+
         let running_zone = RunningZone { running: true, inner: zone };
 
         // Make sure the control vnic has an IP MTU of 9000 inside the zone
         const CONTROL_VNIC_MTU: usize = 9000;
         let vnic = running_zone.inner.control_vnic.name().to_string();
-        let commands = vec![
-            vec![
+
+        // If the zone is self-assembling, then SMF service(s) inside the zone
+        // will be creating the listen address for the zone's service(s). This
+        // will create IP interfaces, and means that `create-if` here will fail
+        // due to the interface already existing. Checking the output of
+        // `show-if` is also problematic due to TOCTOU. Use the check for the
+        // existence of site.xml, which means the zone is performing this
+        // self-assembly, and skip create-if if so.
+
+        if !site_profile_xml_exists {
+            let args = vec![
                 IPADM.to_string(),
                 "create-if".to_string(),
                 "-t".to_string(),
                 vnic.clone(),
-            ],
+            ];
+
+            running_zone.run_cmd(args)?;
+        }
+
+        let commands = vec![
             vec![
                 IPADM.to_string(),
                 "set-ifprop".to_string(),
@@ -752,5 +769,11 @@ impl InstalledZone {
             opte_ports,
             links,
         })
+    }
+
+    pub fn site_profile_xml_path(&self) -> Utf8PathBuf {
+        let mut path: Utf8PathBuf = self.zonepath().into();
+        path.push("root/var/svc/profile/site.xml");
+        path
     }
 }
