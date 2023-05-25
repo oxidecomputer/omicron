@@ -49,10 +49,7 @@ pub enum SagaState {
     /// One or more saga actions failed and the saga was successfully unwound
     /// (i.e., undo actions were executed for any actions that were completed).
     /// The saga is no longer running.
-    Failed {
-        error_node_name: steno::NodeName,
-        error_info: SagaErrorInfo,
-    },
+    Failed { error_node_name: steno::NodeName, error_info: SagaErrorInfo },
     /// One or more saga actions failed, *and* one or more undo actions failed
     /// during unwinding.  State managed by the saga may now be inconsistent.
     /// Support may be required to repair the state.  The saga is no longer
