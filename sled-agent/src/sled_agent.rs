@@ -4,7 +4,7 @@
 
 //! Sled agent implementation
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::config::Config;
 use crate::instance_manager::InstanceManager;
 use crate::nexus::{LazyNexusClient, NexusRequestQueue};
@@ -191,7 +191,7 @@ impl SledAgent {
         config: &Config,
         log: Logger,
         lazy_nexus_client: LazyNexusClient,
-        request: SledAgentRequest,
+        request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
     ) -> Result<SledAgent, Error> {
@@ -239,6 +239,9 @@ impl SledAgent {
             })
             .await?;
 
+        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
+            .map_err(|e| Error::Hardware(e))?;
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             lazy_nexus_client.clone(),
@@ -246,8 +249,23 @@ impl SledAgent {
             port_manager.clone(),
         )?;
 
-        let hardware = HardwareManager::new(&parent_log, services.sled_mode())
-            .map_err(|e| Error::Hardware(e))?;
+        match config.vmm_reservoir_percentage {
+            Some(sz) if sz > 0 && sz < 100 => {
+                instances.set_reservoir_size(&hardware, sz).map_err(|e| {
+                    warn!(log, "Failed to set VMM reservoir size: {e}");
+                    e
+                })?;
+            }
+            Some(sz) if sz == 0 => {
+                warn!(log, "Not using VMM reservoir (size 0 bytes requested)");
+            }
+            None => {
+                warn!(log, "Not using VMM reservoir");
+            }
+            Some(sz) => {
+                panic!("invalid requested VMM reservoir percentage: {}", sz);
+            }
+        }
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
@@ -408,6 +426,7 @@ impl SledAgent {
             self.inner.hardware.online_processor_count();
         let usable_physical_ram =
             self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
 
         let log = log.clone();
         let fut = async move {
@@ -444,6 +463,9 @@ impl SledAgent {
                             usable_hardware_threads,
                             usable_physical_ram: nexus_client::types::ByteCount(
                                 usable_physical_ram,
+                            ),
+                            reservoir_size: nexus_client::types::ByteCount(
+                                reservoir_size.to_bytes(),
                             ),
                         },
                     )

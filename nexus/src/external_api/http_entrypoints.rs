@@ -56,15 +56,22 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::AddressLot;
+use omicron_common::api::external::AddressLotBlock;
+use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
+use omicron_common::api::external::SwitchPort;
+use omicron_common::api::external::SwitchPortSettings;
+use omicron_common::api::external::SwitchPortSettingsInfo;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -73,6 +80,7 @@ use ref_cast::RefCast;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -209,6 +217,25 @@ pub fn external_api() -> NexusApiDescription {
         api.register(current_user_ssh_key_view)?;
         api.register(current_user_ssh_key_create)?;
         api.register(current_user_ssh_key_delete)?;
+
+        // Customer network integration
+        api.register(networking_address_lot_create)?;
+        api.register(networking_address_lot_delete)?;
+        api.register(networking_address_lot_list)?;
+        api.register(networking_address_lot_block_list)?;
+
+        api.register(networking_loopback_address_create)?;
+        api.register(networking_loopback_address_delete)?;
+        api.register(networking_loopback_address_list)?;
+
+        api.register(networking_switch_port_settings_create)?;
+        api.register(networking_switch_port_settings_delete)?;
+        api.register(networking_switch_port_settings_list)?;
+        api.register(networking_switch_port_settings_info)?;
+
+        api.register(networking_switch_port_list)?;
+        api.register(networking_switch_port_apply_settings)?;
+        api.register(networking_switch_port_clear_settings)?;
 
         // Fleet-wide API operations
         api.register(silo_list)?;
@@ -2236,6 +2263,416 @@ async fn certificate_delete(
             )
             .await?;
         Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create an address lot.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/address-lot",
+    tags = ["system"],
+}]
+async fn networking_address_lot_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_address_lot: TypedBody<params::AddressLotCreate>,
+) -> Result<HttpResponseCreated<AddressLotCreateResponse>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = new_address_lot.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.address_lot_create(&opctx, params).await?;
+
+        let lot: AddressLot = result.lot.into();
+        let blocks: Vec<AddressLotBlock> =
+            result.blocks.iter().map(|b| b.clone().into()).collect();
+
+        Ok(HttpResponseCreated(AddressLotCreateResponse { lot, blocks }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete an address lot.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/address-lot/{address_lot}",
+    tags = ["system"],
+}]
+async fn networking_address_lot_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::AddressLotPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
+        nexus.address_lot_delete(&opctx, &address_lot_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List address lots.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/address-lot",
+    tags = ["system"],
+}]
+async fn networking_address_lot_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<AddressLot>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let lots = nexus
+            .address_lot_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            lots,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List the blocks in an address lot.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks",
+    tags = ["system"],
+}]
+async fn networking_address_lot_block_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::AddressLotPath>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<AddressLotBlock>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let address_lot_lookup =
+            nexus.address_lot_lookup(&opctx, path.address_lot)?;
+        let blocks = nexus
+            .address_lot_block_list(&opctx, &address_lot_lookup, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            blocks,
+            &|_, x: &AddressLotBlock| x.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create a loopback address.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/loopback-address",
+    tags = ["system"],
+}]
+async fn networking_loopback_address_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_loopback_address: TypedBody<params::LoopbackAddressCreate>,
+) -> Result<HttpResponseCreated<LoopbackAddress>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = new_loopback_address.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.loopback_address_create(&opctx, params).await?;
+
+        let addr: LoopbackAddress = result.into();
+
+        Ok(HttpResponseCreated(addr))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LoopbackAddressPath {
+    /// The rack to use when selecting the loopback address.
+    pub rack_id: Uuid,
+
+    /// The switch location to use when selecting the loopback address.
+    pub switch_location: Name,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub address: IpAddr,
+
+    /// The IP address and subnet mask to use when selecting the loopback
+    /// address.
+    pub subnet_mask: u8,
+}
+
+/// Delete a loopback address.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+    tags = ["system"],
+}]
+async fn networking_loopback_address_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<LoopbackAddressPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let addr = match IpNetwork::new(path.address, path.subnet_mask) {
+            Ok(addr) => Ok(addr),
+            Err(_) => Err(HttpError::for_bad_request(
+                None,
+                "invalid ip address".into(),
+            )),
+        }?;
+        nexus
+            .loopback_address_delete(
+                &opctx,
+                path.rack_id,
+                path.switch_location.clone(),
+                addr.into(),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get loopback addresses, optionally filtering by id.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/loopback-address",
+    tags = ["system"],
+}]
+async fn networking_loopback_address_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<LoopbackAddress>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let addrs = nexus
+            .loopback_address_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            addrs,
+            &|_, x: &LoopbackAddress| x.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create port settings.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system"],
+}]
+async fn networking_switch_port_settings_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    new_settings: TypedBody<params::SwitchPortSettingsCreate>,
+) -> Result<HttpResponseCreated<SwitchPortSettingsInfo>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let params = new_settings.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let result = nexus.switch_port_settings_create(&opctx, params).await?;
+
+        let settings: SwitchPortSettingsInfo = result.into();
+        Ok(HttpResponseCreated(settings))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete port settings.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system"],
+}]
+async fn networking_switch_port_settings_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::SwitchPortSettingsSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let selector = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.switch_port_settings_delete(&opctx, &selector).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List port settings.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system"],
+}]
+async fn networking_switch_port_settings_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<
+        PaginatedByNameOrId<params::SwitchPortSettingsSelector>,
+    >,
+) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let settings = nexus
+            .switch_port_settings_list(&opctx, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            settings,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get information about a switch port.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/switch-port-settings/{port}/info",
+    tags = ["system"],
+}]
+async fn networking_switch_port_settings_info(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+) -> Result<HttpResponseOk<SwitchPortSettingsInfo>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = path_params.into_inner().port;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
+        Ok(HttpResponseOk(settings.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List switch ports.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/switch-port",
+    tags = ["system"],
+}]
+async fn networking_switch_port_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById<params::SwitchPortPageSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<SwitchPort>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let addrs = nexus
+            .switch_port_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(|p| p.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            addrs,
+            &|_, x: &SwitchPort| x.id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Apply switch port settings.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/hardware/switch-port/{port}/settings",
+    tags = ["system"],
+}]
+async fn networking_switch_port_apply_settings(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPortPathSelector>,
+    query_params: Query<params::SwitchPortSelector>,
+    settings_body: TypedBody<params::SwitchPortApplySettings>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let port = path_params.into_inner().port;
+        let query = query_params.into_inner();
+        let settings = settings_body.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .switch_port_apply_settings(&opctx, &port, &query, &settings)
+            .await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Clear switch port settings.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/hardware/switch-port/{port}/settings",
+    tags = ["system"],
+}]
+async fn networking_switch_port_clear_settings(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SwitchPortPathSelector>,
+    query_params: Query<params::SwitchPortSelector>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let port = path_params.into_inner().port;
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+        Ok(HttpResponseUpdatedNoContent {})
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

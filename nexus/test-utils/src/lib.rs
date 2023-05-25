@@ -50,6 +50,8 @@ pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+/// The reported amount of VMM reservoir RAM for an emulated sled agent.
+pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// Password for the user created by the test suite
 ///
@@ -402,6 +404,7 @@ pub async fn start_sled_agent(
         hardware: sim::ConfigHardware {
             hardware_threads: TEST_HARDWARE_THREADS,
             physical_ram: TEST_PHYSICAL_RAM,
+            reservoir_ram: TEST_RESERVOIR_RAM,
         },
     };
 

@@ -110,6 +110,10 @@ impl Server {
                             config.hardware.physical_ram,
                         )
                         .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)
@@ -327,6 +331,8 @@ impl Server {
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
             recovery_silo,
+            external_port_count: 1,
+            rack_network_config: None,
         };
 
         Ok((

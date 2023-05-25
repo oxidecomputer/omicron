@@ -13,6 +13,8 @@ use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::params::SetVirtualNetworkInterfaceHost;
 use illumos_utils::opte::PortManager;
+use illumos_utils::vmm_reservoir;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -35,6 +37,9 @@ pub enum Error {
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
 
+    #[error("Failed to create reservoir: {0}")]
+    Reservoir(#[from] vmm_reservoir::Error),
+
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
 }
@@ -42,6 +47,9 @@ pub enum Error {
 struct InstanceManagerInternal {
     log: Logger,
     lazy_nexus_client: LazyNexusClient,
+
+    /// Last set size of the VMM reservoir (in bytes)
+    reservoir_size: Mutex<ByteCount>,
 
     // TODO: If we held an object representing an enum of "Created OR Running"
     // instance, we could avoid the methods within "instance.rs" that panic
@@ -70,11 +78,65 @@ impl InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log: log.new(o!("component" => "InstanceManager")),
                 lazy_nexus_client,
+
+                // no reservoir size set on startup
+                reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 instances: Mutex::new(BTreeMap::new()),
                 vnic_allocator: VnicAllocator::new("Instance", etherstub),
                 port_manager,
             }),
         })
+    }
+
+    /// Sets the VMM reservoir size to the requested (nonzero) percentage of
+    /// usable physical RAM, rounded down to nearest aligned size required by
+    /// the control plane.
+    pub fn set_reservoir_size(
+        &self,
+        hardware: &sled_hardware::HardwareManager,
+        target_percent: u8,
+    ) -> Result<(), Error> {
+        assert!(
+            target_percent > 0 && target_percent < 100,
+            "target_percent {} must be nonzero and < 100",
+            target_percent
+        );
+
+        let req_bytes = (hardware.usable_physical_ram_bytes() as f64
+            * (target_percent as f64 / 100.0))
+            .floor() as u64;
+        let req_bytes_aligned = vmm_reservoir::align_reservoir_size(req_bytes);
+
+        if req_bytes_aligned == 0 {
+            warn!(
+                self.inner.log,
+                "Requested reservoir size of {} bytes < minimum aligned size of {} bytes",
+                req_bytes, vmm_reservoir::RESERVOIR_SZ_ALIGN);
+            return Ok(());
+        }
+
+        // The max ByteCount value is i64::MAX, which is ~8 million TiB. As this
+        // value is a percentage of DRAM, constructing this should always work.
+        let reservoir_size = ByteCount::try_from(req_bytes_aligned).unwrap();
+        info!(
+            self.inner.log,
+            "Setting reservoir size to {} bytes \
+            ({}% of {} total = {} bytes requested)",
+            reservoir_size,
+            target_percent,
+            hardware.usable_physical_ram_bytes(),
+            req_bytes,
+        );
+        vmm_reservoir::ReservoirControl::set(reservoir_size)?;
+
+        *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
+
+        Ok(())
+    }
+
+    /// Returns the last-set size of the reservoir
+    pub fn reservoir_size(&self) -> ByteCount {
+        *self.inner.reservoir_size.lock().unwrap()
     }
 
     /// Ensures that the instance manager contains a registered instance with

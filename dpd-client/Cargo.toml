@@ -12,6 +12,10 @@ slog.workspace = true
 regress.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+ipnetwork.workspace = true
+http.workspace = true
+schemars.workspace = true
+rand.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true

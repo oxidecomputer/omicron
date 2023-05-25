@@ -41,6 +41,7 @@ use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
+mod address_lot;
 mod certificate;
 mod console_session;
 mod dataset;
@@ -70,14 +71,18 @@ mod sled_instance;
 mod snapshot;
 mod ssh_key;
 mod switch;
+mod switch_interface;
+mod switch_port;
 mod update;
 mod virtual_provisioning_collection;
 mod volume;
 mod vpc;
 mod zpool;
 
+pub use address_lot::AddressLotCreateResult;
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
+pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
 
@@ -221,6 +226,12 @@ impl DataStore {
     }
 }
 
+pub enum UpdatePrecondition<T> {
+    DontCare,
+    Null,
+    Value(T),
+}
+
 /// Constructs a DataStore for use in test suites that has preloaded the
 /// built-in users, roles, and role assignments that are needed for basic
 /// operation
@@ -313,6 +324,8 @@ mod test {
             is_scrimlet: false,
             usable_hardware_threads: 4,
             usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
+                .unwrap(),
+            reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
                 .unwrap(),
         }
     }

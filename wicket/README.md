@@ -104,19 +104,25 @@ know when a screen animation is ongoing, and so it forwards all ticks to the
 Use these to test out particular scenarios with wicket by hand. (Feel free to
 add more as needed!)
 
-## Adding a simulated update failure
+## Adding simulated failures to operations
 
-Add a simulated failure to wicket.
+Add a simulated failure while starting an update:
 
 ```
-WICKET_UPDATE_TEST_ERROR=<value> cargo run --bin wicket
+WICKET_TEST_START_UPDATE_ERROR=<value> cargo run --bin wicket
+```
+
+Add a simulated failure while clearing update state:
+
+```
+WICKET_TEST_CLEAR_UPDATE_STATE_ERROR=<value> cargo run --bin wicket
 ```
 
 Here, `<value>` can be:
 
-* `start_failed`: Simulate a failure while starting an update.
-* `start_timeout`: Simulate a timeout while starting an update.
-  * `start_timeout:<secs>`: Specify a custom number of seconds (15 seconds by
+* `fail`: Simulate a failure for this operation.
+* `timeout`: Simulate a timeout for this operation.
+  * `timeout:<secs>`: Specify a custom number of seconds (15 seconds by
     default)
 * (implement more options as needed)
 
