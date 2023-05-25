@@ -232,13 +232,15 @@ impl InventoryView {
         state: &State,
         frame: &mut Frame<'_>,
     ) {
-        let popup = self.ignition.popup(state.rack_state.selected);
         let full_screen = Rect {
             width: state.screen_width,
             height: state.screen_height,
             x: 0,
             y: 0,
         };
+        let popup_builder =
+            self.ignition.to_popup_builder(state.rack_state.selected);
+        let popup = popup_builder.build(full_screen);
         frame.render_widget(popup, full_screen);
     }
 

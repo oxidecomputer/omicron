@@ -4,7 +4,7 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DatasetEnsureBody, ServiceType, ServiceZoneRequest, ServiceZoneService,
@@ -228,7 +228,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage: &StorageResources,
-        sleds: &HashMap<SocketAddrV6, SledAgentRequest>,
+        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         let dns_subnets = reserved_rack_subnet.get_dns_subnets();

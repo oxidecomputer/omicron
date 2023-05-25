@@ -9,6 +9,8 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
+mod address_lot;
+mod bgp;
 mod block_size;
 mod bytecount;
 mod certificate;
@@ -42,6 +44,8 @@ mod physical_disk_kind;
 mod producer_endpoint;
 mod project;
 mod semver_version;
+mod switch_interface;
+mod switch_port;
 mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
@@ -91,6 +95,8 @@ mod db {
 
 pub use self::macaddr::*;
 pub use self::unsigned::*;
+pub use address_lot::*;
+pub use bgp::*;
 pub use block_size::*;
 pub use bytecount::*;
 pub use certificate::*;
@@ -141,6 +147,8 @@ pub use sled_resource_kind::*;
 pub use snapshot::*;
 pub use ssh_key::*;
 pub use switch::*;
+pub use switch_interface::*;
+pub use switch_port::*;
 pub use system_update::*;
 pub use update_artifact::*;
 pub use user_builtin::*;

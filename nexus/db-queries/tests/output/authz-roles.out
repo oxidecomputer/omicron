@@ -852,6 +852,34 @@ resource: UpdateDeployment id "c617a035-7c42-49ff-a36a-5dfeee382832"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
+resource: AddressLot id "43259fdc-c5c0-4a21-8b1d-2f673ad00d93"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
+resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  fleet-collaborator               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+
 ACTIONS:
 
    Q = Query

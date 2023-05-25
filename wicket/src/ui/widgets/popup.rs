@@ -12,33 +12,70 @@ use tui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::ui::defaults::dimensions::RectExt;
-use crate::ui::defaults::{colors::*, style};
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Fade};
+use crate::ui::{defaults::dimensions::RectExt, wrap::wrap_text};
+use crate::ui::{
+    defaults::{colors::*, style},
+    wrap::wrap_line,
+};
 use std::iter;
 
 const BUTTON_HEIGHT: u16 = 3;
 
+#[derive(Clone, Debug)]
 pub struct ButtonText<'a> {
     pub instruction: &'a str,
     pub key: &'a str,
 }
 
 #[derive(Default)]
-pub struct Popup<'a> {
-    pub header: Text<'a>,
+pub struct PopupBuilder<'a> {
+    pub header: Spans<'a>,
     pub body: Text<'a>,
     pub buttons: Vec<ButtonText<'a>>,
 }
 
-impl Popup<'_> {
+impl<'a> PopupBuilder<'a> {
+    pub fn build(&self, full_screen: Rect) -> Popup<'_> {
+        Popup::new(full_screen, &self.header, &self.body, self.buttons.clone())
+    }
+}
+
+#[derive(Default)]
+pub struct Popup<'a> {
+    // Fields are private because we always want users to go through the
+    // constructor.
+
+    // This is the header as passed in, except wrapped.
+    wrapped_header: Text<'a>,
+
+    // We store the *wrapped body* rather than the unwrapped body to make
+    // `self.height()` and `self.width()` be computed correctly.
+    wrapped_body: Text<'a>,
+    buttons: Vec<ButtonText<'a>>,
+}
+
+impl<'a> Popup<'a> {
+    fn new(
+        full_screen: Rect,
+        header: &'a Spans<'_>,
+        body: &'a Text<'_>,
+        buttons: Vec<ButtonText<'a>>,
+    ) -> Self {
+        let wrapped_header =
+            wrap_line(header, Self::default_wrap_options(full_screen.width));
+        let wrapped_body =
+            wrap_text(body, Self::default_wrap_options(full_screen.width));
+        Self { wrapped_header, wrapped_body, buttons }
+    }
+
     pub fn height(&self) -> u16 {
         let button_height: u16 =
             if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };
         let bottom_margin: u16 = 1;
         let borders: u16 = 3;
-        u16::try_from(self.header.height()).unwrap()
-            + u16::try_from(self.body.height()).unwrap()
+        u16::try_from(self.wrapped_header.height()).unwrap()
+            + u16::try_from(self.wrapped_body.height()).unwrap()
             + button_height
             + bottom_margin
             + borders
@@ -46,12 +83,15 @@ impl Popup<'_> {
 
     pub fn width(&self) -> u16 {
         let borders: u16 = 2;
-        let right_margin: u16 = 3;
-        let body_width =
-            u16::try_from(self.body.width()).unwrap() + borders + right_margin;
-        let header_width = u16::try_from(self.header.width()).unwrap()
+        // Left padding is taken care of by prepending spaces to the body. Right
+        // padding is added here.
+        let right_padding: u16 = 1;
+        let body_width = u16::try_from(self.wrapped_body.width()).unwrap()
             + borders
-            + right_margin;
+            + right_padding;
+        let header_width = u16::try_from(self.wrapped_header.width()).unwrap()
+            + borders
+            + right_padding;
         let width = u16::max(body_width, header_width);
         u16::max(width, self.button_width())
     }
@@ -81,7 +121,8 @@ impl Popup<'_> {
     /// Returns the maximum width that this popup can have, not including outer
     /// borders.
     pub fn max_content_width(full_screen_width: u16) -> u16 {
-        Self::max_width(full_screen_width).saturating_sub(2)
+        // -2 for borders, -2 for padding
+        Self::max_width(full_screen_width).saturating_sub(4)
     }
 
     /// Returns the maximum height that this popup can have, including outer
@@ -93,13 +134,14 @@ impl Popup<'_> {
     }
 
     /// Returns the wrap options that should be used in most cases for popups.
-    pub fn default_wrap_options(
+    fn default_wrap_options(
         full_screen_width: u16,
     ) -> crate::ui::wrap::Options<'static> {
         crate::ui::wrap::Options {
             width: Popup::max_content_width(full_screen_width) as usize,
-            initial_indent: Span::raw(""),
-            subsequent_indent: Span::raw(""),
+            // The indent here is to add 1 character of padding.
+            initial_indent: Span::raw(" "),
+            subsequent_indent: Span::raw(" "),
             break_words: true,
         }
     }
@@ -133,7 +175,7 @@ impl Widget for Popup<'_> {
             .constraints(
                 [
                     // Top titlebar
-                    Constraint::Length(3),
+                    Constraint::Length(self.wrapped_header.height() as u16 + 2),
                     Constraint::Min(0),
                     // Buttons at the bottom will be accounted for while
                     // rendering the body
@@ -142,7 +184,7 @@ impl Widget for Popup<'_> {
             )
             .split(rect);
 
-        let header = Paragraph::new(self.header).block(block.clone());
+        let header = Paragraph::new(self.wrapped_header).block(block.clone());
         header.render(chunks[0], buf);
 
         block
@@ -150,7 +192,7 @@ impl Widget for Popup<'_> {
             .render(chunks[1], buf);
 
         // NOTE: wrapping should be performed externally, by e.g. wrap_text.
-        let body = Paragraph::new(self.body);
+        let body = Paragraph::new(self.wrapped_body);
 
         let mut body_rect = chunks[1];
         // Ensure we're inside the outer border.

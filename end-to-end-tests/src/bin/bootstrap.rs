@@ -27,9 +27,10 @@ async fn main() -> Result<()> {
     )
     .await?;
 
+    let (first, last) = get_system_ip_pool().await?;
+
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool...");
-    let (first, last) = get_system_ip_pool().await?;
     client
         .ip_pool_range_add()
         .pool("default")

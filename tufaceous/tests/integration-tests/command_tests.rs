@@ -54,7 +54,7 @@ fn test_init_and_add() -> Result<()> {
 
     // Now read the repository and ensure the list of expected artifacts.
     let repo_path: Utf8PathBuf = tempdir.path().join("repo").try_into()?;
-    let repo = OmicronRepo::load(&logctx.log, &repo_path)?;
+    let repo = OmicronRepo::load_untrusted(&logctx.log, &repo_path)?;
 
     let artifacts = repo.read_artifacts()?;
     assert_eq!(

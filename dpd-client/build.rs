@@ -84,7 +84,10 @@ fn main() -> Result<()> {
                 |state: &crate::ClientState, result: &Result<_, _>| {
                     slog::debug!(state.log, "client response"; "result" => ?result);
                 }
-            }),
+            })
+            .with_replacement("Ipv4Cidr", "crate::Ipv4Cidr", std::iter::empty())
+            .with_replacement("Ipv6Cidr", "crate::Ipv6Cidr", std::iter::empty())
+            .with_replacement("Cidr", "crate::Cidr", std::iter::empty()),
     )
     .generate_tokens(&spec)
     .with_context(|| {

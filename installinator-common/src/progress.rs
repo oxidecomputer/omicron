@@ -33,7 +33,7 @@ impl StepSpec for InstallinatorSpec {
     type StepMetadata = InstallinatorStepMetadata;
     type ProgressMetadata = InstallinatorProgressMetadata;
     type CompletionMetadata = InstallinatorCompletionMetadata;
-    type SkippedMetadata = ();
+    type SkippedMetadata = serde_json::Value;
     type Error = anyhow::Error;
 }
 

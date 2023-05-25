@@ -316,16 +316,19 @@ mod tests {
                     },
                     last_attempt: 1,
                     last_outcome: StepOutcome::Success {
-                        metadata: InstallinatorCompletionMetadata::Write {
-                            output: WriteOutput {
-                                slots_attempted: vec![M2Slot::A, M2Slot::B]
-                                    .into_iter()
-                                    .collect(),
-                                slots_written: vec![M2Slot::A]
-                                    .into_iter()
-                                    .collect(),
+                        message: Some("Message".into()),
+                        metadata: Some(
+                            InstallinatorCompletionMetadata::Write {
+                                output: WriteOutput {
+                                    slots_attempted: vec![M2Slot::A, M2Slot::B]
+                                        .into_iter()
+                                        .collect(),
+                                    slots_written: vec![M2Slot::A]
+                                        .into_iter()
+                                        .collect(),
+                                },
                             },
-                        },
+                        ),
                     },
                     step_elapsed: Duration::from_secs(1),
                     attempt_elapsed: Duration::from_secs(1),
