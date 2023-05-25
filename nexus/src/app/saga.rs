@@ -166,7 +166,7 @@ impl super::Nexus {
 
                 error!(log, "saga stuck";
                     "saga_id" => runnable_saga.id.to_string(),
-                    "error" => format!("{:#}", error),
+                    "error" => #%error,
                 );
             }
 

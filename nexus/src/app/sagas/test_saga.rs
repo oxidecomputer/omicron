@@ -98,7 +98,7 @@ async fn test_saga_stuck(cptestctx: &ControlPlaneTestContext) {
                 internal_message,
                 "UNDO ACTION failed (node \"n1\", error undo action failed \
                 permanently: {\n  \"message\": \"undo action attempt 1: \
-                injected error\"\n}) after: saga ACTION error at node \
+                error injected\"\n}) after: saga ACTION error at node \
                 \"n2\": error injected"
             );
         }
