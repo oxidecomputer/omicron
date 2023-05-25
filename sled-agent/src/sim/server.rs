@@ -110,6 +110,10 @@ impl Server {
                             config.hardware.physical_ram,
                         )
                         .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)

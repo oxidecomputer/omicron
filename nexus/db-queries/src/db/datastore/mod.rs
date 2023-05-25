@@ -326,6 +326,8 @@ mod test {
             usable_hardware_threads: 4,
             usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
                 .unwrap(),
+            reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
+                .unwrap(),
         }
     }
 
