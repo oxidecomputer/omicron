@@ -59,6 +59,54 @@
         }
       }
     },
+    "/clear-update-state/{type}/{slot}": {
+      "post": {
+        "summary": "Resets update state for a sled.",
+        "description": "Use this to clear update state after a failed update.",
+        "operationId": "post_clear_update_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/ignition/{type}/{slot}/{command}": {
       "post": {
         "summary": "Send an ignition command targeting a specific SP.",
@@ -368,6 +416,20 @@
             ]
           }
         ]
+      },
+      "ClearUpdateStateOptions": {
+        "type": "object",
+        "properties": {
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the clear update state operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        }
       },
       "Duration": {
         "type": "object",
@@ -1294,14 +1356,6 @@
               "error"
             ]
           }
-        ]
-      },
-      "SpComponentUpdateStage": {
-        "type": "string",
-        "enum": [
-          "sending",
-          "preparing",
-          "writing"
         ]
       },
       "SpIdentifier": {
@@ -2996,14 +3050,10 @@
                 "enum": [
                   "sp_component_update"
                 ]
-              },
-              "stage": {
-                "$ref": "#/components/schemas/SpComponentUpdateStage"
               }
             },
             "required": [
-              "id",
-              "stage"
+              "id"
             ]
           },
           {
@@ -3095,13 +3145,13 @@
       "UpdateTestError": {
         "oneOf": [
           {
-            "description": "Simulate an error where an update fails to start.",
+            "description": "Simulate an error where the operation fails to complete.",
             "type": "object",
             "properties": {
               "kind": {
                 "type": "string",
                 "enum": [
-                  "start_failed"
+                  "fail"
                 ]
               }
             },
@@ -3110,7 +3160,7 @@
             ]
           },
           {
-            "description": "Simulate an issue where the start operation times out.",
+            "description": "Simulate an issue where the operation times out.",
             "type": "object",
             "properties": {
               "content": {
@@ -3130,7 +3180,7 @@
               "kind": {
                 "type": "string",
                 "enum": [
-                  "start_timeout"
+                  "timeout"
                 ]
               }
             },

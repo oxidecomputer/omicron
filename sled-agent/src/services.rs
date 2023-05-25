@@ -25,6 +25,7 @@
 //! - [ServiceManager::activate_switch] exposes an API to specifically enable
 //! or disable (via [ServiceManager::deactivate_switch]) the switch zone.
 
+use crate::config::SidecarRevision;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::params::{
     DendriteAsic, ServiceEnsureBody, ServiceType, ServiceZoneRequest,
@@ -176,6 +177,9 @@ pub enum Error {
 
     #[error("Serde error: {0}")]
     SerdeError(#[from] serde_json::Error),
+
+    #[error("Sidecar revision error")]
+    SidecarRevision(#[from] anyhow::Error),
 }
 
 impl Error {
@@ -201,11 +205,11 @@ pub struct Config {
     pub sled_id: Uuid,
 
     /// Identifies the revision of the sidecar to be used.
-    pub sidecar_revision: String,
+    pub sidecar_revision: SidecarRevision,
 }
 
 impl Config {
-    pub fn new(sled_id: Uuid, sidecar_revision: String) -> Self {
+    pub fn new(sled_id: Uuid, sidecar_revision: SidecarRevision) -> Self {
         Self { sled_id, sidecar_revision }
     }
 }
@@ -297,8 +301,8 @@ pub struct ServiceManagerInner {
     sled_mode: SledMode,
     skip_timesync: Option<bool>,
     time_synced: AtomicBool,
-    sidecar_revision: String,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
+    sidecar_revision: SidecarRevision,
     // Zones representing running services
     zones: Mutex<Vec<RunningZone>>,
     // Zones representing services which own datasets
@@ -355,7 +359,7 @@ impl ServiceManager {
         bootstrap_etherstub: Etherstub,
         sled_mode: SledMode,
         skip_timesync: Option<bool>,
-        sidecar_revision: String,
+        sidecar_revision: SidecarRevision,
         switch_zone_bootstrap_address: Ipv6Addr,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageManager,
@@ -757,14 +761,6 @@ impl ServiceManager {
             })?;
 
             // We also need to update the switch with the NAT mappings
-            let nat_target = dpd_client::types::NatTarget {
-                inner_mac: dpd_client::types::MacAddr {
-                    a: port.0.mac().into_array(),
-                },
-                internal_ip: *underlay_address,
-                vni: port.0.vni().as_u32().into(),
-            };
-
             let (target_ip, first_port, last_port) = match snat {
                 Some(s) => (s.ip, s.first_port, s.last_port),
                 None => (external_ips[0], 0, u16::MAX),
@@ -777,29 +773,22 @@ impl ServiceManager {
                     self.inner.log, "creating NAT entry for service";
                     "service" => ?svc,
                 );
-                match &target_ip {
-                    IpAddr::V4(ip) => {
-                        dpd_client
-                            .nat_ipv4_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                    IpAddr::V6(ip) => {
-                        dpd_client
-                            .nat_ipv6_create(
-                                ip,
-                                first_port,
-                                last_port,
-                                &nat_target,
-                            )
-                            .await
-                    }
-                }
-                .map_err(BackoffError::transient)?;
+
+                dpd_client
+                    .ensure_nat_entry(
+                        &self.inner.log,
+                        target_ip.into(),
+                        dpd_client::types::MacAddr {
+                            a: port.0.mac().into_array(),
+                        },
+                        first_port,
+                        last_port,
+                        port.0.vni().as_u32(),
+                        underlay_address,
+                    )
+                    .await
+                    .map_err(BackoffError::transient)?;
+
                 Ok::<(), BackoffError<DpdError<DpdTypes::Error>>>(())
             };
             let log_failure = |error, _| {
@@ -1593,10 +1582,18 @@ impl ServiceManager {
                                 "config/port_config",
                                 "/opt/oxide/dendrite/misc/sidecar_config.toml",
                             )?;
-                            smfh.setprop(
-                                "config/board_rev",
-                                &self.inner.sidecar_revision,
-                            )?;
+                            let sidecar_revision =
+                                match self.inner.sidecar_revision {
+                                    SidecarRevision::Physical(ref rev) => rev,
+                                    _ => {
+                                        return Err(Error::SidecarRevision(
+                                            anyhow::anyhow!(
+                                            "expected physical sidecar revision"
+                                        ),
+                                        ))
+                                    }
+                                };
+                            smfh.setprop("config/board_rev", sidecar_revision)?;
                         }
                         DendriteAsic::TofinoStub => smfh.setprop(
                             "config/port_config",
@@ -1608,6 +1605,28 @@ impl ServiceManager {
                                 "config/uds_path",
                                 "/opt/softnpu/stuff",
                             )?;
+                            let s = match self.inner.sidecar_revision {
+                                SidecarRevision::Soft(ref s) => s,
+                                _ => {
+                                    return Err(Error::SidecarRevision(
+                                        anyhow::anyhow!(
+                                            "expected soft sidecar revision"
+                                        ),
+                                    ))
+                                }
+                            };
+                            smfh.setprop(
+                                "config/front_ports",
+                                &s.front_port_count.to_string(),
+                            )?;
+                            smfh.setprop(
+                                "config/rear_ports",
+                                &s.rear_port_count.to_string(),
+                            )?;
+                            smfh.setprop(
+                                "config/port_config",
+                                "/opt/oxide/dendrite/misc/softnpu_single_sled_config.toml",
+                            )?
                         }
                     };
                     smfh.refresh()?;
@@ -2402,7 +2421,7 @@ mod test {
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
-            |physical_link: &Etherstub, _, _, _| {
+            |physical_link: &Etherstub, _, _, _, _| {
                 assert_eq!(&physical_link.0, &UNDERLAY_ETHERSTUB_NAME);
                 Ok(())
             },
@@ -2521,7 +2540,9 @@ mod test {
         fn make_config(&self) -> Config {
             Config {
                 sled_id: Uuid::new_v4(),
-                sidecar_revision: "rev_whatever_its_a_test".to_string(),
+                sidecar_revision: SidecarRevision::Physical(
+                    "rev_whatever_its_a_test".to_string(),
+                ),
             }
         }
 
@@ -2553,8 +2574,8 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
-            "rev-test".to_string(),
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,
@@ -2599,8 +2620,8 @@ mod test {
             EtherstubVnic(UNDERLAY_ETHERSTUB_VNIC_NAME.to_string()),
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
-            None, // skip_timesync
-            "rev-test".to_string(),
+            Some(true),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,
@@ -2649,7 +2670,7 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,
@@ -2686,7 +2707,7 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,
@@ -2732,7 +2753,7 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,
@@ -2774,7 +2795,7 @@ mod test {
             Etherstub(BOOTSTRAP_ETHERSTUB_NAME.to_string()),
             SledMode::Auto,
             Some(true),
-            "rev-test".to_string(),
+            SidecarRevision::Physical("rev-test".to_string()),
             SWITCH_ZONE_BOOTSTRAP_IP,
             vec![],
             StorageManager::new(&log).await,

@@ -324,6 +324,15 @@
               "type": "string"
             }
           },
+          "rack_network_config": {
+            "nullable": true,
+            "description": "Initial rack network configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfig"
+              }
+            ]
+          },
           "rack_secret_threshold": {
             "description": "The minimum number of sleds required to unlock the rack secret.\n\nIf this value is less than 2, no rack secret will be created on startup; this is the typical case for single-server test/development.",
             "type": "integer",
@@ -353,6 +362,39 @@
           "rack_secret_threshold",
           "rack_subnet",
           "recovery_silo"
+        ]
+      },
+      "RackNetworkConfig": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "gateway_ip": {
+            "description": "Gateway address",
+            "type": "string"
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "uplink_ip": {
+            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
+            "type": "string"
+          },
+          "uplink_port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_ip",
+          "infra_ip_first",
+          "infra_ip_last",
+          "uplink_ip",
+          "uplink_port"
         ]
       },
       "RecoverySiloConfig": {

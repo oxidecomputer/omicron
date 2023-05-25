@@ -57,7 +57,7 @@
 use super::config::SetupServiceConfig as Config;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::params::BootstrapAddressDiscovery;
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
 use crate::ledger::{Ledger, Ledgerable};
 use crate::nexus::d2n_params;
@@ -69,7 +69,7 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::{
-    generate_rack_secret, Plan as SledPlan, PlanError as SledPlanError,
+    Plan as SledPlan, PlanError as SledPlanError,
 };
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
@@ -92,7 +92,6 @@ use sled_agent_client::{
 };
 use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
-use sprockets_host::Ed25519Certificate;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -148,7 +147,7 @@ pub enum SetupServiceError {
 // The workload / information allocated to a single sled.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 struct SledAllocation {
-    initialization_request: SledAgentRequest,
+    initialization_request: StartSledAgentRequest,
 }
 
 /// The interface to the Rack Setup Service.
@@ -172,11 +171,7 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        // TODO-cleanup: We should be collecting the device ID certs of all
-        // trust quorum members over the management network. Currently we don't
-        // have a management network, so we hard-code the list of members and
-        // accept it as a parameter instead.
-        member_device_id_certs: Vec<Ed25519Certificate>,
+        external_port_count: u8,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -185,7 +180,7 @@ impl RackSetupService {
                     &config,
                     &storage_resources,
                     local_bootstrap_agent,
-                    &member_device_id_certs,
+                    external_port_count,
                 )
                 .await
             {
@@ -543,6 +538,7 @@ impl ServiceInner {
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -754,6 +750,23 @@ impl ServiceInner {
             .into_iter()
             .map(Into::into)
             .collect();
+
+        let rack_network_config = match &config.rack_network_config {
+            Some(config) => {
+                let value = NexusTypes::RackNetworkConfig {
+                    gateway_ip: config.gateway_ip.clone(),
+                    infra_ip_first: config.infra_ip_first.clone(),
+                    infra_ip_last: config.infra_ip_last.clone(),
+                    uplink_ip: config.uplink_ip.clone(),
+                    uplink_port: config.uplink_port.clone(),
+                };
+                Some(value)
+            }
+            None => None,
+        };
+
+        info!(self.log, "rack_network_config: {:#?}", rack_network_config);
+
         let request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
@@ -762,6 +775,8 @@ impl ServiceInner {
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
+            external_port_count,
+            rack_network_config,
         };
 
         let notify_nexus = || async {
@@ -838,7 +853,7 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        member_device_id_certs: &[Ed25519Certificate],
+        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -876,7 +891,13 @@ impl ServiceInner {
             let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
-            self.handoff_to_nexus(&config, &sled_plan, &service_plan).await?;
+            self.handoff_to_nexus(
+                &config,
+                &sled_plan,
+                &service_plan,
+                external_port_count,
+            )
+            .await?;
             return Ok(());
         } else {
             info!(self.log, "RSS configuration has not been fully applied yet",);
@@ -927,44 +948,13 @@ impl ServiceInner {
         };
         let config = &plan.config;
 
-        // Generate our rack secret, unless we're in the single-sled case.
-        let mut maybe_rack_secret_shares = generate_rack_secret(
-            config.rack_secret_threshold,
-            member_device_id_certs,
-            &self.log,
-        )?;
-
-        // Confirm that the returned iterator (if we got one) is the length we
-        // expect.
-        if let Some(rack_secret_shares) = maybe_rack_secret_shares.as_ref() {
-            // TODO-cleanup Asserting here seems fine as long as
-            // `member_device_id_certs` is hard-coded from a config file, but
-            // once we start collecting them over the management network we
-            // should probably attach them at the type level to the bootstrap
-            // addrs, which would remove the need for this assertion.
-            assert_eq!(
-                rack_secret_shares.len(),
-                plan.sleds.len(),
-                concat!(
-                    "Number of trust quorum members does not match ",
-                    "number of sleds in the plan"
-                )
-            );
-        }
-
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
                 plan.sleds
                     .iter()
                     .map(move |(bootstrap_addr, initialization_request)| {
-                        (
-                            *bootstrap_addr,
-                            initialization_request.clone(),
-                            maybe_rack_secret_shares
-                                .as_mut()
-                                .map(|shares| shares.next().unwrap()),
-                        )
+                        (*bootstrap_addr, initialization_request.clone())
                     })
                     .collect(),
             )
@@ -1089,7 +1079,13 @@ impl ServiceInner {
 
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
-        self.handoff_to_nexus(&config, &plan, &service_plan).await?;
+        self.handoff_to_nexus(
+            &config,
+            &plan,
+            &service_plan,
+            external_port_count,
+        )
+        .await?;
 
         // TODO Questions to consider:
         // - What if a sled comes online *right after* this setup? How does

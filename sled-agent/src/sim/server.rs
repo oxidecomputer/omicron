@@ -327,6 +327,8 @@ impl Server {
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
             recovery_silo,
+            external_port_count: 1,
+            rack_network_config: None,
         };
 
         Ok((
