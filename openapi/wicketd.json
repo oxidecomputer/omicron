@@ -616,25 +616,6 @@
           }
         ]
       },
-      "ImageVersion": {
-        "type": "object",
-        "properties": {
-          "epoch": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "version": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "epoch",
-          "version"
-        ]
-      },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
         "type": "string",
@@ -1123,26 +1104,22 @@
           "sps"
         ]
       },
-      "RotImageDetails": {
-        "type": "object",
-        "properties": {
-          "digest": {
-            "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
-          }
-        },
-        "required": [
-          "digest",
-          "version"
-        ]
-      },
       "RotInventory": {
         "description": "RoT-related data that isn't already supplied in [`SpState`].",
         "type": "object",
         "properties": {
-          "caboose": {
+          "active": {
+            "$ref": "#/components/schemas/RotSlot"
+          },
+          "caboose_a": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_b": {
             "nullable": true,
             "allOf": [
               {
@@ -1150,7 +1127,10 @@
               }
             ]
           }
-        }
+        },
+        "required": [
+          "active"
+        ]
       },
       "RotSlot": {
         "oneOf": [
@@ -1192,31 +1172,43 @@
               "active": {
                 "$ref": "#/components/schemas/RotSlot"
               },
-              "slot_a": {
+              "pending_persistent_boot_preference": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/RotImageDetails"
+                    "$ref": "#/components/schemas/RotSlot"
                   }
                 ]
               },
-              "slot_b": {
+              "persistent_boot_preference": {
+                "$ref": "#/components/schemas/RotSlot"
+              },
+              "slot_a_sha3_256_digest": {
                 "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/RotImageDetails"
-                  }
-                ]
+                "type": "string"
+              },
+              "slot_b_sha3_256_digest": {
+                "nullable": true,
+                "type": "string"
               },
               "state": {
                 "type": "string",
                 "enum": [
                   "enabled"
                 ]
+              },
+              "transient_boot_preference": {
+                "nullable": true,
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RotSlot"
+                  }
+                ]
               }
             },
             "required": [
               "active",
+              "persistent_boot_preference",
               "state"
             ]
           },
@@ -1511,7 +1503,15 @@
         "description": "SP-related data",
         "type": "object",
         "properties": {
-          "caboose": {
+          "caboose_active": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpComponentCaboose"
+              }
+            ]
+          },
+          "caboose_inactive": {
             "nullable": true,
             "allOf": [
               {
@@ -1538,7 +1538,12 @@
             ]
           },
           "rot": {
-            "$ref": "#/components/schemas/RotInventory"
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RotInventory"
+              }
+            ]
           },
           "state": {
             "nullable": true,
@@ -1550,8 +1555,7 @@
           }
         },
         "required": [
-          "id",
-          "rot"
+          "id"
         ]
       },
       "SpState": {
@@ -1586,9 +1590,6 @@
           },
           "serial_number": {
             "type": "string"
-          },
-          "version": {
-            "$ref": "#/components/schemas/ImageVersion"
           }
         },
         "required": [
@@ -1598,8 +1599,7 @@
           "power_state",
           "revision",
           "rot",
-          "serial_number",
-          "version"
+          "serial_number"
         ]
       },
       "SpType": {
