@@ -130,46 +130,6 @@
         }
       }
     },
-    "/login/{silo_name}/local": {
-      "post": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Authenticate a user via username and password",
-        "operationId": "login_local",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UsernamePasswordCredentials"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/saml/{provider_name}": {
       "get": {
         "tags": [
@@ -266,25 +226,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/logout": {
-      "post": {
-        "tags": [
-          "hidden"
-        ],
-        "operationId": "logout",
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2126,6 +2067,66 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/login/{silo_name}/local": {
+      "post": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Authenticate a user via username and password",
+        "operationId": "login_local",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsernamePasswordCredentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/logout": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Log user out of web console by deleting session on client and server",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

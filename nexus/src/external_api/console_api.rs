@@ -51,8 +51,6 @@ pub struct SpoofLoginBody {
 #[endpoint {
    method = POST,
    path = "/login",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
    tags = ["hidden"],
 }]
 pub async fn login_spoof(
@@ -423,7 +421,7 @@ pub async fn login_local_begin(
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/local",
+   path = "/v1/login/{silo_name}/local",
    tags = ["login"],
 }]
 pub async fn login_local(
@@ -482,13 +480,11 @@ async fn create_session(
     Ok(session)
 }
 
-// Log user out of web console by deleting session in both server and browser
+/// Log user out of web console by deleting session on client and server
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,
-   path = "/logout",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
+   path = "/v1/logout",
    tags = ["hidden"],
 }]
 pub async fn logout(
@@ -542,8 +538,6 @@ pub struct StateParam {
     state: Option<String>,
 }
 
-// this happens to be the same as StateParam, but it may include other things
-// later
 #[derive(Serialize)]
 pub struct LoginUrlQuery {
     // TODO: give state param the correct name. In SAML it's called RelayState.
