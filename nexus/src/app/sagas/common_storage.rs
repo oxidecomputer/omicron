@@ -330,10 +330,7 @@ pub async fn call_pantry_attach_for_disk(
         client.attach(&disk_id.to_string(), &attach_request)
     })
     .map_err(|e| {
-        ActionError::action_failed(format!(
-            "pantry attach failed with {:?}",
-            e
-        ))
+        ActionError::action_failed(format!("pantry attach failed with {:?}", e))
     })?;
 
     Ok(())
