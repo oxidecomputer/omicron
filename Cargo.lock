@@ -1990,7 +1990,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?ref=dap/raw-tls?branch=dap/raw-tls#eaa74e012b7c86f522aa8d1d78a14597cb1f4314"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#62ee51d5494699c9d12271275010c5433a665a71"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2033,7 +2033,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?ref=dap/raw-tls?branch=dap/raw-tls#eaa74e012b7c86f522aa8d1d78a14597cb1f4314"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#62ee51d5494699c9d12271275010c5433a665a71"
 dependencies = [
  "proc-macro2",
  "quote",

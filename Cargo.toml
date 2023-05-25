@@ -378,10 +378,8 @@ panic = "abort"
 # crucible, or steno in the parent directory.  If you want to use those,
 # uncomment one of these blocks.
 #
-# XXX-dap (the ?ref is a workaround for Cargo URL normalization)
-[patch."https://github.com/oxidecomputer/dropshot".dropshot]
-git = 'https://github.com:443/oxidecomputer/dropshot?ref=dap/raw-tls'
-branch = "dap/raw-tls"
+#[patch."https://github.com/oxidecomputer/dropshot"]
+#dropshot = { path = "../dropshot/dropshot" }
 #[patch."https://github.com/oxidecomputer/steno"]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
