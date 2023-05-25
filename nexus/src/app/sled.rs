@@ -14,6 +14,7 @@ use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
+use crate::retry_until_known_result;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
 use omicron_common::api::external::DataPageParams;
@@ -380,11 +381,15 @@ impl super::Nexus {
                         vni: nic.vni.clone(),
                     };
 
+                    let log = self.log.clone();
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            client.set_v2p(&nic_id, &mapping).await
+                            retry_until_known_result!(log, {
+                                client.set_v2p(&nic_id, &mapping)
+                            })
                         },
                     )));
                 }
@@ -483,11 +488,15 @@ impl super::Nexus {
                         vni: nic.vni.clone(),
                     };
 
+                    let log = self.log.clone();
+
                     // This function is idempotent: calling the set_v2p ioctl with
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            client.del_v2p(&nic_id, &mapping).await
+                            retry_until_known_result!(log, {
+                                client.del_v2p(&nic_id, &mapping)
+                            })
                         },
                     )));
                 }
