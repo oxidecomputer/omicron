@@ -55,7 +55,7 @@ Omicron is a pretty large repo containing a bunch of related components.  If you
 
 NOTE: This section assumes you're already familiar with the prerequisites and environment setup needed to do _any_ work on Omicron.  See xref:docs/how-to-run-simulated.adoc[] or xref:docs/how-to-run.adoc[] for more on that.
 
-Here's a summary:
+=== Key tips
 
 * Use `cargo check` when you just want to know if your code compiles.  It's _much_ faster than `cargo build` or `cargo test`.
 * When using Cargo's check/build/test/clippy commands, you can use the `-p PACKAGE` flag to only operate on a specific package.  This often saves a lot of time for incremental builds.
@@ -63,7 +63,7 @@ Here's a summary:
 
 These are explained a bit more below, along with some common pitfalls.
 
-Here's an example workflow (you definitely don't have to do things this way).  Suppose you're working on some changes to the Nexus database model (`nexus-db-model` package, located at `nexus/db-model` from the root).  While you're actively writing and checking code, you might run:
+Here's an example workflow.  Suppose you're working on some changes to the Nexus database model (`nexus-db-model` package, located at `nexus/db-model` from the root).  While you're actively writing and checking code, you might run:
 
 ```
 cargo check --all-targets
