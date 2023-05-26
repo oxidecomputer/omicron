@@ -244,7 +244,7 @@ pub async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new(&cfg));
+    let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
     let datastore = Arc::new(DataStore::new(pool));
 
     // Create an OpContext with the credentials of "db-init" just for the
@@ -895,7 +895,7 @@ mod test {
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
@@ -944,7 +944,7 @@ mod test {
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
+        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
