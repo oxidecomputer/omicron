@@ -225,6 +225,22 @@ impl RunningZone {
             ];
 
             running_zone.run_cmd(args)?;
+        } else {
+            // If the zone is self-assembling, then it's possible that the IP
+            // interface does not exist yet because it has not been brought up
+            // by the software in the zone. Run `create-if` here, but eat the
+            // error if there is one: this is safe unless the software that's
+            // part of self-assembly inside the zone is also trying to run
+            // `create-if` (instead of `create-addr`), and required for the
+            // `set-ifprop` commands below to pass.
+            let args = vec![
+                IPADM.to_string(),
+                "create-if".to_string(),
+                "-t".to_string(),
+                vnic.clone(),
+            ];
+
+            let _result = running_zone.run_cmd(args);
         }
 
         let commands = vec![
