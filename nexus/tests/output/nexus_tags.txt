@@ -133,8 +133,8 @@ networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-por
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
 networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
-networking_switch_port_settings_info     GET      /v1/system/networking/switch-port-settings/{port}/info
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
+networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
