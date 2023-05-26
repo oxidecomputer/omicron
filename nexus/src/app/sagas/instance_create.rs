@@ -436,35 +436,24 @@ async fn sic_remove_network_config(
 
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
-    let result = match target_ip.ip {
-        ipnetwork::IpNetwork::V4(network) => {
-            retry_until_known_result!(log, {
-                dpd_client.nat_ipv4_delete(&network.ip(), *target_ip.first_port)
-            })
-        }
-        ipnetwork::IpNetwork::V6(network) => {
-            retry_until_known_result!(log, {
-                dpd_client.nat_ipv6_delete(&network.ip(), *target_ip.first_port)
-            })
-        }
-    };
+    let result = retry_until_known_result!(log, {
+        dpd_client.ensure_nat_entry_deleted(
+            log,
+            target_ip.ip,
+            *target_ip.first_port,
+        )
+    });
 
     match result {
         Ok(_) => {
             debug!(log, "deletion of nat entry successful for: {target_ip:#?}");
             Ok(())
         }
-        Err(e) => {
-            if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                debug!(log, "no nat entry found for: {target_ip:#?}");
-                Ok(())
-            } else {
-                Err(ActionError::action_failed(Error::internal_error(
-                    &format!("failed to delete nat entry via dpd: {e}"),
-                )))
-            }
-        }
+        Err(e) => Err(Error::internal_error(&format!(
+            "failed to delete nat entry via dpd: {e}"
+        ))),
     }?;
+
     Ok(())
 }
 

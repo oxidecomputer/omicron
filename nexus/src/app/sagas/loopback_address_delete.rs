@@ -177,15 +177,8 @@ async fn slc_loopback_address_delete(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    match &params.address {
-        IpNet::V4(a) => retry_until_known_result!(log, {
-            dpd_client.loopback_ipv4_delete(&a.ip())
-        }),
-        IpNet::V6(a) => retry_until_known_result!(log, {
-            dpd_client.loopback_ipv6_delete(&a.ip())
-        }),
-    }
-    .map_err(|e| ActionError::action_failed(e.to_string()))?;
-
-    Ok(())
+    retry_until_known_result!(log, {
+        dpd_client.ensure_loopback_deleted(log, params.address.ip())
+    })
+    .map_err(|e| ActionError::action_failed(e.to_string()))
 }

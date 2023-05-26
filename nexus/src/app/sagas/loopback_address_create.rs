@@ -12,9 +12,7 @@ use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
 use crate::retry_until_known_result;
 use anyhow::Error;
-use dpd_client::types::{Ipv4Entry, Ipv6Entry};
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use std::sync::Arc;
 use steno::ActionError;
 
@@ -150,36 +148,12 @@ async fn slc_loopback_address_create(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    let result = match &params.loopback_address.address {
-        IpAddr::V4(a) => {
-            retry_until_known_result!(log, {
-                dpd_client.loopback_ipv4_create(&Ipv4Entry {
-                    addr: *a,
-                    tag: NEXUS_DPD_TAG.into(),
-                })
-            })
-        }
-        IpAddr::V6(a) => {
-            retry_until_known_result!(log, {
-                dpd_client.loopback_ipv6_create(&Ipv6Entry {
-                    addr: *a,
-                    tag: NEXUS_DPD_TAG.into(),
-                })
-            })
-        }
-    };
-
-    if let Err(e) = result {
-        match e {
-            sled_agent_client::Error::ErrorResponse(ref er) => {
-                match er.status() {
-                    http::StatusCode::CONFLICT => Ok(()),
-                    _ => Err(ActionError::action_failed(e.to_string())),
-                }
-            }
-            _ => Err(ActionError::action_failed(e.to_string())),
-        }?;
-    }
-
-    Ok(())
+    retry_until_known_result!(log, {
+        dpd_client.ensure_loopback_created(
+            log,
+            params.loopback_address.address,
+            NEXUS_DPD_TAG,
+        )
+    })
+    .map_err(|e| ActionError::action_failed(e.to_string()))
 }

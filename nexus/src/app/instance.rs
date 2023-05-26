@@ -16,6 +16,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup;
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
+use crate::retry_until_known_result;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::IpKind;
@@ -1240,8 +1241,8 @@ impl super::Nexus {
             })
             .map(|(_, ip)| ip)
         {
-            dpd_client
-                .ensure_nat_entry(
+            retry_until_known_result!(log, {
+                dpd_client.ensure_nat_entry(
                     &log,
                     target_ip.ip,
                     dpd_client::types::MacAddr { a: mac_address.into_array() },
@@ -1250,12 +1251,12 @@ impl super::Nexus {
                     vni,
                     sled_ip_address.ip(),
                 )
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to ensure dpd entry: {e}"
-                    ))
-                })?;
+            })
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to ensure dpd entry: {e}"
+                ))
+            })?;
         }
 
         Ok(())
