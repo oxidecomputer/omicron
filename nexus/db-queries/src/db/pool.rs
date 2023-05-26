@@ -67,7 +67,7 @@ impl Pool {
     ) -> Self {
         let url = db_config.url.url();
         let log = log.new(o!("database_url" => url.clone()));
-        info!(&log, "database connection pool"; "url" => url.clone());
+        info!(&log, "database connection pool");
         let error_sink = LoggingErrorSink::new(log);
         let manager = ConnectionManager::<DbConnection>::new(url);
         let pool = builder
