@@ -66,7 +66,10 @@ impl Pool {
         builder: bb8::Builder<ConnectionManager<DbConnection>>,
     ) -> Self {
         let url = db_config.url.url();
-        let log = log.new(o!("database_url" => url.clone()));
+        let log = log.new(o!(
+            "database_url" => url.clone(),
+            "component" => "db::Pool"
+        ));
         info!(&log, "database connection pool");
         let error_sink = LoggingErrorSink::new(log);
         let manager = ConnectionManager::<DbConnection>::new(url);
