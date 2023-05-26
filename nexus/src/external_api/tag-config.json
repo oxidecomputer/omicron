@@ -8,12 +8,6 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "firewall": {
-      "description": "Firewall operation controls the flow of network data into a VPC",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "hidden": {
       "description": "TODO operations that will not ship to customers",
       "external_docs": {
@@ -21,13 +15,7 @@
       }
     },
     "images": {
-      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "images:global": {
-      "description": "Images are read-only Virtual Disks that may be used to boot Virtual Machines. These images are scoped globally.",
+      "description": "Images are read-only virtual disks that may be used to boot virtual machines.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -39,25 +27,13 @@
       }
     },
     "ip-pools": {
-      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine Instances.",
+      "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
     "login": {
       "description": "Authentication endpoints",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "metrics": {
-      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "silos": {
-      "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -74,26 +50,8 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "hardware": {
-      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "roles": {
       "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "routers": {
-      "description": "Routers direct the flow of network traffic into, out of, and within a VPC via routes.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "routes": {
-      "description": "Routes define router policy.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
@@ -104,44 +62,74 @@
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "snapshots": {
-      "description": "Snapshots of Virtual Disks at a particular point in time.",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
     "session": {
       "description": "Information pertaining to the current session.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "subnets": {
-      "description": "This tag should be moved into a generic network tag",
+    "silos": {
+      "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "system": {
-      "description": "Internal system information",
+    "snapshots": {
+      "description": "Snapshots of virtual disks at a particular point in time.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
-    "updates": {
-      "description": "This tag should be moved into a operations tag",
+    "system/hardware": {
+      "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/identity-providers": {
+      "description": "Identity providers manage the process of establishing, maintaining, and integrating user identity and access control.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/ip-pools": {
+      "description": "An IP pool is a collection of external addresses that are maintained by operators.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/metrics": {
+      "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/networking": {
+      "description": "This provides rack-level network configuration.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/silos": {
+      "description": "Silos represent a logical partition of users and resources.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/update": {
+      "description": "This includes operations related to system updates.",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    "system/users": {
+      "description": "Operations for managing built-in (system) user accounts.",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
     },
     "vpcs": {
       "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "external-networking": {
-      "description": "External networking information",
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

@@ -616,7 +616,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List users in a silo
+/// List built-in (system) users in a silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
@@ -657,7 +657,7 @@ struct UserParam {
     user_id: Uuid,
 }
 
-/// Fetch a user
+/// Fetch a built-in (system) user
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
