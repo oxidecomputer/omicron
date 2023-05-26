@@ -132,7 +132,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     // Get the port settings back
     let roundtrip: SwitchPortSettingsView = NexusRequest::object_get(
         client,
-        "/v1/system/networking/switch-port-settings/portofino/info",
+        "/v1/system/networking/switch-port-settings/portofino",
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()

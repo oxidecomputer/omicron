@@ -2565,7 +2565,7 @@ async fn networking_switch_port_settings_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List port settings
+/// List switch port settings
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings",
