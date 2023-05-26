@@ -121,7 +121,7 @@ anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
 assert_cmd = "2.0.11"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "be3d9bce50051d8c0e0c06078e8066cc27db3001" }
 async-trait = "0.1.68"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -380,9 +380,6 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-[patch."https://github.com/oxidecomputer/async-bb8-diesel".async-bb8-diesel]
-git = 'https://github.com:443/oxidecomputer/async-bb8-diesel?ref=dap/error-message'
-branch = "dap/error-message"
 #[patch.crates-io]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
