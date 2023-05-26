@@ -24,10 +24,12 @@ function main
             R)
                 BUILD_RECOVERY=1
                 HELIOS_BUILD_EXTRA_ARGS=-R
+                IMAGE_PREFIX=recovery
                 ;;
             B)
                 BUILD_STANDARD=1
                 HELIOS_BUILD_EXTRA_ARGS=-B
+                IMAGE_PREFIX=ci
                 ;;
             S)
                 SWITCH_ZONE=$OPTARG
@@ -117,10 +119,41 @@ function main
 
     pfexec zfs create -p rpool/images/$USER
 
+    HELIOS_REPO=https://pkg.oxide.computer/helios-netdev
+
+    # We have to do a bit of extra work to find the host OS hash
+    OS_HASH="unknown"
+
+    tmpd=$(mktemp -d)
+    if [[ -d "$tmpd" ]]; then
+        pkgrecv -s "$HELIOS_REPO" -d "$tmpd" --raw -m latest SUNWcs
+        if (($? == 0)); then
+            for PKGDIR in "$tmpd/SUNWcs/"*; do
+                if [[ -d "$PKGDIR" ]]; then
+                    BUILDHASH=$( \
+                        grep 'path=etc/versions/build ' \
+                        "$PKGDIR/manifest.file" | \
+                        awk '{print $2}' \
+                    )
+                    if [[ -n "$BUILDHASH" && -f "$PKGDIR/$BUILDHASH" ]]; then
+                        OS_HASH="$(awk -F- '{print $NF}' "$PKGDIR/$BUILDHASH")"
+                        break
+                    fi
+                fi
+            done
+        fi
+        rm -rf "$tmpd"
+    fi
+
+    # Build an image name that includes the omicron and host OS hashes
+    IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}/${OS_HASH:1:7}"
+    IMAGE_NAME+=" $(date +'%Y-%m-%d %H:%M')"
+
     ./helios-build experiment-image \
-        -p helios-netdev=https://pkg.oxide.computer/helios-netdev \
-        -F optever=$OPTE_VER \
-        -P $tmp_gz/root \
+        -p helios-netdev="$HELIOS_REPO" \
+        -F optever="$OPTE_VER" \
+        -P "$tmp_gz/root" \
+        -N "$IMAGE_NAME" \
         $HELIOS_BUILD_EXTRA_ARGS
 }
 
