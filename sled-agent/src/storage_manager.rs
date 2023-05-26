@@ -24,10 +24,12 @@ use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
+use tokio::time::Duration;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -333,20 +335,7 @@ impl StorageWorker {
 
     // Adds a "notification to nexus" to `nexus_notifications`,
     // informing it about the addition of `pool_id` to this sled.
-    async fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
-        // The underlay network is setup once at sled-agent startup. Before
-        // there is an underlay we want to avoid sending notifications to nexus for
-        // two reasons:
-        //  1. They can't possibly succeed
-        //  2. They increase the backoff time exponentially, so that once
-        //   sled-agent does start it may take much longer to notify nexus
-        //   than it would if we avoid this. This goes especially so for rack
-        //   setup, when bootstrap agent is waiting an aribtrary time for RSS
-        //   initialization.
-        if self.underlay.lock().await.is_none() {
-            return;
-        }
-
+    fn add_zpool_notify(&mut self, pool: &Pool, size: ByteCount) {
         let pool_id = pool.name.id();
         let DiskIdentity { vendor, serial, model } = pool.parent.clone();
         let underlay = self.underlay.clone();
@@ -361,10 +350,21 @@ impl StorageWorker {
             let underlay = underlay.clone();
 
             async move {
-                let underlay_guard = underlay.lock().await;
-                let Some(underlay) = underlay_guard.as_ref() else {
-                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                // Don't start the backoff timer before the underlay is available
+                let underlay_guard = loop {
+                    let guard = underlay.lock().await;
+                    if guard.is_some() {
+                        // underlay exists; proceed with notifying nexus
+                        break guard;
+                    }
+                    mem::drop(guard); // unlock before sleeping
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 };
+
+                // We only break out of the loop when `underlay_guard.is_some()`, so
+                // we can safely unwrap here.
+                let underlay = underlay_guard.as_ref().unwrap();
+
                 let sled_id = underlay.sled_id;
                 let lazy_nexus_client = underlay.lazy_nexus_client.clone();
                 drop(underlay_guard);
@@ -553,8 +553,7 @@ impl StorageWorker {
         self.physical_disk_notify(NotifyDiskRequest::Add {
             identity: disk.identity(),
             variant: disk.variant(),
-        })
-        .await;
+        });
         self.upsert_zpool(&resources, disk.identity(), disk.zpool_name())
             .await?;
 
@@ -588,80 +587,34 @@ impl StorageWorker {
     ) -> Result<(), Error> {
         if let Some(parsed_disk) = disks.remove(key) {
             resources.pools.lock().await.remove(&parsed_disk.zpool_name().id());
-            self.physical_disk_notify(NotifyDiskRequest::Remove(key.clone()))
-                .await;
+            self.physical_disk_notify(NotifyDiskRequest::Remove(key.clone()));
         }
         Ok(())
     }
 
-    /// When the underlay becomes available, we need to notify nexus about any
-    /// discovered disks and pools, since we don't attempt to notify until there
-    /// is an underlay available.
-    async fn notify_nexus_about_existing_resources(
-        &mut self,
-        resources: &StorageResources,
-    ) -> Result<(), Error> {
-        let disks = resources.disks.lock().await;
-        for disk in disks.values() {
-            self.physical_disk_notify(NotifyDiskRequest::Add {
-                identity: disk.identity(),
-                variant: disk.variant(),
-            })
-            .await;
-        }
-
-        // We may encounter errors while processing any of the pools; keep track of
-        // any errors that occur and return any of them if something goes wrong.
-        //
-        // That being said, we should not prevent notification to nexus of the
-        // other pools if only one failure occurs.
-        let mut err: Option<Error> = None;
-
-        let pools = resources.pools.lock().await;
-        for pool in pools.values() {
-            match ByteCount::try_from(pool.info.size()).map_err(|err| {
-                Error::BadPoolSize { name: pool.name.to_string(), err }
-            }) {
-                Ok(size) => self.add_zpool_notify(pool, size).await,
-                Err(e) => {
-                    warn!(self.log, "Failed to notify nexus about pool: {e}");
-                    err = Some(e)
-                }
-            }
-        }
-
-        if let Some(err) = err {
-            Err(err)
-        } else {
-            Ok(())
-        }
-    }
-
     // Adds a "notification to nexus" to `self.nexus_notifications`, informing it
     // about the addition/removal of a physical disk to this sled.
-    async fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
-        // The underlay network is setup once at sled-agent startup. Before
-        // there is an underlay we want to avoid sending notifications to nexus for
-        // two reasons:
-        //  1. They can't possibly succeed
-        //  2. They increase the backoff time exponentially, so that once
-        //   sled-agent does start it may take much longer to notify nexus
-        //   than it would if we avoid this. This goes especially so for rack
-        //   setup, when bootstrap agent is waiting an aribtrary time for RSS
-        //   initialization.
-        if self.underlay.lock().await.is_none() {
-            return;
-        }
+    fn physical_disk_notify(&mut self, disk: NotifyDiskRequest) {
         let underlay = self.underlay.clone();
         let disk2 = disk.clone();
         let notify_nexus = move || {
             let disk = disk.clone();
             let underlay = underlay.clone();
             async move {
-                let underlay_guard = underlay.lock().await;
-                let Some(underlay) = underlay_guard.as_ref() else {
-                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
+                // Don't start the backoff timer before the underlay is available
+                let underlay_guard = loop {
+                    let guard = underlay.lock().await;
+                    if guard.is_some() {
+                        // underlay exists; proceed with notifying nexus
+                        break guard;
+                    }
+                    mem::drop(guard); // unlock before sleeping
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 };
+
+                // We only break out of the loop when `underlay_guard.is_some()`, so
+                // we can safely unwrap here.
+                let underlay = underlay_guard.as_ref().unwrap();
                 let sled_id = underlay.sled_id;
                 let lazy_nexus_client = underlay.lazy_nexus_client.clone();
                 drop(underlay_guard);
@@ -746,7 +699,7 @@ impl StorageWorker {
             Error::BadPoolSize { name: pool_name.to_string(), err }
         })?;
         // Notify Nexus of the zpool.
-        self.add_zpool_notify(&pool, size).await;
+        self.add_zpool_notify(&pool, size);
         Ok(())
     }
 
@@ -827,9 +780,7 @@ impl StorageWorker {
                             // Instead of individual notifications, we should
                             // send a bulk notification as described in https://
                             // github.com/oxidecomputer/omicron/issues/1917
-                            if self.underlay.lock().await.replace(underlay).is_none() {
-                                self.notify_nexus_about_existing_resources(&resources).await?;
-                            }
+                            self.underlay.lock().await.replace(underlay);
                             let _ = responder.send(Ok(()));
                         }
                     }
