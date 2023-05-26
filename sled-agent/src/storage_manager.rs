@@ -339,7 +339,7 @@ impl StorageWorker {
         // two reasons:
         //  1. They can't possibly succeed
         //  2. They increase the backoff time exponentially, so that once
-        //   sled-agent does start  it may take mucyh longer to notify nexus
+        //   sled-agent does start it may take much longer to notify nexus
         //   than it would if we avoid this. This goes especially so for rack
         //   setup, when bootstrap agent is waiting an aribtrary time for RSS
         //   initialization.
@@ -645,7 +645,7 @@ impl StorageWorker {
         // two reasons:
         //  1. They can't possibly succeed
         //  2. They increase the backoff time exponentially, so that once
-        //   sled-agent does start  it may take mucyh longer to notify nexus
+        //   sled-agent does start it may take much longer to notify nexus
         //   than it would if we avoid this. This goes especially so for rack
         //   setup, when bootstrap agent is waiting an aribtrary time for RSS
         //   initialization.
