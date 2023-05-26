@@ -3399,7 +3399,7 @@ async fn vpc_delete(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3434,7 +3434,7 @@ async fn vpc_subnet_list(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-subnets",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3459,7 +3459,7 @@ async fn vpc_subnet_create(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3488,7 +3488,7 @@ async fn vpc_subnet_view(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3517,7 +3517,7 @@ async fn vpc_subnet_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-subnets/{subnet}",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3554,7 +3554,7 @@ async fn vpc_subnet_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}/network-interfaces",
-    tags = ["vpcs"],
+    tags = ["vpcs/subnets"],
 }]
 async fn vpc_subnet_list_network_interfaces(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3602,7 +3602,7 @@ async fn vpc_subnet_list_network_interfaces(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-firewall-rules",
-    tags = ["vpcs"],
+    tags = ["vpcs/firewall-rules"],
 }]
 async fn vpc_firewall_rules_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3629,7 +3629,7 @@ async fn vpc_firewall_rules_view(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-firewall-rules",
-    tags = ["vpcs"],
+    tags = ["vpcs/firewall-rules"],
 }]
 async fn vpc_firewall_rules_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3661,7 +3661,7 @@ async fn vpc_firewall_rules_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers",
-    tags = ["vpcs"],
+    tags = ["vpcs/routers"],
 }]
 async fn vpc_router_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3696,7 +3696,7 @@ async fn vpc_router_list(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routers"],
 }]
 async fn vpc_router_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3725,7 +3725,7 @@ async fn vpc_router_view(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-routers",
-    tags = ["vpcs"],
+    tags = ["vpcs/routers"],
 }]
 async fn vpc_router_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3756,7 +3756,7 @@ async fn vpc_router_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routers"],
 }]
 async fn vpc_router_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3785,7 +3785,7 @@ async fn vpc_router_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-routers/{router}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routers"],
 }]
 async fn vpc_router_update(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3820,7 +3820,7 @@ async fn vpc_router_update(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes",
-    tags = ["vpcs"],
+    tags = ["vpcs/routes"],
 }]
 async fn vpc_router_route_list(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3857,7 +3857,7 @@ async fn vpc_router_route_list(
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routes"],
 }]
 async fn vpc_router_route_view(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3889,7 +3889,7 @@ async fn vpc_router_route_view(
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",
-    tags = ["vpcs"],
+    tags = ["vpcs/routes"],
 }]
 async fn vpc_router_route_create(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3920,7 +3920,7 @@ async fn vpc_router_route_create(
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routes"],
 }]
 async fn vpc_router_route_delete(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -3951,7 +3951,7 @@ async fn vpc_router_route_delete(
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
-    tags = ["vpcs"],
+    tags = ["vpcs/routes"],
 }]
 async fn vpc_router_route_update(
     rqctx: RequestContext<Arc<ServerContext>>,

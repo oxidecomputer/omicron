@@ -5,133 +5,169 @@
     "disks": {
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/disks"
       }
     },
     "hidden": {
       "description": "TODO operations that will not ship to customers",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/"
       }
     },
     "images": {
       "description": "Images are read-only virtual disks that may be used to boot virtual machines.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/images"
       }
     },
     "instances": {
       "description": "Virtual machine instances are the basic unit of computation. These operations are used for provisioning, controlling, and destroying instances.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/instances"
       }
     },
     "ip-pools": {
       "description": "IP Pools contain external IP addresses that can be assigned to virtual machine instances.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     "login": {
       "description": "Authentication endpoints",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/login"
+      }
+    },
+    "vpcs/firewall-rules": {
+      "description": "Firewall rules are used to control incoming and outgoing network traffic.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/firewall-rules"
+      }
+    },
+    "vpcs": {
+      "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs"
+      }
+    },
+    "vpcs/routers": {
+      "description": "Routers manage the traffic between subnets within a Virtual Private Cloud (VPC) or to external networks.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs/routers"
+      }
+    },
+    "vpcs/routes": {
+      "description": "Routes determine the path that network traffic should take from one subnet to another, or to an external IP.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs/routes"
+      }
+    },
+    "vpcs/subnets": {
+      "description": "Subnets are segments of a VPC's IP address space.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs/subnets"
+      }
+    },
+    "vpcs/nics": {
+      "description": "Network interface controllers (NICs) serve as the interface for instances to connect to a network within a VPC.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/vpcs/nics"
       }
     },
     "policy": {
       "description": "System-wide IAM policy",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/policy"
       }
     },
     "projects": {
       "description": "Projects are a grouping of associated resources such as instances and disks within a silo for purposes of billing and access control.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/projects"
       }
     },
     "roles": {
       "description": "Roles are a component of Identity and Access Management (IAM) that allow a user or agent account access to additional permissions.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/roles"
       }
     },
     "sagas": {
       "description": "Sagas are the abstraction used to represent multi-step operations within the Oxide deployment. These operations can be used to query saga status and report errors.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/sagas"
       }
     },
     "session": {
       "description": "Information pertaining to the current session.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/session"
       }
     },
     "silos": {
       "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/silos"
       }
     },
     "snapshots": {
       "description": "Snapshots of virtual disks at a particular point in time.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/snapshots"
+      }
+    },
+    "system": {
+      "description": "Internal system information",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/system"
       }
     },
     "system/hardware": {
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/hardware"
       }
     },
     "system/identity-providers": {
       "description": "Identity providers manage the process of establishing, maintaining, and integrating user identity and access control.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/identity-providers"
       }
     },
     "system/ip-pools": {
       "description": "An IP pool is a collection of external addresses that are maintained by operators.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/ip-pools"
       }
     },
     "system/metrics": {
       "description": "Metrics provide insight into the operation of the Oxide deployment. These include telemetry on hardware and software components that can be used to understand the current state as well as to diagnose issues.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/metrics"
       }
     },
     "system/networking": {
       "description": "This provides rack-level network configuration.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/networking"
       }
     },
     "system/silos": {
       "description": "Silos represent a logical partition of users and resources.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/silos"
       }
     },
     "system/update": {
       "description": "This includes operations related to system updates.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/update"
       }
     },
     "system/users": {
       "description": "Operations for managing built-in (system) user accounts.",
       "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
-      }
-    },
-    "vpcs": {
-      "description": "A Virtual Private Cloud (VPC) is an isolated network environment that should probaby be moved into a more generic networking tag",
-      "external_docs": {
-        "url": "http://oxide.computer/docs/#xxx"
+        "url": "http://docs.oxide.computer/api/system/users"
       }
     }
   }

@@ -5,7 +5,9 @@ use futures::future::FutureExt;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate, UsernamePasswordCredentials};
-use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
+use oxide_client::{
+    Client, ClientProjectsExt, ClientVpcsExt, ClientVpcsSubnetsExt,
+};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
 use std::net::IpAddr;
