@@ -141,6 +141,7 @@ impl super::Nexus {
         &self,
         runnable_saga: RunnableSaga,
     ) -> Result<SagaResultOk, Error> {
+        let log = &self.log;
         self.sec_client
             .saga_start(runnable_saga.id)
             .await
@@ -149,14 +150,27 @@ impl super::Nexus {
 
         let result = runnable_saga.fut.await;
         result.kind.map_err(|saga_error| {
-            saga_error
+            let mut error = saga_error
                 .error_source
                 .convert::<Error>()
                 .unwrap_or_else(|e| Error::internal_error(&e.to_string()))
                 .internal_context(format!(
-                    "saga error at node {:?}",
+                    "saga ACTION error at node {:?}",
                     saga_error.error_node_name
-                ))
+                ));
+            if let Some((undo_node, undo_error)) = saga_error.undo_failure {
+                error = error.internal_context(format!(
+                    "UNDO ACTION failed (node {:?}, error {:#}) after",
+                    undo_node, undo_error
+                ));
+
+                error!(log, "saga stuck";
+                    "saga_id" => runnable_saga.id.to_string(),
+                    "error" => #%error,
+                );
+            }
+
+            error
         })
     }
 

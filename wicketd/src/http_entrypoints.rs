@@ -160,7 +160,6 @@ pub(crate) struct StartUpdateOptions {
 
     /// If true, skip the check on the current SP version and always update it
     /// regardless of whether the update appears to be neeeded.
-    #[allow(dead_code)] // TODO actually use this
     pub(crate) skip_sp_version_check: bool,
 }
 

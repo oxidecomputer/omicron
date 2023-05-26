@@ -13,7 +13,9 @@ use tui::{
 };
 
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Fade};
-use crate::ui::{defaults::dimensions::RectExt, wrap::wrap_text};
+use crate::ui::{
+    defaults::dimensions::RectExt, panes::ComputedScrollOffset, wrap::wrap_text,
+};
 use crate::ui::{
     defaults::{colors::*, style},
     wrap::wrap_line,
@@ -24,8 +26,28 @@ const BUTTON_HEIGHT: u16 = 3;
 
 #[derive(Clone, Debug)]
 pub struct ButtonText<'a> {
-    pub instruction: &'a str,
-    pub key: &'a str,
+    pub instruction: Spans<'a>,
+    pub key: Spans<'a>,
+}
+
+impl<'a> ButtonText<'a> {
+    pub fn new(instruction: &'a str, key: &'a str) -> Self {
+        Self {
+            instruction: Spans::from(Span::styled(
+                instruction,
+                Self::default_instruction_style(),
+            )),
+            key: Spans::from(Span::styled(key, Self::default_key_style())),
+        }
+    }
+
+    pub fn default_instruction_style() -> Style {
+        style::help_function()
+    }
+
+    pub fn default_key_style() -> Style {
+        style::help_keys()
+    }
 }
 
 #[derive(Default)]
@@ -36,23 +58,28 @@ pub struct PopupBuilder<'a> {
 }
 
 impl<'a> PopupBuilder<'a> {
-    pub fn build(&self, full_screen: Rect) -> Popup<'_> {
-        Popup::new(full_screen, &self.header, &self.body, self.buttons.clone())
+    pub fn build(
+        &self,
+        full_screen: Rect,
+        scroll_kind: PopupScrollKind,
+    ) -> Popup<'_> {
+        Popup::new(
+            full_screen,
+            &self.header,
+            &self.body,
+            self.buttons.clone(),
+            scroll_kind,
+        )
     }
 }
 
 #[derive(Default)]
 pub struct Popup<'a> {
-    // Fields are private because we always want users to go through the
-    // constructor.
-
-    // This is the header as passed in, except wrapped.
-    wrapped_header: Text<'a>,
-
-    // We store the *wrapped body* rather than the unwrapped body to make
-    // `self.height()` and `self.width()` be computed correctly.
-    wrapped_body: Text<'a>,
-    buttons: Vec<ButtonText<'a>>,
+    data: PopupData<'a>,
+    rect: Rect,
+    chunks: Vec<Rect>,
+    body_rect: Rect,
+    actual_scroll_kind: PopupScrollKind,
 }
 
 impl<'a> Popup<'a> {
@@ -61,53 +88,125 @@ impl<'a> Popup<'a> {
         header: &'a Spans<'_>,
         body: &'a Text<'_>,
         buttons: Vec<ButtonText<'a>>,
+        scroll_kind: PopupScrollKind,
     ) -> Self {
         let wrapped_header =
             wrap_line(header, Self::default_wrap_options(full_screen.width));
         let wrapped_body =
             wrap_text(body, Self::default_wrap_options(full_screen.width));
-        Self { wrapped_header, wrapped_body, buttons }
+
+        let mut data = PopupData { wrapped_header, wrapped_body, buttons };
+
+        // Compute the dimensions here so we can compute scroll positions more
+        // effectively.
+        let width = u16::min(data.width(), Self::max_width(full_screen.width));
+        let height =
+            u16::min(data.height(), Self::max_height(full_screen.height));
+
+        let rect =
+            full_screen.center_horizontally(width).center_vertically(height);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    // Top titlebar
+                    Constraint::Length(data.wrapped_header.height() as u16 + 2),
+                    Constraint::Min(0),
+                    // Buttons at the bottom will be accounted for while
+                    // rendering the body
+                ]
+                .as_ref(),
+            )
+            .split(rect);
+
+        let mut body_rect = chunks[1];
+        // Ensure we're inside the outer border.
+        body_rect.x += 1;
+        body_rect.width = body_rect.width.saturating_sub(2);
+        body_rect.height = body_rect.height.saturating_sub(1);
+
+        if !data.buttons.is_empty() {
+            body_rect.height = body_rect.height.saturating_sub(BUTTON_HEIGHT);
+        }
+
+        enum ScrollKind {
+            Disabled,
+            NotRequired,
+            Scrolling(u16),
+        }
+
+        let scroll_kind = match scroll_kind {
+            PopupScrollKind::Disabled => ScrollKind::Disabled,
+            PopupScrollKind::Enabled { offset } => {
+                let height_exceeded =
+                    data.wrapped_body.height() > body_rect.height as usize;
+                match (data.buttons.is_empty(), height_exceeded) {
+                    (true, true) => {
+                        // Need to add scroll buttons, which necessitates reducing
+                        // the size.
+                        body_rect.height =
+                            body_rect.height.saturating_sub(BUTTON_HEIGHT);
+                        ScrollKind::Scrolling(offset)
+                    }
+                    (false, true) => ScrollKind::Scrolling(offset),
+                    (_, false) => ScrollKind::NotRequired,
+                }
+            }
+        };
+
+        let actual_scroll_kind = match scroll_kind {
+            ScrollKind::Disabled => PopupScrollKind::Disabled,
+            ScrollKind::NotRequired => PopupScrollKind::Enabled { offset: 0 },
+            ScrollKind::Scrolling(offset) => {
+                // Add scroll buttons.
+                let offset = ComputedScrollOffset::new(
+                    offset as usize,
+                    data.wrapped_body.height(),
+                    body_rect.height as usize,
+                );
+
+                let up_style = if offset.can_scroll_up() {
+                    style::selected()
+                } else {
+                    ButtonText::default_key_style()
+                };
+                let down_style = if offset.can_scroll_down() {
+                    style::selected()
+                } else {
+                    ButtonText::default_key_style()
+                };
+
+                data.buttons.insert(
+                    0,
+                    ButtonText {
+                        instruction: Span::styled(
+                            "Scroll",
+                            ButtonText::default_instruction_style(),
+                        )
+                        .into(),
+                        key: Spans::from(vec![
+                            Span::styled("Up", up_style),
+                            Span::styled("/", ButtonText::default_key_style()),
+                            Span::styled("Down", down_style),
+                        ]),
+                    },
+                );
+
+                PopupScrollKind::Enabled { offset: offset.into_offset() }
+            }
+        };
+
+        Self { data, rect, chunks, body_rect, actual_scroll_kind }
     }
 
-    pub fn height(&self) -> u16 {
-        let button_height: u16 =
-            if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };
-        let bottom_margin: u16 = 1;
-        let borders: u16 = 3;
-        u16::try_from(self.wrapped_header.height()).unwrap()
-            + u16::try_from(self.wrapped_body.height()).unwrap()
-            + button_height
-            + bottom_margin
-            + borders
-    }
-
-    pub fn width(&self) -> u16 {
-        let borders: u16 = 2;
-        // Left padding is taken care of by prepending spaces to the body. Right
-        // padding is added here.
-        let right_padding: u16 = 1;
-        let body_width = u16::try_from(self.wrapped_body.width()).unwrap()
-            + borders
-            + right_padding;
-        let header_width = u16::try_from(self.wrapped_header.width()).unwrap()
-            + borders
-            + right_padding;
-        let width = u16::max(body_width, header_width);
-        u16::max(width, self.button_width())
-    }
-
-    pub fn button_width(&self) -> u16 {
-        let space_between_buttons = 1;
-        let margins = 4;
-        // Margin + space + angle brackets
-        let button_extras = 6;
-        let width = self.buttons.iter().fold(margins, |acc, text| {
-            acc + text.instruction.len()
-                + text.key.len()
-                + button_extras
-                + space_between_buttons
-        });
-        u16::try_from(width).unwrap()
+    /// Returns the effective, or actual, scroll kind after the text is laid
+    /// out.
+    ///
+    /// If this is a `PopupScrollKind::Enabled` popup, the offset is is capped
+    /// to the maximum degree to which text can be scrolled.
+    pub fn actual_scroll_kind(&self) -> PopupScrollKind {
+        self.actual_scroll_kind
     }
 
     /// Returns the maximum width that this popup can have, including outer
@@ -157,64 +256,149 @@ impl Widget for Popup<'_> {
             .border_type(BorderType::Rounded)
             .style(style::selected_line());
 
-        let width = u16::min(self.width(), Self::max_width(full_screen.width));
-        let height =
-            u16::min(self.height(), Self::max_height(full_screen.height));
-
-        let rect =
-            full_screen.center_horizontally(width).center_vertically(height);
-
         // Clear the popup
-        Clear.render(rect, buf);
+        Clear.render(self.rect, buf);
         Block::default()
             .style(Style::default().bg(TUI_BLACK).fg(TUI_BLACK))
-            .render(rect, buf);
+            .render(self.rect, buf);
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                [
-                    // Top titlebar
-                    Constraint::Length(self.wrapped_header.height() as u16 + 2),
-                    Constraint::Min(0),
-                    // Buttons at the bottom will be accounted for while
-                    // rendering the body
-                ]
-                .as_ref(),
-            )
-            .split(rect);
-
-        let header = Paragraph::new(self.wrapped_header).block(block.clone());
-        header.render(chunks[0], buf);
+        let header =
+            Paragraph::new(self.data.wrapped_header).block(block.clone());
+        header.render(self.chunks[0], buf);
 
         block
             .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-            .render(chunks[1], buf);
+            .render(self.chunks[1], buf);
 
-        // NOTE: wrapping should be performed externally, by e.g. wrap_text.
-        let body = Paragraph::new(self.wrapped_body);
-
-        let mut body_rect = chunks[1];
-        // Ensure we're inside the outer border.
-        body_rect.x += 1;
-        body_rect.width = body_rect.width.saturating_sub(2);
-        body_rect.height = body_rect.height.saturating_sub(1);
-
-        if !self.buttons.is_empty() {
-            // Reduce the height so that the body text doesn't overflow into the
-            // button area.
-            body_rect.height = body_rect.height.saturating_sub(BUTTON_HEIGHT);
+        let mut body = Paragraph::new(self.data.wrapped_body);
+        match self.actual_scroll_kind {
+            PopupScrollKind::Disabled => {}
+            PopupScrollKind::Enabled { offset } => {
+                body = body.scroll((offset, 0));
+            }
         }
 
-        body.render(body_rect, buf);
+        body.render(self.body_rect, buf);
 
         let connector = BoxConnector::new(BoxConnectorKind::Top);
 
-        connector.render(chunks[1], buf);
+        connector.render(self.chunks[1], buf);
 
-        draw_buttons(self.buttons, chunks[1], buf);
+        draw_buttons(self.data.buttons, self.chunks[1], buf);
     }
 }
+
+/// Scroll kind for a popup.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PopupScrollKind {
+    /// Scrolling is disabled.
+    #[default]
+    Disabled,
+
+    /// Scrolling is enabled.
+    Enabled {
+        /// The offset.
+        offset: u16,
+    },
+}
+
+impl PopupScrollKind {
+    /// Returns a new enabled scroll kind.
+    pub fn enabled() -> Self {
+        Self::Enabled { offset: 0 }
+    }
+
+    /// Returns true if scrolling is enabled.
+    pub fn is_scrollable(&self) -> bool {
+        match self {
+            Self::Disabled => false,
+            Self::Enabled { .. } => true,
+        }
+    }
+
+    /// Scrolls up.
+    pub fn scroll_up(&mut self) {
+        match self {
+            Self::Disabled => {}
+            Self::Enabled { offset } => {
+                *offset = offset.saturating_sub(1);
+            }
+        }
+    }
+
+    /// Scrolls down.
+    ///
+    /// This method doesn't account for scrolling past the bottom of the text.
+    /// That will be considered and fixed up while creating the `Popup`, and the
+    /// fixed value returned in [`Popup::actual_offset`].
+    pub fn scroll_down(&mut self) {
+        match self {
+            PopupScrollKind::Disabled => {}
+            PopupScrollKind::Enabled { offset } => {
+                *offset = offset.saturating_add(1);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct PopupData<'a> {
+    // Fields are private because we always want users to go through the
+    // constructor.
+
+    // This is the header as passed in, except wrapped.
+    wrapped_header: Text<'a>,
+
+    // We store the *wrapped body* rather than the unwrapped body to make
+    // `self.height()` and `self.width()` be computed correctly.
+    wrapped_body: Text<'a>,
+
+    buttons: Vec<ButtonText<'a>>,
+}
+
+impl<'a> PopupData<'a> {
+    pub fn height(&self) -> u16 {
+        let button_height: u16 =
+            if self.buttons.is_empty() { 0 } else { BUTTON_HEIGHT };
+        let bottom_margin: u16 = 1;
+        let borders: u16 = 3;
+        u16::try_from(self.wrapped_header.height()).unwrap()
+            + u16::try_from(self.wrapped_body.height()).unwrap()
+            + button_height
+            + bottom_margin
+            + borders
+    }
+
+    pub fn width(&self) -> u16 {
+        let borders: u16 = 2;
+        // Left padding is taken care of by prepending spaces to the body. Right
+        // padding is added here.
+        let right_padding: u16 = 1;
+        let body_width = u16::try_from(self.wrapped_body.width()).unwrap()
+            + borders
+            + right_padding;
+        let header_width = u16::try_from(self.wrapped_header.width()).unwrap()
+            + borders
+            + right_padding;
+        let width = u16::max(body_width, header_width);
+        u16::max(width, self.button_width())
+    }
+
+    pub fn button_width(&self) -> u16 {
+        let space_between_buttons = 1;
+        let margins = 4;
+        // Margin + space + angle brackets
+        let button_extras = 6;
+        let width = self.buttons.iter().fold(margins, |acc, text| {
+            acc + text.instruction.width()
+                + text.key.width()
+                + button_extras
+                + space_between_buttons
+        });
+        u16::try_from(width).unwrap()
+    }
+}
+
 pub fn draw_buttons(
     buttons: Vec<ButtonText<'_>>,
     body_rect: Rect,
@@ -233,8 +417,8 @@ pub fn draw_buttons(
         .chain(buttons.iter().map(|b| {
             Constraint::Length(
                 u16::try_from(
-                    b.instruction.len()
-                        + b.key.len()
+                    b.instruction.width()
+                        + b.key.width()
                         + brackets
                         + margin
                         + borders
@@ -257,12 +441,13 @@ pub fn draw_buttons(
         .style(style::selected_line());
 
     for (i, button) in buttons.into_iter().enumerate() {
-        let b = Paragraph::new(Spans::from(vec![
-            Span::raw(" "),
-            Span::styled(button.instruction, style::selected()),
-            Span::styled(format!(" <{}> ", button.key), style::selected_line()),
-        ]))
-        .block(block.clone());
+        let mut spans = vec![Span::raw(" ")];
+        spans.extend(button.instruction.0);
+        spans.push(Span::styled(" <", ButtonText::default_key_style()));
+        spans.extend(button.key.0);
+        spans.push(Span::styled(">", ButtonText::default_key_style()));
+
+        let b = Paragraph::new(Spans(spans)).block(block.clone());
         b.render(button_rects[i + 1], buf);
     }
 }

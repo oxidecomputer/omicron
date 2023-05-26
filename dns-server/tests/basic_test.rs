@@ -397,7 +397,6 @@ fn test_config(
     let config_dropshot = dropshot::ConfigDropshot {
         bind_address: "[::1]:0".to_string().parse().unwrap(),
         request_body_max_bytes: 1024,
-        ..Default::default()
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

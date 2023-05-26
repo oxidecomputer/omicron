@@ -1620,9 +1620,6 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
  * Sagas
  */
 
-/*
- * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
- */
 CREATE TYPE omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',

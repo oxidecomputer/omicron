@@ -2607,6 +2607,7 @@
       "SagaState": {
         "oneOf": [
           {
+            "description": "Saga is currently executing",
             "type": "object",
             "properties": {
               "state": {
@@ -2621,6 +2622,7 @@
             ]
           },
           {
+            "description": "Saga completed successfully",
             "type": "object",
             "properties": {
               "state": {
@@ -2635,6 +2637,7 @@
             ]
           },
           {
+            "description": "One or more saga actions failed and the saga was successfully unwound (i.e., undo actions were executed for any actions that were completed). The saga is no longer running.",
             "type": "object",
             "properties": {
               "error_info": {
@@ -2654,6 +2657,35 @@
               "error_info",
               "error_node_name",
               "state"
+            ]
+          },
+          {
+            "description": "One or more saga actions failed, *and* one or more undo actions failed during unwinding.  State managed by the saga may now be inconsistent. Support may be required to repair the state.  The saga is no longer running.",
+            "type": "object",
+            "properties": {
+              "error_info": {
+                "$ref": "#/components/schemas/SagaErrorInfo"
+              },
+              "error_node_name": {
+                "$ref": "#/components/schemas/NodeName"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "stuck"
+                ]
+              },
+              "undo_error_node_name": {
+                "$ref": "#/components/schemas/NodeName"
+              },
+              "undo_source_error": {}
+            },
+            "required": [
+              "error_info",
+              "error_node_name",
+              "state",
+              "undo_error_node_name",
+              "undo_source_error"
             ]
           }
         ]
