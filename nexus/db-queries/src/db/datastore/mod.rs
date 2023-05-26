@@ -82,6 +82,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
+pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
@@ -324,6 +325,8 @@ mod test {
             is_scrimlet: false,
             usable_hardware_threads: 4,
             usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
+                .unwrap(),
+            reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
                 .unwrap(),
         }
     }

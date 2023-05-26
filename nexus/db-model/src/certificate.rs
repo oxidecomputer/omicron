@@ -128,13 +128,24 @@ impl Certificate {
         let cert = validate_certs(&params.cert)?;
         validate_private_key(cert, &params.key)?;
 
-        Ok(Self {
+        Ok(Self::new_unvalidated(silo_id, id, service, params))
+    }
+
+    // For testing only: allow creation of certificates that would otherwise not
+    // be allowed (e.g., expired)
+    pub fn new_unvalidated(
+        silo_id: Uuid,
+        id: Uuid,
+        service: ServiceKind,
+        params: params::CertificateCreate,
+    ) -> Self {
+        Self {
             identity: CertificateIdentity::new(id, params.identity),
             silo_id,
             service,
             cert: params.cert,
             key: params.key,
-        })
+        }
     }
 }
 

@@ -5,12 +5,13 @@
 use std::collections::BTreeMap;
 
 use super::help_text;
+use super::ComputedScrollOffset;
 use super::Control;
 use crate::state::{ComponentId, ALL_COMPONENT_IDS};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
-use crate::ui::panes::compute_scroll_offset;
 use crate::ui::widgets::IgnitionPopup;
+use crate::ui::widgets::PopupScrollKind;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::{Action, Cmd, Frame, State};
 use tui::layout::{Constraint, Direction, Layout, Rect};
@@ -238,9 +239,11 @@ impl InventoryView {
             x: 0,
             y: 0,
         };
+
         let popup_builder =
             self.ignition.to_popup_builder(state.rack_state.selected);
-        let popup = popup_builder.build(full_screen);
+        // Scrolling in the ignition popup is always disabled.
+        let popup = popup_builder.build(full_screen, PopupScrollKind::Disabled);
         frame.render_widget(popup, full_screen);
     }
 
@@ -334,11 +337,12 @@ impl Control for InventoryView {
         };
 
         let scroll_offset = self.scroll_offsets.get_mut(&component_id).unwrap();
-        let y_offset = compute_scroll_offset(
+        let y_offset = ComputedScrollOffset::new(
             *scroll_offset,
             text.height(),
             chunks[1].height as usize,
-        );
+        )
+        .into_offset();
         *scroll_offset = y_offset as usize;
 
         let inventory = Paragraph::new(text)

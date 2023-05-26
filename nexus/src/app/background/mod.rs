@@ -8,6 +8,7 @@ mod common;
 mod dns_config;
 mod dns_propagation;
 mod dns_servers;
+mod external_endpoints;
 mod init;
 
 pub use common::Driver;

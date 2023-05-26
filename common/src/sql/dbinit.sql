@@ -84,6 +84,7 @@ CREATE TABLE omicron.public.sled (
     /* CPU & RAM summary for the sled */
     usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
     usable_physical_ram INT8 NOT NULL,
+    reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
@@ -1619,9 +1620,6 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
  * Sagas
  */
 
-/*
- * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
- */
 CREATE TYPE omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',
