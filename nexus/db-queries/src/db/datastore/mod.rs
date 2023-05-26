@@ -82,6 +82,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
+pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;

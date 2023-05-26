@@ -112,11 +112,7 @@ pub struct DeploymentConfig {
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Dropshot configuration for the external API server.
-    ///
-    /// If certificate information is available to Nexus, these
-    /// settings will also be used to launch an HTTPS server
-    /// on [PackageConfig::nexus_https_port].
-    pub dropshot_external: ConfigDropshot,
+    pub dropshot_external: ConfigDropshotWithTls,
     /// Dropshot configuration for internal API server.
     pub dropshot_internal: ConfigDropshot,
     /// Portion of the IP space to be managed by the Rack.
@@ -138,6 +134,22 @@ impl DeploymentConfig {
             .map_err(|e| (path.to_path_buf(), e))?;
         Ok(config_parsed)
     }
+}
+
+/// Thin wrapper around `ConfigDropshot` that adds a boolean for enabling TLS
+///
+/// The configuration for TLS consists of the list of TLS certificates used.
+/// This is dynamic, driven by what's in CockroachDB.  That's why we only need a
+/// boolean here.  (If in the future we want to configure other things about
+/// TLS, this could be extended.)
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ConfigDropshotWithTls {
+    /// Regular Dropshot configuration parameters
+    #[serde(flatten)]
+    pub dropshot: ConfigDropshot,
+    /// Whether TLS is enabled (default: false)
+    #[serde(default)]
+    pub tls: bool,
 }
 
 // By design, we require that all config properties be specified (i.e., we don't
@@ -259,10 +271,6 @@ impl Default for Tunables {
     }
 }
 
-fn default_https_port() -> u16 {
-    443
-}
-
 /// Background task configuration
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct BackgroundTaskConfig {
@@ -270,6 +278,8 @@ pub struct BackgroundTaskConfig {
     pub dns_internal: DnsTasksConfig,
     /// configuration for external DNS background tasks
     pub dns_external: DnsTasksConfig,
+    /// configuration for external endpoint list watcher
+    pub external_endpoints: ExternalEndpointsConfig,
 }
 
 #[serde_as]
@@ -294,6 +304,16 @@ pub struct DnsTasksConfig {
     pub max_concurrent_server_updates: usize,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ExternalEndpointsConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+    // Other policy around the TLS certificates could go here (e.g.,
+    // allow/disallow wildcard certs, don't serve expired certs, etc.)
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -303,9 +323,6 @@ pub struct PackageConfig {
     pub log: ConfigLogging,
     /// Authentication-related configuration
     pub authn: AuthnConfig,
-    /// Port Nexus should use for launching HTTPS servers
-    #[serde(default = "default_https_port")]
-    pub nexus_https_port: u16,
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
@@ -394,8 +411,9 @@ mod test {
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::nexus_config::{
-        BackgroundTaskConfig, Database, DeploymentConfig, DnsTasksConfig,
-        DpdConfig, LoadErrorKind,
+        BackgroundTaskConfig, ConfigDropshotWithTls, Database,
+        DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
+        LoadErrorKind,
     };
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -537,6 +555,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            external_endpoints.period_secs = 9
             "##,
         )
         .unwrap();
@@ -549,11 +568,14 @@ mod test {
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
                         .parse()
                         .unwrap(),
-                    dropshot_external: ConfigDropshot {
-                        bind_address: "10.1.2.3:4567"
-                            .parse::<SocketAddr>()
-                            .unwrap(),
-                        ..Default::default()
+                    dropshot_external: ConfigDropshotWithTls {
+                        tls: false,
+                        dropshot: ConfigDropshot {
+                            bind_address: "10.1.2.3:4567"
+                                .parse::<SocketAddr>()
+                                .unwrap(),
+                            ..Default::default()
+                        }
                     },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
@@ -571,7 +593,6 @@ mod test {
                         session_absolute_timeout_minutes: 480
                     },
                     authn: AuthnConfig { schemes_external: Vec::new() },
-                    nexus_https_port: 443,
                     log: ConfigLogging::File {
                         level: ConfigLoggingLevel::Debug,
                         if_exists: ConfigLoggingIfExists::Fail,
@@ -603,6 +624,9 @@ mod test {
                             period_secs_propagation: Duration::from_secs(7),
                             max_concurrent_server_updates: 8,
                         },
+                        external_endpoints: ExternalEndpointsConfig {
+                            period_secs: Duration::from_secs(9),
+                        }
                     },
                 },
             }
@@ -648,6 +672,7 @@ mod test {
             dns_external.period_secs_servers = 6
             dns_external.period_secs_propagation = 7
             dns_external.max_concurrent_server_updates = 8
+            external_endpoints.period_secs = 9
             "##,
         )
         .unwrap();

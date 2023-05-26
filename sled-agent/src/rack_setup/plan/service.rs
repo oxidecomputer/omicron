@@ -345,6 +345,15 @@ impl Plan {
                             internal_ip: address,
                             external_ip,
                             nic,
+                            // Tell Nexus to use TLS if and only if the caller
+                            // provided TLS certificates.  This effectively
+                            // determines the status of TLS for the lifetime of
+                            // the rack.  In production-like deployments, we'd
+                            // always expect TLS to be enabled.  It's only in
+                            // development that it might not be.
+                            external_tls: !config
+                                .external_certificates
+                                .is_empty(),
                         },
                     }],
                 })
