@@ -251,13 +251,7 @@ impl RunningZone {
         ];
 
         for args in &commands {
-            if let Err(e) = running_zone.run_cmd(args) {
-                // `create-if` may fail if the vnic already has an interface.
-                // eat that error and continue.
-                if args[1] != "create-if" {
-                    return Err(e.into());
-                }
-            }
+            running_zone.run_cmd(args)?;
         }
 
         Ok(running_zone)
