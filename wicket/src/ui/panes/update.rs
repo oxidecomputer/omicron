@@ -1059,7 +1059,7 @@ impl UpdatePane {
                 Span::styled("STATUS", header_style),
             ],
         ))
-        .block(block.clone());
+        .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(headers, self.table_headers_rect);
 
         // Need to refresh the items, as their versions/state may have changed
@@ -1126,7 +1126,7 @@ impl UpdatePane {
                     .style(header_style),
             )
             .widths(&width_constraints)
-            .block(block.clone().title("OVERVIEW"));
+            .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
         // For the selected item, draw the version table.
@@ -1806,11 +1806,11 @@ fn all_installed_versions(
             |component| {
                 vec![
                     InstalledVersion {
-                        title: format!("{base_title} (active)").into(),
+                        title: format!("{base_title}/0 *").into(),
                         version: component.sp_version_active().into(),
                     },
                     InstalledVersion {
-                        title: format!("{base_title} (inactive)").into(),
+                        title: format!("{base_title}/1").into(),
                         version: component.sp_version_inactive().into(),
                     },
                 ]
@@ -1831,16 +1831,16 @@ fn all_installed_versions(
                     }];
                 };
                 let (active_a, active_b) = match active {
-                    RotSlot::A => ("active", "inactive"),
-                    RotSlot::B => ("inactive", "active"),
+                    RotSlot::A => (" *", ""),
+                    RotSlot::B => ("", " *"),
                 };
                 vec![
                     InstalledVersion {
-                        title: format!("{base_title}/A ({active_a})").into(),
+                        title: format!("{base_title}/A{active_a}").into(),
                         version: component.rot_version_a().into(),
                     },
                     InstalledVersion {
-                        title: format!("{base_title}/B ({active_b})").into(),
+                        title: format!("{base_title}/B{active_b}").into(),
                         version: component.rot_version_b().into(),
                     },
                 ]
