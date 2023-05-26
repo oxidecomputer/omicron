@@ -380,6 +380,9 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
+[patch."https://github.com/oxidecomputer/async-bb8-diesel".async-bb8-diesel]
+git = 'https://github.com:443/oxidecomputer/async-bb8-diesel?ref=dap/error-message'
+branch = "dap/error-message"
 #[patch.crates-io]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
