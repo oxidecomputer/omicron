@@ -1382,7 +1382,7 @@ impl super::Nexus {
             .await
             .map_err(|_| {
                 Error::internal_error(
-                    "failed to connect to instance's propolis server",
+                    "websocket connection to instance's serial port failed",
                 )
             })?
             .into_inner();
@@ -1436,7 +1436,7 @@ impl super::Nexus {
             }
             Err(e) => {
                 let message = format!(
-                    "Failed to connect to instance's propolis server: {}",
+                    "websocket connection to instance's serial port failed: {}",
                     e
                 );
                 let _ = client_stream
@@ -1462,7 +1462,7 @@ impl super::Nexus {
             .propolis_ip
             .ok_or_else(|| {
                 Error::internal_error(
-                    "instance's propolis server ip address not found",
+                    "instance's hypervisor IP address not found",
                 )
             })?
             .ip();
@@ -1567,7 +1567,7 @@ impl super::Nexus {
                             nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Abnormal,
                                 reason: std::borrow::Cow::from(
-                                    "nexus: websocket connection to propolis closed unexpectedly"
+                                    "nexus: websocket connection to serial port closed unexpectedly"
                                 ),
                             }))).await?;
                             break;
@@ -1576,7 +1576,7 @@ impl super::Nexus {
                             nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
                                 code: CloseCode::Error,
                                 reason: std::borrow::Cow::from(
-                                    format!("nexus: error in websocket connection to propolis: {}", e)
+                                    format!("nexus: error in websocket connection to serial port: {}", e)
                                 ),
                             }))).await?;
                             return Err(e);
