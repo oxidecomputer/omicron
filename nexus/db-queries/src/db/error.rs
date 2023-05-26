@@ -168,10 +168,9 @@ where
 {
     match error {
         PoolError::Connection(error) => match error {
-            ConnectionError::Checkout(error) => PublicError::unavail(&format!(
-                "Failed to access connection pool: {}",
-                error
-            )),
+            ConnectionError::Connection(error) => PublicError::unavail(
+                &format!("Failed to access connection pool: {}", error),
+            ),
             ConnectionError::Query(error) => make_query_error(error),
         },
         PoolError::Timeout => {
