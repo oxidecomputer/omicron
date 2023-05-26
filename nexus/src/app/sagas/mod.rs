@@ -309,7 +309,10 @@ pub(crate) use declare_saga_actions;
 ///
 /// Saga execution relies on the outcome of an external call being known: since
 /// they are idempotent, reissue the external call until a known result comes
-/// back. Retry if a communication error is seen.
+/// back. Retry if a communication error is seen, or if another retryable error
+/// is seen.
+///
+/// Note that retrying is only valid if the call itself is idempotent.
 #[macro_export]
 macro_rules! retry_until_known_result {
     ( $log:ident, $func:block ) => {{
@@ -329,6 +332,29 @@ macro_rules! retry_until_known_result {
                         Err(backoff::BackoffError::transient(
                             progenitor_client::Error::CommunicationError(e),
                         ))
+                    }
+
+                    Err(progenitor_client::Error::ErrorResponse(
+                        response_value,
+                    )) => {
+                        match response_value.status() {
+                            // Retry on 503 or 429
+                            http::StatusCode::SERVICE_UNAVAILABLE
+                            | http::StatusCode::TOO_MANY_REQUESTS => {
+                                Err(backoff::BackoffError::transient(
+                                    progenitor_client::Error::ErrorResponse(
+                                        response_value,
+                                    ),
+                                ))
+                            }
+
+                            // Anything elses is a permanent error
+                            _ => Err(backoff::BackoffError::Permanent(
+                                progenitor_client::Error::ErrorResponse(
+                                    response_value,
+                                ),
+                            )),
+                        }
                     }
 
                     Err(e) => {
