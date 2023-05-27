@@ -67,6 +67,7 @@ use wicket_common::update_events::SharedStepHandle;
 use wicket_common::update_events::SpComponentUpdateSpec;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::SpComponentUpdateStepId;
+use wicket_common::update_events::SpComponentUpdateTerminalError;
 use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
@@ -303,9 +304,10 @@ impl UpdateTracker {
     pub(crate) async fn abort_update(
         &self,
         sp: SpIdentifier,
+        message: String,
     ) -> Result<(), AbortUpdateError> {
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.abort_update(sp)
+        update_data.abort_update(sp, message).await
     }
 
     async fn start_impl<F, Fut>(
@@ -436,6 +438,29 @@ impl UpdateTrackerData {
         Ok(())
     }
 
+    async fn abort_update(
+        &mut self,
+        sp: SpIdentifier,
+        message: String,
+    ) -> Result<(), AbortUpdateError> {
+        let Some(update_data) = self.sp_update_data.get(&sp) else {
+            return Err(AbortUpdateError::UpdateNotStarted);
+        };
+
+        // Is an update not running? If so, then accept the request.
+        //
+        // There's a race possible here between the task finishing and this
+        // check, but that's totally fine: the worst case is that the abort is
+        // ignored.
+        if update_data.task.is_finished() {
+            return Err(AbortUpdateError::UpdateFinished);
+        }
+
+        let waiter = update_data.abort_handle.abort(message);
+        waiter.await;
+        Ok(())
+    }
+
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
         // Are there any updates currently running? If so, then reject the new
         // repository.
@@ -504,6 +529,9 @@ impl ClearUpdateStateError {
 
 #[derive(Debug, Clone, Error, Eq, PartialEq)]
 pub enum AbortUpdateError {
+    #[error("update task not started")]
+    UpdateNotStarted,
+
     #[error("update task already finished")]
     UpdateFinished,
 }
@@ -513,7 +541,8 @@ impl AbortUpdateError {
         let message = DisplayErrorChain::new(self).to_string();
 
         match self {
-            AbortUpdateError::UpdateFinished => {
+            AbortUpdateError::UpdateNotStarted
+            | AbortUpdateError::UpdateFinished => {
                 HttpError::for_bad_request(None, message)
             }
         }
@@ -1630,7 +1659,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Sending,
                                 artifact: artifact.id.clone(),
                                 error: anyhow!(error),
@@ -1656,7 +1685,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Preparing,
                                 artifact: artifact.id.clone(),
                                 error,
@@ -1682,7 +1711,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Writing,
                                 artifact: artifact.id.clone(),
                                 error,
@@ -1715,7 +1744,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::SetRotActiveSlotFailed {
+                                    SpComponentUpdateTerminalError::SetRotActiveSlotFailed {
                                         error,
                                     }
                                 })?;
@@ -1734,7 +1763,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 .reset_sp_component(component_name)
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::RotResetFailed {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
                                         error,
                                     }
                                 })?;
@@ -1754,7 +1783,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 .reset_sp_component(component_name)
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::SpResetFailed { error }
+                                    SpComponentUpdateTerminalError::SpResetFailed { error }
                                 })?;
                             StepSuccess::new(()).into()
                         },

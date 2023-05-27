@@ -17,7 +17,7 @@ device_access_token                      POST     /device/token
 device_auth_confirm                      POST     /device/confirm
 device_auth_request                      POST     /device/auth
 login_spoof                              POST     /login
-logout                                   POST     /logout
+logout                                   POST     /v1/logout
 
 API operations found with tag "images"
 OPERATION ID                             METHOD   URL PATH
@@ -52,7 +52,7 @@ instance_view                            GET      /v1/instances/{instance}
 
 API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
-login_local                              POST     /login/{silo_name}/local
+login_local                              POST     /v1/login/{silo_name}/local
 login_saml                               POST     /login/{silo_name}/saml/{provider_name}
 login_saml_begin                         GET      /login/{silo_name}/saml/{provider_name}
 
@@ -133,8 +133,8 @@ networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-por
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
 networking_switch_port_settings_create   POST     /v1/system/networking/switch-port-settings
 networking_switch_port_settings_delete   DELETE   /v1/system/networking/switch-port-settings
-networking_switch_port_settings_info     GET      /v1/system/networking/switch-port-settings/{port}/info
 networking_switch_port_settings_list     GET      /v1/system/networking/switch-port-settings
+networking_switch_port_settings_view     GET      /v1/system/networking/switch-port-settings/{port}
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}

@@ -11,6 +11,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use thiserror::Error;
+use update_engine::errors::NestedEngineError;
 use update_engine::StepSpec;
 
 #[derive(JsonSchema)]
@@ -83,7 +84,7 @@ impl StepSpec for SpComponentUpdateSpec {
     type ProgressMetadata = serde_json::Value;
     type CompletionMetadata = serde_json::Value;
     type SkippedMetadata = serde_json::Value;
-    type Error = UpdateTerminalError;
+    type Error = SpComponentUpdateTerminalError;
 }
 
 #[derive(Debug, Error)]
@@ -105,25 +106,15 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
-    #[error("setting currently-active RoT slot failed")]
-    SetRotActiveSlotFailed {
-        #[source]
-        error: anyhow::Error,
-    },
-    #[error("resetting RoT failed")]
-    RotResetFailed {
-        #[source]
-        error: anyhow::Error,
+    #[error("error updating component")]
+    ComponentNestedError {
+        #[from]
+        error: NestedEngineError<SpComponentUpdateSpec>,
     },
     #[error("getting SP caboose failed")]
     GetSpCabooseFailed {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
-    },
-    #[error("SP reset failed")]
-    SpResetFailed {
-        #[source]
-        error: anyhow::Error,
     },
     #[error("setting installinator image ID failed")]
     SetInstallinatorImageIdFailed {
@@ -141,16 +132,6 @@ pub enum UpdateTerminalError {
         #[source]
         error: gateway_client::Error<gateway_client::types::Error>,
     },
-    #[error(
-        "SP component update failed at stage \"{stage}\" for {}",
-        display_artifact_id(.artifact)
-    )]
-    SpComponentUpdateFailed {
-        stage: SpComponentUpdateStage,
-        artifact: ArtifactId,
-        #[source]
-        error: anyhow::Error,
-    },
     #[error("failed to upload trampoline phase 2 to MGS (was a new TUF repo uploaded)?")]
     // XXX should this carry an error message?
     TrampolinePhase2UploadFailed,
@@ -167,6 +148,41 @@ pub enum UpdateTerminalError {
 }
 
 impl update_engine::AsError for UpdateTerminalError {
+    fn as_error(&self) -> &(dyn std::error::Error + 'static) {
+        self
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum SpComponentUpdateTerminalError {
+    #[error(
+        "SP component update failed at stage \"{stage}\" for {}",
+        display_artifact_id(.artifact)
+    )]
+    SpComponentUpdateFailed {
+        stage: SpComponentUpdateStage,
+        artifact: ArtifactId,
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("setting currently-active RoT slot failed")]
+    SetRotActiveSlotFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("resetting RoT failed")]
+    RotResetFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+    #[error("SP reset failed")]
+    SpResetFailed {
+        #[source]
+        error: anyhow::Error,
+    },
+}
+
+impl update_engine::AsError for SpComponentUpdateTerminalError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
     }

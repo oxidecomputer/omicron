@@ -58,6 +58,7 @@ enum PopupKind {
     StartUpdate { popup_state: StartUpdatePopupState },
     StepLogs,
     Ignition,
+    AbortUpdate { popup_state: AbortUpdatePopupState },
     ClearUpdateState { popup_state: ClearUpdateStatePopupState },
 }
 
@@ -67,6 +68,7 @@ impl PopupKind {
             Self::StartUpdate { popup_state } => popup_state.is_scrollable(),
             Self::StepLogs => true,
             Self::Ignition => false,
+            Self::AbortUpdate { popup_state } => popup_state.is_scrollable(),
             Self::ClearUpdateState { popup_state } => {
                 popup_state.is_scrollable()
             }
@@ -82,6 +84,22 @@ enum StartUpdatePopupState {
 }
 
 impl StartUpdatePopupState {
+    fn is_scrollable(&self) -> bool {
+        match self {
+            Self::Prompting | Self::Waiting => false,
+            Self::Failed { .. } => true,
+        }
+    }
+}
+
+#[derive(Debug)]
+enum AbortUpdatePopupState {
+    Prompting,
+    Waiting,
+    Failed { message: String },
+}
+
+impl AbortUpdatePopupState {
     fn is_scrollable(&self) -> bool {
         match self {
             Self::Prompting | Self::Waiting => false,
@@ -112,6 +130,7 @@ pub struct UpdatePane {
     log: Logger,
     help: Vec<(&'static str, &'static str)>,
     not_started_help: Vec<(&'static str, &'static str)>,
+    running_help: Vec<(&'static str, &'static str)>,
     completed_help: Vec<(&'static str, &'static str)>,
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
@@ -160,6 +179,7 @@ impl UpdatePane {
                 ("Update", "<Enter>"),
             ],
             not_started_help: vec![("Start", "<Ctrl-U>")],
+            running_help: vec![("Abort", "<Ctrl-Alt-A>")],
             completed_help: vec![("Clear", "<Ctrl-Alt-R>")],
             component_state: ALL_COMPONENT_IDS
                 .iter()
@@ -555,6 +575,113 @@ impl UpdatePane {
         actual_scroll_kind
     }
 
+    pub fn draw_abort_update_prompting_popup(
+        &mut self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let mut body = Text::default();
+        body.lines.push(Spans::from(vec![Span::styled(
+            "Would you like to abort this update?",
+            style::plain_text(),
+        )]));
+        body.lines.push(Spans::from(Vec::new()));
+        body.lines.push(Spans::from(vec![
+            Span::styled("Warning: ", style::warning_update()),
+            Span::styled(
+                "This might result in an inconsistent state. \
+                Reset via ignition afterwards if necessary.",
+                style::plain_text(),
+            ),
+        ]));
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body,
+            buttons: vec![
+                ButtonText::new("Yes", "Y"),
+                ButtonText::new("No", "N"),
+            ],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
+    fn draw_abort_update_waiting_popup(
+        &self,
+        state: &State,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE: {}", state.rack_state.selected),
+                style::header(true),
+            )]),
+            body: Text::from(vec![Spans::from(vec![Span::styled(
+                "Waiting for update to be aborted",
+                style::plain_text(),
+            )])]),
+            buttons: Vec::new(),
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
+    fn draw_abort_update_failed_popup(
+        &self,
+        state: &State,
+        message: &str,
+        frame: &mut Frame<'_>,
+        scroll_kind: PopupScrollKind,
+    ) -> PopupScrollKind {
+        let mut body = Text::default();
+        let prefix = vec![Span::styled("Message: ", style::selected())];
+        push_text_lines(message, prefix, &mut body.lines);
+
+        let popup_builder = PopupBuilder {
+            header: Spans::from(vec![Span::styled(
+                format!("ABORT UPDATE FAILED: {}", state.rack_state.selected),
+                style::failed_update(),
+            )]),
+            body,
+            buttons: vec![ButtonText::new("Close", "Esc")],
+        };
+        let full_screen = Rect {
+            width: state.screen_width,
+            height: state.screen_height,
+            x: 0,
+            y: 0,
+        };
+
+        let popup = popup_builder.build(full_screen, scroll_kind);
+        let actual_scroll_kind = popup.actual_scroll_kind();
+        frame.render_widget(popup, full_screen);
+        actual_scroll_kind
+    }
+
     fn draw_clear_update_state_waiting_popup(
         &self,
         state: &State,
@@ -795,6 +922,7 @@ impl UpdatePane {
                     | UpdateItemState::RunningOrCompleted { .. } => None,
                 }
             }
+            Cmd::AbortUpdate => self.handle_abort_update(state),
             Cmd::ClearUpdateState => self.handle_clear_update_state(state),
             Cmd::GotoTop => {
                 let id_state = self
@@ -813,6 +941,47 @@ impl UpdatePane {
                 Some(Action::Redraw)
             }
             _ => None,
+        }
+    }
+
+    fn handle_abort_update(&mut self, state: &mut State) -> Option<Action> {
+        let selected = state.rack_state.selected;
+        match state.update_state.item_state(selected) {
+            UpdateItemState::RunningOrCompleted { .. } => {
+                let id_state = self.component_state.get(&selected).unwrap();
+                let event_buffer = &id_state.event_buffer;
+                if let Some(root_execution_id) =
+                    event_buffer.root_execution_id()
+                {
+                    let summary = event_buffer.steps().summarize();
+                    let summary = summary.get(&root_execution_id).expect(
+                        "root execution ID should have a summary \
+                            associated with it",
+                    );
+                    match summary.execution_status {
+                        ExecutionStatus::Running { .. } => {
+                            // If execution is still running, we can abort it.
+                            self.popup = Some(UpdatePanePopup::new(
+                                PopupKind::AbortUpdate {
+                                    popup_state:
+                                        AbortUpdatePopupState::Prompting,
+                                },
+                            ));
+                            Some(Action::Redraw)
+                        }
+
+                        ExecutionStatus::NotStarted
+                        | ExecutionStatus::Completed { .. }
+                        | ExecutionStatus::Failed { .. }
+                        | ExecutionStatus::Aborted { .. } => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            UpdateItemState::AwaitingRepository
+            | UpdateItemState::NotStarted
+            | UpdateItemState::UpdateStarted => None,
         }
     }
 
@@ -996,6 +1165,64 @@ impl UpdatePane {
                     _ => None,
                 }
             }
+            PopupKind::AbortUpdate { popup_state } => {
+                match (popup_state, cmd) {
+                    (
+                        popup_state @ AbortUpdatePopupState::Prompting,
+                        Cmd::Yes,
+                    ) => {
+                        // Trigger the update
+                        let selected = state.rack_state.selected;
+                        info!(self.log, "Aborting update for {}", selected);
+                        *popup_state = AbortUpdatePopupState::Waiting;
+                        Some(Action::AbortUpdate(selected))
+                    }
+                    (AbortUpdatePopupState::Prompting, Cmd::No) => {
+                        self.popup = None;
+                        Some(Action::Redraw)
+                    }
+                    (
+                        popup_state,
+                        Cmd::ShowPopup(ShowPopupCmd::AbortUpdateResponse {
+                            component_id,
+                            response,
+                        }),
+                    ) => {
+                        let component_id_matches =
+                            state.rack_state.selected == component_id;
+                        match (component_id_matches, response) {
+                            (true, Ok(())) => {
+                                // We're done waiting, close the popup.
+                                self.popup = None;
+                                Some(Action::Redraw)
+                            }
+                            (true, Err(message)) => {
+                                *popup_state =
+                                    AbortUpdatePopupState::Failed { message };
+                                Some(Action::Redraw)
+                            }
+                            (false, _) => {
+                                // This message isn't meant for this component.
+                                // It's a bit of a weird situation (we should
+                                // only be making one abort-update request at a
+                                // time, and shouldn't let
+                                // state.rack_state.selected be changed in the
+                                // meantime) so log this.
+                                slog::warn!(
+                                    self.log,
+                                    "currently waiting on abort update \
+                                    response for {}, but received response \
+                                    for {component_id}",
+                                    state.rack_state.selected
+                                );
+                                None
+                            }
+                        }
+                    }
+                    _ => None,
+                }
+            }
+
             PopupKind::ClearUpdateState { popup_state } => {
                 // The popup state doesn't matter here.
                 match cmd {
@@ -1323,6 +1550,9 @@ impl UpdatePane {
                 .highlight_style(style::highlighted());
 
                 let help_text = match id_state.show_help {
+                    Some(ComponentUpdateShowHelp::Running) => {
+                        Some(help_text(&self.running_help))
+                    }
                     Some(ComponentUpdateShowHelp::Completed) => {
                         Some(help_text(&self.completed_help))
                     }
@@ -1564,7 +1794,7 @@ impl ComponentUpdateListState {
                         ),
                         style::plain_text(),
                     ));
-                    None
+                    Some(ComponentUpdateShowHelp::Running)
                 }
                 ExecutionStatus::Completed { .. } => {
                     status_text
@@ -1811,6 +2041,8 @@ impl ComponentUpdateListState {
 /// The kind of help text to display under the component update.
 #[derive(Clone, Copy, Debug)]
 enum ComponentUpdateShowHelp {
+    /// Show running help text.
+    Running,
     /// Show completed or failed help text.
     Completed,
 }
@@ -2021,6 +2253,27 @@ impl Control for UpdatePane {
                         ),
                     StartUpdatePopupState::Failed { message } => self
                         .draw_start_update_failed_popup(
+                            state,
+                            &message,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                },
+                PopupKind::AbortUpdate { popup_state } => match popup_state {
+                    AbortUpdatePopupState::Prompting => self
+                        .draw_abort_update_prompting_popup(
+                            state,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                    AbortUpdatePopupState::Waiting => self
+                        .draw_abort_update_waiting_popup(
+                            state,
+                            frame,
+                            popup.scroll_kind,
+                        ),
+                    AbortUpdatePopupState::Failed { message } => self
+                        .draw_abort_update_failed_popup(
                             state,
                             &message,
                             frame,

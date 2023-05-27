@@ -197,6 +197,12 @@ impl KeyHandler {
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate
             }
+            KeyCode::Char('a')
+                if event.modifiers
+                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
+            {
+                Cmd::AbortUpdate
+            }
             KeyCode::Char('r')
                 if event.modifiers
                     == KeyModifiers::CONTROL | KeyModifiers::ALT =>

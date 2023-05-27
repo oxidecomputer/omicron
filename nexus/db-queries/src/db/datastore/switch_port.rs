@@ -66,11 +66,11 @@ impl SwitchPortSettingsCombinedResult {
     }
 }
 
-impl Into<external::SwitchPortSettingsInfo>
+impl Into<external::SwitchPortSettingsView>
     for SwitchPortSettingsCombinedResult
 {
-    fn into(self) -> external::SwitchPortSettingsInfo {
-        external::SwitchPortSettingsInfo {
+    fn into(self) -> external::SwitchPortSettingsView {
+        external::SwitchPortSettingsView {
             settings: self.settings.into(),
             port: self.port.into(),
             groups: self.groups.into_iter().map(Into::into).collect(),

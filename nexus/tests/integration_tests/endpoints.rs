@@ -387,7 +387,7 @@ lazy_static! {
         "/v1/system/networking/switch-port-settings?port_settings=portofino"
     );
     pub static ref DEMO_SWITCH_PORT_SETTINGS_INFO_URL: String =
-        format!("/v1/system/networking/switch-port-settings/protofino/info");
+        format!("/v1/system/networking/switch-port-settings/protofino");
     pub static ref DEMO_SWITCH_PORT_SETTINGS_CREATE: params::SwitchPortSettingsCreate =
         params::SwitchPortSettingsCreate::new(IdentityMetadataCreateParams {
             name: "portofino".parse().unwrap(),

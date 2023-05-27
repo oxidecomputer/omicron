@@ -160,7 +160,7 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     // Prepare to make a login request.
     let base_url = format!("{}://{}", proto, dns_name);
     let silo_name = config.recovery_silo.silo_name.as_str();
-    let login_url = format!("{}/login/{}/local", base_url, silo_name);
+    let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
     let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
             anyhow!("parsing configured recovery user name: {:?}", s)

@@ -45,6 +45,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_artifacts_and_event_reports)?;
         api.register(get_baseboard)?;
         api.register(post_start_update)?;
+        api.register(post_abort_update)?;
         api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
@@ -369,19 +370,22 @@ async fn get_update_sp(
 async fn post_abort_update(
     rqctx: RequestContext<ServerContext>,
     target: Path<SpIdentifier>,
-    opts: TypedBody<ClearUpdateStateOptions>,
+    opts: TypedBody<AbortUpdateOptions>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let log = &rqctx.log;
     let target = target.into_inner();
 
     let opts = opts.into_inner();
     if let Some(test_error) = opts.test_error {
-        return Err(test_error
-            .into_http_error(log, "force canceling update")
-            .await);
+        return Err(test_error.into_http_error(log, "aborting update").await);
     }
 
-    match rqctx.context().update_tracker.abort_update(target).await {
+    match rqctx
+        .context()
+        .update_tracker
+        .abort_update(target, opts.message)
+        .await
+    {
         Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
         Err(err) => Err(err.to_http_error()),
     }

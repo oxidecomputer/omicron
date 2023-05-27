@@ -179,6 +179,21 @@ impl MessageDisplayState {
                             attempt_elapsed,
                         );
                     }
+                    StepEventKind::ExecutionAborted {
+                        aborted_step,
+                        attempt,
+                        attempt_elapsed,
+                        message,
+                        ..
+                    } => {
+                        let aborted_node =
+                            self.handle_and_get_node(aborted_step)?;
+                        aborted_node.abandon(
+                            &message,
+                            attempt,
+                            attempt_elapsed,
+                        );
+                    }
                     StepEventKind::Nested { .. } => {
                         // TODO: display nested events
                     }
