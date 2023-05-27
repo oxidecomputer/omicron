@@ -21,6 +21,10 @@ sidecar_revision.physical = "b"
 # $ dladm show-phys -p -o LINK
 data_link = "cxgbe0"
 
+# Percentage of usable physical DRAM to use for the VMM reservoir, which
+# guest memory is pulled from.
+vmm_reservoir_percentage = 0
+
 [log]
 level = "info"
 mode = "file"

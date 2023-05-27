@@ -70,7 +70,7 @@ use omicron_common::backoff::{
     BackoffError,
 };
 use omicron_common::nexus_config::{
-    self, DeploymentConfig as NexusDeploymentConfig,
+    self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
 };
 use once_cell::sync::OnceCell;
 use sled_hardware::is_gimlet;
@@ -1294,7 +1294,7 @@ impl ServiceManager {
             smfh.import_manifest()?;
 
             match &service.details {
-                ServiceType::Nexus { internal_ip, .. } => {
+                ServiceType::Nexus { internal_ip, external_tls, .. } => {
                     info!(self.inner.log, "Setting up Nexus service");
 
                     let sled_info = self
@@ -1313,16 +1313,21 @@ impl ServiceManager {
 
                     // Nexus takes a separate config file for parameters which
                     // cannot be known at packaging time.
+                    let nexus_port = if *external_tls { 443 } else { 80 };
                     let deployment_config = NexusDeploymentConfig {
                         id: request.zone.id,
                         rack_id: sled_info.rack_id,
 
-                        dropshot_external: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(port_ip, 80),
-                            // This has to be large enough to support:
-                            // - bulk writes to disks
-                            request_body_max_bytes: 8192 * 1024,
-                            ..Default::default()
+                        dropshot_external: ConfigDropshotWithTls {
+                            tls: *external_tls,
+                            dropshot: dropshot::ConfigDropshot {
+                                bind_address: SocketAddr::new(
+                                    port_ip, nexus_port,
+                                ),
+                                // This has to be large enough to support:
+                                // - bulk writes to disks
+                                request_body_max_bytes: 8192 * 1024,
+                            },
                         },
                         dropshot_internal: dropshot::ConfigDropshot {
                             bind_address: SocketAddr::new(
@@ -1334,7 +1339,6 @@ impl ServiceManager {
                             // certificates provided by the customer during rack
                             // setup.
                             request_body_max_bytes: 10 * 1024 * 1024,
-                            ..Default::default()
                         },
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
                             sled_info.underlay_address,

@@ -277,7 +277,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-bb8-diesel"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=7944dafc8a36dc6e20a1405eca59d04662de2bb7#7944dafc8a36dc6e20a1405eca59d04662de2bb7"
+source = "git+https://github.com/oxidecomputer/async-bb8-diesel?rev=be3d9bce50051d8c0e0c06078e8066cc27db3001#be3d9bce50051d8c0e0c06078e8066cc27db3001"
 dependencies = [
  "async-trait",
  "bb8",
@@ -1053,15 +1053,15 @@ dependencies = [
 
 [[package]]
 name = "console"
-version = "0.15.5"
+version = "0.15.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3d79fbe8970a77e3e34151cc13d3b3e248aa0faaecb9f6091fa07ebefe5ad60"
+checksum = "c926e00cc70edefdc64d3a5ff31cc65bb97a3460097762bd23afb4d8145fccf8"
 dependencies = [
  "encode_unicode",
  "lazy_static",
  "libc",
  "unicode-width",
- "windows-sys 0.42.0",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -1990,7 +1990,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#62ee51d5494699c9d12271275010c5433a665a71"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2033,7 +2033,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#616e9fbda73ca90ee40dfea8283fe62437af99ff"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#62ee51d5494699c9d12271275010c5433a665a71"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2156,7 +2156,6 @@ dependencies = [
  "chrono",
  "futures",
  "http",
- "hyper",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oxide-client",
@@ -3168,6 +3167,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bhyve_api",
  "camino",
  "cfg-if 1.0.0",
  "futures",
@@ -3976,7 +3976,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno",
+ "steno 0.4.0",
  "thiserror",
  "uuid",
 ]
@@ -4049,7 +4049,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -4153,7 +4153,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "steno",
+ "steno 0.4.0",
  "uuid",
 ]
 
@@ -4393,7 +4393,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "test-strategy",
  "thiserror",
@@ -4432,7 +4432,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.3.1",
  "strum",
  "thiserror",
  "tokio",
@@ -4463,6 +4463,8 @@ name = "omicron-dev-tools"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
+ "camino-tempfile",
  "clap 4.3.0",
  "dropshot",
  "expectorate",
@@ -4475,8 +4477,10 @@ dependencies = [
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "openssl",
  "oxide-client",
  "pq-sys",
+ "rcgen",
  "signal-hook",
  "signal-hook-tokio",
  "subprocess",
@@ -4589,6 +4593,7 @@ dependencies = [
  "openssl-probe",
  "openssl-sys",
  "oso",
+ "oxide-client",
  "oximeter 0.1.0",
  "oximeter-client",
  "oximeter-db",
@@ -4617,7 +4622,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -4984,16 +4989,21 @@ checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 name = "oxide-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "base64 0.21.1",
  "chrono",
  "futures",
+ "http",
+ "hyper",
  "progenitor",
  "rand 0.8.5",
  "regress 0.6.0",
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
  "tokio",
+ "trust-dns-resolver",
  "uuid",
 ]
 
@@ -6267,9 +6277,9 @@ dependencies = [
 
 [[package]]
 name = "reedline"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b8684e0f5d6fb8529156a19c637645dd7fd5018efbdeaa306f53f54e3b404de"
+checksum = "31d763be5efcabcd27d6e804d126661215aa0a2d898c13c0aa1c953c6652fcec"
 dependencies = [
  "chrono",
  "crossterm 0.26.1",
@@ -7699,6 +7709,28 @@ name = "steno"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee007f34597a281684e1ab95e5c62d4c330db52644ad81dbaa53204f1ff7ba9f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "newtype_derive",
+ "petgraph",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "steno"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a1e7ccea133c197729abfd16dccf91a3c4d0da1e94bb0c0aa164c2b8a227481"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9610,9 +9642,9 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e92305c174683d78035cbf1b70e18db6329cc0f1b9cae0a52ca90bf5bfe7125"
+checksum = "760394e246e4c28189f19d488c058bf16f564016aefac5d32bb1f3b51d5e9261"
 dependencies = [
  "byteorder",
  "bzip2",

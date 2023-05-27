@@ -34,6 +34,7 @@ pub mod snapshot_delete;
 pub mod switch_port_settings_apply;
 pub mod switch_port_settings_clear;
 pub mod switch_port_settings_update;
+pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
 pub mod vpc_create;
@@ -158,6 +159,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
+
+    #[cfg(test)]
+    <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
 
     registry
 }

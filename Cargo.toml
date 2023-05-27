@@ -121,7 +121,7 @@ anyhow = "1.0"
 api_identity = { path = "api_identity" }
 assert_matches = "1.5.0"
 assert_cmd = "2.0.11"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "7944dafc8a36dc6e20a1405eca59d04662de2bb7" }
+async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "be3d9bce50051d8c0e0c06078e8066cc27db3001" }
 async-trait = "0.1.68"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -250,6 +250,7 @@ pretty-hex = "0.3.0"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "5f694f4833a4368e05764a3b4b0fcaa6feed54df" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5f694f4833a4368e05764a3b4b0fcaa6feed54df", features = [ "generated-migration" ] }
 propolis-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5f694f4833a4368e05764a3b4b0fcaa6feed54df", default-features = false, features = ["mock-only"] }
 proptest = "1.1.0"
@@ -299,7 +300,7 @@ sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
-steno = "0.3.1"
+steno = "0.4.0"
 strum = { version = "0.24", features = [ "derive" ] }
 subprocess = "0.2.9"
 libsw = { version = "3.2.4", features = ["tokio"] }
@@ -338,7 +339,7 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "wicketd-client" }
 zeroize = { version = "1.6.0", features = ["zeroize_derive", "std"] }
-zip = { version = "0.6.5", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.2", default-features = false, features = ["async"] }
 
 [profile.dev]
@@ -379,7 +380,7 @@ panic = "abort"
 #
 #[patch."https://github.com/oxidecomputer/dropshot"]
 #dropshot = { path = "../dropshot/dropshot" }
-#[patch."https://github.com/oxidecomputer/steno"]
+#[patch.crates-io]
 #steno = { path = "../steno" }
 #[patch."https://github.com/oxidecomputer/propolis"]
 #propolis-client = { path = "../propolis/lib/propolis-client" }

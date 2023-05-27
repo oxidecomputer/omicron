@@ -54,7 +54,6 @@ impl ArtifactServer {
             // https://github.com/oxidecomputer/dropshot/pull/618 lands and is
             // available in omicron.
             request_body_max_bytes: 4 * 1024 * 1024,
-            ..Default::default()
         };
 
         let api = crate::http_entrypoints::api();

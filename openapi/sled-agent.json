@@ -1762,6 +1762,10 @@
                 "type": "string",
                 "format": "ip"
               },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
               "internal_ip": {
                 "description": "The address at which the internal nexus server is reachable.",
                 "type": "string",
@@ -1784,6 +1788,7 @@
             },
             "required": [
               "external_ip",
+              "external_tls",
               "internal_ip",
               "nic",
               "type"

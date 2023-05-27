@@ -82,6 +82,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DnsVersionUpdateBuilder;
 pub use rack::RackInit;
+pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::CrucibleResources;
@@ -243,7 +244,7 @@ pub async fn datastore_test(
     use crate::authn;
 
     let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new(&cfg));
+    let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
     let datastore = Arc::new(DataStore::new(pool));
 
     // Create an OpContext with the credentials of "db-init" just for the
@@ -324,6 +325,8 @@ mod test {
             is_scrimlet: false,
             usable_hardware_threads: 4,
             usable_physical_ram: crate::db::model::ByteCount::try_from(1 << 40)
+                .unwrap(),
+            reservoir_size: crate::db::model::ByteCount::try_from(1 << 39)
                 .unwrap(),
         }
     }
@@ -892,7 +895,7 @@ mod test {
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
         let datastore = DataStore::new(Arc::new(pool));
 
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
@@ -941,7 +944,7 @@ mod test {
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&cfg));
+        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
         let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
