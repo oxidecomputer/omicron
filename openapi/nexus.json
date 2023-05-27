@@ -5166,7 +5166,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List port settings",
+        "summary": "List switch port settings",
         "operationId": "networking_switch_port_settings_list",
         "parameters": [
           {
