@@ -3631,7 +3631,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List switch ports.",
+        "summary": "List switch ports",
         "operationId": "networking_switch_port_list",
         "parameters": [
           {
@@ -3700,7 +3700,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Apply switch port settings.",
+        "summary": "Apply switch port settings",
         "operationId": "networking_switch_port_apply_settings",
         "parameters": [
           {
@@ -3758,7 +3758,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Clear switch port settings.",
+        "summary": "Clear switch port settings",
         "operationId": "networking_switch_port_clear_settings",
         "parameters": [
           {
@@ -4808,7 +4808,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List address lots.",
+        "summary": "List address lots",
         "operationId": "networking_address_lot_list",
         "parameters": [
           {
@@ -4865,7 +4865,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create an address lot.",
+        "summary": "Create an address lot",
         "operationId": "networking_address_lot_create",
         "requestBody": {
           "content": {
@@ -4902,7 +4902,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Delete an address lot.",
+        "summary": "Delete an address lot",
         "operationId": "networking_address_lot_delete",
         "parameters": [
           {
@@ -4933,7 +4933,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List the blocks in an address lot.",
+        "summary": "List the blocks in an address lot",
         "operationId": "networking_address_lot_block_list",
         "parameters": [
           {
@@ -5001,7 +5001,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Get loopback addresses, optionally filtering by id.",
+        "summary": "Get loopback addresses, optionally filtering by id",
         "operationId": "networking_loopback_address_list",
         "parameters": [
           {
@@ -5058,7 +5058,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create a loopback address.",
+        "summary": "Create a loopback address",
         "operationId": "networking_loopback_address_create",
         "requestBody": {
           "content": {
@@ -5095,7 +5095,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Delete a loopback address.",
+        "summary": "Delete a loopback address",
         "operationId": "networking_loopback_address_delete",
         "parameters": [
           {
@@ -5157,7 +5157,7 @@
         "tags": [
           "system"
         ],
-        "summary": "List port settings.",
+        "summary": "List switch port settings",
         "operationId": "networking_switch_port_settings_list",
         "parameters": [
           {
@@ -5222,7 +5222,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Create port settings.",
+        "summary": "Create switch port settings",
         "operationId": "networking_switch_port_settings_create",
         "requestBody": {
           "content": {
@@ -5240,7 +5240,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsInfo"
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
                 }
               }
             }
@@ -5257,7 +5257,7 @@
         "tags": [
           "system"
         ],
-        "summary": "Delete port settings.",
+        "summary": "Delete switch port settings",
         "operationId": "networking_switch_port_settings_delete",
         "parameters": [
           {
@@ -5282,13 +5282,13 @@
         }
       }
     },
-    "/v1/system/networking/switch-port-settings/{port}/info": {
+    "/v1/system/networking/switch-port-settings/{port}": {
       "get": {
         "tags": [
           "system"
         ],
-        "summary": "Get information about a switch port.",
-        "operationId": "networking_switch_port_settings_info",
+        "summary": "Get information about a switch port",
+        "operationId": "networking_switch_port_settings_view",
         "parameters": [
           {
             "in": "path",
@@ -5306,7 +5306,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SwitchPortSettingsInfo"
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
                 }
               }
             }
@@ -12655,7 +12655,7 @@
         ]
       },
       "SwitchPortSettings": {
-        "description": "Represents a port settings object by containing its id. This id may be used in other API calls to view and manage port settings. This is the central object for configuring external networking. At face value this likely seems off as there is only an `identity` member. However most other configuration objects reference this object by id. This includes - SwitchPortConfig - SwitchPortLinkConfig - LldpServiceConfig - SwitchInterfaceConfig - SwitchVlanInterfaceConfig - SwitchPortRouteConfig - SwitchPortBgpPeerConfig - SwitchPortAddressConfig With the exception of the port configuration all of these relationships are many to one. So SwitchPortSettings object can contain several link configs, interface configs, route configs, etc.\n\nThe relationships betwen these objects are futher described in RFD 267.",
+        "description": "A switch port settings identity whose id may be used to view additional details.",
         "type": "object",
         "properties": {
           "description": {
@@ -12781,7 +12781,28 @@
           "port_settings_id"
         ]
       },
-      "SwitchPortSettingsInfo": {
+      "SwitchPortSettingsResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettings"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SwitchPortSettingsView": {
         "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
         "type": "object",
         "properties": {
@@ -12869,27 +12890,6 @@
           "routes",
           "settings",
           "vlan_interfaces"
-        ]
-      },
-      "SwitchPortSettingsResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortSettings"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
         ]
       },
       "SwitchResultsPage": {

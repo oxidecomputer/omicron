@@ -2215,24 +2215,8 @@ pub struct SwitchPort {
     pub port_settings_id: Option<Uuid>,
 }
 
-/// Represents a port settings object by containing its id. This id may be used
-/// in other API calls to view and manage port settings. This is the central
-/// object for configuring external networking. At face value this likely seems
-/// off as there is only an `identity` member. However most other configuration
-/// objects reference this object by id. This includes
-///     - SwitchPortConfig
-///     - SwitchPortLinkConfig
-///     - LldpServiceConfig
-///     - SwitchInterfaceConfig
-///     - SwitchVlanInterfaceConfig
-///     - SwitchPortRouteConfig
-///     - SwitchPortBgpPeerConfig
-///     - SwitchPortAddressConfig
-/// With the exception of the port configuration all of these relationships are
-/// many to one. So SwitchPortSettings object can contain several link configs,
-/// interface configs, route configs, etc.
-///
-/// The relationships betwen these objects are futher described in RFD 267.
+/// A switch port settings identity whose id may be used to view additional
+/// details.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
 )]
@@ -2245,7 +2229,7 @@ pub struct SwitchPortSettings {
 /// convenience data structure for getting a complete view of a particular
 /// port's settings.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettingsInfo {
+pub struct SwitchPortSettingsView {
     /// The primary switch port settings handle.
     pub settings: SwitchPortSettings,
 
