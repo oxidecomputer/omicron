@@ -57,6 +57,7 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
@@ -81,6 +82,7 @@ use wicket_common::update_events::UpdateTerminalError;
 #[derive(Debug)]
 struct SpUpdateData {
     task: JoinHandle<()>,
+    abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
@@ -209,15 +211,25 @@ impl UpdateTracker {
             // TODO do we need `UpdateDriver` as a distinct type?
             let update_driver = UpdateDriver {};
 
+            // Using a oneshot channel to communicate the abort handle isn't
+            // ideal, but it works and is the easiest way to send it without
+            // restructuring this code.
+            let (abort_handle_sender, abort_handle_receiver) =
+                oneshot::channel();
             let task = tokio::spawn(update_driver.run(
                 plan,
                 update_cx,
                 event_buffer.clone(),
                 ipr_start_receiver,
                 opts,
+                abort_handle_sender,
             ));
 
-            SpUpdateData { task, event_buffer }
+            let abort_handle = abort_handle_receiver
+                .await
+                .expect("abort handle is sent immediately");
+
+            SpUpdateData { task, abort_handle, event_buffer }
         })
         .await
     }
@@ -236,9 +248,10 @@ impl UpdateTracker {
             let event_buffer_2 = event_buffer.clone();
             let log = self.log.clone();
 
-            let task = tokio::spawn(async move {
-                let engine = UpdateEngine::new(&log, sender);
+            let engine = UpdateEngine::new(&log, sender);
+            let abort_handle = engine.abort_handle();
 
+            let task = tokio::spawn(async move {
                 // The step component and ID have been chosen arbitrarily here --
                 // they aren't important.
                 engine
@@ -274,7 +287,7 @@ impl UpdateTracker {
                     .expect("event receiving task panicked");
             });
 
-            SpUpdateData { task, event_buffer }
+            SpUpdateData { task, abort_handle, event_buffer }
         })
         .await
     }
@@ -285,6 +298,14 @@ impl UpdateTracker {
     ) -> Result<(), ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
         update_data.clear_update_state(sp)
+    }
+
+    pub(crate) async fn abort_update(
+        &self,
+        sp: SpIdentifier,
+    ) -> Result<(), AbortUpdateError> {
+        let mut update_data = self.sp_update_data.lock().await;
+        update_data.abort_update(sp)
     }
 
     async fn start_impl<F, Fut>(
@@ -481,6 +502,24 @@ impl ClearUpdateStateError {
     }
 }
 
+#[derive(Debug, Clone, Error, Eq, PartialEq)]
+pub enum AbortUpdateError {
+    #[error("update task already finished")]
+    UpdateFinished,
+}
+
+impl AbortUpdateError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            AbortUpdateError::UpdateFinished => {
+                HttpError::for_bad_request(None, message)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -492,6 +531,7 @@ impl UpdateDriver {
         event_buffer: Arc<StdMutex<EventBuffer>>,
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
+        abort_handle_sender: oneshot::Sender<AbortHandle>,
     ) {
         let update_cx = &update_cx;
 
@@ -514,6 +554,8 @@ impl UpdateDriver {
         // Build the update executor.
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
+        let abort_handle = engine.abort_handle();
+        _ = abort_handle_sender.send(abort_handle);
 
         if let Some(secs) = opts.test_step_seconds {
             engine

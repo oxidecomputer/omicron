@@ -12,6 +12,7 @@ use derive_where::derive_where;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::errors::NestedEngineError;
 use crate::{
     errors::ExecutionError,
     events::{Event, EventReport, StepEventKind, StepProgress},
@@ -122,16 +123,17 @@ impl<S: StepSpec> StepContext<S> {
     pub async fn with_nested_engine<'a, 'this, F, S2>(
         &'this self,
         engine_fn: F,
-    ) -> Result<CompletionContext<S2>, S2::Error>
+    ) -> Result<CompletionContext<S2>, NestedEngineError<S2>>
     where
         'this: 'a,
         F: FnOnce(&mut UpdateEngine<'a, S2>) -> Result<(), S2::Error> + Send,
-        S2: StepSpec,
+        S2: StepSpec + 'a,
     {
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&self.log, sender);
         // Create the engine's steps.
-        (engine_fn)(&mut engine)?;
+        (engine_fn)(&mut engine)
+            .map_err(|error| NestedEngineError::Creation { error })?;
 
         // Now run the engine.
         let engine = engine.execute();
@@ -150,8 +152,11 @@ impl<S: StepSpec> StepContext<S> {
                         Err(ExecutionError::EventSendError(_)) => {
                             unreachable!("we always keep the receiver open")
                         }
-                        Err(ExecutionError::StepFailed { error, .. }) => {
-                            result = Some(Err(error));
+                        Err(ExecutionError::StepFailed { component, id, error }) => {
+                            result = Some(Err(NestedEngineError::StepFailed { component, id, error }));
+                        }
+                        Err(ExecutionError::Aborted { component, id, message }) => {
+                            result = Some(Err(NestedEngineError::Aborted { component, id, message }));
                         }
                     }
                 }

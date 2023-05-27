@@ -13,12 +13,14 @@ use tokio::sync::mpsc;
 
 use crate::{events::Event, AsError, StepSpec};
 
-// NOTE: have to hand write this impl because #[source] doesn't work for AsError.
+// NOTE: have to hand write `ExecutionError` and `NestedEngineError` impls
+// because #[source] doesn't work for AsError.
 
 /// An error that occurs while the engine is being executed.
 #[derive_where(Debug)]
 pub enum ExecutionError<S: StepSpec> {
     StepFailed { component: S::Component, id: S::StepId, error: S::Error },
+    Aborted { component: S::Component, id: S::StepId, message: String },
     EventSendError(mpsc::error::SendError<Event<S>>),
 }
 
@@ -27,6 +29,13 @@ impl<S: StepSpec> fmt::Display for ExecutionError<S> {
         match self {
             Self::StepFailed { component, id, .. } => {
                 write!(f, "step failed: component {component:?}, id {id:?}")
+            }
+            Self::Aborted { component, id, message } => {
+                write!(
+                    f,
+                    "execution aborted while running \
+                     component {component:?}, id {id:?}: {message}"
+                )
             }
             Self::EventSendError(_) => {
                 write!(f, "event receiver dropped")
@@ -39,6 +48,7 @@ impl<S: StepSpec + 'static> error::Error for ExecutionError<S> {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             ExecutionError::StepFailed { error, .. } => Some(error.as_error()),
+            ExecutionError::Aborted { .. } => None,
             ExecutionError::EventSendError(error) => {
                 Some(error as &(dyn error::Error + 'static))
             }
@@ -49,6 +59,44 @@ impl<S: StepSpec + 'static> error::Error for ExecutionError<S> {
 impl<S: StepSpec> From<mpsc::error::SendError<Event<S>>> for ExecutionError<S> {
     fn from(value: mpsc::error::SendError<Event<S>>) -> Self {
         Self::EventSendError(value)
+    }
+}
+
+/// An error that occurs while executing a nested engine.
+#[derive_where(Debug)]
+pub enum NestedEngineError<S: StepSpec> {
+    Creation { error: S::Error },
+    StepFailed { component: S::Component, id: S::StepId, error: S::Error },
+    Aborted { component: S::Component, id: S::StepId, message: String },
+}
+
+impl<S: StepSpec> fmt::Display for NestedEngineError<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Creation { .. } => {
+                write!(f, "error while creating nested engine")
+            }
+            Self::StepFailed { component, id, .. } => {
+                write!(f, "step failed: component {component:?}, id {id:?}")
+            }
+            Self::Aborted { component, id, message } => {
+                write!(
+                    f,
+                    "execution aborted while running \
+                     component {component:?}, id {id:?}: {message}"
+                )
+            }
+        }
+    }
+}
+
+impl<S: StepSpec + 'static> error::Error for NestedEngineError<S> {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            Self::Creation { error } => Some(error.as_error()),
+            Self::StepFailed { error, .. } => Some(error.as_error()),
+            Self::Aborted { .. } => None,
+        }
     }
 }
 

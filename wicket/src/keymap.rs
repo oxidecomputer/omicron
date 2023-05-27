@@ -72,6 +72,9 @@ pub enum Cmd {
     /// Begin an update.
     StartUpdate,
 
+    /// Force cancel an update.
+    AbortUpdate,
+
     /// Reset update state.
     ClearUpdateState,
 
@@ -117,6 +120,12 @@ pub enum Cmd {
 pub enum ShowPopupCmd {
     /// A response to a start-update request.
     StartUpdateResponse {
+        component_id: ComponentId,
+        response: Result<(), String>,
+    },
+
+    /// A response to a abort-update request.
+    AbortUpdateResponse {
         component_id: ComponentId,
         response: Result<(), String>,
     },

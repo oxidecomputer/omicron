@@ -387,6 +387,42 @@ impl UpdatePane {
                 ];
                 body.lines.push(Spans::from(spans));
             }
+            StepStatus::Aborted { info: Some(info) } => {
+                let mut spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Aborted", style::failed_update_bold()),
+                ];
+                if info.attempt > 1 {
+                    // Display the attempt number.
+                    spans.push(Span::styled(
+                        " (at attempt ",
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(
+                        format!("{}", info.attempt),
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(")", style::plain_text()));
+                }
+                spans.push(Span::styled(
+                    format!(" after {:.2?}", info.step_elapsed),
+                    style::plain_text(),
+                ));
+                body.lines.push(Spans::from(spans));
+
+                body.lines.push(Spans::default());
+
+                // Show the message.
+                let prefix = vec![Span::styled("Message: ", style::selected())];
+                push_text_lines(&info.message, prefix, &mut body.lines);
+            }
+            StepStatus::Aborted { info: None } => {
+                let spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Aborted", style::failed_update_bold()),
+                ];
+                body.lines.push(Spans::from(spans));
+            }
             StepStatus::WillNotBeRun { step_that_failed } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
@@ -799,7 +835,8 @@ impl UpdatePane {
                     );
                     match summary.execution_status {
                         ExecutionStatus::Completed { .. }
-                        | ExecutionStatus::Failed { .. } => {
+                        | ExecutionStatus::Failed { .. }
+                        | ExecutionStatus::Aborted { .. } => {
                             // If execution has reached a terminal
                             // state, we can clear it.
                             self.popup = Some(UpdatePanePopup::new(
@@ -1555,6 +1592,23 @@ impl ComponentUpdateListState {
                     ));
                     Some(ComponentUpdateShowHelp::Completed)
                 }
+                ExecutionStatus::Aborted { step_key } => {
+                    status_text
+                        .push(Span::styled("Update ", style::plain_text()));
+                    status_text.push(Span::styled(
+                        "aborted",
+                        style::failed_update_bold(),
+                    ));
+                    status_text.push(Span::styled(
+                        format!(
+                            " at step {}/{}",
+                            step_key.index + 1,
+                            summary.total_steps,
+                        ),
+                        style::plain_text(),
+                    ));
+                    Some(ComponentUpdateShowHelp::Completed)
+                }
             }
         } else {
             status_text
@@ -1633,6 +1687,14 @@ impl ComponentUpdateListState {
                     item_spans.push(Span::styled(
                         format!("{:>5} ", "✘"),
                         style::failed_update(),
+                    ));
+                    style::selected()
+                }
+                StepStatus::Aborted { .. } => {
+                    // Exclamation mark is probably the best we can do.
+                    item_spans.push(Span::styled(
+                        format!("{:>5} ", "!"),
+                        style::failed_update_bold(),
                     ));
                     style::selected()
                 }
