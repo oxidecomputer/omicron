@@ -321,7 +321,7 @@ impl super::Nexus {
             let loopback_address_params = LoopbackAddressCreate {
                 address_lot: NameOrId::Name(address_lot_name.clone()),
                 rack_id,
-                switch_location,
+                switch_location: switch_location.clone(),
                 address: first_address,
                 mask: 64,
             };
@@ -344,14 +344,26 @@ impl super::Nexus {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
                 })?;
 
-            self.db_datastore
-                .loopback_address_create(
-                    opctx,
-                    &loopback_address_params,
-                    None,
-                    &authz_address_lot,
-                )
-                .await?;
+            if self
+                .loopback_address_lookup(
+                    &opctx,
+                    rack_id,
+                    switch_location.into(),
+                    first_address.into(),
+                )?
+                .lookup_for(authz::Action::Read)
+                .await
+                .is_err()
+            {
+                self.db_datastore
+                    .loopback_address_create(
+                        opctx,
+                        &loopback_address_params,
+                        None,
+                        &authz_address_lot,
+                    )
+                    .await?;
+            }
 
             let body = Ipv6Entry {
                 addr: Ipv6Addr::from_str("fd00:99::1").map_err(|e| {
@@ -374,7 +386,7 @@ impl super::Nexus {
             })?;
 
             let identity = IdentityMetadataCreateParams {
-                name,
+                name: name.clone(),
                 description: "initial uplink configuration".to_string(),
             };
 
@@ -431,9 +443,16 @@ impl super::Nexus {
                 RouteConfig { routes: vec![route] },
             );
 
-            self.db_datastore
-                .switch_port_settings_create(opctx, &port_settings_params)
-                .await?;
+            if self
+                .db_datastore
+                .switch_port_settings_get(opctx, &name.into())
+                .await
+                .is_err()
+            {
+                self.db_datastore
+                    .switch_port_settings_create(opctx, &port_settings_params)
+                    .await?;
+            }
 
             let mut dpd_port_settings = PortSettings {
                 tag: NEXUS_DPD_TAG.into(),
