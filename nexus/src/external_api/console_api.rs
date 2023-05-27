@@ -51,8 +51,6 @@ pub struct SpoofLoginBody {
 #[endpoint {
    method = POST,
    path = "/login",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
    tags = ["hidden"],
 }]
 pub async fn login_spoof(
@@ -376,8 +374,24 @@ pub async fn login_saml(
             )
             .await?;
 
-        login_finish(&opctx, apictx, user, relay_state.and_then(|r| r.referer))
-            .await
+        let session = create_session(opctx, apictx, user).await?;
+        let next_url = relay_state
+            .and_then(|r| r.referer)
+            .unwrap_or_else(|| "/".to_string());
+        let mut response = http_response_see_other(next_url)?;
+
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
+                &session.token,
+                // use absolute timeout even though session might idle out first.
+                // browser expiration is mostly for convenience, as the API will
+                // reject requests with an expired session regardless
+                apictx.session_absolute_timeout(),
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -387,17 +401,34 @@ pub struct LoginPathParam {
     pub silo_name: crate::db::model::Name,
 }
 
+#[endpoint {
+   method = GET,
+   path = "/login/{silo_name}/local",
+   tags = ["login"],
+   unpublished = true,
+}]
+pub async fn login_local_begin(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    _path_params: Path<LoginPathParam>,
+) -> Result<Response<Body>, HttpError> {
+    // TODO: figure out why instrumenting doesn't work
+    // let apictx = rqctx.context();
+    // let handler = async { serve_console_index(rqctx.context()).await };
+    // apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+    serve_console_index(rqctx.context()).await
+}
+
 /// Authenticate a user via username and password
 #[endpoint {
    method = POST,
-   path = "/login/{silo_name}/local",
+   path = "/v1/login/{silo_name}/local",
    tags = ["login"],
 }]
 pub async fn login_local(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<LoginPathParam>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
-) -> Result<HttpResponseSeeOther, HttpError> {
+) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -411,56 +442,49 @@ pub async fn login_local(
         let opctx = nexus.opctx_external_authn();
         let silo_lookup = nexus.silo_lookup(&opctx, silo)?;
         let user = nexus.login_local(&opctx, &silo_lookup, credentials).await?;
-        login_finish(&opctx, apictx, user, None).await
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 
-async fn login_finish(
-    opctx: &OpContext,
-    apictx: &ServerContext,
-    user: Option<crate::db::model::SiloUser>,
-    next_url: Option<String>,
-) -> Result<HttpResponseSeeOther, HttpError> {
-    let nexus = &apictx.nexus;
+        let session = create_session(opctx, apictx, user).await?;
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseUpdatedNoContent());
 
-    if user.is_none() {
-        Err(Error::Unauthenticated {
-            internal_message: String::from(
-                "no matching user found or credentials were not valid",
-            ),
-        })?;
-    }
-
-    let user = user.unwrap();
-    let session = nexus.session_create(&opctx, user.id()).await?;
-    let next_url = next_url.unwrap_or_else(|| "/".to_string());
-
-    let mut response_with_headers = http_response_see_other(next_url)?;
-
-    {
-        let headers = response_with_headers.headers_mut();
-        headers.append(
-            header::SET_COOKIE,
-            session_cookie_header_value(
+        {
+            let headers = response.headers_mut();
+            let cookie = session_cookie_header_value(
                 &session.token,
                 // use absolute timeout even though session might idle out first.
                 // browser expiration is mostly for convenience, as the API will
                 // reject requests with an expired session regardless
                 apictx.session_absolute_timeout(),
-            )?,
-        );
-    }
-    Ok(response_with_headers)
+            )?;
+            headers.append(header::SET_COOKIE, cookie);
+        }
+        Ok(response)
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// Log user out of web console by deleting session in both server and browser
+async fn create_session(
+    opctx: &OpContext,
+    apictx: &ServerContext,
+    user: Option<crate::db::model::SiloUser>,
+) -> Result<crate::db::model::ConsoleSession, HttpError> {
+    let nexus = &apictx.nexus;
+    let session = match user {
+        Some(user) => nexus.session_create(&opctx, user.id()).await?,
+        None => Err(Error::Unauthenticated {
+            internal_message: String::from(
+                "no matching user found or credentials were not valid",
+            ),
+        })?,
+    };
+    Ok(session)
+}
+
+/// Log user out of web console by deleting session on client and server
 #[endpoint {
    // important for security that this be a POST despite the empty req body
    method = POST,
-   path = "/logout",
-   // TODO: this should be unpublished, but for now it's convenient for the
-   // console to use the generated client for this request
+   path = "/v1/logout",
    tags = ["hidden"],
 }]
 pub async fn logout(
@@ -514,8 +538,6 @@ pub struct StateParam {
     state: Option<String>,
 }
 
-// this happens to be the same as StateParam, but it may include other things
-// later
 #[derive(Serialize)]
 pub struct LoginUrlQuery {
     // TODO: give state param the correct name. In SAML it's called RelayState.
