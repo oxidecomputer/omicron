@@ -621,6 +621,9 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(project_images.len(), 1);
     assert_eq!(project_images[0].identity.name, "alpine-edge");
 
+    let image_id = project_images[0].identity.id;
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &promote_url)
             .expect_status(Some(StatusCode::BAD_REQUEST)),
