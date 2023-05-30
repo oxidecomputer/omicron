@@ -350,20 +350,15 @@ impl StorageWorker {
             let underlay = underlay.clone();
 
             async move {
-                // Don't start the backoff timer before the underlay is available
-                let underlay_guard = loop {
-                    let guard = underlay.lock().await;
-                    if guard.is_some() {
-                        // underlay exists; proceed with notifying nexus
-                        break guard;
-                    }
-                    mem::drop(guard); // unlock before sleeping
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                // We should always have an underlay at this point (see below;
+                // we don't get into this `notify_nexus` retry loop until the
+                // underlay exists), but it could have disappeared in between
+                // the check and this execution. If the underlay doesn't exist,
+                // we can't proceed, so backoff and we'll retry later.
+                let underlay_guard = underlay.lock().await;
+                let Some(underlay) = underlay_guard.as_ref() else {
+                    return Err(backoff::BackoffError::transient(Error::UnderlayNotInitialized.to_string()));
                 };
-
-                // We only break out of the loop when `underlay_guard.is_some()`, so
-                // we can safely unwrap here.
-                let underlay = underlay_guard.as_ref().unwrap();
 
                 let sled_id = underlay.sled_id;
                 let lazy_nexus_client = underlay.lazy_nexus_client.clone();
@@ -394,12 +389,31 @@ impl StorageWorker {
                     "total duration" => ?total_duration);
             }
         };
+        let underlay = self.underlay.clone();
         self.nexus_notifications.push_back(
-            backoff::retry_notify_ext(
-                backoff::retry_policy_internal_service_aggressive(),
-                notify_nexus,
-                log_post_failure,
-            )
+            async move {
+                // Don't start the backoff timer before the underlay is
+                // available. This is inherently racy in that `underlay` could
+                // be cleared between our check and `notify_nexus`; we handle
+                // this by also checking for the underlay's existence inside
+                // `notify_nexus`.
+                loop {
+                    let guard = underlay.lock().await;
+                    if guard.is_some() {
+                        // underlay exists; proceed with notifying nexus
+                        break;
+                    }
+                    mem::drop(guard); // unlock before sleeping
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+
+                backoff::retry_notify_ext(
+                    backoff::retry_policy_internal_service_aggressive(),
+                    notify_nexus,
+                    log_post_failure,
+                )
+                .await
+            }
             .boxed(),
         );
     }
