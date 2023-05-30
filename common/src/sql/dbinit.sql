@@ -1033,12 +1033,22 @@ FROM
 WHERE 
     project_id IS NULL;
 
+/* Index for silo images */
+CREATE UNIQUE INDEX on omicron.public.image (
+    silo_id,
+    name
+) WHERE
+    time_deleted is NULL AND
+    project_id is NULL
+
+/* Index for project images */
 CREATE UNIQUE INDEX on omicron.public.image (
     silo_id,
     project_id,
     name
 ) WHERE
-    time_deleted is NULL;
+    time_deleted is NULL AND
+    project_id is NOT NULL;
 
 CREATE TYPE omicron.public.snapshot_state AS ENUM (
   'creating',
