@@ -605,7 +605,7 @@ async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(silo_image.identity.id, image_id);
 
-    // Create another project image
+    // Create another project image with the same name
     NexusRequest::objects_post(client, &images_url, &image_create_params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<views::Image>()
