@@ -45,7 +45,9 @@ use dropshot::HandlerTaskMode;
 use flate2::bufread::GzDecoder;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::addrobj::IPV6_LINK_LOCAL_NAME;
-use illumos_utils::dladm::{Dladm, Etherstub, EtherstubVnic, PhysicalLink};
+use illumos_utils::dladm::{
+    Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
+};
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
@@ -218,6 +220,9 @@ pub enum Error {
 
     #[error("Early networking setup error")]
     EarlyNetworkSetupError(#[from] EarlyNetworkSetupError),
+
+    #[error("Error querying simnet devices")]
+    Simnet(#[from] GetSimnetError),
 }
 
 impl Error {
@@ -369,6 +374,8 @@ enum SledLocalZone {
         // Since SoftNPU is currently managed via a UNIX socket, we need to
         // pass those files in to the SwitchZone so Dendrite can manage SoftNPU
         filesystems: Vec<zone::Fs>,
+        // Data links that need to be plumbed into the zone.
+        data_links: Vec<String>,
     },
     // The Zone is currently running.
     Running {
@@ -787,6 +794,10 @@ impl ServiceManager {
     ) -> Result<Vec<(Link, bool)>, Error> {
         let mut links: Vec<(Link, bool)> = Vec::new();
 
+        let is_gimlet = is_gimlet().map_err(|e| {
+            Error::Underlay(underlay::Error::SystemDetection(e))
+        })?;
+
         for svc in &req.services {
             match &svc.details {
                 ServiceType::Tfport { pkt_source } => {
@@ -800,9 +811,11 @@ impl ServiceManager {
                             links.push((link, false));
                         }
                         Err(_) => {
-                            return Err(Error::MissingDevice {
-                                device: pkt_source.to_string(),
-                            });
+                            if is_gimlet {
+                                return Err(Error::MissingDevice {
+                                    device: pkt_source.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1052,6 +1065,7 @@ impl ServiceManager {
         &self,
         request: &ZoneRequest,
         filesystems: &[zone::Fs],
+        data_links: &[String],
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(&request.zone)?;
         let (bootstrap_vnic, bootstrap_name_and_address) =
@@ -1113,6 +1127,7 @@ impl ServiceManager {
             unique_name,
             datasets.as_slice(),
             &filesystems,
+            &data_links,
             &devices,
             opte_ports,
             bootstrap_vnic,
@@ -1813,9 +1828,15 @@ impl ServiceManager {
                 ServiceType::Tfport { pkt_source } => {
                     info!(self.inner.log, "Setting up tfport service");
 
-                    // Collect the prefixes for each techport.
-                    let techport_prefixes =
-                        match bootstrap_name_and_address.as_ref() {
+                    let is_gimlet = is_gimlet().map_err(|e| {
+                        Error::Underlay(underlay::Error::SystemDetection(e))
+                    })?;
+
+                    if is_gimlet {
+                        // Collect the prefixes for each techport.
+                        let techport_prefixes = match bootstrap_name_and_address
+                            .as_ref()
+                        {
                             Some((_, addr)) => {
                                 Self::bootstrap_addr_to_techport_prefixes(addr)
                             }
@@ -1827,21 +1848,24 @@ impl ServiceManager {
                             }
                         };
 
-                    for (i, prefix) in techport_prefixes.into_iter().enumerate()
-                    {
-                        // Each `prefix` is an `Ipv6Subnet` including a netmask.
-                        // Stringify just the network address, without the mask.
-                        smfh.setprop(
-                            format!("config/techport{i}_prefix"),
-                            prefix.net().network().to_string(),
-                        )?;
+                        for (i, prefix) in
+                            techport_prefixes.into_iter().enumerate()
+                        {
+                            // Each `prefix` is an `Ipv6Subnet` including a netmask.
+                            // Stringify just the network address, without the mask.
+                            smfh.setprop(
+                                format!("config/techport{i}_prefix"),
+                                prefix.net().network().to_string(),
+                            )?;
+                        }
+                        smfh.setprop("config/pkt_source", pkt_source)?;
                     }
-                    smfh.setprop("config/pkt_source", pkt_source)?;
                     smfh.setprop(
                         "config/host",
                         &format!("[{}]", Ipv6Addr::LOCALHOST),
                     )?;
                     smfh.setprop("config/port", &format!("{}", DENDRITE_PORT))?;
+
                     smfh.refresh()?;
                 }
                 ServiceType::BoundaryNtp {
@@ -1973,10 +1997,10 @@ impl ServiceManager {
                     if is_gimlet {
                         // Maghemite for a scrimlet needs to be configured to
                         // talk to dendrite
-                        smfh.setprop("config/dendrite", "true")?;
                         smfh.setprop("config/dpd_host", "[::1]")?;
                         smfh.setprop("config/dpd_port", DENDRITE_PORT)?;
                     }
+                    smfh.setprop("config/dendrite", "true")?;
 
                     smfh.refresh()?;
                 }
@@ -2680,14 +2704,20 @@ impl ServiceManager {
                     log,
                     "Initializing CRDB Cluster - sending request to {host}"
                 );
-                zone.run_cmd(&[
+                if let Err(err) = zone.run_cmd(&[
                     "/opt/oxide/cockroachdb/bin/cockroach",
                     "init",
                     "--insecure",
                     "--host",
                     host,
-                ])
-                .map_err(|err| Error::CockroachInit { err })?;
+                ]) {
+                    if !err
+                        .to_string()
+                        .contains("cluster has already been initialized")
+                    {
+                        return Err(Error::CockroachInit { err });
+                    }
+                };
                 info!(log, "Formatting CRDB");
                 zone.run_cmd(&[
                     "/opt/oxide/cockroachdb/bin/cockroach",
@@ -2828,6 +2858,7 @@ impl ServiceManager {
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ensuring scrimlet services (enabling services)");
         let mut filesystems: Vec<zone::Fs> = vec![];
+        let mut data_links: Vec<String> = vec![];
 
         let services = match self.inner.sled_mode {
             // A pure gimlet sled should not be trying to activate a switch zone.
@@ -2858,10 +2889,11 @@ impl ServiceManager {
                     let softnpu_filesystem = zone::Fs {
                         ty: "lofs".to_string(),
                         dir: "/opt/softnpu/stuff".to_string(),
-                        special: "/opt/oxide/softnpu/stuff".to_string(),
+                        special: "/var/run/softnpu/sidecar".to_string(),
                         ..Default::default()
                     };
                     filesystems.push(softnpu_filesystem);
+                    data_links = Dladm::get_simulated_tfports()?;
                 }
                 vec![
                     ServiceType::Dendrite { asic },
@@ -2869,6 +2901,7 @@ impl ServiceManager {
                     ServiceType::Uplink,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::Tfport { pkt_source: "tfpkt0".to_string() },
                     ServiceType::SpSim,
                 ]
             }
@@ -2895,6 +2928,8 @@ impl ServiceManager {
             Some(request),
             // filesystems=
             filesystems,
+            // data_links=
+            data_links,
         )
         .await?;
 
@@ -2984,6 +3019,8 @@ impl ServiceManager {
             None,
             // filesystems=
             vec![],
+            // data_links=
+            vec![],
         )
         .await
     }
@@ -2996,12 +3033,14 @@ impl ServiceManager {
         zone: &mut SledLocalZone,
         request: ServiceZoneRequest,
         filesystems: Vec<zone::Fs>,
+        data_links: Vec<String>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
         let zone_type = request.zone_type.clone();
         *zone = SledLocalZone::Initializing {
             request,
             filesystems,
+            data_links,
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
@@ -3017,6 +3056,7 @@ impl ServiceManager {
         zone_type: ZoneType,
         request: Option<ServiceZoneRequest>,
         filesystems: Vec<zone::Fs>,
+        data_links: Vec<String>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3032,7 +3072,12 @@ impl ServiceManager {
         match (&mut *sled_zone, request) {
             (SledLocalZone::Disabled, Some(request)) => {
                 info!(log, "Enabling {zone_typestr} zone (new)");
-                self.clone().start_zone(&mut sled_zone, request, filesystems);
+                self.clone().start_zone(
+                    &mut sled_zone,
+                    request,
+                    filesystems,
+                    data_links,
+                );
             }
             (
                 SledLocalZone::Initializing { request, .. },
@@ -3192,7 +3237,12 @@ impl ServiceManager {
         &self,
         sled_zone: &mut SledLocalZone,
     ) -> Result<(), Error> {
-        let SledLocalZone::Initializing { request, filesystems, .. } = &*sled_zone else {
+        let SledLocalZone::Initializing {
+            request,
+            filesystems,
+            data_links,
+            ..
+        } = &*sled_zone else {
             return Ok(())
         };
 
@@ -3215,7 +3265,8 @@ impl ServiceManager {
         };
 
         let request = ZoneRequest { zone: request.clone(), root };
-        let zone = self.initialize_zone(&request, filesystems).await?;
+        let zone =
+            self.initialize_zone(&request, filesystems, data_links).await?;
         *sled_zone =
             SledLocalZone::Running { request: request.zone.clone(), zone };
         Ok(())

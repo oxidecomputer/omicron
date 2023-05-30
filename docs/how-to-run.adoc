@@ -176,13 +176,19 @@ The Sled Agent supports operation on both:
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using an existing network as your external network, you can usually just run:
+If you're running on a PC and using an existing network as your external network, you can usually just run this script with a few environment vaiables set. These environment varaibles tell softnpu about your local network. 
 
+[source,bash]
 ----
+export PHYSICAL_LINK=igb0           # The physical link for your local network.
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network.
+export PXA_START=192.168.1.2        # The first IP address your Oxide cluster can use.
+export PXA_END=192.168.1.100        # The last IP address your Oxide cluster can use.
+
 $ pfexec ./tools/create_virtual_hardware.sh
 ----
 
-If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK:
+If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK as follows:
 
 ----
 $ PHYSICAL_LINK=fake_external_stub0 pfexec ./tools/create_virtual_hardware.sh
@@ -369,26 +375,6 @@ $ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
 ----
 
 In other configurations, you might use a different GATEWAY_IP.  You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
-
-=== SoftNPU Proxy ARP Setup
-
-Services that require external connectivity (e.g. Nexus, Boundary NTP, External DNS) do so via OPTE using addresses from the services IP pool.  When using SoftNPU, we'll need to configure Proxy ARP for those addresses.
-
-In this snippet, `$SERVICE_IP_POOL_START` and `$SERVICE_IP_POOL_END` are the addresses you put into `config-rss.toml` above for `internal_services_ip_pool_ranges`:
-
-[source,console]
-----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $SERVICE_IP_POOL_START \
-  $SERVICE_IP_POOL_END \
-  $SOFTNPU_MAC
-----
 
 == Using Omicron
 

@@ -292,7 +292,7 @@ impl SledAgent {
         .map_err(|err| Error::SledSubnet { err })?;
 
         // Initialize the xde kernel driver with the underlay devices.
-        let underlay_nics = underlay::find_nics()?;
+        let underlay_nics = underlay::find_nics(&config.data_links)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
         // Create the PortManager to manage all the OPTE ports on the sled.

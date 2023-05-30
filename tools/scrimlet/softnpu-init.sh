@@ -8,24 +8,35 @@ set -x
 GATEWAY_IP=${GATEWAY_IP:=$(netstat -rn -f inet | grep default | awk -F ' ' '{print $2}')}
 echo "Using $GATEWAY_IP as gateway ip"
 
+ping $GATEWAY_IP
+sleep 1
+ping $GATEWAY_IP
+sleep 1
+ping $GATEWAY_IP
+sleep 1
+ping $GATEWAY_IP
+sleep 1
+
 # Gateway mac is determined automatically by inspecting the arp table on the development machine
 # Can be overridden by setting GATEWAY_MAC
 GATEWAY_MAC=${GATEWAY_MAC:=$(arp "$GATEWAY_IP" | awk -F ' ' '{print $4}')}
 echo "Using $GATEWAY_MAC as gateway mac"
 
-z_swadm () {
-    pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
+z_scadm () {
+    pfexec zlogin sidecar_softnpu /softnpu/scadm \
+        --server /softnpu/server \
+        --client /softnpu/client \
+        standalone \
+        $@
 }
 
-# Configure route to the "sled"
-z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
-# Create NDP entry for the "sled"
-z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
 
 # Configure upstream network gateway ARP entry
-z_swadm arp add "$GATEWAY_IP" "$GATEWAY_MAC"
+z_scadm add-arp-entry $GATEWAY_IP $GATEWAY_MAC
 
-z_swadm link ls
-z_swadm addr list
-z_swadm route list
-z_swadm arp list
+PXA_MAC=${PXA_MAC:-a8:e1:de:01:70:1d}
+
+if [[ -v PXA_START ]]; then
+    z_scadm add-proxy-arp $PXA_START $PXA_END $PXA_MAC
+fi
+z_scadm dump-state

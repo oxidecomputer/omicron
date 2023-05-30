@@ -104,6 +104,7 @@ function install_packages {
       'library/postgresql-13'
       'pkg-config'
       'brand/omicron1/tools'
+      'brand/sparse'
       'library/libxmlsec1'
     )
 

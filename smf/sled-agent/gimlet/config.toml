@@ -31,6 +31,9 @@ vmm_reservoir_percentage = 80
 # for non-gimlets will configure a swap device via /etc/vfstab.
 swap_device_size_gb = 256
 
+data_links = ["cxgbe0", "cxgbe1"]
+rss_initiator = true
+
 [log]
 level = "info"
 mode = "file"

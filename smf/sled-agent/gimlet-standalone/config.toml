@@ -29,6 +29,10 @@ vmm_reservoir_percentage = 0
 # $ dladm show-phys -p -o LINK
 # data_link = "igb0"
 
+data_links = ["net0", "net1"]
+
+rss_initiator = true
+
 [log]
 level = "info"
 mode = "file"
