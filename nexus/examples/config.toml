@@ -9,12 +9,8 @@ session_idle_timeout_minutes = 480 # 6 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
-#
-# This is not fleshed out yet and the only reason to change it now is for
-# working on authentication or authorization.
 [authn]
-# TODO(https://github.com/oxidecomputer/omicron/issues/372): Remove "spoof".
-schemes_external = ["spoof", "session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token"]
 
 [log]
 # Show log messages of this level and more severe
