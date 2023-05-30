@@ -4853,6 +4853,7 @@ dependencies = [
  "expectorate",
  "flate2",
  "futures",
+ "gateway-client",
  "http",
  "hyper-staticfile",
  "illumos-utils",

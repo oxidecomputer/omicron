@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Name;
 use slog::Logger;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -173,8 +174,17 @@ impl Nexus {
                 "component" => "DpdClient"
             )),
         };
-        let (dpd_host, dpd_port) = if let Some(dpd_address) =
-            &config.pkg.dendrite.address
+
+        // TODO
+        // Can we get switch names from DNS only and avoid this?
+        // This will primarily impact testing since many of the tests still
+        // supply a dendrite configuration
+        let switch_zero = Name::try_from("switch0".to_string())?;
+        let (dpd_host, dpd_port) = if let Some(dpd_address) = &config
+            .pkg
+            .dendrite
+            .get(&switch_zero)
+            .and_then(|dendrite| dendrite.address)
         {
             (dpd_address.ip().to_string(), dpd_address.port())
         } else {

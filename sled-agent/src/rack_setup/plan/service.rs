@@ -19,8 +19,8 @@ use illumos_utils::zpool::ZpoolName;
 use internal_dns::{ServiceName, DNS_ZONE};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
-    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGS_PORT, NTP_PORT,
+    NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -283,6 +283,13 @@ impl Plan {
                     ServiceName::Dendrite,
                     &zone,
                     DENDRITE_PORT,
+                )
+                .unwrap();
+            dns_builder
+                .service_backend_zone(
+                    ServiceName::ManagementGatewayService,
+                    &zone,
+                    MGS_PORT,
                 )
                 .unwrap();
         }

@@ -333,6 +333,7 @@ pub enum ServiceType {
     Clickhouse,
     CockroachDb,
     Crucible,
+    SpSim,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -353,6 +354,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Clickhouse => write!(f, "clickhouse"),
             ServiceType::CockroachDb => write!(f, "cockroachdb"),
             ServiceType::Crucible => write!(f, "crucible"),
+            ServiceType::SpSim => write!(f, "sp-sim"),
         }
     }
 }
@@ -435,6 +437,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             St::CockroachDb => Ok(AutoSt::CockroachDb),
             St::Crucible => Ok(AutoSt::Crucible),
             St::ManagementGatewayService
+            | St::SpSim
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }

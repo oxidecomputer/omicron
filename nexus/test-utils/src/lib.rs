@@ -348,11 +348,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.dendrite = Some(dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+        let switch_name: Name = "switch0".parse().unwrap();
 
         // Update the configuration options for Nexus, if it's launched later.
         //
         // NOTE: If dendrite is started after Nexus, this is ignored.
-        self.config.pkg.dendrite.address = Some(address.into());
+        let config = omicron_common::nexus_config::DpdConfig {
+            address: Some(std::net::SocketAddr::V6(address)),
+        };
+        self.config.pkg.dendrite.insert(switch_name, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
         self.rack_init_builder.add_service(

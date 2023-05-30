@@ -9,6 +9,7 @@ use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
@@ -262,8 +263,8 @@ pub struct RackInitializationRequest {
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
     pub recovery_silo: RecoverySiloConfig,
-    /// The number of external qsfp ports per sidecar
-    pub external_port_count: u8,
+    /// The external qsfp ports per sidecar
+    pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: Option<RackNetworkConfig>,
 }

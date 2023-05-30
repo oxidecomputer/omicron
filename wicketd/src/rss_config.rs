@@ -375,8 +375,10 @@ fn validate_rack_network_config(
 ) -> Result<bootstrap_agent_client::types::RackNetworkConfig> {
     use bootstrap_agent_client::types::PortFec as BaPortFec;
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
+    use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
     use omicron_common::api::internal::shared::PortFec;
     use omicron_common::api::internal::shared::PortSpeed;
+    use omicron_common::api::internal::shared::SwitchLocation;
 
     // Make sure `infra_ip_first`..`infra_ip_last` is a well-defined range...
     let infra_ip_range =
@@ -421,5 +423,9 @@ fn validate_rack_network_config(
         },
         uplink_ip: config.uplink_ip,
         uplink_vid: config.uplink_vid,
+        switch: match config.switch {
+            SwitchLocation::Switch0 => BaSwitchLocation::Switch0,
+            SwitchLocation::Switch1 => BaSwitchLocation::Switch1,
+        },
     })
 }

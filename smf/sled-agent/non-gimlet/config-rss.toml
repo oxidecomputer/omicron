@@ -62,6 +62,7 @@ user_password_hash = "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p
 gateway_ip = "192.168.1.199"
 infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.50"
+switch = "switch0"
 uplink_port = "qsfp0"
 uplink_port_speed = "40G"
 uplink_port_fec="none"

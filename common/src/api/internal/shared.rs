@@ -4,10 +4,14 @@
 
 //! Types shared between Nexus and Sled Agent.
 
-use crate::api::external;
+use crate::api::external::{self, Name};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 use uuid::Uuid;
 
 /// The type of network interface
@@ -71,6 +75,8 @@ pub struct RackNetworkConfig {
     pub infra_ip_first: Ipv4Addr,
     /// Last ip address to be used for configuring network infrastructure
     pub infra_ip_last: Ipv4Addr,
+    /// Switch to use for uplink
+    pub switch: SwitchLocation,
     /// Switchport to use for external connectivity
     pub uplink_port: String,
     /// Speed for the Switchport
@@ -81,6 +87,36 @@ pub struct RackNetworkConfig {
     pub uplink_ip: Ipv4Addr,
     /// VLAN id to use for uplink
     pub uplink_vid: Option<u16>,
+}
+
+/// Identifies switch physical location
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SwitchLocation {
+    /// Switch in upper slot
+    Switch0,
+    /// Switch in lower slot
+    Switch1,
+}
+
+impl Display for SwitchLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SwitchLocation::Switch0 => write!(f, "switch0"),
+            SwitchLocation::Switch1 => write!(f, "switch1"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalPortDiscovery {
+    // Automatically discover ports via Dendrite
+    Auto(HashMap<SwitchLocation, Ipv6Addr>),
+    // Static configuration pairing switches with a collection of ports
+    Static(HashMap<SwitchLocation, Vec<Name>>),
 }
 
 /// Switchport Speed options

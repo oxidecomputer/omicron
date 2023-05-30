@@ -5,6 +5,8 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
+use crate::api::external::Name;
+
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
 use anyhow::anyhow;
@@ -16,6 +18,7 @@ use serde_with::DeserializeFromStr;
 use serde_with::DisplayFromStr;
 use serde_with::DurationSeconds;
 use serde_with::SerializeDisplay;
+use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -351,7 +354,7 @@ pub struct PackageConfig {
     pub tunables: Tunables,
     /// `Dendrite` dataplane daemon configuration
     #[serde(default)]
-    pub dendrite: DpdConfig,
+    pub dendrite: HashMap<Name, DpdConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
 }
@@ -426,6 +429,7 @@ mod test {
         SchemeName, TimeseriesDbConfig, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
+    use crate::api::external::Name;
     use crate::nexus_config::{
         BackgroundTaskConfig, ConfigDropshotWithTls, Database,
         DeploymentConfig, DnsTasksConfig, DpdConfig, ExternalEndpointsConfig,
@@ -436,6 +440,7 @@ mod test {
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
     use libc;
+    use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
     use std::path::Path;
@@ -561,7 +566,7 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
             [background_tasks]
             dns_internal.period_secs_config = 1
@@ -627,11 +632,14 @@ mod test {
                         default_base_url: "http://example.invalid/".into(),
                     }),
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
-                    dendrite: DpdConfig {
-                        address: Some(
-                            SocketAddr::from_str("[::1]:12224").unwrap()
-                        )
-                    },
+                    dendrite: HashMap::from([(
+                        Name::try_from("switch0".to_string()).unwrap(),
+                        DpdConfig {
+                            address: Some(
+                                SocketAddr::from_str("[::1]:12224").unwrap()
+                            )
+                        }
+                    ),]),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
                             period_secs_config: Duration::from_secs(1),
@@ -683,7 +691,7 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
-            [dendrite]
+            [dendrite.switch0]
             address = "[::1]:12224"
             [background_tasks]
             dns_internal.period_secs_config = 1

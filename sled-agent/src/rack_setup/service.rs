@@ -79,17 +79,21 @@ use dpd_client::types::{
 };
 use dpd_client::Client as DpdClient;
 use dpd_client::Ipv4Cidr;
+use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::MGS_PORT;
 use omicron_common::address::{
     get_sled_address, CLICKHOUSE_PORT, COCKROACH_PORT, CRUCIBLE_PANTRY_PORT,
     CRUCIBLE_PORT, DENDRITE_PORT, DNS_HTTP_PORT, NEXUS_INTERNAL_PORT, NTP_PORT,
     OXIMETER_PORT,
 };
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
+use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -188,17 +192,11 @@ impl RackSetupService {
         config: Config,
         storage_resources: StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        external_port_count: u8,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
             if let Err(e) = svc
-                .run(
-                    &config,
-                    &storage_resources,
-                    local_bootstrap_agent,
-                    external_port_count,
-                )
+                .run(&config, &storage_resources, local_bootstrap_agent)
                 .await
             {
                 warn!(log, "RSS injection failed: {}", e);
@@ -532,7 +530,7 @@ impl ServiceInner {
         config: &Config,
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
-        external_port_count: u8,
+        external_port_count: ExternalPortDiscovery,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -780,6 +778,7 @@ impl ServiceInner {
                             });
                         }
                         ServiceType::ManagementGatewayService
+                        | ServiceType::SpSim
                         | ServiceType::Wicketd { .. }
                         | ServiceType::Maghemite { .. }
                         | ServiceType::Tfport { .. } => {
@@ -832,6 +831,7 @@ impl ServiceInner {
                     gateway_ip: config.gateway_ip,
                     infra_ip_first: config.infra_ip_first,
                     infra_ip_last: config.infra_ip_last,
+                    switch: config.switch.clone().into(),
                     uplink_ip: config.uplink_ip,
                     uplink_port: config.uplink_port.clone(),
                     uplink_port_speed: config.uplink_port_speed.clone().into(),
@@ -853,8 +853,8 @@ impl ServiceInner {
             internal_dns_zone_config: d2n_params(&service_plan.dns_config),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
-            external_port_count,
             rack_network_config,
+            external_port_count: external_port_count.into(),
         };
 
         let notify_nexus = || async {
@@ -983,7 +983,6 @@ impl ServiceInner {
         config: &Config,
         storage_resources: &StorageResources,
         local_bootstrap_agent: BootstrapAgentHandle,
-        external_port_count: u8,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
 
@@ -1021,11 +1020,19 @@ impl ServiceInner {
             let service_plan = ServicePlan::load(&self.log, storage_resources)
                 .await?
                 .expect("Service plan should exist if completed marker exists");
+
+            info!(self.log, "Finding switch zone addresses in service plan");
+            let switch_zone_addresses = switch_zone_addresses(&service_plan);
+            info!(self.log, "Detected switch zone addresses"; "addresses" => format!("{switch_zone_addresses:#?}"));
+
+            let switch_mgmt_addrs =
+                self.map_switch_zone_addrs(switch_zone_addresses).await;
+
             self.handoff_to_nexus(
                 &config,
                 &sled_plan,
                 &service_plan,
-                external_port_count,
+                ExternalPortDiscovery::Auto(switch_mgmt_addrs),
             )
             .await?;
             return Ok(());
@@ -1121,30 +1128,47 @@ impl ServiceInner {
         self.ensure_all_services_of_type(&service_plan, &zone_types).await?;
         self.initialize_internal_dns_records(&service_plan).await?;
 
+        info!(self.log, "Finding switch zone addresses in service plan");
+        let switch_zone_addresses = switch_zone_addresses(&service_plan);
+        info!(self.log, "Detected switch zone addresses"; "addresses" => format!("{switch_zone_addresses:#?}"));
+
+        let switch_mgmt_addrs =
+            self.map_switch_zone_addrs(switch_zone_addresses).await;
+
         // Initialize rack network before NTP comes online, otherwise boundary
         // services will not be available and NTP will fail to sync
         info!(self.log, "Checking for Rack Network Configuration");
         if let Some(rack_network_config) = &config.rack_network_config {
             info!(self.log, "Initializing Rack Network");
-            info!(self.log, "Looking up address for Dendrite");
-            let resolver = DnsResolver::new_from_subnet(
-                self.log.new(o!("component" => "DnsResolver")),
-                config.az_subnet(),
-            )?;
+            let dpd_clients: HashMap<SwitchLocation, DpdClient> =
+                switch_mgmt_addrs
+                    .iter()
+                    .map(|(location, addr)| {
+                        (
+                            location.clone(),
+                            DpdClient::new(
+                                &format!("http://[{}]:{}", addr, DENDRITE_PORT),
+                                dpd_client::ClientState {
+                                    tag: "rss".to_string(),
+                                    log: self
+                                        .log
+                                        .new(o!("component" => "DpdClient")),
+                                },
+                            ),
+                        )
+                    })
+                    .collect();
 
-            let dpd_addr = resolver
-                .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
-                .await?;
-
-            let dpd = DpdClient::new(
-                &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
-                dpd_client::ClientState {
-                    tag: "sled-agent".to_string(),
-                    log: self.log.new(o!(
-                        "component" => "DpdClient"
-                    )),
-                },
-            );
+            // Configure the switch requested by the user
+            // Raise error if requested switch is not found
+            let dpd = dpd_clients
+                .get(&rack_network_config.switch)
+                .ok_or_else(|| {
+                    SetupServiceError::BadConfig(format!(
+                        "Switch requested by rack network config not found: {:#?}",
+                        rack_network_config.switch
+                    ))
+                })?;
 
             info!(self.log, "Building Rack Network Configuration");
             // TODO - https://github.com/oxidecomputer/omicron/issues/3278
@@ -1235,8 +1259,10 @@ impl ServiceInner {
                 })?;
 
             info!(self.log, "advertising boundary services loopback address");
-            let mut ddmd_addr = dpd_addr;
-            ddmd_addr.set_port(8000);
+            // TODO - Should ddmd port be a constant?
+            let zone_addr =
+                switch_mgmt_addrs.get(&rack_network_config.switch).unwrap();
+            let ddmd_addr = SocketAddrV6::new(*zone_addr, 8000, 0, 0);
             let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
             ddmd_client.advertise_prefix(Ipv6Subnet::new(
                 BOUNDARY_SERVICES_ADDR.parse().unwrap(),
@@ -1301,7 +1327,7 @@ impl ServiceInner {
             &config,
             &plan,
             &service_plan,
-            external_port_count,
+            ExternalPortDiscovery::Auto(switch_mgmt_addrs),
         )
         .await?;
 
@@ -1311,4 +1337,78 @@ impl ServiceInner {
 
         Ok(())
     }
+
+    // Query MGS servers in each switch zone to determine which switch slot they are managing.
+    // This logic does not handle an event where there are multiple racks. Is that ok?
+    async fn map_switch_zone_addrs(
+        &self,
+        switch_zone_addresses: Vec<Ipv6Addr>,
+    ) -> HashMap<SwitchLocation, Ipv6Addr> {
+        info!(self.log, "Determining switch slots managed by switch zones");
+        let mut switch_zone_addrs = HashMap::new();
+        for addr in switch_zone_addresses {
+            let mgs_client = MgsClient::new(
+                &format!("http://[{}]:{}", addr, MGS_PORT),
+                self.log.new(o!("component" => "MgsClient")),
+            );
+
+            info!(self.log, "determining switch slot managed by dendrite zone"; "zone_address" => format!("{addr:#?}"));
+            let switch_slot = loop {
+                match mgs_client.sp_local_switch_id().await {
+                    Ok(switch) => {
+                        info!(
+                            self.log,
+                            "identified switch slot for dendrite zone";
+                            "slot" => format!("{switch:#?}"),
+                            "zone_address" => format!("{addr:#?}")
+                        );
+                        break switch.slot;
+                    }
+                    Err(e) => {
+                        warn!(
+                            self.log,
+                            "failed to identify switch slot for dendrite, will retry in 2 seconds";
+                            "zone_address" => format!("{addr:#?}"),
+                            "reason" => format!("{e}")
+                        );
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            };
+
+            match switch_slot {
+                0 => {
+                    switch_zone_addrs.insert(SwitchLocation::Switch0, addr);
+                }
+                1 => {
+                    switch_zone_addrs.insert(SwitchLocation::Switch1, addr);
+                }
+                _ => {
+                    warn!(self.log, "Expected a slot number of 0 or 1, found {switch_slot:#?} when querying {addr:#?}");
+                }
+            };
+        }
+        switch_zone_addrs
+    }
+}
+
+/// Scan the DNS configuration in the service plan to find
+/// the addresses of the switch zones
+fn switch_zone_addresses(service_plan: &ServicePlan) -> Vec<Ipv6Addr> {
+    let mut addrs = vec![];
+    for entry in &service_plan.dns_config.zones {
+        for (name, records) in &entry.records {
+            if name.starts_with("dendrite") {
+                for record in records {
+                    match record {
+                        dns_service_client::types::DnsRecord::Aaaa(addr) => {
+                            addrs.push(*addr);
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+        }
+    }
+    addrs
 }
