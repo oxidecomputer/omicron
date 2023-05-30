@@ -471,7 +471,7 @@ impl UpdatePane {
                 };
                 if let Some(value) = id_state.event_buffer.get(step) {
                     spans.push(Span::styled(
-                        format!(": {preceding_desc} "),
+                        format!("; {preceding_desc} "),
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
