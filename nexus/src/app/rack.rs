@@ -32,11 +32,12 @@ use nexus_types::external_api::params::AddressLotBlockCreate;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::{
-    AddressLotCreate, AddressLotKind, LoopbackAddressCreate, Route, SiloCreate,
+    AddressLotCreate, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::internal_api::params::DnsRecord;
+use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;

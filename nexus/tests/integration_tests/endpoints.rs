@@ -16,6 +16,7 @@ use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
+use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
@@ -408,7 +409,7 @@ lazy_static! {
                 name: "parkinglot".parse().unwrap(),
                 description: "an address parking lot".into(),
             },
-            kind: params::AddressLotKind::Infra,
+            kind: AddressLotKind::Infra,
             blocks: vec![params::AddressLotBlockCreate {
                 first_address: "203.0.113.10".parse().unwrap(),
                 last_address: "203.0.113.20".parse().unwrap(),
