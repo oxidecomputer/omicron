@@ -67,6 +67,7 @@ tar xf /input/package/work/package.tar.gz out package-manifest.toml target/relea
 target/release/omicron-package -t default target create -i standard -m gimlet -s asic
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
+rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done

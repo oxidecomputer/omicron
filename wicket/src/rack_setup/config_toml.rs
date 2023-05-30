@@ -208,12 +208,14 @@ mod tests {
     use wicketd_client::types::PortFec;
     use wicketd_client::types::PortSpeed;
     use wicketd_client::types::SpIdentifier;
+    use wicketd_client::types::SwitchLocation;
 
     fn put_config_from_current_config(
         value: CurrentRssUserConfigInsensitive,
     ) -> PutRssUserConfigInsensitive {
         use omicron_common::api::internal::shared::PortFec as InternalPortFec;
         use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
+        use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
 
         let rnc = value.rack_network_config.unwrap();
 
@@ -264,6 +266,10 @@ mod tests {
                 },
                 uplink_ip: rnc.uplink_ip,
                 uplink_vid: rnc.uplink_vid,
+                switch: match rnc.switch {
+                    SwitchLocation::Switch0 => InternalSwitchLocation::Switch0,
+                    SwitchLocation::Switch1 => InternalSwitchLocation::Switch1,
+                },
             },
         }
     }
@@ -309,6 +315,7 @@ mod tests {
                 uplink_port_fec: PortFec::Firecode,
                 uplink_port: "port0".into(),
                 uplink_vid: None,
+                switch: SwitchLocation::Switch0,
             }),
         };
         let template = TomlTemplate::populate(&config).to_string();

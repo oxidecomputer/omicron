@@ -1784,6 +1784,14 @@
             "type": "string",
             "format": "ipv4"
           },
+          "switch": {
+            "description": "Switch to use for uplink",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
           "uplink_ip": {
             "description": "IP Address to apply to switchport (must be in infra_ip pool)",
             "type": "string",
@@ -1821,6 +1829,7 @@
           "gateway_ip",
           "infra_ip_first",
           "infra_ip_last",
+          "switch",
           "uplink_ip",
           "uplink_port",
           "uplink_port_fec",
@@ -3933,6 +3942,25 @@
             "required": [
               "kind",
               "message"
+            ]
+          }
+        ]
+      },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
             ]
           }
         ]

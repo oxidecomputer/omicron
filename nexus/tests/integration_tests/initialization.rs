@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
+
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 
@@ -92,8 +94,7 @@ async fn test_nexus_boots_before_dendrite() {
                 .pg_config()
                 .clone(),
         };
-    builder.config.pkg.dendrite =
-        omicron_common::nexus_config::DpdConfig { address: None };
+    builder.config.pkg.dendrite = HashMap::new();
     builder.config.deployment.internal_dns =
         omicron_common::nexus_config::InternalDns::FromAddress {
             address: *builder

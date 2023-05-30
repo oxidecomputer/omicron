@@ -77,18 +77,19 @@ ptime -m ./tools/build-global-zone-packages.sh $tarball_src_dir /work
 # should be included in the OS ramdisk.
 mkdir -p /work/zones
 zones=(
-	out/clickhouse.tar.gz
-	out/cockroachdb.tar.gz
-	out/crucible-pantry.tar.gz
-	out/crucible.tar.gz
-	out/external-dns.tar.gz
-	out/internal-dns.tar.gz
-	out/omicron-nexus.tar.gz
-	out/oximeter-collector.tar.gz
-	out/propolis-server.tar.gz
-	out/switch-asic.tar.gz
-	out/switch-softnpu.tar.gz
-	out/ntp.tar.gz
+  out/clickhouse.tar.gz
+  out/cockroachdb.tar.gz
+  out/crucible-pantry.tar.gz
+  out/crucible.tar.gz
+  out/external-dns.tar.gz
+  out/internal-dns.tar.gz
+  out/omicron-nexus.tar.gz
+  out/oximeter-collector.tar.gz
+  out/propolis-server.tar.gz
+  out/switch-*.tar.gz
+  out/ntp.tar.gz
+  out/omicron-gateway-softnpu.tar.gz
+  out/omicron-gateway-asic.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

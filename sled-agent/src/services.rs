@@ -1550,6 +1550,9 @@ impl ServiceManager {
 
                     smfh.refresh()?;
                 }
+                ServiceType::SpSim => {
+                    info!(self.inner.log, "Setting up Simulated SP service");
+                }
                 ServiceType::Wicketd { baseboard } => {
                     info!(self.inner.log, "Setting up wicketd service");
 
@@ -2666,12 +2669,12 @@ impl ServiceManager {
                     };
                     filesystems.push(softnpu_filesystem);
                 }
-
                 vec![
                     ServiceType::Dendrite { asic },
                     ServiceType::ManagementGatewayService,
                     ServiceType::Wicketd { baseboard },
                     ServiceType::Maghemite { mode: "transit".to_string() },
+                    ServiceType::SpSim,
                 ]
             }
         };

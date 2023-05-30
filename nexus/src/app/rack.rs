@@ -38,6 +38,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -128,7 +129,6 @@ impl super::Nexus {
 
         // internally ignores ObjectAlreadyExists, so will not error on repeat runs
         let _ = self.populate_mock_system_updates(&opctx).await?;
-        self.populate_switch_ports(&opctx, request.external_port_count).await?;
 
         let dns_zone = request
             .internal_dns_zone_config
@@ -241,6 +241,76 @@ impl super::Nexus {
             self.background_tasks.activate(task);
         }
 
+        // TODO - levon
+        // register all switches found during rack initialization
+        // identify requested switch from config and associate
+        // uplink records to that switch
+        match request.external_port_count {
+            ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
+                use dpd_client::Client as DpdClient;
+                info!(
+                    self.log,
+                    "Using automatic external switchport discovery"
+                );
+
+                for (switch, addr) in switch_mgmt_addrs {
+                    let dpd_client = DpdClient::new(
+                        &format!(
+                            "http://[{}]:{}",
+                            addr,
+                            omicron_common::address::DENDRITE_PORT
+                        ),
+                        dpd_client::ClientState {
+                            tag: "rss".to_string(),
+                            log: self.log.new(o!("component" => "DpdClient")),
+                        },
+                    );
+
+                    let all_ports =
+                        dpd_client.port_list().await.map_err(|e| {
+                            Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
+                        })?;
+
+                    info!(
+                        self.log,
+                        "discovered ports for {switch}: {all_ports:#?}"
+                    );
+
+                    let qsfp_ports: Vec<Name> = all_ports
+                        .iter()
+                        .filter(|port| port.starts_with("qsfp"))
+                        .map(|port| port.to_string().parse().unwrap())
+                        .collect();
+
+                    info!(
+                        self.log,
+                        "populating ports for {switch}: {qsfp_ports:#?}"
+                    );
+
+                    self.populate_switch_ports(
+                        &opctx,
+                        &qsfp_ports,
+                        switch.to_string().parse().unwrap(),
+                    )
+                    .await?;
+                }
+            }
+            ExternalPortDiscovery::Static(port_mappings) => {
+                info!(
+                    self.log,
+                    "Using static configuration for external switchports"
+                );
+                for (switch, ports) in port_mappings {
+                    self.populate_switch_ports(
+                        &opctx,
+                        &ports,
+                        switch.to_string().parse().unwrap(),
+                    )
+                    .await?;
+                }
+            }
+        }
+
         // TODO
         // configure rack networking / boundary services here
         // Currently calling some of the apis directly, but should we be using sagas
@@ -305,9 +375,10 @@ impl super::Nexus {
                 },
             }?;
 
-            let switch_location = Name::from_str("switch0").map_err(|e| {
+            let switch = rack_network_config.switch.to_string();
+            let switch_location = Name::from_str(&switch).map_err(|e| {
                 Error::internal_error(&format!(
-                    "unable to use `switch0` as Name: {e}"
+                    "unable to use {switch} as Name: {e}"
                 ))
             })?;
 
@@ -330,8 +401,8 @@ impl super::Nexus {
                     ))
                 })?;
 
-            let (.., authz_address_lot) =
-                address_lot_lookup.lookup_for(authz::Action::Modify)
+            let (.., authz_address_lot) = address_lot_lookup
+                .lookup_for(authz::Action::Modify)
                 .await
                 .map_err(|e| {
                     Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
@@ -378,7 +449,7 @@ impl super::Nexus {
 
             let port_config = SwitchPortConfig {
                 geometry:
-                    nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
+                nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
             };
 
             let mut port_settings_params = SwitchPortSettingsCreate {
@@ -393,9 +464,9 @@ impl super::Nexus {
             };
 
             let uplink_address = IpNet::from_str(&format!(
-                    "{}/32",
-                    rack_network_config.uplink_ip
-                ))
+                "{}/32",
+                rack_network_config.uplink_ip
+            ))
                 .map_err(|e| Error::internal_error(&format!(
                     "failed to parse value provided for `rack_network_config.uplink_ip` as `IpNet`: {e}"
                 )))?;
