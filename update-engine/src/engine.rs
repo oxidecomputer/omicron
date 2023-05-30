@@ -183,7 +183,18 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     async fn execute_impl(
         mut self,
     ) -> Result<CompletionContext<S>, ExecutionError<S>> {
-        let total_start = Instant::now();
+        // TODO: this absolutely does not need to be an atomic! However it is
+        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
+        // once omicron is on Rust 1.70.
+        //
+        // https://github.com/rust-lang/rust/pull/107844
+        let event_index = AtomicUsize::new(0);
+        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
+        let exec_cx = ExecutionContext::new(
+            self.execution_id,
+            next_event_index,
+            self.sender.clone(),
+        );
 
         let steps = {
             let mut steps_lock = self.steps.lock().unwrap();
@@ -226,21 +237,13 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         // * Intermediate steps
         // * The last step
 
-        // TODO: this absolutely does not need to be an atomic! However it is
-        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
-        // once omicron is on Rust 1.70.
-        //
-        // https://github.com/rust-lang/rust/pull/107844
-        let event_index = AtomicUsize::new(0);
-        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
-
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
             self.sender.send(Event::Step(StepEvent {
                 spec: S::schema_name(),
                 execution_id: self.execution_id,
                 event_index: next_event_index(),
-                total_elapsed: total_start.elapsed(),
+                total_elapsed: exec_cx.total_start.elapsed(),
                 kind: StepEventKind::NoStepsDefined,
             })).await?;
             return Ok(CompletionContext::new());
@@ -261,7 +264,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
             spec: S::schema_name(),
             execution_id: self.execution_id,
             event_index: next_event_index(),
-            total_elapsed: total_start.elapsed(),
+            total_elapsed: exec_cx.total_start.elapsed(),
             kind: StepEventKind::ExecutionStarted {
                 steps: step_infos,
                 components,
@@ -271,17 +274,11 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 
         self.sender.send(event).await?;
 
+        let step_exec_cx = exec_cx.create(first_step_info);
+
         let (mut step_res, mut reporter) = first_step
             .exec
-            .execute(
-                &self.log,
-                self.execution_id,
-                &next_event_index,
-                total_start,
-                first_step_info,
-                self.sender.clone(),
-                &mut self.abort_receiver,
-            )
+            .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
             .await?;
 
         // Now run all remaining steps.
@@ -295,21 +292,14 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
                 .metadata_gen
                 .into_step_info_with_metadata(index, *total_component_steps)
                 .await;
-
             let next_step = reporter.next_step(step_res, &step_info);
             next_step.await?;
 
+            let step_exec_cx = exec_cx.create(step_info);
+
             (step_res, reporter) = step
                 .exec
-                .execute(
-                    &self.log,
-                    self.execution_id,
-                    &next_event_index,
-                    total_start,
-                    step_info,
-                    self.sender.clone(),
-                    &mut self.abort_receiver,
-                )
+                .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
                 .await?;
         }
 
@@ -799,11 +789,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
     async fn execute<F: Fn() -> usize>(
         self,
         log: &slog::Logger,
-        execution_id: ExecutionId,
-        next_event_index: F,
-        total_start: Instant,
-        step_info: StepInfoWithMetadata<S>,
-        sender: mpsc::Sender<Event<S>>,
+        step_exec_cx: StepExecutionContext<S, F>,
         abort_receiver: &mut mpsc::UnboundedReceiver<AbortMessage>,
     ) -> Result<
         (Result<StepOutcome<S>, S::Error>, StepProgressReporter<S, F>),
@@ -812,20 +798,14 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         slog::debug!(
             log,
             "start executing step";
-            "step component" => ?step_info.info.component,
-            "step id" => ?step_info.info.id,
+            "step component" => ?step_exec_cx.step_info.info.component,
+            "step id" => ?step_exec_cx.step_info.info.id,
         );
         let (payload_sender, mut payload_receiver) = mpsc::channel(16);
         let cx = StepContext::new(log, payload_sender);
 
         let mut step_fut = (self.exec_fn.0)(cx);
-        let mut reporter = StepProgressReporter::new(
-            execution_id,
-            next_event_index,
-            total_start,
-            step_info,
-            sender,
-        );
+        let mut reporter = StepProgressReporter::new(step_exec_cx);
 
         let mut step_res = None;
         let mut payload_done = false;
@@ -842,7 +822,8 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
             //
             // The two selects cannot be combined! That's because the else block
             // of the inner select only applies to the step and payload
-            // receivers. We do not want to wait for the abort receiver to exit.
+            // receivers. We do not want to wait for the abort receiver to exit
+            // before exiting the loop.
             let inner_select = async {
                 tokio::select! {
                     res = &mut step_fut, if step_res.is_none() => {
@@ -867,6 +848,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                 }
             };
 
+            // This is the outer select.
             tokio::select! {
                 ret = inner_select => {
                     match ret {
@@ -891,6 +873,52 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
         let step_res = step_res.expect("can only get here if res is Some");
         Ok((step_res, reporter))
     }
+}
+
+#[derive_where(Debug)]
+struct ExecutionContext<S: StepSpec, F> {
+    execution_id: ExecutionId,
+    next_event_index: DebugIgnore<F>,
+    total_start: Instant,
+    sender: mpsc::Sender<Event<S>>,
+}
+
+impl<S: StepSpec, F> ExecutionContext<S, F> {
+    fn new(
+        execution_id: ExecutionId,
+        next_event_index: F,
+        sender: mpsc::Sender<Event<S>>,
+    ) -> Self {
+        let total_start = Instant::now();
+        Self {
+            execution_id,
+            next_event_index: DebugIgnore(next_event_index),
+            total_start,
+            sender,
+        }
+    }
+
+    fn create(
+        &self,
+        step_info: StepInfoWithMetadata<S>,
+    ) -> StepExecutionContext<S, &F> {
+        StepExecutionContext {
+            execution_id: self.execution_id,
+            next_event_index: DebugIgnore(&self.next_event_index.0),
+            total_start: self.total_start,
+            step_info,
+            sender: self.sender.clone(),
+        }
+    }
+}
+
+#[derive_where(Debug)]
+struct StepExecutionContext<S: StepSpec, F> {
+    execution_id: ExecutionId,
+    next_event_index: DebugIgnore<F>,
+    total_start: Instant,
+    step_info: StepInfoWithMetadata<S>,
+    sender: mpsc::Sender<Event<S>>,
 }
 
 type StepMetadataFn<'a, S> = Box<
@@ -929,24 +957,18 @@ struct StepProgressReporter<S: StepSpec, F> {
 }
 
 impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
-    fn new(
-        execution_id: ExecutionId,
-        next_event_index: F,
-        total_start: Instant,
-        step_info: StepInfoWithMetadata<S>,
-        sender: mpsc::Sender<Event<S>>,
-    ) -> Self {
+    fn new(step_exec_cx: StepExecutionContext<S, F>) -> Self {
         let step_start = Instant::now();
         Self {
-            execution_id,
-            next_event_index,
-            total_start,
-            step_info,
+            execution_id: step_exec_cx.execution_id,
+            next_event_index: step_exec_cx.next_event_index.0,
+            total_start: step_exec_cx.total_start,
+            step_info: step_exec_cx.step_info,
             step_start,
             attempt: 1,
             // It's slightly nicer for step_start and attempt_start to be exactly the same.
             attempt_start: step_start,
-            sender,
+            sender: step_exec_cx.sender,
         }
     }
 
@@ -1064,6 +1086,10 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
 
     async fn handle_abort(self, message: AbortMessage) -> ExecutionError<S> {
         // Send the abort message over the channel.
+        //
+        // The only way this can fail is if the event receiver is closed or
+        // dropped. That failure doesn't have any implications on whether this
+        // aborts or not.
         let res = self
             .sender
             .send(Event::Step(StepEvent {

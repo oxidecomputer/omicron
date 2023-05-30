@@ -27,9 +27,12 @@ use tui::widgets::{
     Row, Table,
 };
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use update_engine::{ExecutionStatus, StepKey};
+use update_engine::{
+    AbortReason, ExecutionStatus, StepKey, WillNotBeRunReason,
+};
 use wicket_common::update_events::{
-    EventBuffer, EventReport, StepOutcome, StepStatus, UpdateComponent,
+    EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
+    UpdateComponent,
 };
 use wicketd_client::types::SemverVersion;
 
@@ -263,38 +266,9 @@ impl UpdatePane {
 
                 body.lines.push(Spans::default());
 
-                let mut progress_spans = Vec::new();
-                if let Some(progress) = progress_event.kind.progress_counter() {
-                    progress_spans
-                        .push(Span::styled("Progress: ", style::selected()));
-                    let current = progress.current;
-                    progress_spans.push(Span::styled(
-                        format!("{current}"),
-                        style::plain_text_bold(),
-                    ));
-                    if let Some(total) = progress.total {
-                        progress_spans
-                            .push(Span::styled("/", style::plain_text()));
-                        progress_spans.push(Span::styled(
-                            format!("{total}"),
-                            style::plain_text_bold(),
-                        ));
-                    }
-                    // TODO: progress units
-                    // TODO: show a progress bar?
-                } else {
-                    progress_spans.push(Span::raw("Waiting for progress"));
-                }
-                if let Some(step_elapsed) =
-                    progress_event.kind.leaf_step_elapsed()
-                {
-                    progress_spans.push(Span::styled(
-                        format!(" (at {step_elapsed:.2?})"),
-                        style::plain_text(),
-                    ));
-                }
-
-                body.lines.push(Spans::from(progress_spans));
+                let progress_spans =
+                    progress_event_spans(progress_event, "Progress:");
+                body.lines.push(progress_spans);
 
                 // TODO: show previous attempts
             }
@@ -407,7 +381,10 @@ impl UpdatePane {
                 ];
                 body.lines.push(Spans::from(spans));
             }
-            StepStatus::Aborted { info: Some(info) } => {
+            StepStatus::Aborted {
+                reason: AbortReason::StepAborted(info),
+                last_progress,
+            } => {
                 let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Aborted", style::failed_update_bold()),
@@ -435,30 +412,78 @@ impl UpdatePane {
                 // Show the message.
                 let prefix = vec![Span::styled("Message: ", style::selected())];
                 push_text_lines(&info.message, prefix, &mut body.lines);
+
+                // Show last progress if available.
+                if let Some(last_progress) = last_progress {
+                    let progress_spans =
+                        progress_event_spans(last_progress, "Last progress:");
+                    body.lines.push(Spans::default());
+                    body.lines.push(progress_spans);
+                }
             }
-            StepStatus::Aborted { info: None } => {
-                let spans = vec![
+            StepStatus::Aborted {
+                reason: AbortReason::ParentAborted { parent_step },
+                last_progress,
+            } => {
+                let mut spans = vec![
                     Span::styled("Status: ", style::selected()),
                     Span::styled("Aborted", style::failed_update_bold()),
                 ];
-                body.lines.push(Spans::from(spans));
-            }
-            StepStatus::WillNotBeRun { step_that_failed } => {
-                let mut spans = vec![
-                    Span::styled("Status: ", style::selected()),
-                    Span::styled("Will not be run", style::plain_text_bold()),
-                ];
-                if let Some(value) = id_state.event_buffer.get(step_that_failed)
-                {
+                if let Some(value) = id_state.event_buffer.get(parent_step) {
                     spans.push(Span::styled(
-                        " because step ",
+                        " at parent step ",
                         style::plain_text(),
                     ));
                     spans.push(Span::styled(
                         value.step_info().description.as_ref(),
                         style::selected(),
                     ));
-                    spans.push(Span::styled(" failed", style::plain_text()));
+                }
+                body.lines.push(Spans::from(spans));
+
+                // Show last progress if available.
+                if let Some(last_progress) = last_progress {
+                    let progress_spans =
+                        progress_event_spans(last_progress, "Last progress:");
+                    body.lines.push(Spans::default());
+                    body.lines.push(progress_spans);
+                }
+            }
+            StepStatus::WillNotBeRun { reason } => {
+                let mut spans = vec![
+                    Span::styled("Status: ", style::selected()),
+                    Span::styled("Will not be run", style::plain_text_bold()),
+                ];
+
+                let (step, preceding_desc, following_desc) = match reason {
+                    WillNotBeRunReason::PreviousStepFailed { step } => {
+                        (step, "previous step", Some("failed"))
+                    }
+                    WillNotBeRunReason::ParentStepFailed { step } => {
+                        (step, "parent step", Some("failed"))
+                    }
+                    WillNotBeRunReason::PreviousStepAborted { step } => {
+                        (step, "aborted at previous step", None)
+                    }
+                    WillNotBeRunReason::ParentAborted { step } => {
+                        (step, "aborted at parent step", None)
+                    }
+                };
+                if let Some(value) = id_state.event_buffer.get(step) {
+                    spans.push(Span::styled(
+                        format!(": {preceding_desc} "),
+                        style::plain_text(),
+                    ));
+                    spans.push(Span::styled(
+                        value.step_info().description.as_ref(),
+                        style::selected(),
+                    ));
+                    if let Some(following_desc) = following_desc {
+                        spans.push(Span::styled(
+                            format!(" {following_desc}"),
+                            style::plain_text(),
+                        ));
+                    };
                 }
                 body.lines.push(Spans::from(spans));
             }
@@ -1573,6 +1598,42 @@ impl UpdatePane {
             }
         }
     }
+}
+
+fn progress_event_spans(
+    progress_event: &ProgressEvent,
+    header: &str,
+) -> Spans<'static> {
+    let mut progress_spans = Vec::new();
+    progress_spans.push(Span::styled(header.to_owned(), style::selected()));
+    progress_spans.push(Span::raw(" "));
+
+    if let Some(progress) = progress_event.kind.progress_counter() {
+        let current = progress.current;
+        progress_spans
+            .push(Span::styled(format!("{current}"), style::plain_text_bold()));
+        if let Some(total) = progress.total {
+            progress_spans.push(Span::styled("/", style::plain_text()));
+            progress_spans.push(Span::styled(
+                format!("{total}"),
+                style::plain_text_bold(),
+            ));
+        }
+        // TODO: progress units
+        // TODO: show a progress bar?
+    } else {
+        progress_spans
+            .push(Span::styled("Waiting for progress", style::plain_text()));
+    }
+
+    if let Some(step_elapsed) = progress_event.kind.leaf_step_elapsed() {
+        progress_spans.push(Span::styled(
+            format!(" (at {step_elapsed:.2?})"),
+            style::plain_text(),
+        ));
+    }
+
+    Spans(progress_spans)
 }
 
 struct ComponentForceUpdateSelectionState {

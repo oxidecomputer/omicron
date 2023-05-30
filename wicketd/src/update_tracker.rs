@@ -75,6 +75,9 @@ use wicket_common::update_events::StepResult;
 use wicket_common::update_events::StepSkipped;
 use wicket_common::update_events::StepSuccess;
 use wicket_common::update_events::StepWarning;
+use wicket_common::update_events::TestStepComponent;
+use wicket_common::update_events::TestStepId;
+use wicket_common::update_events::TestStepSpec;
 use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
@@ -447,7 +450,7 @@ impl UpdateTrackerData {
             return Err(AbortUpdateError::UpdateNotStarted);
         };
 
-        // Is an update not running? If so, then accept the request.
+        // We can only abort an update if it is still running.
         //
         // There's a race possible here between the task finishing and this
         // check, but that's totally fine: the worst case is that the abort is
@@ -587,32 +590,7 @@ impl UpdateDriver {
         _ = abort_handle_sender.send(abort_handle);
 
         if let Some(secs) = opts.test_step_seconds {
-            engine
-                .new_step(
-                    UpdateComponent::Rot,
-                    UpdateStepId::TestStep,
-                    format!("Test step ({secs} seconds)"),
-                    move |cx| async move {
-                        for sec in 0..secs {
-                            cx.send_progress(
-                                StepProgress::with_current_and_total(
-                                    sec,
-                                    secs,
-                                    serde_json::Value::Null,
-                                ),
-                            )
-                            .await;
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-
-                        StepSuccess::new(())
-                            .with_message(format!(
-                                "Step completed after {secs} seconds"
-                            ))
-                            .into()
-                    },
-                )
-                .register();
+            define_test_steps(&engine, secs);
         }
 
         let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
@@ -1221,6 +1199,65 @@ impl UpdateDriver {
             )
             .register();
     }
+}
+
+fn define_test_steps(engine: &UpdateEngine, secs: u64) {
+    engine
+        .new_step(
+            UpdateComponent::Rot,
+            UpdateStepId::TestStep,
+            "Test step",
+            move |cx| async move {
+                cx.with_nested_engine(
+                    |engine: &mut UpdateEngine<TestStepSpec>| {
+                        engine
+                            .new_step(
+                                TestStepComponent::Test,
+                                TestStepId::Delay,
+                                format!("Delay step ({secs} secs)"),
+                                |cx| async move {
+                                    for sec in 0..secs {
+                                        cx.send_progress(
+                                        StepProgress::with_current_and_total(
+                                            sec,
+                                            secs,
+                                            serde_json::Value::Null,
+                                        ),
+                                    )
+                                    .await;
+                                        tokio::time::sleep(
+                                            Duration::from_secs(1),
+                                        )
+                                        .await;
+                                    }
+
+                                    StepSuccess::new(())
+                                        .with_message(format!(
+                                        "Step completed after {secs} seconds"
+                                    ))
+                                        .into()
+                                },
+                            )
+                            .register();
+
+                        engine
+                        .new_step(
+                            TestStepComponent::Test,
+                            TestStepId::Delay,
+                            "Nested stub step",
+                            |_cx| async move { StepSuccess::new(()).into() },
+                        )
+                        .register();
+
+                        Ok(())
+                    },
+                )
+                .await?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
 }
 
 struct UpdateContext {
