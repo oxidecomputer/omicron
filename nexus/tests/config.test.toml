@@ -68,7 +68,7 @@ type = "from_url"
 url = "postgresql://root@127.0.0.1:0/omicron?sslmode=disable"
 
 # Dendrite (dataplane daemon) API configuration
-[dendrite]
+[dendrite.switch0]
 address = "[::1]:12224"
 
 [background_tasks]

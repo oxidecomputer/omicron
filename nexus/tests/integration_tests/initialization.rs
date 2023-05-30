@@ -2,8 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::collections::HashMap;
+use std::net::{Ipv6Addr, SocketAddrV6};
+
+use gateway_messages::SpPort;
+use gateway_test_utils::setup as mgs_setup;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
+use omicron_common::address::MGS_PORT;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::Duration;
@@ -67,6 +73,19 @@ async fn test_nexus_boots_before_cockroach() {
 
 #[tokio::test]
 async fn test_nexus_boots_before_dendrite() {
+    // Start MGS + Sim SP. This is needed for the Dendrite client initialization
+    // inside of Nexus initialization
+    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
+    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, MGS_PORT, 0, 0);
+    let mgs = mgs_setup::test_setup_with_config(
+        "test_nexus_boots_before_dendrite",
+        SpPort::One,
+        mgs_config,
+        &sp_sim_config,
+        Some(mgs_addr),
+    )
+    .await;
+
     let mut config = load_test_config();
 
     let mut builder =
@@ -95,8 +114,7 @@ async fn test_nexus_boots_before_dendrite() {
                 .pg_config()
                 .clone(),
         };
-    builder.config.pkg.dendrite =
-        omicron_common::nexus_config::DpdConfig { address: None };
+    builder.config.pkg.dendrite = HashMap::new();
     builder.config.deployment.internal_dns =
         omicron_common::nexus_config::InternalDns::FromAddress {
             address: *builder
@@ -129,6 +147,7 @@ async fn test_nexus_boots_before_dendrite() {
     nexus_handle.await.expect("Test: Task starting Nexus has failed");
 
     builder.teardown().await;
+    mgs.teardown().await;
 }
 
 // Helper to ensure we perform the same setup for the positive and negative test

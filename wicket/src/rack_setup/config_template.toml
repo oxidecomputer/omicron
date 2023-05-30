@@ -40,10 +40,14 @@ bootstrap_sleds = []
 
 # TODO: docs on network config
 [rack_network_config]
-gateway_ip = ""
 infra_ip_first = ""
 infra_ip_last = ""
+
+[[rack_network_config.uplinks]]
+switch = ""
+gateway_ip = ""
 uplink_port = ""
 uplink_port_speed = ""
 uplink_port_fec = ""
 uplink_ip = ""
+uplink_vid = 1234 # optional - remove if no VLAN id is needed

@@ -342,6 +342,7 @@ pub enum ServiceType {
     Clickhouse,
     CockroachDb,
     Crucible,
+    SpSim,
 }
 
 impl std::fmt::Display for ServiceType {
@@ -362,6 +363,7 @@ impl std::fmt::Display for ServiceType {
             ServiceType::Clickhouse => write!(f, "clickhouse"),
             ServiceType::CockroachDb => write!(f, "cockroachdb"),
             ServiceType::Crucible => write!(f, "crucible"),
+            ServiceType::SpSim => write!(f, "sp-sim"),
         }
     }
 }
@@ -447,6 +449,7 @@ impl TryFrom<ServiceType> for sled_agent_client::types::ServiceType {
             St::CockroachDb => Ok(AutoSt::CockroachDb),
             St::Crucible => Ok(AutoSt::Crucible),
             St::ManagementGatewayService
+            | St::SpSim
             | St::Wicketd { .. }
             | St::Dendrite { .. }
             | St::Tfport { .. }
@@ -542,6 +545,8 @@ pub struct ServiceZoneRequest {
     pub dataset: Option<DatasetRequest>,
     // Services that should be run in the zone
     pub services: Vec<ServiceZoneService>,
+    // Switch addresses for SNAT configuration, if required
+    pub boundary_switches: Vec<Ipv6Addr>,
 }
 
 impl ServiceZoneRequest {
@@ -589,6 +594,7 @@ impl TryFrom<ServiceZoneRequest>
             addresses: s.addresses,
             dataset: s.dataset.map(|d| d.into()),
             services,
+            boundary_switches: s.boundary_switches,
         })
     }
 }
