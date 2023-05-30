@@ -1039,7 +1039,7 @@ CREATE UNIQUE INDEX on omicron.public.image (
     name
 ) WHERE
     time_deleted is NULL AND
-    project_id is NULL
+    project_id is NULL;
 
 /* Index for project images */
 CREATE UNIQUE INDEX on omicron.public.image (

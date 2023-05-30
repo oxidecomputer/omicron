@@ -512,7 +512,7 @@ async fn test_make_disk_from_image_too_small(
 }
 
 #[nexus_test]
-async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
+async fn test_image_promotion(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
 
@@ -588,6 +588,15 @@ async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(silo_images.len(), 1);
     assert_eq!(silo_images[0].identity.name, "alpine-edge");
 
+    // Ensure there are no more project images
+    let project_images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(project_images.len(), 0);
+
     let silo_image_url = format!("/v1/images/{}", image_id);
     let silo_image = NexusRequest::object_get(client, &silo_image_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -595,4 +604,31 @@ async fn test_image_access(cptestctx: &ControlPlaneTestContext) {
         .await;
 
     assert_eq!(silo_image.identity.id, image_id);
+
+    // Create another project image
+    NexusRequest::objects_post(client, &images_url, &image_create_params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<views::Image>()
+        .await;
+
+    // Ensure project image was created
+    let project_images = NexusRequest::object_get(client, &images_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(project_images.len(), 1);
+    assert_eq!(project_images[0].identity.name, "alpine-edge");
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success")
+    .parsed_body::<dropshot::HttpErrorResponseBody>()
+    .unwrap();
 }
