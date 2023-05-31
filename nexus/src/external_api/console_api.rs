@@ -8,8 +8,6 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 
-// XXX-dap add end-to-end test that spoof authn doesn't work
-
 use crate::authn::silos::IdentityProviderType;
 use crate::ServerContext;
 use crate::{
@@ -555,7 +553,7 @@ async fn get_login_url(
         // only put the ? in front if there's something there
         Ok(encoded) if !encoded.is_empty() => format!("{login_uri}?{encoded}"),
         // redirect_url is either None or not url-encodable for some reason
-        _ => login_uri.to_string(),
+        _ => login_uri,
     })
 }
 

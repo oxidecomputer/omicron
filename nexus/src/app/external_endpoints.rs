@@ -36,6 +36,7 @@ use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
+use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -221,6 +222,11 @@ impl ExternalEndpoints {
         // XXX-dap TODO-coverage
         let default_endpoint = silos_by_id
             .values()
+            .filter(|s| {
+                // Ignore the built-in Silo, which people are not supposed to
+                // log into.
+                s.id() != *SILO_ID
+            })
             .find(|s| s.authentication_mode == AuthenticationMode::Local)
             .and_then(|s| {
                 by_dns_name
@@ -253,7 +259,8 @@ impl ExternalEndpoints {
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct ExternalEndpoint {
     /// the id of the Silo associated with this endpoint
-    // XXX-dap remove since it's redundant?
+    // This is redundant with `db_silo`, but it's convenient to put it here and
+    // it shows up in the serialized form this way.
     silo_id: Uuid,
     /// the silo associated with this endpoint
     #[serde(skip)]
@@ -642,27 +649,65 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
 }
 
 impl super::Nexus {
-    // XXX-dap TODO-doc
-    // XXX-dap commonize with device_auth_request()
-    // XXX-dap TODO-coverage
-    pub fn endpoint_for_request(
+    /// Returns the name of the server that the client is trying to reach
+    ///
+    /// Recall that Nexus serves many external endpoints on the same set of IP
+    /// addresses, each corresponding to a particular Silo.  We use the standard
+    /// HTTP 1.1 "host" header or HTTP2 URI authority to determine which
+    /// Silo's endpoint the client is trying to reach.
+    pub fn host_for_request<'a>(
         &self,
-        rqinfo: &dropshot::RequestInfo,
-    ) -> Result<Arc<ExternalEndpoint>, Error> {
-        let requested_host = if rqinfo.version() > http::Version::HTTP_11 {
+        rqinfo: &'a dropshot::RequestInfo,
+    ) -> Result<&'a str, String> {
+        if rqinfo.version() > hyper::Version::HTTP_11 {
             // For HTTP2, the server name is specified in the URL's "authority".
-            rqinfo.uri().authority().map(|a| a.as_str())
+            rqinfo
+                .uri()
+                .authority()
+                .map(|a| a.as_str())
+                .ok_or_else(|| String::from("request URL missing authority"))
         } else {
             // For earlier versions of HTTP, the server name is specified by the
             // "Host" header.
             rqinfo
                 .headers()
                 .get(http::header::HOST)
-                .map(|h| h.to_str())
-                .transpose()
-                .context("parsing \"host\" header")
-                .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?
-        };
+                .ok_or_else(|| String::from("request missing \"host\" header"))?
+                .to_str()
+                .map_err(|e| {
+                    format!("failed to decode \"host\" header: {:#}", e)
+                })
+        }
+    }
+
+    // XXX-dap TODO-coverage
+    /// Attempts to determine which external endpoint the given request is
+    /// attempting to reach
+    ///
+    /// This is intended primarily for unauthenticated requests so that we can
+    /// determine which Silo's identity providers we should refer a user to so
+    /// that they can log in.  For authenticated users, we know which Silo
+    /// they're in.  In the future, we may also want this for authenticated
+    /// requests to restrict access to a Silo only via one of its endpoints.
+    ///
+    /// Normally, this works as follows: a client (whether a browser, CLI, or
+    /// otherwise) would be given a Silo-specific DNS name to use to reach one
+    /// of our external endpoints.  They'd use our own external DNS servers
+    /// (mostly likely indirectly) to resolve this to one of Nexus's external
+    /// IPs.  Clients then put that DNS name in either the "host" header (in
+    /// HTTP 1.1) or the URL's authority section (in HTTP 2 and later).
+    ///
+    /// In development, we do not assume that DNS has been set up properly.
+    /// That means we might receive requests that appear targeted at an IP
+    /// address or maybe are missing these fields altogether.  To support that
+    /// case, we'll choose an arbitrary Silo.
+    pub fn endpoint_for_request(
+        &self,
+        rqinfo: &dropshot::RequestInfo,
+    ) -> Result<Arc<ExternalEndpoint>, Error> {
+        let requested_host = self
+            .host_for_request(rqinfo)
+            .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
 
         // If we have not successfully loaded the endpoint configuration yet,
         // there's nothing we can do here.  We could try to do better (e.g., use
@@ -674,38 +719,35 @@ impl super::Nexus {
             Error::unavail("endpoints not loaded")
         })?;
 
-        if let Some(host) = requested_host {
-            endpoints
-                .by_dns_name
-                .get(host)
-                .ok_or_else(|| {
-                    Error::invalid_request(&format!(
-                        "no endpoint for host {:?}",
-                        host
-                    ))
-                })
-                .map(|c| c.clone())
-        } else {
-            // Outside of development, we expect people to be using DNS to find
-            // external endpoints.  In that case, they should not get here.  In
-            // development, we don't always have DNS set up.  As a best-effort
-            // for this case, we'll pick a default endpoint.
-            endpoints
-                .default_endpoint
-                .as_ref()
-                .ok_or_else(|| {
-                    error!(
-                        &self.log,
-                        "received request with no endpoint specified and no \
-                    default endpoint"
-                    );
-                    Error::invalid_request(
-                        "expected HTTP 1.1 \"host\" header or \
-                    HTTP2 URL to contain a server name",
-                    )
-                })
-                .map(|c| c.clone())
+        // See if there's an endpoint for the requested name.  If so, use it.
+        if let Some(endpoint) = endpoints.by_dns_name.get(requested_host) {
+            return Ok(endpoint.clone());
         }
+
+        // There was no endpoint for the requested name.  This should generally
+        // not happen in deployed systems where we expect people to have set up
+        // DNS to find the external endpoints.  But in development, we don't
+        // always have DNS set up.  People may use an IP address to get here.
+        // As a best-effort, we'll pick a default endpoint for this case.  (We
+        // may want to put this behind a policy knob that differs in
+        // production.)
+        endpoints
+            .default_endpoint
+            .as_ref()
+            .ok_or_else(|| {
+                error!(
+                    &self.log,
+                    "received request for unknown host {:?} and no \
+                    default endpoint is available",
+                    requested_host;
+                    "host" => requested_host,
+                );
+                Error::invalid_request(&format!(
+                    "HTTP request for unknown server name {:?}",
+                    requested_host,
+                ))
+            })
+            .map(|c| c.clone())
     }
 }
 
@@ -842,13 +884,12 @@ mod test {
         .unwrap();
         let ee2 = ExternalEndpoints::new(vec![], vec![cert], vec![]);
         assert_eq!(ee2.ndomains(), 0);
-        assert_eq!(ee2.nwarnings(), 1);
+        assert_eq!(ee2.nwarnings(), 2);
+        assert!(ee2.warnings[0].to_string().contains("silo not found"),);
         assert_eq!(
-            ee2.warnings[0].to_string(),
+            ee2.warnings[1].to_string(),
             "no external endpoints were found"
         );
-        // Test PartialEq impl.
-        assert_eq!(ee1, ee2);
     }
 
     #[test]

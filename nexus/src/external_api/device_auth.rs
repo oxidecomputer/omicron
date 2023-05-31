@@ -71,37 +71,14 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let request = &rqctx.request;
-
-        let host = if request.version() > hyper::Version::HTTP_11 {
-            request.uri().authority().map(|a| a.as_str())
-        } else {
-            let host = request
-                .headers()
-                .get(header::HOST)
-                .map(|h| h.to_str())
-                .transpose();
-            match host {
-                Ok(host) => host,
-                Err(e) => {
-                    return build_oauth_response(
-                        StatusCode::BAD_REQUEST,
-                        &serde_json::json!({
-                            "error": "invalid_request",
-                            "error_description": format!("could not decode Host header: {}", e)
-                        }),
-                    )
-                }
-            }
-        };
-        let host = match host {
-            Some(host) => host,
-            None => {
+        let host = match nexus.host_for_request(&rqctx.request) {
+            Ok(host) => host,
+            Err(error) => {
                 return build_oauth_response(
                     StatusCode::BAD_REQUEST,
                     &serde_json::json!({
                         "error": "invalid_request",
-                        "error_description": "missing Host header",
+                        "error_description": error,
                     }),
                 )
             }

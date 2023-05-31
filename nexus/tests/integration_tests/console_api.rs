@@ -177,10 +177,11 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
+    let expected = format!("/login/{}/local", cptestctx.silo_name);
     expect_redirect(
         testctx,
         "/projects/irrelevant-path",
-        "/spoof_login?state=%2Fprojects%2Firrelevant-path",
+        &format!("{}?state=%2Fprojects%2Firrelevant-path", expected),
     )
     .await;
 
@@ -209,8 +210,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
 async fn test_unauthed_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    let unauthed_console_paths =
-        &["/spoof_login", "/login/irrelevant-silo/local"];
+    let unauthed_console_paths = &["/login/irrelevant-silo/local"];
 
     for path in unauthed_console_paths {
         expect_console_page(testctx, path, None).await;
@@ -410,6 +410,20 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("failed to 401 on unauthed request");
 
+    // That's true even if we use spoof authentication.
+    let reqwest_builder = reqwest::ClientBuilder::new();
+    let base_url = format!(
+        "http://{}:{}",
+        testctx.bind_address.ip(),
+        testctx.bind_address.port()
+    );
+    assert!(
+        omicron_test_utils::test_spoof_works(reqwest_builder, &base_url)
+            .await
+            .unwrap(),
+        "unexpectedly failed to use spoof authn from test suite"
+    );
+
     // now make same request with auth
     let priv_user_groups = NexusRequest::object_get(testctx, "/v1/me/groups")
         .authn_as(AuthnMode::PrivilegedUser)
@@ -436,14 +450,15 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
 async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
-    expect_redirect(testctx, "/login", "/spoof_login").await;
+    let expected = format!("/login/{}/local", cptestctx.silo_name);
+    expect_redirect(testctx, "/login", &expected).await;
 
     // pass through state param to login redirect URL. keep it URL encoded, don't double encode
     // encoded path is /abc/def
     expect_redirect(
         testctx,
         "/login?state=%2Fabc%2Fdef",
-        "/spoof_login?state=%2Fabc%2Fdef",
+        &format!("{}?state=%2Fabc%2Fdef", expected),
     )
     .await;
 
@@ -451,12 +466,12 @@ async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
     expect_redirect(
         testctx,
         "/login?state=/abc/def",
-        "/spoof_login?state=%2Fabc%2Fdef",
+        &format!("{}?state=%2Fabc%2Fdef", expected),
     )
     .await;
 
     // empty state param gets dropped
-    expect_redirect(testctx, "/login?state=", "/spoof_login").await;
+    expect_redirect(testctx, "/login?state=", &expected).await;
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
@@ -467,14 +482,14 @@ async fn log_in_and_extract_token(
     cptestctx: &ControlPlaneTestContext,
 ) -> String {
     let testctx = &cptestctx.external_client;
-    let url = format!("/login/{}/local", cptestctx.silo_name);
+    let url = format!("/v1/login/{}/local", cptestctx.silo_name);
     let credentials = UsernamePasswordCredentials {
         username: cptestctx.user_name.as_ref().parse().unwrap(),
         password: TEST_SUITE_PASSWORD.parse().unwrap(),
     };
     let login = RequestBuilder::new(&testctx, Method::POST, &url)
         .body(Some(&credentials))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("failed to log in");
