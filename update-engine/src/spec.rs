@@ -15,14 +15,16 @@ use serde::{de::DeserializeOwned, Serialize};
 ///
 /// NOTE: `StepSpec` is only required to implement `JsonSchema` to obtain the
 /// name of the schema. This is an upstream limitation in `JsonSchema`.
-pub trait StepSpec: JsonSchema {
+pub trait StepSpec: JsonSchema + Send {
     /// A component associated with each step.
     type Component: Clone
         + fmt::Debug
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// The step identifier.
     type StepId: Clone
@@ -30,7 +32,9 @@ pub trait StepSpec: JsonSchema {
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// Metadata associated with each step.
     ///
@@ -41,7 +45,9 @@ pub trait StepSpec: JsonSchema {
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// Metadata associated with an individual progress event.
     ///
@@ -52,7 +58,9 @@ pub trait StepSpec: JsonSchema {
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// Metadata associated with each step's completion.
     ///
@@ -63,7 +71,9 @@ pub trait StepSpec: JsonSchema {
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// Metadata associated with a step being skipped.
     ///
@@ -74,7 +84,9 @@ pub trait StepSpec: JsonSchema {
         + DeserializeOwned
         + Serialize
         + Eq
-        + JsonSchema;
+        + JsonSchema
+        + Send
+        + Sync;
 
     /// The error type associated with each step.
     ///
@@ -82,7 +94,7 @@ pub trait StepSpec: JsonSchema {
     /// however, `anyhow::Error` doesn't implement `std::error::Error`. Both can
     /// be converted to a dynamic `Error`, though. We use `AsError` to abstract
     /// over both sorts of errors.
-    type Error: AsError + fmt::Debug;
+    type Error: AsError + fmt::Debug + Send + Sync;
 }
 
 /// Represents a fully generic step specification, as can be serialized over
@@ -171,7 +183,7 @@ impl AsError for NestedError {
 /// Trait that abstracts over concrete errors and `anyhow::Error`.
 ///
 /// This needs to be manually implemented for any custom error types.
-pub trait AsError: fmt::Debug {
+pub trait AsError: fmt::Debug + Send + Sync {
     fn as_error(&self) -> &(dyn std::error::Error + 'static);
 }
 

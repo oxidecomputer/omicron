@@ -30,7 +30,9 @@ use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
 };
 use tufaceous_lib::ControlPlaneZoneImages;
-use update_engine::StepSpec;
+use update_engine::{
+    errors::NestedEngineError, events::ProgressUnits, StepSpec,
+};
 
 use crate::{
     async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
@@ -290,7 +292,11 @@ impl<'a> ArtifactWriter<'a> {
                         success_this_iter += 1;
                     }
                     Err(error) => match error {
-                        WriteError::WriteError { component, .. } => {
+                        NestedEngineError::Creation { .. } => {
+                            unreachable!("nested engine creation is infallible")
+                        }
+                        NestedEngineError::StepFailed { component, .. }
+                        | NestedEngineError::Aborted { component, .. } => {
                             match component {
                                 WriteComponent::HostPhase2 => {
                                     *progress =
@@ -304,13 +310,6 @@ impl<'a> ArtifactWriter<'a> {
                                     unreachable!("we should never generate an unknown component")
                                 }
                             }
-                        }
-                        // These errors are only produced when writing the
-                        // control plane zones.
-                        WriteError::RemoveFilesError { .. }
-                        | WriteError::SyncOutputDirError { .. }
-                        | WriteError::ZpoolError { .. } => {
-                            *progress = DriveWriteProgress::ControlPlaneFailed;
                         }
                     },
                 }
@@ -801,6 +800,7 @@ async fn write_artifact_impl<S: StepSpec<ProgressMetadata = ()>>(
                 cx.send_progress(StepProgress::with_current_and_total(
                     written_bytes,
                     total_bytes,
+                    ProgressUnits::BYTES,
                     (),
                 ))
                 .await;

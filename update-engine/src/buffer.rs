@@ -430,6 +430,30 @@ impl<S: StepSpec> EventStore<S> {
 
                 (Some(key), Some(key))
             }
+            StepEventKind::ExecutionAborted {
+                aborted_step: step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => {
+                // This is a terminal event: clear all progress for this
+                // execution ID and any nested events.
+
+                let key = StepKey {
+                    execution_id: event.execution_id,
+                    index: step.info.index,
+                };
+                let info = AbortInfo {
+                    attempt: *attempt,
+                    message: message.clone(),
+                    step_elapsed: *step_elapsed,
+                    attempt_elapsed: *attempt_elapsed,
+                };
+                self.mark_step_aborted(key, info);
+
+                (Some(key), Some(key))
+            }
             StepEventKind::Nested { step, event: nested_event, .. } => {
                 // Recurse and find any nested events.
                 let parent_key = StepKey {
@@ -547,9 +571,54 @@ impl<S: StepSpec> EventStore<S> {
     }
 
     fn mark_step_failed(&mut self, root_key: StepKey, info: FailureInfo) {
+        self.mark_step_failed_impl(root_key, |value, kind| {
+            match kind {
+                MarkStepFailedImplKind::Root => {
+                    value.mark_failed(Some(info.clone()));
+                }
+                MarkStepFailedImplKind::Descendant => {
+                    value.mark_failed(None);
+                }
+                MarkStepFailedImplKind::Future => {
+                    value.mark_will_not_be_run(
+                        WillNotBeRunReason::PreviousStepFailed {
+                            step: root_key,
+                        },
+                    );
+                }
+            };
+        })
+    }
+
+    fn mark_step_aborted(&mut self, root_key: StepKey, info: AbortInfo) {
+        self.mark_step_failed_impl(root_key, |value, kind| {
+            match kind {
+                MarkStepFailedImplKind::Root => {
+                    value.mark_aborted(AbortReason::StepAborted(info.clone()));
+                }
+                MarkStepFailedImplKind::Descendant => {
+                    value.mark_aborted(AbortReason::ParentAborted {
+                        parent_step: root_key,
+                    });
+                }
+                MarkStepFailedImplKind::Future => {
+                    value.mark_will_not_be_run(
+                        WillNotBeRunReason::PreviousStepAborted {
+                            step: root_key,
+                        },
+                    );
+                }
+            };
+        });
+    }
+
+    fn mark_step_failed_impl(
+        &mut self,
+        root_key: StepKey,
+        mut cb: impl FnMut(&mut EventBufferStepData<S>, MarkStepFailedImplKind),
+    ) {
         if let Some(value) = self.map.get_mut(&root_key) {
-            // Failure status only applies to the root key.
-            value.mark_failed(Some(info));
+            (cb)(value, MarkStepFailedImplKind::Root);
         }
 
         // Exceptional situation (in normal use, past steps should always show
@@ -570,7 +639,7 @@ impl<S: StepSpec> EventStore<S> {
         while let Some(key) = dfs.next(&self.event_tree) {
             if let EventTreeNode::Step(key) = key {
                 if let Some(value) = self.map.get_mut(&key) {
-                    value.mark_failed(None);
+                    (cb)(value, MarkStepFailedImplKind::Descendant);
                 }
             }
         }
@@ -585,11 +654,17 @@ impl<S: StepSpec> EventStore<S> {
         while let Some(key) = dfs.next(&self.event_tree) {
             if let EventTreeNode::Step(key) = key {
                 if let Some(value) = self.map.get_mut(&key) {
-                    value.mark_will_not_be_run(root_key);
+                    (cb)(value, MarkStepFailedImplKind::Future);
                 }
             }
         }
     }
+}
+
+enum MarkStepFailedImplKind {
+    Root,
+    Descendant,
+    Future,
 }
 
 /// Actions taken by a recursion step.
@@ -776,6 +851,7 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
+            | StepStatus::Aborted { .. }
             | StepStatus::WillNotBeRun { .. } => {
                 // Ignore low-priority events for terminated steps since they're
                 // likely duplicate events.
@@ -790,6 +866,7 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
+            | StepStatus::Aborted { .. }
             | StepStatus::WillNotBeRun { .. } => {
                 // Ignore the status if the step has already been marked
                 // terminated.
@@ -797,13 +874,14 @@ impl<S: StepSpec> EventBufferStepData<S> {
         }
     }
 
-    fn mark_failed(&mut self, status: Option<FailureInfo>) {
+    fn mark_failed(&mut self, info: Option<FailureInfo>) {
         match self.step_status {
             StepStatus::NotStarted | StepStatus::Running { .. } => {
-                self.step_status = StepStatus::Failed { info: status };
+                self.step_status = StepStatus::Failed { info };
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
+            | StepStatus::Aborted { .. }
             | StepStatus::WillNotBeRun { .. } => {
                 // Ignore the status if the step has already been marked
                 // terminated.
@@ -811,11 +889,47 @@ impl<S: StepSpec> EventBufferStepData<S> {
         }
     }
 
-    fn mark_will_not_be_run(&mut self, step_that_failed: StepKey) {
+    fn mark_aborted(&mut self, reason: AbortReason) {
+        match &mut self.step_status {
+            StepStatus::NotStarted => {
+                match reason {
+                    AbortReason::ParentAborted { parent_step } => {
+                        // A parent was aborted and this step hasn't been
+                        // started.
+                        self.step_status = StepStatus::WillNotBeRun {
+                            reason: WillNotBeRunReason::ParentAborted {
+                                step: parent_step,
+                            },
+                        };
+                    }
+                    AbortReason::StepAborted(info) => {
+                        self.step_status = StepStatus::Aborted {
+                            reason: AbortReason::StepAborted(info),
+                            last_progress: None,
+                        };
+                    }
+                }
+            }
+            StepStatus::Running { progress_event, .. } => {
+                self.step_status = StepStatus::Aborted {
+                    reason,
+                    last_progress: Some(progress_event.clone()),
+                };
+            }
+            StepStatus::Completed { .. }
+            | StepStatus::Failed { .. }
+            | StepStatus::Aborted { .. }
+            | StepStatus::WillNotBeRun { .. } => {
+                // Ignore the status if the step has already been marked
+                // terminated.
+            }
+        }
+    }
+
+    fn mark_will_not_be_run(&mut self, reason: WillNotBeRunReason) {
         match self.step_status {
             StepStatus::NotStarted => {
-                self.step_status =
-                    StepStatus::WillNotBeRun { step_that_failed };
+                self.step_status = StepStatus::WillNotBeRun { reason };
             }
             StepStatus::Running { .. } => {
                 // This is a weird situation. We should never encounter it in
@@ -823,6 +937,7 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
+            | StepStatus::Aborted { .. }
             | StepStatus::WillNotBeRun { .. } => {
                 // Ignore the status if the step has already been marked
                 // terminated.
@@ -840,6 +955,9 @@ impl<S: StepSpec> EventBufferStepData<S> {
             }
             StepStatus::Running { progress_event, .. } => {
                 *progress_event = current_progress;
+            }
+            StepStatus::Aborted { last_progress, .. } => {
+                *last_progress = Some(current_progress);
             }
             StepStatus::Completed { .. }
             | StepStatus::Failed { .. }
@@ -876,10 +994,19 @@ pub enum StepStatus<S: StepSpec> {
         info: Option<FailureInfo>,
     },
 
+    /// Execution was aborted while this step was running.
+    Aborted {
+        /// The reason for the abort.
+        reason: AbortReason,
+
+        /// The last progress seen, if any.
+        last_progress: Option<ProgressEvent<S>>,
+    },
+
     /// The step will not be executed because a prior step failed.
     WillNotBeRun {
         /// The step that failed and caused this step to not be run.
-        step_that_failed: StepKey,
+        reason: WillNotBeRunReason,
     },
 }
 
@@ -900,6 +1027,7 @@ impl<S: StepSpec> StepStatus<S> {
             Self::NotStarted
             | Self::Completed { .. }
             | Self::Failed { .. }
+            | Self::Aborted { .. }
             | Self::WillNotBeRun { .. } => Either::Right(std::iter::empty()),
         }
     }
@@ -908,6 +1036,7 @@ impl<S: StepSpec> StepStatus<S> {
     pub fn progress_event(&self) -> Option<&ProgressEvent<S>> {
         match self {
             Self::Running { progress_event, .. } => Some(progress_event),
+            Self::Aborted { last_progress, .. } => last_progress.as_ref(),
             Self::NotStarted
             | Self::Completed { .. }
             | Self::Failed { .. }
@@ -929,6 +1058,52 @@ pub struct FailureInfo {
     pub total_attempts: usize,
     pub message: String,
     pub causes: Vec<String>,
+    pub step_elapsed: Duration,
+    pub attempt_elapsed: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub enum AbortReason {
+    /// This step was aborted.
+    StepAborted(AbortInfo),
+    /// A parent step was aborted.
+    ParentAborted {
+        /// The parent step key that was aborted.
+        parent_step: StepKey,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum WillNotBeRunReason {
+    /// A preceding step failed.
+    PreviousStepFailed {
+        /// The previous step that failed.
+        step: StepKey,
+    },
+
+    /// A parent step failed.
+    ParentStepFailed {
+        /// The parent step that failed.
+        step: StepKey,
+    },
+
+    /// Execution was aborted during a previous step.
+    PreviousStepAborted {
+        /// The step which was aborted.
+        step: StepKey,
+    },
+
+    /// A parent step was aborted.
+    ParentAborted {
+        /// The parent step which was aborted.
+        step: StepKey,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct AbortInfo {
+    pub attempt: usize,
+    pub message: String,
     pub step_elapsed: Duration,
     pub attempt_elapsed: Duration,
 }
@@ -965,6 +1140,9 @@ impl ExecutionSummary {
                 }
                 StepStatus::Failed { .. } => {
                     execution_status = ExecutionStatus::Failed { step_key };
+                }
+                StepStatus::Aborted { .. } => {
+                    execution_status = ExecutionStatus::Aborted { step_key };
                 }
                 StepStatus::WillNotBeRun { .. } => {
                     // Ignore steps that will not be run -- a prior step failed.
@@ -1028,6 +1206,14 @@ pub enum ExecutionStatus {
         /// Use [`EventBuffer::get`] to get more information about this step.
         step_key: StepKey,
     },
+
+    /// This execution was aborted.
+    Aborted {
+        /// The step that was running when the abort happened.
+        ///
+        /// Use [`EventBuffer::get`] to get more information about this step.
+        step_key: StepKey,
+    },
 }
 
 /// Keys for the event tree.
@@ -1056,8 +1242,9 @@ mod tests {
     use tokio_stream::wrappers::ReceiverStream;
 
     use crate::{
-        events::StepProgress, test_utils::TestSpec, StepContext, StepSuccess,
-        UpdateEngine,
+        events::{ProgressUnits, StepProgress},
+        test_utils::TestSpec,
+        StepContext, StepSuccess, UpdateEngine,
     };
 
     use super::*;
@@ -1082,6 +1269,7 @@ mod tests {
                     cx.send_progress(StepProgress::with_current_and_total(
                         5,
                         20,
+                        ProgressUnits::BYTES,
                         Default::default(),
                     ))
                     .await;
@@ -1664,6 +1852,7 @@ mod tests {
                         .send_progress(StepProgress::with_current_and_total(
                             1,
                             3,
+                            "steps",
                             Default::default(),
                         ))
                         .await;
@@ -1686,12 +1875,14 @@ mod tests {
                         .send_progress(StepProgress::with_current_and_total(
                             2,
                             3,
+                            "steps",
                             Default::default(),
                         ))
                         .await;
 
                     cx.send_progress(StepProgress::with_current(
                         20,
+                        "units",
                         Default::default(),
                     ))
                     .await;
@@ -1729,6 +1920,7 @@ mod tests {
                 move |cx| async move {
                     cx.send_progress(StepProgress::with_current(
                         20,
+                        "units",
                         Default::default(),
                     ))
                     .await;

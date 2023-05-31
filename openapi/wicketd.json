@@ -10,6 +10,54 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/abort-update/{type}/{slot}": {
+      "post": {
+        "summary": "Forcibly cancels a running update.",
+        "description": "This is a potentially dangerous operation, but one that is sometimes required. A machine reset might be required after this operation completes.",
+        "operationId": "post_abort_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SpType"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbortUpdateOptions"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/artifacts-and-event-reports": {
       "get": {
         "summary": "An endpoint used to report all available artifacts and event reports.",
@@ -322,6 +370,27 @@
       }
     },
     "schemas": {
+      "AbortUpdateOptions": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "description": "The message to abort the update with.",
+            "type": "string"
+          },
+          "test_error": {
+            "nullable": true,
+            "description": "If passed in, fails the force cancel update operation with a simulated error.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UpdateTestError"
+              }
+            ]
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
       "ArtifactId": {
         "description": "An identifier for an artifact.\n\nThe kind is [`ArtifactKind`], indicating that it might represent an artifact whose kind is unknown.",
         "type": "object",
@@ -649,19 +718,26 @@
         "type": "object",
         "properties": {
           "current": {
+            "description": "The current progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "total": {
             "nullable": true,
+            "description": "The total progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "units": {
+            "description": "Progress units.",
+            "type": "string"
           }
         },
         "required": [
-          "current"
+          "current",
+          "units"
         ]
       },
       "ProgressEventForGenericSpec": {
@@ -2127,6 +2203,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -2555,6 +2685,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForWicketdEngineSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {

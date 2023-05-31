@@ -9,7 +9,7 @@
 //! Events are serializable and implement `JsonSchema`, so that they can be
 //! transmitted over the wire.
 
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, fmt, time::Duration};
 
 use derive_where::derive_where;
 use schemars::JsonSchema;
@@ -189,6 +189,7 @@ impl<S: StepSpec> StepEvent<S> {
             StepEventKind::NoStepsDefined
             | StepEventKind::ExecutionCompleted { .. }
             | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
             | StepEventKind::Unknown => None,
         }
     }
@@ -386,6 +387,29 @@ pub enum StepEventKind<S: StepSpec> {
         causes: Vec<String>,
     },
 
+    /// Execution aborted by an external user.
+    ///
+    /// This is a terminal event: it is guaranteed that no more events will be
+    /// seen after this one.
+    ExecutionAborted {
+        /// Information about the step that was running at the time execution
+        /// was aborted.
+        aborted_step: StepInfoWithMetadata<S>,
+
+        /// The attempt that was running at the time the step was aborted.
+        attempt: usize,
+
+        /// Total time elapsed since the start of the step. Includes prior
+        /// attempts.
+        step_elapsed: Duration,
+
+        /// The time it took for this attempt to complete.
+        attempt_elapsed: Duration,
+
+        /// A message associated with the abort.
+        message: String,
+    },
+
     /// A nested step event occurred.
     Nested {
         /// Information about the step that's occurring.
@@ -423,7 +447,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionCompleted { .. } => {
                 StepEventIsTerminal::Terminal { success: true }
             }
-            StepEventKind::ExecutionFailed { .. } => {
+            StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => {
                 StepEventIsTerminal::Terminal { success: false }
             }
             StepEventKind::ExecutionStarted { .. }
@@ -444,7 +469,8 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ExecutionStarted { .. }
             | StepEventKind::StepCompleted { .. }
             | StepEventKind::ExecutionCompleted { .. }
-            | StepEventKind::ExecutionFailed { .. } => StepEventPriority::High,
+            | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. } => StepEventPriority::High,
             StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::Unknown => StepEventPriority::Low,
@@ -567,6 +593,20 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: StepInfoWithMetadata::from_generic(aborted_step)
+                    .map_err(|error| error.parent("aborted_step"))?,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -686,6 +726,19 @@ impl<S: StepSpec> StepEventKind<S> {
                 message,
                 causes,
             },
+            StepEventKind::ExecutionAborted {
+                aborted_step,
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            } => StepEventKind::ExecutionAborted {
+                aborted_step: aborted_step.into_generic(),
+                attempt,
+                step_elapsed,
+                attempt_elapsed,
+                message,
+            },
             StepEventKind::Nested {
                 step,
                 attempt,
@@ -717,6 +770,7 @@ impl<S: StepSpec> StepEventKind<S> {
             | StepEventKind::ProgressReset { .. }
             | StepEventKind::AttemptRetry { .. }
             | StepEventKind::ExecutionFailed { .. }
+            | StepEventKind::ExecutionAborted { .. }
             | StepEventKind::Nested { .. }
             | StepEventKind::Unknown => None,
         }
@@ -1035,9 +1089,9 @@ pub enum ProgressEventKind<S: StepSpec> {
 
 impl<S: StepSpec> ProgressEventKind<S> {
     /// Returns the progress counter for this event, if available.
-    pub fn progress_counter(&self) -> Option<ProgressCounter> {
+    pub fn progress_counter(&self) -> Option<&ProgressCounter> {
         match self {
-            ProgressEventKind::Progress { progress, .. } => *progress,
+            ProgressEventKind::Progress { progress, .. } => progress.as_ref(),
             ProgressEventKind::Nested { event, .. } => {
                 event.kind.progress_counter()
             }
@@ -1378,26 +1432,76 @@ impl<S: StepSpec> StepInfoWithMetadata<S> {
 /// number of bytes. There is no guarantee that the counter won't go back in
 /// subsequent events; that can happen e.g. if a fetch happens from multiple
 /// peers within a single attempt.
-#[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
-)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ProgressCounter {
+    /// The current progress.
     pub current: u64,
+
+    /// The total progress.
     pub total: Option<u64>,
+
+    /// Progress units.
+    pub units: ProgressUnits,
 }
 
 impl ProgressCounter {
     /// Creates a new `ProgressCounter` with current and total values.
     #[inline]
-    pub fn new(current: u64, total: u64) -> Self {
-        Self { current, total: Some(total) }
+    pub fn new(
+        current: u64,
+        total: u64,
+        units: impl Into<ProgressUnits>,
+    ) -> Self {
+        Self { current, total: Some(total), units: units.into() }
     }
 
     /// Creates a new `ProgressCounter` with just a current value.
     #[inline]
-    pub fn current(current: u64) -> Self {
-        Self { current, total: None }
+    pub fn current(current: u64, units: impl Into<ProgressUnits>) -> Self {
+        Self { current, total: None, units: units.into() }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct ProgressUnits(pub Cow<'static, str>);
+
+impl ProgressUnits {
+    /// Creates a new `ProgressUnits`.
+    pub fn new(s: impl Into<Cow<'static, str>>) -> Self {
+        Self(s.into())
+    }
+
+    /// Creates a new `ProgressUnits` from a static string.
+    pub const fn new_const(s: &'static str) -> Self {
+        Self(Cow::Borrowed(s))
+    }
+
+    /// Units in terms of bytes.
+    ///
+    /// Some displayers might display bytes in terms of KiB, MiB etc.
+    pub const BYTES: Self = Self::new_const("bytes");
+}
+
+impl AsRef<str> for ProgressUnits {
+    fn as_ref(&self) -> &str {
+        self.0.as_ref()
+    }
+}
+
+impl fmt::Display for ProgressUnits {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_ref())
+    }
+}
+
+impl<T> From<T> for ProgressUnits
+where
+    T: Into<Cow<'static, str>>,
+{
+    fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 
@@ -1437,18 +1541,31 @@ impl<S: StepSpec> StepProgress<S> {
     pub fn with_current_and_total(
         current: u64,
         total: u64,
+        units: impl Into<ProgressUnits>,
         metadata: S::ProgressMetadata,
     ) -> Self {
         Self::Progress {
-            progress: Some(ProgressCounter { current, total: Some(total) }),
+            progress: Some(ProgressCounter {
+                current,
+                total: Some(total),
+                units: units.into(),
+            }),
             metadata,
         }
     }
 
     /// Creates a new progress message with a current value.
-    pub fn with_current(current: u64, metadata: S::ProgressMetadata) -> Self {
+    pub fn with_current(
+        current: u64,
+        units: impl Into<ProgressUnits>,
+        metadata: S::ProgressMetadata,
+    ) -> Self {
         Self::Progress {
-            progress: Some(ProgressCounter { current, total: None }),
+            progress: Some(ProgressCounter {
+                current,
+                total: None,
+                units: units.into(),
+            }),
             metadata,
         }
     }
@@ -1793,7 +1910,8 @@ mod tests {
                       "metadata": null,
                       "progress": {
                         "current": 123,
-                        "total": null
+                        "total": null,
+                        "units": "bytes"
                       },
                       "step_elapsed": {
                         "secs": 0,
@@ -1825,7 +1943,10 @@ mod tests {
                         },
                         attempt: 1,
                         metadata: serde_json::Value::Null,
-                        progress: Some(ProgressCounter::current(123)),
+                        progress: Some(ProgressCounter::current(
+                            123,
+                            ProgressUnits::BYTES,
+                        )),
                         step_elapsed: Duration::ZERO,
                         attempt_elapsed: Duration::ZERO,
                     },

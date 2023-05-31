@@ -472,19 +472,26 @@
         "type": "object",
         "properties": {
           "current": {
+            "description": "The current progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "total": {
             "nullable": true,
+            "description": "The total progress.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
+          },
+          "units": {
+            "description": "Progress units.",
+            "type": "string"
           }
         },
         "required": [
-          "current"
+          "current",
+          "units"
         ]
       },
       "ProgressEventForGenericSpec": {
@@ -1420,6 +1427,60 @@
             ]
           },
           {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForGenericSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
+            ]
+          },
+          {
             "description": "A nested step event occurred.",
             "type": "object",
             "properties": {
@@ -1853,6 +1914,60 @@
               "message",
               "step_elapsed",
               "total_attempts"
+            ]
+          },
+          {
+            "description": "Execution aborted by an external user.\n\nThis is a terminal event: it is guaranteed that no more events will be seen after this one.",
+            "type": "object",
+            "properties": {
+              "aborted_step": {
+                "description": "Information about the step that was running at the time execution was aborted.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepInfoWithMetadataForInstallinatorSpec"
+                  }
+                ]
+              },
+              "attempt": {
+                "description": "The attempt that was running at the time the step was aborted.",
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "attempt_elapsed": {
+                "description": "The time it took for this attempt to complete.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "execution_aborted"
+                ]
+              },
+              "message": {
+                "description": "A message associated with the abort.",
+                "type": "string"
+              },
+              "step_elapsed": {
+                "description": "Total time elapsed since the start of the step. Includes prior attempts.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Duration"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "aborted_step",
+              "attempt",
+              "attempt_elapsed",
+              "kind",
+              "message",
+              "step_elapsed"
             ]
           },
           {

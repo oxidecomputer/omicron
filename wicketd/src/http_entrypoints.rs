@@ -45,6 +45,7 @@ pub fn api() -> WicketdApiDescription {
         api.register(get_artifacts_and_event_reports)?;
         api.register(get_baseboard)?;
         api.register(post_start_update)?;
+        api.register(post_abort_update)?;
         api.register(post_clear_update_state)?;
         api.register(get_update_sp)?;
         api.register(post_ignition_command)?;
@@ -166,6 +167,16 @@ pub(crate) struct StartUpdateOptions {
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 pub(crate) struct ClearUpdateStateOptions {
     /// If passed in, fails the clear update state operation with a simulated
+    /// error.
+    pub(crate) test_error: Option<UpdateTestError>,
+}
+
+#[derive(Clone, Debug, JsonSchema, Deserialize)]
+pub(crate) struct AbortUpdateOptions {
+    /// The message to abort the update with.
+    pub(crate) message: String,
+
+    /// If passed in, fails the force cancel update operation with a simulated
     /// error.
     pub(crate) test_error: Option<UpdateTestError>,
 }
@@ -346,6 +357,38 @@ async fn get_update_sp(
     let event_report =
         rqctx.context().update_tracker.event_report(target.into_inner()).await;
     Ok(HttpResponseOk(event_report))
+}
+
+/// Forcibly cancels a running update.
+///
+/// This is a potentially dangerous operation, but one that is sometimes
+/// required. A machine reset might be required after this operation completes.
+#[endpoint {
+    method = POST,
+    path = "/abort-update/{type}/{slot}",
+}]
+async fn post_abort_update(
+    rqctx: RequestContext<ServerContext>,
+    target: Path<SpIdentifier>,
+    opts: TypedBody<AbortUpdateOptions>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let log = &rqctx.log;
+    let target = target.into_inner();
+
+    let opts = opts.into_inner();
+    if let Some(test_error) = opts.test_error {
+        return Err(test_error.into_http_error(log, "aborting update").await);
+    }
+
+    match rqctx
+        .context()
+        .update_tracker
+        .abort_update(target, opts.message)
+        .await
+    {
+        Ok(()) => Ok(HttpResponseUpdatedNoContent {}),
+        Err(err) => Err(err.to_http_error()),
+    }
 }
 
 /// Resets update state for a sled.

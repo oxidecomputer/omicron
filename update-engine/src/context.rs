@@ -12,6 +12,7 @@ use derive_where::derive_where;
 use futures::FutureExt;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::errors::NestedEngineError;
 use crate::{
     errors::ExecutionError,
     events::{Event, EventReport, StepEventKind, StepProgress},
@@ -69,7 +70,7 @@ impl<S: StepSpec> StepContext<S> {
     pub async fn send_nested_report<S2: StepSpec>(
         &self,
         report: EventReport<S2>,
-    ) -> Result<(), NestedError> {
+    ) -> Result<(), NestedEngineError<NestedSpec>> {
         let mut res = Ok(());
         let delta_report = if let Some(id) = report.root_execution_id {
             let mut nested_buffers = self.nested_buffers.lock().unwrap();
@@ -90,12 +91,46 @@ impl<S: StepSpec> StepContext<S> {
 
         if let Some(delta_report) = delta_report {
             for event in delta_report.step_events {
-                if let StepEventKind::ExecutionFailed {
-                    message, causes, ..
-                } = &event.kind
-                {
-                    res =
-                        Err(NestedError::new(message.clone(), causes.clone()));
+                match &event.kind {
+                    StepEventKind::ExecutionFailed {
+                        failed_step,
+                        message,
+                        causes,
+                        ..
+                    } => {
+                        res = Err(NestedEngineError::StepFailed {
+                            component: failed_step.info.component.clone(),
+                            id: failed_step.info.id.clone(),
+                            description: failed_step.info.description.clone(),
+                            error: NestedError::new(
+                                message.clone(),
+                                causes.clone(),
+                            ),
+                        });
+                    }
+                    StepEventKind::ExecutionAborted {
+                        aborted_step,
+                        message,
+                        ..
+                    } => {
+                        res = Err(NestedEngineError::Aborted {
+                            component: aborted_step.info.component.clone(),
+                            id: aborted_step.info.id.clone(),
+                            description: aborted_step.info.description.clone(),
+                            message: message.clone(),
+                        });
+                    }
+                    StepEventKind::NoStepsDefined
+                    | StepEventKind::ExecutionStarted { .. }
+                    | StepEventKind::AttemptRetry { .. }
+                    | StepEventKind::ProgressReset { .. }
+                    | StepEventKind::StepCompleted { .. }
+                    | StepEventKind::ExecutionCompleted { .. }
+                    // Note: we do not care about nested failures or aborts.
+                    // That's because the parent step might have restarted
+                    // nested engines. Only top-level failures or aborts matter.
+                    | StepEventKind::Nested { .. }
+                    | StepEventKind::Unknown => {}
                 }
 
                 self.payload_sender
@@ -122,16 +157,17 @@ impl<S: StepSpec> StepContext<S> {
     pub async fn with_nested_engine<'a, 'this, F, S2>(
         &'this self,
         engine_fn: F,
-    ) -> Result<CompletionContext<S2>, S2::Error>
+    ) -> Result<CompletionContext<S2>, NestedEngineError<S2>>
     where
         'this: 'a,
         F: FnOnce(&mut UpdateEngine<'a, S2>) -> Result<(), S2::Error> + Send,
-        S2: StepSpec,
+        S2: StepSpec + 'a,
     {
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&self.log, sender);
         // Create the engine's steps.
-        (engine_fn)(&mut engine)?;
+        (engine_fn)(&mut engine)
+            .map_err(|error| NestedEngineError::Creation { error })?;
 
         // Now run the engine.
         let engine = engine.execute();
@@ -150,8 +186,11 @@ impl<S: StepSpec> StepContext<S> {
                         Err(ExecutionError::EventSendError(_)) => {
                             unreachable!("we always keep the receiver open")
                         }
-                        Err(ExecutionError::StepFailed { error, .. }) => {
-                            result = Some(Err(error));
+                        Err(ExecutionError::StepFailed { component, id, description, error }) => {
+                            result = Some(Err(NestedEngineError::StepFailed { component, id, description, error }));
+                        }
+                        Err(ExecutionError::Aborted { component, id, description, message }) => {
+                            result = Some(Err(NestedEngineError::Aborted { component, id, description, message }));
                         }
                     }
                 }

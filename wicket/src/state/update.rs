@@ -268,6 +268,13 @@ impl UpdateItem {
                         UpdateRunningState::Failed,
                     );
                 }
+                StepEventKind::ExecutionAborted { aborted_step, .. } => {
+                    update_component_state(
+                        components,
+                        Some(aborted_step.info.component),
+                        UpdateRunningState::Failed,
+                    );
+                }
             }
         }
 
@@ -355,6 +362,7 @@ pub enum UpdateRunningState {
     Updated,
     Updating,
     Failed,
+    Aborted,
 }
 
 impl Display for UpdateRunningState {
@@ -364,6 +372,7 @@ impl Display for UpdateRunningState {
             UpdateRunningState::Updated => write!(f, "UPDATED"),
             UpdateRunningState::Updating => write!(f, "UPDATING"),
             UpdateRunningState::Failed => write!(f, "FAILED"),
+            UpdateRunningState::Aborted => write!(f, "ABORTED"),
         }
     }
 }
@@ -374,7 +383,9 @@ impl UpdateRunningState {
             UpdateRunningState::Waiting => style::deselected(),
             UpdateRunningState::Updated => style::successful_update(),
             UpdateRunningState::Updating => style::start_update(),
-            UpdateRunningState::Failed => style::failed_update(),
+            UpdateRunningState::Failed | UpdateRunningState::Aborted => {
+                style::failed_update()
+            }
         }
     }
 }

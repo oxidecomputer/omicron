@@ -57,6 +57,8 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use update_engine::events::ProgressUnits;
+use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
 use wicket_common::update_events::ComponentRegistrar;
@@ -66,6 +68,7 @@ use wicket_common::update_events::SharedStepHandle;
 use wicket_common::update_events::SpComponentUpdateSpec;
 use wicket_common::update_events::SpComponentUpdateStage;
 use wicket_common::update_events::SpComponentUpdateStepId;
+use wicket_common::update_events::SpComponentUpdateTerminalError;
 use wicket_common::update_events::StepContext;
 use wicket_common::update_events::StepHandle;
 use wicket_common::update_events::StepProgress;
@@ -73,6 +76,9 @@ use wicket_common::update_events::StepResult;
 use wicket_common::update_events::StepSkipped;
 use wicket_common::update_events::StepSuccess;
 use wicket_common::update_events::StepWarning;
+use wicket_common::update_events::TestStepComponent;
+use wicket_common::update_events::TestStepId;
+use wicket_common::update_events::TestStepSpec;
 use wicket_common::update_events::UpdateComponent;
 use wicket_common::update_events::UpdateEngine;
 use wicket_common::update_events::UpdateStepId;
@@ -81,6 +87,7 @@ use wicket_common::update_events::UpdateTerminalError;
 #[derive(Debug)]
 struct SpUpdateData {
     task: JoinHandle<()>,
+    abort_handle: AbortHandle,
     // Note: Our mutex here is a standard mutex, not a tokio mutex. We generally
     // hold it only log enough to update its state or push a new update event
     // into its running log; occasionally we hold it long enough to clone it.
@@ -209,15 +216,25 @@ impl UpdateTracker {
             // TODO do we need `UpdateDriver` as a distinct type?
             let update_driver = UpdateDriver {};
 
+            // Using a oneshot channel to communicate the abort handle isn't
+            // ideal, but it works and is the easiest way to send it without
+            // restructuring this code.
+            let (abort_handle_sender, abort_handle_receiver) =
+                oneshot::channel();
             let task = tokio::spawn(update_driver.run(
                 plan,
                 update_cx,
                 event_buffer.clone(),
                 ipr_start_receiver,
                 opts,
+                abort_handle_sender,
             ));
 
-            SpUpdateData { task, event_buffer }
+            let abort_handle = abort_handle_receiver
+                .await
+                .expect("abort handle is sent immediately");
+
+            SpUpdateData { task, abort_handle, event_buffer }
         })
         .await
     }
@@ -236,9 +253,10 @@ impl UpdateTracker {
             let event_buffer_2 = event_buffer.clone();
             let log = self.log.clone();
 
-            let task = tokio::spawn(async move {
-                let engine = UpdateEngine::new(&log, sender);
+            let engine = UpdateEngine::new(&log, sender);
+            let abort_handle = engine.abort_handle();
 
+            let task = tokio::spawn(async move {
                 // The step component and ID have been chosen arbitrarily here --
                 // they aren't important.
                 engine
@@ -274,7 +292,7 @@ impl UpdateTracker {
                     .expect("event receiving task panicked");
             });
 
-            SpUpdateData { task, event_buffer }
+            SpUpdateData { task, abort_handle, event_buffer }
         })
         .await
     }
@@ -285,6 +303,15 @@ impl UpdateTracker {
     ) -> Result<(), ClearUpdateStateError> {
         let mut update_data = self.sp_update_data.lock().await;
         update_data.clear_update_state(sp)
+    }
+
+    pub(crate) async fn abort_update(
+        &self,
+        sp: SpIdentifier,
+        message: String,
+    ) -> Result<(), AbortUpdateError> {
+        let mut update_data = self.sp_update_data.lock().await;
+        update_data.abort_update(sp, message).await
     }
 
     async fn start_impl<F, Fut>(
@@ -415,6 +442,29 @@ impl UpdateTrackerData {
         Ok(())
     }
 
+    async fn abort_update(
+        &mut self,
+        sp: SpIdentifier,
+        message: String,
+    ) -> Result<(), AbortUpdateError> {
+        let Some(update_data) = self.sp_update_data.get(&sp) else {
+            return Err(AbortUpdateError::UpdateNotStarted);
+        };
+
+        // We can only abort an update if it is still running.
+        //
+        // There's a race possible here between the task finishing and this
+        // check, but that's totally fine: the worst case is that the abort is
+        // ignored.
+        if update_data.task.is_finished() {
+            return Err(AbortUpdateError::UpdateFinished);
+        }
+
+        let waiter = update_data.abort_handle.abort(message);
+        waiter.await;
+        Ok(())
+    }
+
     fn put_repository(&mut self, bytes: BufList) -> Result<(), HttpError> {
         // Are there any updates currently running? If so, then reject the new
         // repository.
@@ -481,6 +531,28 @@ impl ClearUpdateStateError {
     }
 }
 
+#[derive(Debug, Clone, Error, Eq, PartialEq)]
+pub enum AbortUpdateError {
+    #[error("update task not started")]
+    UpdateNotStarted,
+
+    #[error("update task already finished")]
+    UpdateFinished,
+}
+
+impl AbortUpdateError {
+    pub(crate) fn to_http_error(&self) -> HttpError {
+        let message = DisplayErrorChain::new(self).to_string();
+
+        match self {
+            AbortUpdateError::UpdateNotStarted
+            | AbortUpdateError::UpdateFinished => {
+                HttpError::for_bad_request(None, message)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 struct UpdateDriver {}
 
@@ -492,6 +564,7 @@ impl UpdateDriver {
         event_buffer: Arc<StdMutex<EventBuffer>>,
         ipr_start_receiver: IprStartReceiver,
         opts: StartUpdateOptions,
+        abort_handle_sender: oneshot::Sender<AbortHandle>,
     ) {
         let update_cx = &update_cx;
 
@@ -514,34 +587,11 @@ impl UpdateDriver {
         // Build the update executor.
         let (sender, mut receiver) = mpsc::channel(128);
         let mut engine = UpdateEngine::new(&update_cx.log, sender);
+        let abort_handle = engine.abort_handle();
+        _ = abort_handle_sender.send(abort_handle);
 
         if let Some(secs) = opts.test_step_seconds {
-            engine
-                .new_step(
-                    UpdateComponent::Rot,
-                    UpdateStepId::TestStep,
-                    format!("Test step ({secs} seconds)"),
-                    move |cx| async move {
-                        for sec in 0..secs {
-                            cx.send_progress(
-                                StepProgress::with_current_and_total(
-                                    sec,
-                                    secs,
-                                    serde_json::Value::Null,
-                                ),
-                            )
-                            .await;
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-
-                        StepSuccess::new(())
-                            .with_message(format!(
-                                "Step completed after {secs} seconds"
-                            ))
-                            .into()
-                    },
-                )
-                .register();
+            define_test_steps(&engine, secs);
         }
 
         let (rot_a, rot_b, sp_artifact) = match update_cx.sp.type_ {
@@ -1152,6 +1202,66 @@ impl UpdateDriver {
     }
 }
 
+fn define_test_steps(engine: &UpdateEngine, secs: u64) {
+    engine
+        .new_step(
+            UpdateComponent::Rot,
+            UpdateStepId::TestStep,
+            "Test step",
+            move |cx| async move {
+                cx.with_nested_engine(
+                    |engine: &mut UpdateEngine<TestStepSpec>| {
+                        engine
+                            .new_step(
+                                TestStepComponent::Test,
+                                TestStepId::Delay,
+                                format!("Delay step ({secs} secs)"),
+                                |cx| async move {
+                                    for sec in 0..secs {
+                                        cx.send_progress(
+                                        StepProgress::with_current_and_total(
+                                            sec,
+                                            secs,
+                                            "seconds",
+                                            serde_json::Value::Null,
+                                        ),
+                                    )
+                                    .await;
+                                        tokio::time::sleep(
+                                            Duration::from_secs(1),
+                                        )
+                                        .await;
+                                    }
+
+                                    StepSuccess::new(())
+                                        .with_message(format!(
+                                        "Step completed after {secs} seconds"
+                                    ))
+                                        .into()
+                                },
+                            )
+                            .register();
+
+                        engine
+                        .new_step(
+                            TestStepComponent::Test,
+                            TestStepId::Delay,
+                            "Nested stub step",
+                            |_cx| async move { StepSuccess::new(()).into() },
+                        )
+                        .register();
+
+                        Ok(())
+                    },
+                )
+                .await?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
 struct UpdateContext {
     update_id: Uuid,
     sp: SpIdentifier,
@@ -1303,6 +1413,7 @@ impl UpdateContext {
                     cx.send_progress(StepProgress::with_current_and_total(
                         offset,
                         total_size,
+                        ProgressUnits::BYTES,
                         Default::default(),
                     ))
                     .await;
@@ -1414,6 +1525,7 @@ impl UpdateContext {
                                 StepProgress::with_current_and_total(
                                     progress.current as u64,
                                     progress.total as u64,
+                                    ProgressUnits::BYTES,
                                     Default::default(),
                                 ),
                             )
@@ -1444,6 +1556,7 @@ impl UpdateContext {
                                 StepProgress::with_current_and_total(
                                     bytes_received as u64,
                                     total_bytes as u64,
+                                    ProgressUnits::BYTES,
                                     Default::default(),
                                 ),
                             )
@@ -1588,7 +1701,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Sending,
                                 artifact: artifact.id.clone(),
                                 error: anyhow!(error),
@@ -1614,7 +1727,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Preparing,
                                 artifact: artifact.id.clone(),
                                 error,
@@ -1640,7 +1753,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                         )
                         .await
                         .map_err(|error| {
-                            UpdateTerminalError::SpComponentUpdateFailed {
+                            SpComponentUpdateTerminalError::SpComponentUpdateFailed {
                                 stage: SpComponentUpdateStage::Writing,
                                 artifact: artifact.id.clone(),
                                 error,
@@ -1673,7 +1786,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::SetRotActiveSlotFailed {
+                                    SpComponentUpdateTerminalError::SetRotActiveSlotFailed {
                                         error,
                                     }
                                 })?;
@@ -1692,7 +1805,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 .reset_sp_component(component_name)
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::RotResetFailed {
+                                    SpComponentUpdateTerminalError::RotResetFailed {
                                         error,
                                     }
                                 })?;
@@ -1712,7 +1825,7 @@ impl<'a> SpComponentUpdateContext<'a> {
                                 .reset_sp_component(component_name)
                                 .await
                                 .map_err(|error| {
-                                    UpdateTerminalError::SpResetFailed { error }
+                                    SpComponentUpdateTerminalError::SpResetFailed { error }
                                 })?;
                             StepSuccess::new(()).into()
                         },
