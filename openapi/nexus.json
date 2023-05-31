@@ -870,6 +870,14 @@
           },
           {
             "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
+            }
+          },
+          {
+            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -4756,6 +4764,14 @@
               "type": "integer",
               "format": "uint32",
               "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "description": "Query result order",
+            "schema": {
+              "$ref": "#/components/schemas/PaginationOrder"
             }
           },
           {
@@ -14293,6 +14309,14 @@
           "read_bytes",
           "write",
           "write_bytes"
+        ]
+      },
+      "PaginationOrder": {
+        "description": "The order in which the client wants to page through the requested collection",
+        "type": "string",
+        "enum": [
+          "ascending",
+          "descending"
         ]
       },
       "IdSortMode": {

@@ -11,7 +11,7 @@ use crate::{
 };
 use crate::{TimeseriesKey, TimeseriesName};
 use async_trait::async_trait;
-use dropshot::{EmptyScanParams, ResultsPage, WhichPage};
+use dropshot::{EmptyScanParams, PaginationOrder, ResultsPage, WhichPage};
 use oximeter::types::Sample;
 use slog::{debug, error, trace, Logger};
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
@@ -67,6 +67,7 @@ impl Client {
         start_time: Option<query::Timestamp>,
         end_time: Option<query::Timestamp>,
         limit: Option<NonZeroU32>,
+        order: Option<PaginationOrder>,
     ) -> Result<Vec<Timeseries>, Error> {
         // Querying uses up to three queries to the database:
         //  1. Retrieve the schema
@@ -93,6 +94,10 @@ impl Client {
         } else {
             query_builder
         };
+
+        if let Some(order) = order {
+            query_builder = query_builder.order(order);
+        }
 
         for criterion in criteria.iter() {
             query_builder = query_builder.filter_raw(criterion)?;
@@ -839,6 +844,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1004,6 +1010,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select test samples");
@@ -1092,6 +1099,7 @@ mod tests {
                 criteria,
                 start_time,
                 end_time,
+                None,
                 None,
             )
             .await
@@ -1350,6 +1358,7 @@ mod tests {
                 Some(query::Timestamp::Exclusive(start_time)),
                 None,
                 None,
+                None,
             )
             .await
             .expect("Failed to select timeseries");
@@ -1388,7 +1397,14 @@ mod tests {
 
         // First, query without a limit. We should see all the results.
         let all_measurements = &client
-            .select_timeseries_with(timeseries_name, &[], None, None, None)
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("Failed to select timeseries")[0]
             .measurements;
@@ -1412,6 +1428,7 @@ mod tests {
                 None,
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];
@@ -1431,6 +1448,7 @@ mod tests {
                 )),
                 None,
                 Some(limit),
+                None,
             )
             .await
             .expect("Failed to select timeseries")[0];

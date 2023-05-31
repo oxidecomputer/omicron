@@ -218,6 +218,7 @@ impl super::Nexus {
         criteria: &[&str],
         query_params: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
+        order: PaginationOrder,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
         #[inline]
         fn no_results() -> dropshot::ResultsPage<Measurement> {
@@ -263,6 +264,7 @@ impl super::Nexus {
                 Some(start_time),
                 Some(end_time),
                 Some(limit),
+                Some(order),
             )
             .await
             .or_else(|err| {
@@ -299,6 +301,7 @@ impl super::Nexus {
                 ResourceMetrics {
                     start_time: last_measurement.timestamp(),
                     end_time: query.end_time,
+                    order: None,
                 }
             },
         )
