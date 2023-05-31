@@ -75,7 +75,7 @@ impl CertificateValidator {
     /// expiration validation).
     //
     // TODO-completeness: Can we take an optional hostname and validate that
-    // this cert will work for it? (This might be a paramter to this method, or
+    // this cert will work for it? (This might be a parameter to this method, or
     // could be an additional property on `Self`.)
     pub fn validate(
         &self,
