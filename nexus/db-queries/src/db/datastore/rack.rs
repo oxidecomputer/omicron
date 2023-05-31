@@ -301,6 +301,78 @@ impl DataStore {
         Ok(())
     }
 
+    async fn rack_populate_service_records<ConnError>(
+        &self,
+        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        log: &slog::Logger,
+        service_pool: &db::model::IpPool,
+        service: internal_params::ServicePutRequest,
+    ) -> Result<(), TxnError>
+    where
+        ConnError: From<diesel::result::Error> + Send + 'static,
+        PoolError: From<ConnError>,
+    {
+        use internal_params::ServiceKind;
+
+        let service_db = db::model::Service::new(
+            service.service_id,
+            service.sled_id,
+            service.zone_id,
+            service.address,
+            service.kind.into(),
+        );
+        self.service_upsert_conn(conn, service_db).await.map_err(|e| {
+            TxnError::CustomError(RackInitError::ServiceInsert(e))
+        })?;
+
+        // For services with external connectivity, we record their
+        // explicit IP allocation and create a service NIC as well.
+        let service_ip = match service.kind {
+            ServiceKind::ExternalDns { external_address }
+            | ServiceKind::Nexus { external_address } => {
+                let name = service.kind.name();
+                let db_ip = IncompleteExternalIp::for_service_explicit(
+                    Uuid::new_v4(),
+                    &db::model::Name(name),
+                    &format!("{}", service.kind),
+                    service.service_id,
+                    service_pool.id(),
+                    external_address,
+                );
+                Some((external_address, db_ip))
+            }
+            ServiceKind::Ntp { snat_cfg: Some(snat) } => {
+                let db_ip = IncompleteExternalIp::for_service_explicit_snat(
+                    Uuid::new_v4(),
+                    service.service_id,
+                    service_pool.id(),
+                    snat.ip,
+                    (snat.first_port, snat.last_port),
+                );
+                Some((snat.ip, db_ip))
+            }
+            _ => None,
+        };
+        if let Some((external_ip, db_ip)) = service_ip {
+            let allocated_ip =
+                Self::allocate_external_ip_on_connection(conn, db_ip)
+                    .await
+                    .map_err(|err| {
+                        warn!(
+                            log,
+                            "Initializing Rack: Failed to allocate \
+                            IP address for {}",
+                            service.kind,
+                        );
+                        TxnError::CustomError(RackInitError::AddingIp(err))
+                    })?;
+            assert_eq!(allocated_ip.ip.ip(), external_ip);
+        }
+
+        info!(log, "Inserted records for {} service", service.kind);
+        Ok(())
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -324,7 +396,8 @@ impl DataStore {
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
-        let rack = self.pool_authorized(opctx)
+        let rack = self
+            .pool_authorized(opctx)
             .await?
             .transaction_async(|conn| async move {
                 // Early exit if the rack has already been initialized.
@@ -354,70 +427,26 @@ impl DataStore {
                         opctx,
                         &authz_service_pool,
                         &range,
-                    ).await.map_err(|err| {
-                        warn!(log, "Initializing Rack: Failed to add IP pool range");
+                    )
+                    .await
+                    .map_err(|err| {
+                        warn!(
+                            log,
+                            "Initializing Rack: Failed to add IP pool range"
+                        );
                         TxnError::CustomError(RackInitError::AddingIp(err))
                     })?;
                 }
 
                 // Allocate records for all services.
                 for service in services {
-                    use internal_params::ServiceKind;
-
-                    let service_db = db::model::Service::new(
-                        service.service_id,
-                        service.sled_id,
-                        service.zone_id,
-                        service.address,
-                        service.kind.into(),
-                    );
-                    self.service_upsert_conn(&conn, service_db)
-                        .await
-                        .map_err(|e| {
-                            TxnError::CustomError(RackInitError::ServiceInsert(e))
-                        })?;
-
-                    // Record explicit IP allocation if service has one
-                    let service_ip = match service.kind {
-                        ServiceKind::ExternalDns { external_address }
-                        | ServiceKind::Nexus { external_address } => {
-                            let name = service.kind.to_string().replace('_', "-").parse().unwrap();
-                            let db_ip = IncompleteExternalIp::for_service_explicit(
-                                Uuid::new_v4(),
-                                &db::model::Name(name),
-                                &format!("{}", service.kind),
-                                service.service_id,
-                                service_pool.id(),
-                                external_address,
-                            );
-                            Some((external_address, db_ip))
-                        }
-                        ServiceKind::Ntp { snat_cfg: Some(snat) } => {
-                            let db_ip = IncompleteExternalIp::for_service_explicit_snat(
-                                Uuid::new_v4(),
-                                service.service_id,
-                                service_pool.id(),
-                                snat.ip,
-                                (snat.first_port, snat.last_port),
-                            );
-                            Some((snat.ip, db_ip))
-                        }
-                        _ => None,
-                    };
-                    if let Some((external_ip, db_ip)) = service_ip {
-                        let allocated_ip = Self::allocate_external_ip_on_connection(
-                            &conn,
-                            db_ip,
-                        ).await.map_err(|err| {
-                            warn!(
-                                log,
-                                "Initializing Rack: Failed to allocate IP address for {}",
-                                service.kind,
-                            );
-                            TxnError::CustomError(RackInitError::AddingIp(err))
-                        })?;
-                        assert_eq!(allocated_ip.ip.ip(), external_ip);
-                    }
+                    self.rack_populate_service_records(
+                        &conn,
+                        &log,
+                        &service_pool,
+                        service,
+                    )
+                    .await?;
                 }
                 info!(log, "Inserted services");
 
@@ -789,11 +818,12 @@ mod test {
             paste::paste! {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
+                    use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
                     db.pool_for_tests()
                         .await
                         .unwrap()
                         .transaction_async(|conn| async move {
-                            conn.batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
+                            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                                 .await
                                 .unwrap();
                             Ok::<_, crate::db::TransactionError<()>>(
@@ -808,7 +838,7 @@ mod test {
                         .unwrap()
                 }
             }
-        }
+        };
     }
 
     fn_to_get_all!(service, Service);

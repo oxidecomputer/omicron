@@ -190,6 +190,24 @@ pub enum ServiceKind {
     Ntp { snat_cfg: Option<SourceNatConfig> },
 }
 
+impl ServiceKind {
+    pub fn name(&self) -> Name {
+        use ServiceKind::*;
+        let s = match self {
+            ExternalDns { .. } => "external-dns",
+            InternalDns => "internal-dns",
+            Nexus { .. } => "nexus",
+            Oximeter => "oximeter",
+            Dendrite => "dendrite",
+            Tfport => "tfport",
+            CruciblePantry => "crucible-pantry",
+            Ntp { snat_cfg: None } => "ntp",
+            Ntp { snat_cfg: Some(_) } => "boundary-ntp",
+        };
+        s.parse().unwrap()
+    }
+}
+
 impl fmt::Display for ServiceKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ServiceKind::*;
