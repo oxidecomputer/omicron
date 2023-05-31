@@ -12,15 +12,18 @@ use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
 use nexus_test_utils::resource_helpers::grant_iam;
-use nexus_test_utils::{load_test_config, test_setup_with_config};
+use nexus_test_utils::{
+    load_test_config, test_setup_with_config, TEST_SUITE_PASSWORD,
+};
 use nexus_test_utils_macros::nexus_test;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
-use omicron_nexus::external_api::console_api::SpoofLoginBody;
-use omicron_nexus::external_api::params::ProjectCreate;
+use omicron_nexus::external_api::params::{
+    ProjectCreate, UsernamePasswordCredentials,
+};
 use omicron_nexus::external_api::{shared, views};
 use omicron_sled_agent::sim;
 
@@ -43,7 +46,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to clear cookie and 204 on logout");
 
     // log in and pull the token out of the header so we can use it for authed requests
-    let session_token = log_in_and_extract_token(&testctx).await;
+    let session_token = log_in_and_extract_token(cptestctx).await;
 
     let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
@@ -181,7 +184,7 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let session_token = log_in_and_extract_token(&testctx).await;
+    let session_token = log_in_and_extract_token(cptestctx).await;
 
     // hit console pages with session, should get back HTML response
     let console_paths = &[
@@ -460,10 +463,18 @@ fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {
     resp.headers.get(header_name).unwrap().to_str().unwrap().to_string()
 }
 
-async fn log_in_and_extract_token(testctx: &ClientTestContext) -> String {
-    let login = RequestBuilder::new(&testctx, Method::POST, "/login")
-        .body(Some(&SpoofLoginBody { username: "unprivileged".to_string() }))
-        .expect_status(Some(StatusCode::NO_CONTENT))
+async fn log_in_and_extract_token(
+    cptestctx: &ControlPlaneTestContext,
+) -> String {
+    let testctx = &cptestctx.external_client;
+    let url = format!("/login/{}/local", cptestctx.silo_name);
+    let credentials = UsernamePasswordCredentials {
+        username: cptestctx.user_name.as_ref().parse().unwrap(),
+        password: TEST_SUITE_PASSWORD.parse().unwrap(),
+    };
+    let login = RequestBuilder::new(&testctx, Method::POST, &url)
+        .body(Some(&credentials))
+        .expect_status(Some(StatusCode::SEE_OTHER))
         .execute()
         .await
         .expect("failed to log in");

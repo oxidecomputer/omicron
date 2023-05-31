@@ -31,6 +31,7 @@ use crate::db::model::ServiceKind;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
+use nexus_db_model::AuthenticationMode;
 use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -40,7 +41,6 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Name as ExternalName;
 use omicron_common::bail_unless;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
@@ -71,6 +71,7 @@ use uuid::Uuid;
 pub struct ExternalEndpoints {
     by_dns_name: BTreeMap<String, Arc<ExternalEndpoint>>,
     warnings: Vec<ExternalEndpointError>,
+    default_endpoint: Option<Arc<ExternalEndpoint>>,
 }
 
 impl ExternalEndpoints {
@@ -94,26 +95,32 @@ impl ExternalEndpoints {
         // be any duplicates since the DNS names are constructed from the
         // (unique) Silo names.  Even if we support aliases in the future, they
         // will presumably need to be unique, too.
-        let silo_names: BTreeMap<Uuid, ExternalName> = silos
-            .iter()
-            .map(|db_silo| (db_silo.id(), db_silo.name().clone()))
+        let silos_by_id: BTreeMap<Uuid, Arc<nexus_db_model::Silo>> = silos
+            .into_iter()
+            .map(|db_silo| (db_silo.id(), Arc::new(db_silo)))
             .collect();
         let mut dns_names: BTreeMap<String, Uuid> = BTreeMap::new();
         for z in external_dns_zones {
-            for s in &silos {
-                let dns_name =
-                    format!("{}.{}", silo_dns_name(s.name()), z.zone_name);
+            for (_, db_silo) in &silos_by_id {
+                let dns_name = format!(
+                    "{}.{}",
+                    silo_dns_name(db_silo.name()),
+                    z.zone_name
+                );
                 match dns_names.entry(dns_name.clone()) {
                     Entry::Vacant(vac) => {
-                        vac.insert(s.id());
+                        vac.insert(db_silo.id());
                     }
                     Entry::Occupied(occ) => {
                         let first_silo_id = *occ.get();
-                        let first_silo_name =
-                            silo_names.get(&first_silo_id).unwrap().to_string();
+                        let first_silo_name = silos_by_id
+                            .get(&first_silo_id)
+                            .unwrap()
+                            .name()
+                            .to_string();
                         warnings.push(ExternalEndpointError::DupDnsName {
-                            dup_silo_id: s.id(),
-                            dup_silo_name: s.name().to_string(),
+                            dup_silo_id: db_silo.id(),
+                            dup_silo_name: db_silo.name().to_string(),
                             first_silo_id,
                             first_silo_name,
                             dns_name,
@@ -131,31 +138,38 @@ impl ExternalEndpoints {
         // to prefer some certificates over others, but that'll be decided later
         // (see best_certificate()).  And in the end it'll be better to provide
         // an expired certificate than none at all.
-        let (silo_tls_certs, cert_warnings): (Vec<_>, Vec<_>) = certs
-            .into_iter()
-            .map(|db_cert| (db_cert.silo_id, TlsCertificate::try_from(db_cert)))
-            .partition(|(_, e)| e.is_ok());
-        warnings.extend(cert_warnings.into_iter().map(|(silo_id, e)| {
-            let reason = match e {
-                // We partitioned above by whether this is an error not, so we
-                // shouldn't find a non-error here.  (We cannot use unwrap_err()
-                // because the `Ok` type doesn't impl `Debug`.)
-                Ok(_) => unreachable!("found certificate in list of errors"),
-                Err(e) => Arc::new(e),
-            };
+        let parsed_certificates = certs.into_iter().map(|db_cert| {
+            let silo_id = db_cert.silo_id;
+            let tls_cert = TlsCertificate::try_from(db_cert).map_err(|e| {
+                ExternalEndpointError::BadCert { silo_id, reason: Arc::new(e) }
+            })?;
+            let db_silo = silos_by_id
+                .get(&silo_id)
+                .ok_or_else(|| ExternalEndpointError::BadCert {
+                    silo_id,
+                    reason: Arc::new(anyhow!("silo not found")),
+                })?
+                .clone();
+            Ok((silo_id, db_silo, tls_cert))
+        });
 
-            ExternalEndpointError::BadCert { silo_id, reason }
-        }));
         let mut certs_by_silo_id = BTreeMap::new();
-        for (silo_id, tls_cert) in silo_tls_certs.into_iter() {
-            // This was partitioned above so we should only have the non-errors
-            // here.
-            let tls_cert = tls_cert.unwrap();
-            let silo_entry =
-                certs_by_silo_id.entry(silo_id).or_insert_with(|| {
-                    ExternalEndpoint { silo_id, tls_certs: Vec::new() }
-                });
-            silo_entry.tls_certs.push(tls_cert)
+        for parsed_cert in parsed_certificates {
+            match parsed_cert {
+                Err(error) => {
+                    warnings.push(error);
+                }
+                Ok((silo_id, db_silo, tls_cert)) => {
+                    let silo_entry = certs_by_silo_id
+                        .entry(silo_id)
+                        .or_insert_with(|| ExternalEndpoint {
+                            silo_id,
+                            db_silo,
+                            tls_certs: Vec::new(),
+                        });
+                    silo_entry.tls_certs.push(tls_cert)
+                }
+            };
         }
 
         let certs_by_silo_id: BTreeMap<_, _> = certs_by_silo_id
@@ -170,8 +184,14 @@ impl ExternalEndpoints {
                     .get(&silo_id)
                     .cloned()
                     .unwrap_or_else(|| {
+                        // For something to appear in `dns_names`, we must have
+                        // found it in `silos`, and so it must be in
+                        // `silos_by_id`.
+                        let db_silo =
+                            silos_by_id.get(&silo_id).unwrap().clone();
                         Arc::new(ExternalEndpoint {
                             silo_id,
+                            db_silo,
                             tls_certs: vec![],
                         })
                     });
@@ -191,7 +211,25 @@ impl ExternalEndpoints {
             warnings.push(ExternalEndpointError::NoEndpoints);
         }
 
-        ExternalEndpoints { by_dns_name, warnings }
+        // Pick a default endpoint.  This will be used if a request arrives
+        // without specifying an endpoint via the HTTP/1.1 Host header or the
+        // HTTP2 URL.  This is only intended for development, where external DNS
+        // may not be set up.
+        //
+        // We somewhat arbitrarily choose the first Silo we find that's not JIT.
+        // This would usually be the recovery Silo.
+        // XXX-dap TODO-coverage
+        let default_endpoint = silos_by_id
+            .values()
+            .find(|s| s.authentication_mode == AuthenticationMode::Local)
+            .and_then(|s| {
+                by_dns_name
+                    .iter()
+                    .find(|(_, endpoint)| endpoint.silo_id == s.id())
+                    .map(|(_, endpoint)| endpoint.clone())
+            });
+
+        ExternalEndpoints { by_dns_name, warnings, default_endpoint }
     }
 
     #[cfg(test)]
@@ -212,16 +250,24 @@ impl ExternalEndpoints {
 
 /// Describes a single external "endpoint", by which we mean an external DNS
 /// name that's associated with a particular Silo
-#[derive(Debug, Eq, PartialEq, Serialize)]
-struct ExternalEndpoint {
-    /// the Silo associated with this endpoint
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct ExternalEndpoint {
+    /// the id of the Silo associated with this endpoint
+    // XXX-dap remove since it's redundant?
     silo_id: Uuid,
+    /// the silo associated with this endpoint
+    #[serde(skip)]
+    db_silo: Arc<nexus_db_model::Silo>,
     /// the set of TLS certificate chains that could be appropriate for this
     /// endpoint
     tls_certs: Vec<TlsCertificate>,
 }
 
 impl ExternalEndpoint {
+    pub fn silo(&self) -> &nexus_db_model::Silo {
+        &self.db_silo
+    }
+
     /// Chooses a TLS certificate (chain) to use when handling connections to
     /// this endpoint
     fn best_certificate(&self) -> Result<&TlsCertificate, anyhow::Error> {
@@ -592,6 +638,74 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
     ) -> Option<Arc<CertifiedKey>> {
         let server_name = client_hello.server_name();
         self.do_resolve(server_name)
+    }
+}
+
+impl super::Nexus {
+    // XXX-dap TODO-doc
+    // XXX-dap commonize with device_auth_request()
+    // XXX-dap TODO-coverage
+    pub fn endpoint_for_request(
+        &self,
+        rqinfo: &dropshot::RequestInfo,
+    ) -> Result<Arc<ExternalEndpoint>, Error> {
+        let requested_host = if rqinfo.version() > http::Version::HTTP_11 {
+            // For HTTP2, the server name is specified in the URL's "authority".
+            rqinfo.uri().authority().map(|a| a.as_str())
+        } else {
+            // For earlier versions of HTTP, the server name is specified by the
+            // "Host" header.
+            rqinfo
+                .headers()
+                .get(http::header::HOST)
+                .map(|h| h.to_str())
+                .transpose()
+                .context("parsing \"host\" header")
+                .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?
+        };
+
+        // If we have not successfully loaded the endpoint configuration yet,
+        // there's nothing we can do here.  We could try to do better (e.g., use
+        // the recovery Silo?).  But if we failed to load endpoints, it's likely
+        // the database is down, and we're not going to get much further anyway.
+        let endpoint_config = self.background_tasks.external_endpoints.borrow();
+        let endpoints = endpoint_config.as_ref().ok_or_else(|| {
+            error!(&self.log, "received request with no endpoints loaded");
+            Error::unavail("endpoints not loaded")
+        })?;
+
+        if let Some(host) = requested_host {
+            endpoints
+                .by_dns_name
+                .get(host)
+                .ok_or_else(|| {
+                    Error::invalid_request(&format!(
+                        "no endpoint for host {:?}",
+                        host
+                    ))
+                })
+                .map(|c| c.clone())
+        } else {
+            // Outside of development, we expect people to be using DNS to find
+            // external endpoints.  In that case, they should not get here.  In
+            // development, we don't always have DNS set up.  As a best-effort
+            // for this case, we'll pick a default endpoint.
+            endpoints
+                .default_endpoint
+                .as_ref()
+                .ok_or_else(|| {
+                    error!(
+                        &self.log,
+                        "received request with no endpoint specified and no \
+                    default endpoint"
+                    );
+                    Error::invalid_request(
+                        "expected HTTP 1.1 \"host\" header or \
+                    HTTP2 URL to contain a server name",
+                    )
+                })
+                .map(|c| c.clone())
+        }
     }
 }
 
