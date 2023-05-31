@@ -9,6 +9,7 @@ mod http_entrypoints;
 mod installinator_progress;
 mod inventory;
 pub mod mgs;
+mod rss_config;
 mod update_tracker;
 
 use anyhow::{anyhow, Result};
@@ -106,6 +107,7 @@ impl Server {
                     mgs_client,
                     update_tracker: update_tracker.clone(),
                     baseboard: args.baseboard,
+                    rss_config: Default::default(),
                 },
                 &log,
             )

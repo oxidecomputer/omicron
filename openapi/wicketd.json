@@ -265,6 +265,181 @@
         }
       }
     },
+    "/rss-config": {
+      "get": {
+        "summary": "Get the current status of the user-provided (or system-default-provided, in",
+        "description": "some cases) RSS configuration.",
+        "operationId": "get_rss_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentRssUserConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update (a subset of) the current RSS configuration.",
+        "description": "Sensitive values (certificates and password hash) are not set through this endpoint.",
+        "operationId": "put_rss_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRssUserConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Reset all RSS configuration to their default values.",
+        "operationId": "delete_rss_config",
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rss-config/cert": {
+      "post": {
+        "summary": "Add an external certificate.",
+        "description": "This must be paired with its private key. They may be posted in either order, but one cannot post two certs in a row (or two keys in a row).",
+        "operationId": "post_rss_config_cert",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_uint8",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rss-config/key": {
+      "post": {
+        "summary": "Add the private key of an external certificate.",
+        "description": "This must be paired with its certificate. They may be posted in either order, but one cannot post two keys in a row (or two certs in a row).",
+        "operationId": "post_rss_config_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_uint8",
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateUploadResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/rss-config/recovery-user-password-hash": {
+      "put": {
+        "summary": "Update the RSS config recovery silo user password hash.",
+        "operationId": "put_rss_config_recovery_user_password_hash",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutRssRecoveryUserPasswordHash"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/update/{type}/{slot}": {
       "get": {
         "summary": "An endpoint to get the status of any update being performed or recently",
@@ -486,6 +661,80 @@
           }
         ]
       },
+      "BootstrapSledDescription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/SpIdentifier"
+          },
+          "model": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "serial_number": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "revision",
+          "serial_number"
+        ]
+      },
+      "CertificateUploadResponse": {
+        "oneOf": [
+          {
+            "description": "The key has been uploaded, but we're waiting on its corresponding certificate chain.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_cert"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "The cert chain has been uploaded, but we're waiting on its corresponding private key.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_on_key"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "A cert chain and its key have been accepted.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_accepted"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        ]
+      },
       "ClearUpdateStateOptions": {
         "type": "object",
         "properties": {
@@ -499,6 +748,64 @@
             ]
           }
         }
+      },
+      "CurrentRssUserConfig": {
+        "type": "object",
+        "properties": {
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootstrapSledDescription"
+            },
+            "uniqueItems": true
+          },
+          "dns_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "external_dns_zone_name": {
+            "nullable": true,
+            "type": "string"
+          },
+          "internal_services_ip_pool_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "ntp_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "num_external_certificates": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "rack_network_config": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfig"
+              }
+            ]
+          },
+          "recovery_silo_password_set": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bootstrap_sleds",
+          "dns_servers",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers",
+          "num_external_certificates",
+          "recovery_silo_password_set"
+        ]
       },
       "Duration": {
         "type": "object",
@@ -684,6 +991,67 @@
             ]
           }
         ]
+      },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
+      "NewPasswordHash": {
+        "title": "A password hash in PHC string format",
+        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+        "type": "string"
       },
       "PowerState": {
         "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
@@ -1163,6 +1531,94 @@
               "kind"
             ]
           }
+        ]
+      },
+      "PutRssRecoveryUserPasswordHash": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "$ref": "#/components/schemas/NewPasswordHash"
+          }
+        },
+        "required": [
+          "hash"
+        ]
+      },
+      "PutRssUserConfig": {
+        "type": "object",
+        "properties": {
+          "bootstrap_sleds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "dns_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "external_dns_zone_name": {
+            "type": "string"
+          },
+          "internal_services_ip_pool_ranges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "ntp_servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/RackNetworkConfig"
+          }
+        },
+        "required": [
+          "bootstrap_sleds",
+          "dns_servers",
+          "external_dns_zone_name",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers",
+          "rack_network_config"
+        ]
+      },
+      "RackNetworkConfig": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "gateway_ip": {
+            "description": "Gateway address",
+            "type": "string"
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string"
+          },
+          "uplink_ip": {
+            "description": "IP Address to apply to switchport (must be in infra_ip pool)",
+            "type": "string"
+          },
+          "uplink_port": {
+            "description": "Switchport to use for external connectivity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "gateway_ip",
+          "infra_ip_first",
+          "infra_ip_last",
+          "uplink_ip",
+          "uplink_port"
         ]
       },
       "RackV1Inventory": {

@@ -6,6 +6,8 @@
 
 use crate::mgs::GetInventoryError;
 use crate::mgs::GetInventoryResponse;
+use crate::mgs::MgsHandle;
+use crate::RackV1Inventory;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -20,13 +22,16 @@ use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
 use http::StatusCode;
+use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
+use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::update::ArtifactId;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_hardware::Baseboard;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::time::Duration;
 use uuid::Uuid;
 use wicket_common::update_events::EventReport;
@@ -40,6 +45,12 @@ pub fn api() -> WicketdApiDescription {
     fn register_endpoints(
         api: &mut WicketdApiDescription,
     ) -> Result<(), String> {
+        api.register(get_rss_config)?;
+        api.register(put_rss_config)?;
+        api.register(put_rss_config_recovery_user_password_hash)?;
+        api.register(post_rss_config_cert)?;
+        api.register(post_rss_config_key)?;
+        api.register(delete_rss_config)?;
         api.register(get_inventory)?;
         api.register(put_repository)?;
         api.register(get_artifacts_and_event_reports)?;
@@ -57,6 +68,220 @@ pub fn api() -> WicketdApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct BootstrapSledDescription {
+    pub id: SpIdentifier,
+    pub serial_number: String,
+    pub model: String,
+    pub revision: u32,
+}
+
+// This is the subset of `RackInitializeRequest` that we return to wicket when
+// it asks how much information the user has already provided. It omits fields
+// that we determine ourselves, and replaces sensitive fields with "has it been
+// set" booleans.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfig {
+    // Values provided as-is; not sensitive.
+    pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
+    pub ntp_servers: Vec<String>,
+    pub dns_servers: Vec<String>,
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_zone_name: Option<String>,
+    pub rack_network_config: Option<RackNetworkConfig>,
+
+    // Sensitive values replaced with "has it been provided" markers.
+    // TODO: maybe replace with a vec of cert names?
+    pub num_external_certificates: usize,
+    pub recovery_silo_password_set: bool,
+}
+
+// The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
+// provided by the wicket user uploading a TOML file, currently.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PutRssUserConfig {
+    pub bootstrap_sleds: BTreeSet<SpIdentifier>,
+    pub ntp_servers: Vec<String>,
+    pub dns_servers: Vec<String>,
+    pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
+    pub external_dns_zone_name: String,
+    pub rack_network_config: RackNetworkConfig,
+}
+
+// Get the current inventory or return a 503 Unavailable.
+async fn inventory_or_unavail(
+    mgs_handle: &MgsHandle,
+) -> Result<RackV1Inventory, HttpError> {
+    match mgs_handle.get_inventory(Vec::new()).await {
+        Ok(GetInventoryResponse::Response { inventory, .. }) => Ok(inventory),
+        Ok(GetInventoryResponse::Unavailable) => Err(HttpError::for_unavail(
+            None,
+            "Rack inventory not yet available".into(),
+        )),
+        Err(GetInventoryError::ShutdownInProgress) => {
+            Err(HttpError::for_unavail(None, "Server is shutting down".into()))
+        }
+        Err(GetInventoryError::InvalidSpIdentifier) => {
+            // We didn't provide any SP identifiers to refresh, so they can't be
+            // invalid.
+            unreachable!()
+        }
+    }
+}
+
+/// Get the current status of the user-provided (or system-default-provided, in
+/// some cases) RSS configuration.
+#[endpoint {
+    method = GET,
+    path = "/rss-config"
+}]
+async fn get_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseOk<CurrentRssUserConfig>, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+
+    Ok(HttpResponseOk((&*config).into()))
+}
+
+/// Update (a subset of) the current RSS configuration.
+///
+/// Sensitive values (certificates and password hash) are not set through this
+/// endpoint.
+#[endpoint {
+    method = PUT,
+    path = "/rss-config"
+}]
+async fn put_rss_config(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssUserConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    // We can't run RSS if we don't have an inventory from MGS yet; we always
+    // need to fill in the bootstrap sleds first.
+    let inventory = inventory_or_unavail(&ctx.mgs_handle).await?;
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.populate_available_bootstrap_sleds_from_inventory(&inventory);
+    config
+        .update(body.into_inner(), ctx.baseboard.as_ref())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CertificateUploadResponse {
+    /// The key has been uploaded, but we're waiting on its corresponding
+    /// certificate chain.
+    WaitingOnCert,
+    /// The cert chain has been uploaded, but we're waiting on its corresponding
+    /// private key.
+    WaitingOnKey,
+    /// A cert chain and its key have been accepted.
+    CertKeyAccepted,
+}
+
+/// Add an external certificate.
+///
+/// This must be paired with its private key. They may be posted in either
+/// order, but one cannot post two certs in a row (or two keys in a row).
+#[endpoint {
+    method = POST,
+    path = "/rss-config/cert"
+}]
+async fn post_rss_config_cert(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<Vec<u8>>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_cert(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+/// Add the private key of an external certificate.
+///
+/// This must be paired with its certificate. They may be posted in either
+/// order, but one cannot post two keys in a row (or two certs in a row).
+#[endpoint {
+    method = POST,
+    path = "/rss-config/key"
+}]
+async fn post_rss_config_key(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<Vec<u8>>,
+) -> Result<HttpResponseOk<CertificateUploadResponse>, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    let response = config
+        .push_key(body.into_inner())
+        .map_err(|err| HttpError::for_bad_request(None, err))?;
+
+    Ok(HttpResponseOk(response))
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PutRssRecoveryUserPasswordHash {
+    pub hash: omicron_passwords::NewPasswordHash,
+}
+
+/// Update the RSS config recovery silo user password hash.
+#[endpoint {
+    method = PUT,
+    path = "/rss-config/recovery-user-password-hash"
+}]
+async fn put_rss_config_recovery_user_password_hash(
+    rqctx: RequestContext<ServerContext>,
+    body: TypedBody<PutRssRecoveryUserPasswordHash>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    config.set_recovery_user_password_hash(body.into_inner().hash);
+
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Reset all RSS configuration to their default values.
+#[endpoint {
+    method = DELETE,
+    path = "/rss-config"
+}]
+async fn delete_rss_config(
+    rqctx: RequestContext<ServerContext>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let ctx = rqctx.context();
+
+    let mut config = ctx.rss_config.lock().unwrap();
+    *config = Default::default();
+
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
