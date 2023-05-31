@@ -63,6 +63,7 @@ members = [
 
 default-members = [
     "bootstrap-agent-client",
+    "certificates",
     "common",
     "ddm-admin-client",
     "dpd-client",
