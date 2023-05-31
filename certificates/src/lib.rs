@@ -73,6 +73,11 @@ impl CertificateValidator {
     /// Validate that we can parse the cert chain, that the key matches, and
     /// that the certs in the chain are not expired (unless we have disabled
     /// expiration validation).
+    ///
+    /// `certs` is expected to be a certificate chain in PEM format.
+    ///
+    /// `key` is expected to be the private key for the leaf certificate of
+    /// `certs` in PEM format.
     //
     // TODO-completeness: Can we take an optional hostname and validate that
     // this cert will work for it? (This might be a parameter to this method, or
