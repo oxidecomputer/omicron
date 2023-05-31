@@ -640,6 +640,11 @@ impl UpdateDriver {
 
         let sp_registrar = engine.for_component(UpdateComponent::Sp);
 
+        // The SP only has one updateable firmware slot ("the inactive bank").
+        // We want to ask about slot 0 (the active slot)'s current version, and
+        // we are supposed to always pass 0 when updating.
+        let sp_firmware_slot = 0;
+
         let sp_current_version = sp_registrar
             .new_step(
                 UpdateStepId::InterrogateSp,
@@ -651,6 +656,7 @@ impl UpdateDriver {
                             update_cx.sp.type_,
                             update_cx.sp.slot,
                             SpComponent::SP_ITSELF.const_as_str(),
+                            sp_firmware_slot,
                         )
                         .await
                         .map_err(|error| {
@@ -706,9 +712,6 @@ impl UpdateDriver {
                         .into();
                     }
 
-                    // The SP only has one updateable firmware slot ("the
-                    // inactive bank") - we always pass 0.
-                    let sp_firmware_slot = 0;
                     cx.with_nested_engine(|engine| {
                         inner_cx.register_steps(
                             engine,
