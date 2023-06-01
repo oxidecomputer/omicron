@@ -84,7 +84,6 @@ function ensure_simulated_chelsios {
             dladm create-simnet -t "net$I"
             dladm create-simnet -t "sc${I}_0"
             dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "net$I" # encap headroom
             dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
 
             # corresponding scrimlet ports
@@ -133,7 +132,7 @@ function enable_softnpu {
         exit 1
     }
     zlogin softnpu pgrep softnpu || {
-        zlogin softnpu /stuff/softnpu /stuff/softnpu.toml &
+        zlogin softnpu 'RUST_LOG=debug /stuff/softnpu /stuff/softnpu.toml &> /softnpu.log &'
     }
     success "softnpu started"
 }

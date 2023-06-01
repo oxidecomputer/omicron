@@ -4,11 +4,13 @@
 
 //! The global state manipulated by wicket.
 
+mod force_update;
 mod inventory;
 mod rack;
 mod status;
 mod update;
 
+pub use force_update::ForceUpdateState;
 pub use inventory::{
     Component, ComponentId, Inventory, ParsableComponentId, PowerState, Sp,
     ALL_COMPONENT_IDS,
@@ -34,6 +36,7 @@ pub struct State {
     pub rack_state: RackState,
     pub service_status: ServiceStatus,
     pub update_state: RackUpdateState,
+    pub force_update_state: ForceUpdateState,
 }
 
 impl State {
@@ -45,6 +48,7 @@ impl State {
             rack_state: RackState::new(),
             service_status: ServiceStatus::new(),
             update_state: RackUpdateState::new(),
+            force_update_state: ForceUpdateState::default(),
         }
     }
 }

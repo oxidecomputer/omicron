@@ -275,6 +275,7 @@ impl PortManager {
                 &vnic_name,
                 Some(nic.mac),
                 None,
+                1500,
             ) {
                 slog::warn!(
                     self.inner.log,

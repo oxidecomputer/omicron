@@ -130,56 +130,6 @@
         }
       }
     },
-    "/login/{silo_name}/local": {
-      "post": {
-        "tags": [
-          "login"
-        ],
-        "summary": "Authenticate a user via username and password",
-        "operationId": "login_local",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "silo_name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UsernamePasswordCredentials"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "303": {
-            "description": "redirect (see other)",
-            "headers": {
-              "location": {
-                "description": "HTTP \"Location\" header",
-                "style": "simple",
-                "required": true,
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/login/{silo_name}/saml/{provider_name}": {
       "get": {
         "tags": [
@@ -276,25 +226,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/logout": {
-      "post": {
-        "tags": [
-          "hidden"
-        ],
-        "operationId": "logout",
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1956,7 +1887,7 @@
           {
             "in": "query",
             "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`. This parameter is only useful for the non-streaming GET request for serial console data, and *ignored* by the streaming websocket endpoint.",
+            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`.",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -2023,30 +1954,8 @@
           },
           {
             "in": "query",
-            "name": "from_start",
-            "description": "Character index in the serial buffer from which to read, counting the bytes output since instance start. If this is not provided, `most_recent` must be provided, and if this *is* provided, `most_recent` must *not* be provided.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
-            "name": "max_bytes",
-            "description": "Maximum number of bytes of buffered serial console contents to return. If the requested range runs to the end of the available buffer, the data returned will be shorter than `max_bytes`. This parameter is only useful for the non-streaming GET request for serial console data, and *ignored* by the streaming websocket endpoint.",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "query",
             "name": "most_recent",
-            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance. (See note on `from_start` about mutual exclusivity)",
+            "description": "Character index in the serial buffer from which to read, counting *backward* from the most recently buffered data retrieved from the instance.",
             "schema": {
               "nullable": true,
               "type": "integer",
@@ -2158,6 +2067,66 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/login/{silo_name}/local": {
+      "post": {
+        "tags": [
+          "login"
+        ],
+        "summary": "Authenticate a user via username and password",
+        "operationId": "login_local",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo_name",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsernamePasswordCredentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/logout": {
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Log user out of web console by deleting session on client and server",
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -3588,6 +3557,252 @@
         }
       }
     },
+    "/v1/system/hardware/sleds/{sled_id}/instances": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List instances running on a given sled",
+        "operationId": "sled_instance_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "description": "ID of the sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledInstanceResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switch-port": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List switch ports",
+        "operationId": "networking_switch_port_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_port_id",
+            "description": "An optional switch port id to use when listing switch ports.",
+            "schema": {
+              "nullable": true,
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/hardware/switch-port/{port}/settings": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Apply switch port settings",
+        "operationId": "networking_switch_port_apply_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPortApplySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Clear switch port settings",
+        "operationId": "networking_switch_port_clear_settings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "switch_location",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/switches": {
       "get": {
         "tags": [
@@ -4585,6 +4800,523 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/networking/address-lot": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List address lots",
+        "operationId": "networking_address_lot_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create an address lot",
+        "operationId": "networking_address_lot_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressLotCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotCreateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete an address lot",
+        "operationId": "networking_address_lot_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/address-lot/{address_lot}/blocks": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List the blocks in an address lot",
+        "operationId": "networking_address_lot_block_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address_lot",
+            "description": "Name or ID of the address lot",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressLotBlockResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/v1/system/networking/loopback-address": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get loopback addresses, optionally filtering by id",
+        "operationId": "networking_loopback_address_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoopbackAddressResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create a loopback address",
+        "operationId": "networking_loopback_address_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoopbackAddressCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoopbackAddress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}": {
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete a loopback address",
+        "operationId": "networking_loopback_address_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "description": "The IP address and subnet mask to use when selecting the loopback address.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "The rack to use when selecting the loopback address.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "subnet_mask",
+            "description": "The IP address and subnet mask to use when selecting the loopback address.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch_location",
+            "description": "The switch location to use when selecting the loopback address.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-settings": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "List switch port settings",
+        "operationId": "networking_switch_port_settings_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "port_settings",
+            "description": "An optional name or id to use when selecting port settings.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Create switch port settings",
+        "operationId": "networking_switch_port_settings_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPortSettingsCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Delete switch port settings",
+        "operationId": "networking_switch_port_settings_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "port_settings",
+            "description": "An optional name or id to use when selecting port settings.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-settings/{port}": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get information about a switch port",
+        "operationId": "networking_switch_port_settings_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name or id to use when selecting switch port settings info objects.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -7032,6 +7764,262 @@
       }
     },
     "schemas": {
+      "Address": {
+        "description": "An address tied to an address lot.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address and prefix length of this address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "address_lot": {
+            "description": "The address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "address_lot"
+        ]
+      },
+      "AddressConfig": {
+        "description": "A set of addresses associated with a port configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "The set of addresses assigned to the port configuration.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          }
+        },
+        "required": [
+          "addresses"
+        ]
+      },
+      "AddressLot": {
+        "description": "Represents an address lot object, containing the id of the lot that can be used in other API calls.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "description": "Desired use of `AddressLot`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLotKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "kind",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "AddressLotBlock": {
+        "description": "An address lot block is a part of an address lot and contains a range of addresses. The range is inclusive.",
+        "type": "object",
+        "properties": {
+          "first_address": {
+            "description": "The first address of the block (inclusive).",
+            "type": "string",
+            "format": "ip"
+          },
+          "id": {
+            "description": "The id of the address lot block.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_address": {
+            "description": "The last address of the block (inclusive).",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "first_address",
+          "id",
+          "last_address"
+        ]
+      },
+      "AddressLotBlockCreate": {
+        "description": "Parameters for creating an address lot block. Fist and last addresses are inclusive.",
+        "type": "object",
+        "properties": {
+          "first_address": {
+            "description": "The first address in the lot (inclusive).",
+            "type": "string",
+            "format": "ip"
+          },
+          "last_address": {
+            "description": "The last address in the lot (inclusive).",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "first_address",
+          "last_address"
+        ]
+      },
+      "AddressLotBlockResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlock"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "AddressLotCreate": {
+        "description": "Parameters for creating an address lot.",
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "description": "The blocks to add along with the new address lot.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlockCreate"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "description": "The kind of address lot to create.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLotKind"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "blocks",
+          "description",
+          "kind",
+          "name"
+        ]
+      },
+      "AddressLotCreateResponse": {
+        "description": "An address lot and associated blocks resulting from creating an address lot.",
+        "type": "object",
+        "properties": {
+          "blocks": {
+            "description": "The address lot blocks that were created.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLotBlock"
+            }
+          },
+          "lot": {
+            "description": "The address lot that was created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "blocks",
+          "lot"
+        ]
+      },
+      "AddressLotKind": {
+        "description": "The kind associated with an address lot.",
+        "oneOf": [
+          {
+            "description": "Infrastructure address lots are used for network infrastructure like addresses assigned to rack switches.",
+            "type": "string",
+            "enum": [
+              "infra"
+            ]
+          },
+          {
+            "description": "Pool address lots are used by IP pools.",
+            "type": "string",
+            "enum": [
+              "pool"
+            ]
+          }
+        ]
+      },
+      "AddressLotResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressLot"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -7051,6 +8039,43 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BgpPeerConfig": {
+        "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The address of the host to peer with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "bgp_announce_set": {
+            "description": "The set of announcements advertised by the peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "bgp_config": {
+            "description": "The global BGP configuration used for establishing a session with this peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "bgp_announce_set",
+          "bgp_config",
+          "interface_name"
         ]
       },
       "BinRangedouble": {
@@ -9575,7 +10600,7 @@
         "title": "An IPv4 subnet",
         "description": "An IPv4 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([8-9]|1[0-9]|2[0-9]|3[0-2])$"
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Range": {
         "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -9600,7 +10625,7 @@
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)\\/([1-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Range": {
         "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
@@ -9628,6 +10653,158 @@
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
         "maxLength": 11
+      },
+      "LinkConfig": {
+        "description": "Switch link configuration.",
+        "type": "object",
+        "properties": {
+          "lldp": {
+            "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpServiceConfig"
+              }
+            ]
+          },
+          "mtu": {
+            "description": "Maximum transmission unit for the link.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "lldp",
+          "mtu"
+        ]
+      },
+      "LldpServiceConfig": {
+        "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "Whether or not LLDP is enabled.",
+            "type": "boolean"
+          },
+          "lldp_config": {
+            "nullable": true,
+            "description": "A reference to the LLDP configuration used. Must not be `None` when `enabled` is `true`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "LoopbackAddress": {
+        "description": "A loopback address is an address that is assigned to a rack switch but is not associated with any particular port.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The loopback IP address and prefix length.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "address_lot_block_id": {
+            "description": "The address lot block this address came from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "description": "The id of the loopback address.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_id": {
+            "description": "The id of the rack where this loopback address is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "switch_location": {
+            "description": "Switch location where this loopback address is assigned.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "address_lot_block_id",
+          "id",
+          "rack_id",
+          "switch_location"
+        ]
+      },
+      "LoopbackAddressCreate": {
+        "description": "Parameters for creating a loopback address on a particular rack switch.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address to create.",
+            "type": "string",
+            "format": "ip"
+          },
+          "address_lot": {
+            "description": "The name or id of the address lot this loopback address will pull an address from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "mask": {
+            "description": "The subnet mask to use for the address.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "rack_id": {
+            "description": "The containing the switch this loopback address will be configured on.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "switch_location": {
+            "description": "The location of the switch within the rack this loopback address will be configured on.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "address_lot",
+          "mask",
+          "rack_id",
+          "switch_location"
+        ]
+      },
+      "LoopbackAddressResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LoopbackAddress"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -10018,6 +11195,45 @@
           "items"
         ]
       },
+      "Route": {
+        "description": "A route to a destination network through a gateway address.",
+        "type": "object",
+        "properties": {
+          "dst": {
+            "description": "The route destination.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "gw": {
+            "description": "The route gateway.",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "dst",
+          "gw"
+        ]
+      },
+      "RouteConfig": {
+        "description": "Route configuration data associated with a switch port configuration.",
+        "type": "object",
+        "properties": {
+          "routes": {
+            "description": "The set of routes assigned to a switch port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Route"
+            }
+          }
+        },
+        "required": [
+          "routes"
+        ]
+      },
       "RouteDestination": {
         "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
         "oneOf": [
@@ -10375,11 +11591,16 @@
         "type": "object",
         "properties": {
           "acs_url": {
-            "description": "service provider endpoint where the response will be sent",
+            "description": "Service provider endpoint where the response will be sent",
             "type": "string"
           },
           "description": {
             "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "group_attribute_name": {
+            "nullable": true,
+            "description": "If set, attributes with this name will be considered to denote a user's group membership, where the values will be the group names.",
             "type": "string"
           },
           "id": {
@@ -10388,7 +11609,7 @@
             "format": "uuid"
           },
           "idp_entity_id": {
-            "description": "idp's entity id",
+            "description": "IdP's entity id",
             "type": "string"
           },
           "name": {
@@ -10401,19 +11622,19 @@
           },
           "public_cert": {
             "nullable": true,
-            "description": "optional request signing public certificate (base64 encoded der file)",
+            "description": "Optional request signing public certificate (base64 encoded der file)",
             "type": "string"
           },
           "slo_url": {
-            "description": "service provider endpoint where the idp should send log out requests",
+            "description": "Service provider endpoint where the idp should send log out requests",
             "type": "string"
           },
           "sp_client_id": {
-            "description": "sp's client id",
+            "description": "SP's client id",
             "type": "string"
           },
           "technical_contact_email": {
-            "description": "customer's technical contact for saml configuration",
+            "description": "Customer's technical contact for saml configuration",
             "type": "string"
           },
           "time_created": {
@@ -10749,6 +11970,89 @@
           "usable_physical_ram"
         ]
       },
+      "SledInstance": {
+        "description": "An operator's view of an instance running on a given sled",
+        "type": "object",
+        "properties": {
+          "active_sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "memory": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "migration_id": {
+            "nullable": true,
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "ncpus": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "project_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/InstanceState"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "active_sled_id",
+          "id",
+          "memory",
+          "name",
+          "ncpus",
+          "project_name",
+          "silo_name",
+          "state",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SledInstanceResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledInstance"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
       "SledResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -11023,6 +12327,580 @@
           "time_modified"
         ]
       },
+      "SwitchInterfaceConfig": {
+        "description": "A layer-3 switch interface configuration. When IPv6 is enabled, a link local address will be created for the interface.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "What kind of switch interface this configuration represents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchInterfaceKind"
+              }
+            ]
+          },
+          "v6_enabled": {
+            "description": "Whether or not IPv6 is enabled.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "v6_enabled"
+        ]
+      },
+      "SwitchInterfaceKind": {
+        "description": "Indicates the kind for a switch interface.",
+        "oneOf": [
+          {
+            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "primary"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vlan"
+                ]
+              },
+              "vid": {
+                "description": "The virtual network id (VID) that distinguishes this interface and is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "vid"
+            ]
+          },
+          {
+            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "loopback"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "SwitchPort": {
+        "description": "A switch port represents a physical external port on a rack switch.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "The id of the switch port.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "port_name": {
+            "description": "The name of this switch port.",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "nullable": true,
+            "description": "The primary settings group of this switch port. Will be `None` until this switch port is configured.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "rack_id": {
+            "description": "The rack this switch port belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "switch_location": {
+            "description": "The switch location of this switch port.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "port_name",
+          "rack_id",
+          "switch_location"
+        ]
+      },
+      "SwitchPortAddressConfig": {
+        "description": "An IP address configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The IP address and prefix.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "address_lot_block_id": {
+            "description": "The id of the address lot block this address is drawn from.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface_name": {
+            "description": "The interface name this address belongs to.",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "description": "The port settings object this address configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "address_lot_block_id",
+          "interface_name",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortApplySettings": {
+        "description": "Parameters for applying settings to switch ports.",
+        "type": "object",
+        "properties": {
+          "port_settings": {
+            "description": "A name or id to use when applying switch port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "port_settings"
+        ]
+      },
+      "SwitchPortBgpPeerConfig": {
+        "description": "A BGP peer configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The address of the peer.",
+            "type": "string",
+            "format": "ip"
+          },
+          "bgp_announce_set_id": {
+            "description": "The id for the set of prefixes announced in this peer configuration.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "bgp_config_id": {
+            "description": "The id of the global BGP configuration referenced by this peer configuration.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface_name": {
+            "description": "The interface name used to establish a peer session.",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "description": "The port settings object this BGP configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "addr",
+          "bgp_announce_set_id",
+          "bgp_config_id",
+          "interface_name",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortConfig": {
+        "description": "Physical switch port configuration.",
+        "type": "object",
+        "properties": {
+          "geometry": {
+            "description": "Link geometry for the switch port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortGeometry"
+              }
+            ]
+          }
+        },
+        "required": [
+          "geometry"
+        ]
+      },
+      "SwitchPortGeometry": {
+        "description": "The link geometry associated with a switch port.",
+        "oneOf": [
+          {
+            "description": "The port contains a single QSFP28 link with four lanes.",
+            "type": "string",
+            "enum": [
+              "qsfp28x1"
+            ]
+          },
+          {
+            "description": "The port contains two QSFP28 links each with two lanes.",
+            "type": "string",
+            "enum": [
+              "qsfp28x2"
+            ]
+          },
+          {
+            "description": "The port contains four SFP28 links each with one lane.",
+            "type": "string",
+            "enum": [
+              "sfp28x4"
+            ]
+          }
+        ]
+      },
+      "SwitchPortLinkConfig": {
+        "description": "A link configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "link_name": {
+            "description": "The name of this link.",
+            "type": "string"
+          },
+          "lldp_service_config_id": {
+            "description": "The link-layer discovery protocol service configuration id for this link.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "mtu": {
+            "description": "The maximum transmission unit for this link.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "port_settings_id": {
+            "description": "The port settings this link configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "link_name",
+          "lldp_service_config_id",
+          "mtu",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPort"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SwitchPortRouteConfig": {
+        "description": "A route configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "dst": {
+            "description": "The route's destination network.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "gw": {
+            "description": "The route's gateway address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "The interface name this route configuration is assigned to.",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "description": "The port settings object this route configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "dst",
+          "gw",
+          "interface_name",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettings": {
+        "description": "A switch port settings identity whose id may be used to view additional details.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SwitchPortSettingsCreate": {
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          "interfaces": {
+            "description": "Interfaces indexed by link name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "links": {
+            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LinkConfig"
+            }
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "port_config": {
+            "$ref": "#/components/schemas/SwitchPortConfig"
+          },
+          "routes": {
+            "description": "Routes indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "description",
+          "groups",
+          "interfaces",
+          "links",
+          "name",
+          "port_config",
+          "routes"
+        ]
+      },
+      "SwitchPortSettingsGroups": {
+        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
+        "type": "object",
+        "properties": {
+          "port_settings_group_id": {
+            "description": "The id of a port settings group being referenced by a port settings object.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "port_settings_id": {
+            "description": "The id of a port settings object referencing a port settings group.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "port_settings_group_id",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettingsResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettings"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SwitchPortSettingsView": {
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Layer 3 IP address settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortAddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortBgpPeerConfig"
+            }
+          },
+          "groups": {
+            "description": "Switch port settings included from other switch port settings groups.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
+            }
+          },
+          "interfaces": {
+            "description": "Layer 3 interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "link_lldp": {
+            "description": "Link-layer discovery protocol (LLDP) settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LldpServiceConfig"
+            }
+          },
+          "links": {
+            "description": "Layer 2 link settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortLinkConfig"
+            }
+          },
+          "port": {
+            "description": "Layer 1 physical port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "IP route settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortRouteConfig"
+            }
+          },
+          "settings": {
+            "description": "The primary switch port settings handle.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortSettings"
+              }
+            ]
+          },
+          "vlan_interfaces": {
+            "description": "Vlan interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "groups",
+          "interfaces",
+          "link_lldp",
+          "links",
+          "port",
+          "routes",
+          "settings",
+          "vlan_interfaces"
+        ]
+      },
       "SwitchResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -11042,6 +12920,27 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SwitchVlanInterfaceConfig": {
+        "description": "A switch port VLAN interface configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "interface_config_id": {
+            "description": "The switch interface configuration this VLAN interface configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vid": {
+            "description": "The virtual network id (VID) that distinguishes this interface and is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface_config_id",
+          "vid"
         ]
       },
       "SystemUpdate": {
@@ -12434,6 +14333,13 @@
     {
       "name": "disks",
       "description": "Virtual disks are used to store instance-local data which includes the operating system.",
+      "externalDocs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
+    },
+    {
+      "name": "external-networking",
+      "description": "External networking information",
       "externalDocs": {
         "url": "http://oxide.computer/docs/#xxx"
       }

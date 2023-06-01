@@ -46,6 +46,7 @@ pub struct ConfigStorage {
 pub struct ConfigHardware {
     pub hardware_threads: u32,
     pub physical_ram: u64,
+    pub reservoir_ram: u64,
 }
 
 /// Configuration for a sled agent

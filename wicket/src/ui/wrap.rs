@@ -22,19 +22,22 @@ use textwrap::{
 };
 use tui::text::{Span, Spans, Text};
 
-pub(crate) struct Options<'a> {
+pub struct Options<'a> {
     /// The width in columns at which the text will be wrapped.
-    pub(crate) width: usize,
+    pub width: usize,
     /// Indentation used for the first line of output.
-    pub(crate) initial_indent: Span<'a>,
+    pub initial_indent: Span<'a>,
     /// Indentation used for subsequent lines of output.
-    pub(crate) subsequent_indent: Span<'a>,
+    pub subsequent_indent: Span<'a>,
     /// Allow long words to be broken if they cannot fit on a line.
     /// When set to `false`, some lines may be longer than
     /// `self.width`.
-    pub(crate) break_words: bool,
+    pub break_words: bool,
 }
 
+/// Wraps a [`Text`] block.
+///
+/// `text` should be broken up into lines at the time it's passed in.
 pub(crate) fn wrap_text<'a>(
     text: &'a Text<'_>,
     options: Options<'a>,
@@ -46,6 +49,18 @@ pub(crate) fn wrap_text<'a>(
         wrap_single_line(line, &options, &mut lines);
     }
 
+    Text::from(lines)
+}
+
+/// Wraps a [`Spans`] representing a single line.
+///
+/// If the text contains multiple lines, use [`wrap_text`] instead.
+pub(crate) fn wrap_line<'a>(
+    line: &'a Spans<'_>,
+    options: Options<'a>,
+) -> Text<'a> {
+    let mut lines = Vec::new();
+    wrap_single_line(line, &options, &mut lines);
     Text::from(lines)
 }
 

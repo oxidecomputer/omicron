@@ -170,8 +170,8 @@ where
     /// Extracts this archive into the specified directory.
     ///
     /// Once this is completed, use
-    /// [`OmicronRepo::load`](crate::OmicronRepo::load) to load the archive from
-    /// `output_dir`.
+    /// [`OmicronRepo::load_untrusted`](crate::OmicronRepo::load_untrusted) to
+    /// load the archive from `output_dir`.
     ///
     /// [`ZIP_BASE_DIR`] will be stripped from output paths.
     pub fn extract(&mut self, output_dir: &Utf8Path) -> Result<()> {

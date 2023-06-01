@@ -23,17 +23,17 @@
 #: [[publish]]
 #: series = "tuf-repo"
 #: name = "repo.zip.parta"
-#: from_output = "/out/repo.zip.parta"
+#: from_output = "/work/repo.zip.parta"
 #:
 #: [[publish]]
 #: series = "tuf-repo"
 #: name = "repo.zip.partb"
-#: from_output = "/out/repo.zip.partb"
+#: from_output = "/work/repo.zip.partb"
 #:
 #: [[publish]]
 #: series = "tuf-repo"
 #: name = "repo.zip.sha256.txt"
-#: from_output = "/out/repo.zip.sha256.txt"
+#: from_output = "/work/repo.zip.sha256.txt"
 #:
 
 set -o errexit
@@ -79,7 +79,11 @@ version = "$VERSION"
 kind = "composite-control-plane"
 EOF
 
-for zone in /work/package/install/*.tar.gz; do
+# Exclude `propolis-server` from the list of control plane zones: it is bundled
+# into the OS ramdisk. It still shows up under `.../install` for development
+# workflows using `omicron-package install` that don't build a full omicron OS
+# ramdisk, so we filter it out here.
+for zone in $(find /work/package/install -maxdepth 1 -type f -name '*.tar.gz' | grep -v propolis-server.tar.gz); do
     cat >>/work/manifest.toml <<EOF
 [[artifact.control_plane.source.zones]]
 kind = "file"

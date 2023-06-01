@@ -118,6 +118,7 @@ mod test {
                     .parse()
                     .unwrap(),
             },
+            rack_network_config: None,
         };
 
         assert_eq!(

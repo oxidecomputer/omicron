@@ -1,10 +1,10 @@
 use crate::helpers::generate_name;
 use anyhow::{anyhow, Context as _, Result};
 use chrono::Utc;
-use futures::future::FutureExt;
 use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
-use oxide_client::types::{Name, ProjectCreate, UsernamePasswordCredentials};
+use oxide_client::types::{Name, ProjectCreate};
+use oxide_client::CustomDnsResolver;
 use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
@@ -12,11 +12,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
-};
 use trust_dns_resolver::error::ResolveErrorKind;
-use trust_dns_resolver::TokioAsyncResolver;
 
 const RSS_CONFIG_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -127,13 +123,13 @@ pub async fn nexus_addr() -> Result<IpAddr> {
     let dns_addr = external_dns_addr(&config)?;
     let dns_name = nexus_external_dns_name(&config);
     let resolver = CustomDnsResolver::new(dns_addr)?;
-    resolver
-        .wait_for_records(
-            &dns_name,
-            Duration::from_secs(1),
-            Duration::from_secs(300),
-        )
-        .await
+    wait_for_records(
+        &resolver,
+        &dns_name,
+        Duration::from_secs(1),
+        Duration::from_secs(300),
+    )
+    .await
 }
 
 pub async fn build_client() -> Result<oxide_client::Client> {
@@ -144,15 +140,6 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     let dns_addr = external_dns_addr(&config)?;
     let dns_name = nexus_external_dns_name(&config);
     let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
-
-    // Do not have reqwest follow redirects.  That's because our login response
-    // includes both a redirect and the session cookie header.  If reqwest
-    // follows the redirect, we won't have a chance to get the cookie.
-    let mut builder = reqwest::ClientBuilder::new()
-        .connect_timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .dns_resolver(resolver.clone())
-        .timeout(Duration::from_secs(60));
 
     // If we were provided with a path to a certificate in the environment, add
     // it as a trusted one.
@@ -170,54 +157,54 @@ pub async fn build_client() -> Result<oxide_client::Client> {
         }
     };
 
-    if let Some(cert) = &extra_root_cert {
-        builder = builder.add_root_certificate(cert.clone());
-    }
-
-    let reqwest_login_client = builder.build()?;
-
     // Prepare to make a login request.
     let base_url = format!("{}://{}", proto, dns_name);
     let silo_name = config.recovery_silo.silo_name.as_str();
-    let login_url = format!("{}/login/{}/local", base_url, silo_name);
+    let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
     let username: oxide_client::types::UserId =
         config.recovery_silo.user_name.as_str().parse().map_err(|s| {
             anyhow!("parsing configured recovery user name: {:?}", s)
         })?;
     // See the comment in the config file about this password.
     let password: oxide_client::types::Password = "oxide".parse().unwrap();
-    let login_request_body =
-        serde_json::to_string(&UsernamePasswordCredentials {
-            username: username,
-            password: password,
-        })
-        .context("serializing login request body")?;
 
     // By the time we get here, Nexus might not be up yet.  It may not have
     // published its names to external DNS, and even if it has, it may not have
     // opened its external listening socket.  So we have to retry a bit until we
     // succeed.
-    let response = wait_for_condition(
+    let session_token = wait_for_condition(
         || async {
             // Use a raw reqwest client because it's not clear that Progenitor
             // is intended to support endpoints that return 300-level response
             // codes.  See progenitor#451.
             eprintln!("{}: attempting to log into API", Utc::now());
-            reqwest_login_client
-                .post(&login_url)
-                .body(login_request_body.clone())
-                .send()
-                .await
-                .map_err(|e| {
-                    eprintln!("{}: login failed: {:#}", Utc::now(), e);
+
+            let mut builder = reqwest::ClientBuilder::new()
+                .connect_timeout(Duration::from_secs(15))
+                .dns_resolver(resolver.clone())
+                .timeout(Duration::from_secs(60));
+
+            if let Some(cert) = &extra_root_cert {
+                builder = builder.add_root_certificate(cert.clone());
+            }
+
+            oxide_client::login(
+                builder,
+                &login_url,
+                username.clone(),
+                password.clone(),
+            )
+            .await
+            .map_err(|e| {
+                eprintln!("{}: login failed: {:#}", Utc::now(), e);
+                if let oxide_client::LoginError::RequestError(e) = &e {
                     if e.is_connect() {
-                        CondCheckError::NotYet
-                    } else {
-                        CondCheckError::Failed(
-                            anyhow::Error::new(e).context("logging in"),
-                        )
+                        return CondCheckError::NotYet;
                     }
-                })
+                }
+
+                CondCheckError::Failed(e)
+            })
         },
         &Duration::from_secs(1),
         &Duration::from_secs(300),
@@ -226,20 +213,11 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     .context("logging in")?;
 
     eprintln!("{}: login succeeded", Utc::now());
-    let session_cookie = response
-        .headers()
-        .get(http::header::SET_COOKIE)
-        .ok_or_else(|| anyhow!("expected session cookie after login"))?
-        .to_str()
-        .context("expected session cookie token to be a string")?;
-    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
-    assert!(session_token.starts_with("session="));
-    assert!(rest.contains("Path=/; HttpOnly; SameSite=Lax; Max-Age="));
 
     let mut headers = HeaderMap::new();
     headers.insert(
         http::header::COOKIE,
-        HeaderValue::from_str(session_token).unwrap(),
+        HeaderValue::from_str(&format!("session={}", session_token)).unwrap(),
     );
 
     let mut builder = reqwest::ClientBuilder::new()
@@ -256,86 +234,43 @@ pub async fn build_client() -> Result<oxide_client::Client> {
     Ok(Client::new_with_client(&base_url, reqwest_client))
 }
 
-/// Wrapper around a `TokioAsyncResolver` so that we can impl
-/// `reqwest::dns::Resolve` for it.
-struct CustomDnsResolver {
-    dns_addr: SocketAddr,
-    // The lifetime constraints on the `Resolve` trait make it hard to avoid an
-    // Arc here.
-    resolver: Arc<TokioAsyncResolver>,
-}
-
-impl CustomDnsResolver {
-    fn new(dns_addr: SocketAddr) -> Result<CustomDnsResolver> {
-        let mut resolver_config = ResolverConfig::new();
-        resolver_config.add_name_server(NameServerConfig {
-            socket_addr: dns_addr,
-            protocol: Protocol::Udp,
-            tls_dns_name: None,
-            trust_nx_responses: false,
-            bind_addr: None,
-        });
-
-        let resolver = Arc::new(
-            TokioAsyncResolver::tokio(resolver_config, ResolverOpts::default())
-                .context("failed to create resolver")?,
-        );
-        Ok(CustomDnsResolver { dns_addr, resolver })
-    }
-
-    async fn wait_for_records(
-        &self,
-        dns_name: &str,
-        check_period: Duration,
-        max: Duration,
-    ) -> Result<IpAddr> {
-        wait_for_condition::<_, anyhow::Error, _, _>(
-            || async {
-                self.resolver
-                    .lookup_ip(dns_name)
-                    .await
-                    .map_err(|e| match e.kind() {
-                        ResolveErrorKind::NoRecordsFound { .. }
-                        | ResolveErrorKind::Timeout => CondCheckError::NotYet,
-                        _ => CondCheckError::Failed(
-                            anyhow::Error::new(e).context(format!(
-                                "resolving {:?} from {}",
-                                dns_name, self.dns_addr
-                            )),
+async fn wait_for_records(
+    resolver: &CustomDnsResolver,
+    dns_name: &str,
+    check_period: Duration,
+    max: Duration,
+) -> Result<IpAddr> {
+    wait_for_condition::<_, anyhow::Error, _, _>(
+        || async {
+            resolver
+                .resolver()
+                .lookup_ip(dns_name)
+                .await
+                .map_err(|e| match e.kind() {
+                    ResolveErrorKind::NoRecordsFound { .. }
+                    | ResolveErrorKind::Timeout => CondCheckError::NotYet,
+                    _ => CondCheckError::Failed(anyhow::Error::new(e).context(
+                        format!(
+                            "resolving {:?} from {}",
+                            dns_name,
+                            resolver.dns_addr()
                         ),
-                    })?
-                    .iter()
-                    .next()
-                    .ok_or(CondCheckError::NotYet)
-            },
-            &check_period,
-            &max,
+                    )),
+                })?
+                .iter()
+                .next()
+                .ok_or(CondCheckError::NotYet)
+        },
+        &check_period,
+        &max,
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "failed to resolve {:?} from {:?} within {:?}",
+            dns_name,
+            resolver.dns_addr(),
+            max
         )
-        .await
-        .with_context(|| {
-            format!(
-                "failed to resolve {:?} from {:?} within {:?}",
-                dns_name, self.dns_addr, max
-            )
-        })
-    }
-}
-
-impl reqwest::dns::Resolve for CustomDnsResolver {
-    fn resolve(
-        &self,
-        name: hyper::client::connect::dns::Name,
-    ) -> reqwest::dns::Resolving {
-        let resolver = self.resolver.clone();
-        async move {
-            let list = resolver.lookup_ip(name.as_str()).await?;
-            Ok(Box::new(list.into_iter().map(|s| {
-                // reqwest does not appear to use the port number here.
-                // (See the docs for `ClientBuilder::resolve()`, which isn't
-                // the same thing, but is related.)
-                SocketAddr::from((s, 0))
-            })) as Box<dyn Iterator<Item = SocketAddr> + Send>)
-        }
-        .boxed()
-    }
+    })
 }

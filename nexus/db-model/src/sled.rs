@@ -28,6 +28,9 @@ pub struct SledSystemHardware {
     pub is_scrimlet: bool,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
+
+    // current VMM reservoir size
+    pub reservoir_size: ByteCount,
 }
 
 /// Database representation of a Sled.
@@ -46,8 +49,9 @@ pub struct Sled {
     part_number: String,
     revision: i64,
 
-    usable_hardware_threads: SqlU32,
-    usable_physical_ram: ByteCount,
+    pub usable_hardware_threads: SqlU32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
 
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
@@ -83,6 +87,7 @@ impl Sled {
                 hardware.usable_hardware_threads,
             ),
             usable_physical_ram: hardware.usable_physical_ram,
+            reservoir_size: hardware.reservoir_size,
             ip: ipv6::Ipv6Addr::from(addr.ip()),
             port: addr.port().into(),
             last_used_address,

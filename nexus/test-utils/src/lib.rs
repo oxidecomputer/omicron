@@ -13,6 +13,7 @@ use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
+use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServicePutRequest;
@@ -50,6 +51,8 @@ pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const TEST_HARDWARE_THREADS: u32 = 16;
 /// The reported amount of physical RAM for an emulated sled agent.
 pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
+/// The reported amount of VMM reservoir RAM for an emulated sled agent.
+pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// Password for the user created by the test suite
 ///
@@ -91,36 +94,6 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         self.dendrite.cleanup().await.unwrap();
         self.logctx.cleanup_successful();
     }
-
-    pub async fn external_http_client(&self) -> ClientTestContext {
-        self.server
-            .get_http_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external http client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
-
-    pub async fn external_https_client(&self) -> ClientTestContext {
-        self.server
-            .get_https_server_external_address()
-            .await
-            .map(|addr| {
-                ClientTestContext::new(
-                    addr,
-                    self.logctx.log.new(
-                        o!("component" => "external https client test context"),
-                    ),
-                )
-            })
-            .unwrap()
-    }
 }
 
 pub fn load_test_config() -> omicron_common::nexus_config::Config {
@@ -151,14 +124,20 @@ pub async fn test_setup<N: NexusServer>(
     test_name: &str,
 ) -> ControlPlaneTestContext<N> {
     let mut config = load_test_config();
-    test_setup_with_config::<N>(test_name, &mut config, sim::SimMode::Explicit)
-        .await
+    test_setup_with_config::<N>(
+        test_name,
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
+    )
+    .await
 }
 
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
     config: &mut omicron_common::nexus_config::Config,
     sim_mode: sim::SimMode,
+    initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
     let start_time = chrono::Utc::now();
     let logctx = LogContext::new(test_name, &config.pkg.log);
@@ -228,47 +207,39 @@ pub async fn test_setup_with_config<N: NexusServer>(
     // Finish setting up Nexus by initializing the rack.  We need to include
     // information about the internal DNS server started within the simulated
     // Sled Agent.
-    let dns_server_address_internal = match sled_agent
-        .dns_dropshot_server
-        .local_addr()
-    {
-        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
-        SocketAddr::V6(addr) => addr,
-    };
-    let dns_server_dns_address_internal = match sled_agent
-        .dns_server
-        .local_address()
-    {
-        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
-        SocketAddr::V6(addr) => *addr,
-    };
+    let dns_server_address_internal =
+        match sled_agent.dns_dropshot_server.local_addr() {
+            SocketAddr::V4(_) => panic!(
+            "expected internal DNS config (HTTP) server to have IPv6 address"
+        ),
+            SocketAddr::V6(addr) => addr,
+        };
+    if let SocketAddr::V4(_) = sled_agent.dns_server.local_address() {
+        panic!("expected internal DNS server to have IPv6 address");
+    }
     let dns_server_zone = Uuid::new_v4();
-    let dns_service_config = ServicePutRequest {
+    let dns_service_internal = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         zone_id: Some(dns_server_zone),
         address: dns_server_address_internal,
-        kind: ServiceKind::InternalDnsConfig,
-    };
-    let dns_service_dns = ServicePutRequest {
-        service_id: Uuid::new_v4(),
-        sled_id: sa_id,
-        zone_id: Some(dns_server_zone),
-        address: dns_server_dns_address_internal,
         kind: ServiceKind::InternalDns,
     };
-    let dns_server_address_external = match external_dns_config_server
-        .local_addr()
-    {
-        SocketAddr::V4(_) => panic!("expected DNS server to have IPv6 address"),
-        SocketAddr::V6(addr) => addr,
-    };
+    let dns_server_address_external =
+        match external_dns_config_server.local_addr() {
+            SocketAddr::V4(_) => panic!(
+            "expected external DNS config (HTTP) server to have IPv6 address"
+        ),
+            SocketAddr::V6(addr) => addr,
+        };
     let dns_service_external = ServicePutRequest {
         service_id: Uuid::new_v4(),
         sled_id: sa_id,
         zone_id: Some(Uuid::new_v4()),
         address: dns_server_address_external,
-        kind: ServiceKind::ExternalDnsConfig,
+        kind: ServiceKind::ExternalDns {
+            external_address: external_dns_server.local_address().ip(),
+        },
     };
     let nexus_service = ServicePutRequest {
         service_id: Uuid::new_v4(),
@@ -287,6 +258,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
             external_address: config
                 .deployment
                 .dropshot_external
+                .dropshot
                 .bind_address
                 .ip(),
         },
@@ -309,22 +281,19 @@ pub async fn test_setup_with_config<N: NexusServer>(
         user_password_hash,
     };
 
+    let tls_certificates = initial_cert.into_iter().collect();
+
     let server = N::start(
         nexus_internal,
         &config,
-        vec![
-            dns_service_config,
-            dns_service_dns,
-            dns_service_external,
-            nexus_service,
-        ],
+        vec![dns_service_internal, dns_service_external, nexus_service],
         &external_dns_zone_name,
         recovery_silo,
+        tls_certificates,
     )
     .await;
 
-    let external_server_addr =
-        server.get_http_server_external_address().await.unwrap();
+    let external_server_addr = server.get_http_server_external_address().await;
     let internal_server_addr = server.get_http_server_internal_address().await;
 
     let testctx_external = ClientTestContext::new(
@@ -401,7 +370,6 @@ pub async fn start_sled_agent(
         dropshot: ConfigDropshot {
             bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
             request_body_max_bytes: 1024 * 1024,
-            ..Default::default()
         },
         // TODO-cleanup this is unused
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
@@ -415,6 +383,7 @@ pub async fn start_sled_agent(
         hardware: sim::ConfigHardware {
             hardware_threads: TEST_HARDWARE_THREADS,
             physical_ram: TEST_PHYSICAL_RAM,
+            reservoir_ram: TEST_RESERVOIR_RAM,
         },
     };
 
@@ -584,7 +553,6 @@ pub async fn start_dns_server(
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),
             request_body_max_bytes: 8 * 1024,
-            ..Default::default()
         },
     )
     .await

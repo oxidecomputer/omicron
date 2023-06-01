@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::bail;
+use anyhow::Context;
 use crossterm::event::Event as TermEvent;
 use crossterm::event::EventStream;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -13,6 +15,7 @@ use crossterm::terminal::{
 use futures::StreamExt;
 use slog::Logger;
 use slog::{debug, error, info};
+use std::env::VarError;
 use std::io::{stdout, Stdout};
 use std::net::SocketAddrV6;
 use std::time::Instant;
@@ -22,6 +25,9 @@ use tokio::sync::mpsc::{
 use tokio::time::{interval, Duration};
 use tui::backend::CrosstermBackend;
 use tui::Terminal;
+use wicketd_client::types::ClearUpdateStateOptions;
+use wicketd_client::types::StartUpdateOptions;
+use wicketd_client::types::UpdateTestError;
 
 use crate::events::EventReportMap;
 use crate::ui::Screen;
@@ -158,10 +164,14 @@ impl RunnerCore {
             Action::Redraw => {
                 self.screen.draw(&self.state, &mut self.terminal)?;
             }
-            Action::Update(component_id) => {
+            Action::StartUpdate(component_id) => {
                 if let Some(wicketd) = wicketd {
-                    // This is a debug environment variable used to add a test
-                    // step.
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_START_UPDATE_ERROR",
+                    )?;
+
+                    // This is a debug environment variable used to
+                    // add a test step.
                     let test_step_seconds =
                         std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS")
                             .ok()
@@ -171,10 +181,35 @@ impl RunnerCore {
                                         as a u64",
                                 )
                             });
+
+                    let options = StartUpdateOptions {
+                        test_error,
+                        test_step_seconds,
+                        skip_rot_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_rot,
+                        skip_sp_version_check: self
+                            .state
+                            .force_update_state
+                            .force_update_sp,
+                    };
                     wicketd.tx.blocking_send(
-                        wicketd::Request::StartUpdate {
+                        wicketd::Request::StartUpdate { component_id, options },
+                    )?;
+                }
+            }
+            Action::ClearUpdateState(component_id) => {
+                if let Some(wicketd) = wicketd {
+                    let test_error = get_update_test_error(
+                        "WICKET_TEST_CLEAR_UPDATE_STATE_ERROR",
+                    )?;
+
+                    let options = ClearUpdateStateOptions { test_error };
+                    wicketd.tx.blocking_send(
+                        wicketd::Request::ClearUpdateState {
                             component_id,
-                            test_step_seconds,
+                            options,
                         },
                     )?;
                 }
@@ -192,6 +227,46 @@ impl RunnerCore {
         }
         Ok(())
     }
+}
+
+fn get_update_test_error(
+    env_var: &str,
+) -> Result<Option<UpdateTestError>, anyhow::Error> {
+    // 30 seconds should always be enough to cause a timeout. (The default
+    // timeout for progenitor is 15 seconds, and in wicket we set an even
+    // shorter timeout.)
+    const DEFAULT_TEST_TIMEOUT_SECS: u64 = 30;
+
+    let test_error = match std::env::var(env_var) {
+        Ok(v) if v == "fail" => Some(UpdateTestError::Fail),
+        Ok(v) if v == "timeout" => {
+            Some(UpdateTestError::Timeout { secs: DEFAULT_TEST_TIMEOUT_SECS })
+        }
+        Ok(v) if v.starts_with("timeout:") => {
+            // Extended start_timeout syntax with a custom
+            // number of seconds.
+            let suffix = v.strip_prefix("timeout:").unwrap();
+            match suffix.parse::<u64>() {
+                Ok(secs) => Some(UpdateTestError::Timeout { secs }),
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!(
+                            "could not parse {env_var} \
+                             in the form `timeout:<secs>`: {v}"
+                        )
+                    });
+                }
+            }
+        }
+        Ok(value) => {
+            bail!("unrecognized value for {env_var}: {value}");
+        }
+        Err(VarError::NotPresent) => None,
+        Err(VarError::NotUnicode(value)) => {
+            bail!("invalid Unicode for {env_var}: {}", value.to_string_lossy());
+        }
+    };
+    Ok(test_error)
 }
 
 /// The `Runner` owns the main UI thread, and starts a tokio runtime

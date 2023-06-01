@@ -652,6 +652,7 @@ impl Zones {
 
         let cmd = command.args(args);
         execute(cmd)?;
+
         Ok(())
     }
 

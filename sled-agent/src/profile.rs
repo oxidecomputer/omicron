@@ -30,10 +30,7 @@ impl ProfileBuilder {
     ) -> Result<(), std::io::Error> {
         info!(log, "Profile for {}:\n{}", installed_zone.name(), self);
 
-        let profile_path = format!(
-            "{zonepath}/root/var/svc/profile/site.xml",
-            zonepath = installed_zone.zonepath()
-        );
+        let profile_path = installed_zone.site_profile_xml_path();
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;
         Ok(())

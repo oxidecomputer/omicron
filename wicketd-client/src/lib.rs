@@ -33,6 +33,7 @@ progenitor::generate_api!(
         RotInventory = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
+        StartUpdateOptions = { derives = [ Serialize, Deserialize, Default ]},
     },
     replace = {
         Duration = std::time::Duration,
@@ -46,3 +47,6 @@ progenitor::generate_api!(
         M2Slot = installinator_common::M2Slot,
     }
 );
+
+/// A type alias for errors returned by this crate.
+pub type ClientError = crate::Error<crate::types::Error>;

@@ -368,7 +368,8 @@ impl MgsManager {
             .or_insert_with(|| SpInventory::new(sp.id));
         entry.state = Some(sp.state);
         entry.components = sp.components;
-        entry.caboose = sp.caboose;
+        entry.caboose_active = sp.caboose_active;
+        entry.caboose_inactive = sp.caboose_inactive;
         entry.rot = sp.rot;
 
         // Scan any pending waiters and remove this SP from their list; if that

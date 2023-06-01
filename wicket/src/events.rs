@@ -65,7 +65,8 @@ impl Event {
 /// testable.
 pub enum Action {
     Redraw,
-    Update(ComponentId),
+    StartUpdate(ComponentId),
+    ClearUpdateState(ComponentId),
     Ignition(ComponentId, IgnitionCommand),
 }
 
@@ -76,7 +77,10 @@ impl Action {
     /// Some downstream operations will not trigger this in the future.
     pub fn should_redraw(&self) -> bool {
         match self {
-            Action::Redraw | Action::Update(_) | Action::Ignition(_, _) => true,
+            Action::Redraw
+            | Action::StartUpdate(_)
+            | Action::ClearUpdateState(_)
+            | Action::Ignition(_, _) => true,
         }
     }
 }
