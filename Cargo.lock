@@ -2607,7 +2607,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2622,7 +2622,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3481,9 +3481,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
+ "omicron-common 0.1.0",
  "secrecy",
  "sha3",
- "sled-hardware",
  "thiserror",
  "tokio",
  "zeroize",
@@ -3963,10 +3963,10 @@ dependencies = [
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
+ "omicron-certificates",
  "omicron-common 0.1.0",
  "omicron-passwords",
  "omicron-rpaths",
- "openssl",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -4360,6 +4360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-certificates"
+version = "0.1.0"
+dependencies = [
+ "omicron-common 0.1.0",
+ "openssl",
+ "thiserror",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -4720,6 +4729,7 @@ dependencies = [
  "internal-dns",
  "ipnetwork",
  "itertools",
+ "key-manager",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
@@ -6053,9 +6063,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.27"
+version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4f29d145265ec1c483c7c654450edde0bfe043d3938d6972630663356d9500"
+checksum = "1b9ab9c7eadfd8df19006f1cf1a4aed13540ed5cbc047010ece5826e10825488"
 dependencies = [
  "proc-macro2",
 ]
@@ -6309,13 +6319,13 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.8.1"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af83e617f331cc6ae2da5443c602dfa5af81e517212d9d611a5b3ba1777b5370"
+checksum = "81ca098a9821bd52d6b24fd8b10bd081f47d39c22778cafaa75a2857a62c6390"
 dependencies = [
  "aho-corasick 1.0.1",
  "memchr",
- "regex-syntax 0.7.1",
+ "regex-syntax 0.7.2",
 ]
 
 [[package]]
@@ -6332,9 +6342,9 @@ checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5996294f19bd3aae0453a862ad728f60e6600695733dd5df01da90c54363a3c"
+checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 
 [[package]]
 name = "regress"
@@ -7351,6 +7361,7 @@ dependencies = [
  "futures",
  "illumos-devinfo",
  "illumos-utils",
+ "key-manager",
  "libc",
  "libefi-illumos",
  "macaddr",
@@ -8176,9 +8187,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.28.1"
+version = "1.28.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0aa32867d44e6f2ce3385e89dceb990188b8bb0fb25b0cf576647a6f98ac5105"
+checksum = "94d7b1cfd2aa4011f2de74c2c4c63665e27a71006b0a192dcd2710272e73dfa2"
 dependencies = [
  "autocfg",
  "bytes",

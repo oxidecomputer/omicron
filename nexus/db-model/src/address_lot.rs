@@ -6,7 +6,6 @@ use crate::impl_enum_type;
 use crate::schema::{address_lot, address_lot_block, address_lot_rsvd_block};
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
@@ -58,15 +57,27 @@ pub struct AddressLot {
 
 impl Into<external::AddressLot> for AddressLot {
     fn into(self) -> external::AddressLot {
-        external::AddressLot { identity: self.identity() }
+        external::AddressLot {
+            identity: self.identity(),
+            kind: self.kind.into(),
+        }
     }
 }
 
-impl From<params::AddressLotKind> for AddressLotKind {
-    fn from(k: params::AddressLotKind) -> AddressLotKind {
+impl From<external::AddressLotKind> for AddressLotKind {
+    fn from(k: external::AddressLotKind) -> AddressLotKind {
         match k {
-            params::AddressLotKind::Infra => AddressLotKind::Infra,
-            params::AddressLotKind::Pool => AddressLotKind::Pool,
+            external::AddressLotKind::Infra => AddressLotKind::Infra,
+            external::AddressLotKind::Pool => AddressLotKind::Pool,
+        }
+    }
+}
+
+impl From<AddressLotKind> for external::AddressLotKind {
+    fn from(value: AddressLotKind) -> Self {
+        match value {
+            AddressLotKind::Infra => external::AddressLotKind::Infra,
+            AddressLotKind::Pool => external::AddressLotKind::Pool,
         }
     }
 }

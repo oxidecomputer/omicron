@@ -110,6 +110,11 @@ pub enum UpdateTerminalError {
         #[source]
         error: anyhow::Error,
     },
+    #[error("getting RoT caboose failed")]
+    GetRotCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
+    },
     #[error("resetting RoT failed")]
     RotResetFailed {
         #[source]

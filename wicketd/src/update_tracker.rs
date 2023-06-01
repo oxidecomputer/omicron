@@ -565,80 +565,80 @@ impl UpdateDriver {
         // To update the RoT, we have to know which slot (A or B) it is
         // currently executing; we must update the _other_ slot.
         let rot_registrar = engine.for_component(UpdateComponent::Rot);
-        let rot_firmware_slot_and_artifact = rot_registrar
-            .new_step(
-                UpdateStepId::InterrogateRot,
-                "Interrogating RoT for currently-active slot",
-                |_cx| async move {
-                    let rot_active_slot = update_cx
-                        .get_component_active_slot(
-                            SpComponent::ROT.const_as_str(),
-                        )
-                        .await
-                        .map_err(|error| {
-                            UpdateTerminalError::GetRotActiveSlotFailed {
-                                error,
-                            }
-                        })?;
-
-                    // Flip these around: if 0 (A) is active, we want to
-                    // update 1 (B), and vice versa.
-                    let (rot_active_slot_char, slot_to_update, artifact) =
-                        match rot_active_slot {
-                            0 => ('A', 1, rot_b),
-                            1 => ('B', 0, rot_a),
-                            _ => return Err(
-                                UpdateTerminalError::GetRotActiveSlotFailed {
-                                    error: anyhow!(
-                                        "unexpected RoT active slot \
-                                         {rot_active_slot}"
-                                    ),
-                                },
-                            ),
-                        };
-
-                    StepSuccess::new((slot_to_update, artifact))
-                        .with_message(format!(
-                            "Currently active slot is {rot_active_slot_char}"
-                        ))
-                        .into()
-                },
-            )
-            .register()
-            .into_shared();
-
-        // Send the update to the RoT.
-        {
-            let inner_cx =
-                SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
-            let rot_firmware_slot_and_artifact =
-                rot_firmware_slot_and_artifact.clone();
+        let rot_interrogation =
             rot_registrar
                 .new_step(
-                    UpdateStepId::SpComponentUpdate,
-                    "Updating RoT",
-                    move |cx| async move {
-                        let (firmware_slot, artifact) =
-                            rot_firmware_slot_and_artifact
-                                .into_value(cx.token())
-                                .await;
-                        cx.with_nested_engine(|engine| {
-                            inner_cx.register_steps(
-                                engine,
-                                firmware_slot,
-                                &artifact,
-                            );
-                            Ok(())
-                        })
-                        .await?;
-
-                        StepSuccess::new(()).into()
+                    UpdateStepId::InterrogateRot,
+                    "Checking current RoT version and active slot",
+                    |_cx| async move {
+                        update_cx.interrogate_rot(rot_a, rot_b).await
                     },
                 )
                 .register();
-        }
+
+        // Send the update to the RoT.
+        let inner_cx =
+            SpComponentUpdateContext::new(update_cx, UpdateComponent::Rot);
+        rot_registrar
+            .new_step(
+                UpdateStepId::SpComponentUpdate,
+                "Updating RoT",
+                move |cx| async move {
+                    let rot_interrogation =
+                        rot_interrogation.into_value(cx.token()).await;
+
+                    let rot_has_this_version = rot_interrogation
+                        .active_version_matches_artifact_to_apply();
+
+                    // If this RoT already has this version, skip the rest of
+                    // this step, UNLESS we've been told to skip this version
+                    // check.
+                    if rot_has_this_version && !opts.skip_rot_version_check {
+                        return StepSkipped::new(
+                            (),
+                            format!(
+                                "RoT active slot already at version {}",
+                                rot_interrogation.artifact_to_apply.id.version
+                            ),
+                        )
+                        .into();
+                    }
+
+                    cx.with_nested_engine(|engine| {
+                        inner_cx.register_steps(
+                            engine,
+                            rot_interrogation.slot_to_update,
+                            &rot_interrogation.artifact_to_apply,
+                        );
+                        Ok(())
+                    })
+                    .await?;
+
+                    // If we updated despite the RoT already having the version
+                    // we updated to, make this step return a warning with that
+                    // message; otherwise, this is a normal success.
+                    if rot_has_this_version {
+                        StepWarning::new(
+                            (),
+                            format!(
+                                "RoT updated despite already having version {}",
+                                rot_interrogation.artifact_to_apply.id.version
+                            ),
+                        )
+                        .into()
+                    } else {
+                        StepSuccess::new(()).into()
+                    }
+                },
+            )
+            .register();
 
         let sp_registrar = engine.for_component(UpdateComponent::Sp);
+
+        // The SP only has one updateable firmware slot ("the inactive bank").
+        // We want to ask about slot 0 (the active slot)'s current version, and
+        // we are supposed to always pass 0 when updating.
+        let sp_firmware_slot = 0;
 
         let sp_current_version = sp_registrar
             .new_step(
@@ -651,6 +651,7 @@ impl UpdateDriver {
                             update_cx.sp.type_,
                             update_cx.sp.slot,
                             SpComponent::SP_ITSELF.const_as_str(),
+                            sp_firmware_slot,
                         )
                         .await
                         .map_err(|error| {
@@ -706,9 +707,6 @@ impl UpdateDriver {
                         .into();
                     }
 
-                    // The SP only has one updateable firmware slot ("the
-                    // inactive bank") - we always pass 0.
-                    let sp_firmware_slot = 0;
                     cx.with_nested_engine(|engine| {
                         inner_cx.register_steps(
                             engine,
@@ -1152,6 +1150,19 @@ impl UpdateDriver {
     }
 }
 
+#[derive(Debug)]
+struct RotInterrogation {
+    slot_to_update: u16,
+    artifact_to_apply: ArtifactIdData,
+    active_version: Option<SemverVersion>,
+}
+
+impl RotInterrogation {
+    fn active_version_matches_artifact_to_apply(&self) -> bool {
+        Some(&self.artifact_to_apply.id.version) == self.active_version.as_ref()
+    }
+}
+
 struct UpdateContext {
     update_id: Uuid,
     sp: SpIdentifier,
@@ -1208,6 +1219,73 @@ impl UpdateContext {
         write_output.ok_or_else(|| {
             anyhow!("installinator completed without reporting disks written")
         })
+    }
+
+    async fn interrogate_rot(
+        &self,
+        rot_a: ArtifactIdData,
+        rot_b: ArtifactIdData,
+    ) -> Result<StepResult<RotInterrogation>, UpdateTerminalError> {
+        let rot_active_slot = self
+            .get_component_active_slot(SpComponent::ROT.const_as_str())
+            .await
+            .map_err(|error| UpdateTerminalError::GetRotActiveSlotFailed {
+                error,
+            })?;
+
+        // Flip these around: if 0 (A) is active, we want to
+        // update 1 (B), and vice versa.
+        let (active_slot_name, slot_to_update, artifact_to_apply) =
+            match rot_active_slot {
+                0 => ('A', 1, rot_b),
+                1 => ('B', 0, rot_a),
+                _ => {
+                    return Err(UpdateTerminalError::GetRotActiveSlotFailed {
+                        error: anyhow!(
+                            "unexpected RoT active slot {rot_active_slot}"
+                        ),
+                    })
+                }
+            };
+
+        // Read the caboose of the currently-active slot.
+        let caboose = self
+            .mgs_client
+            .sp_component_caboose_get(
+                self.sp.type_,
+                self.sp.slot,
+                SpComponent::ROT.const_as_str(),
+                rot_active_slot,
+            )
+            .await
+            .map_err(|error| UpdateTerminalError::GetRotCabooseFailed {
+                error,
+            })?
+            .into_inner();
+
+        let message = format!(
+            "RoT slot {active_slot_name} version {} (git commit {})",
+            caboose.version.as_deref().unwrap_or("unknown"),
+            caboose.git_commit
+        );
+
+        let make_result = |active_version| RotInterrogation {
+            slot_to_update,
+            artifact_to_apply,
+            active_version,
+        };
+
+        match caboose.version.map(|v| v.parse::<SemverVersion>()) {
+            Some(Ok(version)) => StepSuccess::new(make_result(Some(version)))
+                .with_message(message)
+                .into(),
+            Some(Err(err)) => StepWarning::new(
+                make_result(None),
+                format!("{message} (failed to parse RoT version: {err})"),
+            )
+            .into(),
+            None => StepWarning::new(make_result(None), message).into(),
+        }
     }
 
     async fn wait_for_first_installinator_progress(

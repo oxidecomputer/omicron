@@ -15,6 +15,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Error;
+use sled_hardware::Baseboard;
 use std::sync::Arc;
 
 type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
@@ -24,6 +25,7 @@ pub(crate) fn api() -> BootstrapApiDescription {
     fn register_endpoints(
         api: &mut BootstrapApiDescription,
     ) -> Result<(), String> {
+        api.register(baseboard_get)?;
         api.register(components_get)?;
         api.register(rack_initialize)?;
         api.register(rack_reset)?;
@@ -36,6 +38,18 @@ pub(crate) fn api() -> BootstrapApiDescription {
         panic!("failed to register entrypoints: {}", err);
     }
     api
+}
+
+/// Return the baseboard identity of this sled.
+#[endpoint {
+    method = GET,
+    path = "/baseboard",
+}]
+async fn baseboard_get(
+    rqctx: RequestContext<Arc<Agent>>,
+) -> Result<HttpResponseOk<Baseboard>, HttpError> {
+    let ba = rqctx.context();
+    Ok(HttpResponseOk(ba.baseboard().clone()))
 }
 
 /// Provides a list of components known to the bootstrap agent.

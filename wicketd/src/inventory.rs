@@ -5,7 +5,8 @@
 //! Rack inventory for display by wicket
 
 use gateway_client::types::{
-    SpComponentCaboose, SpComponentInfo, SpIdentifier, SpIgnition, SpState,
+    RotSlot, SpComponentCaboose, SpComponentInfo, SpIdentifier, SpIgnition,
+    SpState,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -18,8 +19,9 @@ pub struct SpInventory {
     pub ignition: Option<SpIgnition>,
     pub state: Option<SpState>,
     pub components: Option<Vec<SpComponentInfo>>,
-    pub caboose: Option<SpComponentCaboose>,
-    pub rot: RotInventory,
+    pub caboose_active: Option<SpComponentCaboose>,
+    pub caboose_inactive: Option<SpComponentCaboose>,
+    pub rot: Option<RotInventory>,
 }
 
 impl SpInventory {
@@ -32,17 +34,20 @@ impl SpInventory {
             ignition: None,
             state: None,
             components: None,
-            caboose: None,
-            rot: RotInventory::default(),
+            caboose_active: None,
+            caboose_inactive: None,
+            rot: None,
         }
     }
 }
 
 /// RoT-related data that isn't already supplied in [`SpState`].
-#[derive(Default, Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "sp_inventory", rename_all = "snake_case")]
 pub struct RotInventory {
-    pub caboose: Option<SpComponentCaboose>,
+    pub active: RotSlot,
+    pub caboose_a: Option<SpComponentCaboose>,
+    pub caboose_b: Option<SpComponentCaboose>,
 }
 
 /// The current state of the v1 Rack as known to wicketd

@@ -11,6 +11,7 @@ camino.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
+key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 nexus-client.workspace = true

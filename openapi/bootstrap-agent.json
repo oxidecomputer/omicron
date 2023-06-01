@@ -10,6 +10,30 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/baseboard": {
+      "get": {
+        "summary": "Return the baseboard identity of this sled.",
+        "operationId": "baseboard_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Baseboard"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/components": {
       "get": {
         "summary": "Provides a list of components known to the bootstrap agent.",
@@ -113,6 +137,74 @@
       }
     },
     "schemas": {
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
+            ]
+          }
+        ]
+      },
       "BootstrapAddressDiscovery": {
         "oneOf": [
           {
