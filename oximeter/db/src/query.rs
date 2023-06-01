@@ -262,12 +262,7 @@ impl SelectQueryBuilder {
             time_range: self.time_range,
             limit: self.limit,
             offset: self.offset,
-            order: match self.order {
-                Some(PaginationOrder::Descending) => {
-                    PaginationOrder::Descending
-                }
-                _ => PaginationOrder::Ascending,
-            },
+            order: self.order.unwrap_or(PaginationOrder::Ascending),
         }
     }
 }

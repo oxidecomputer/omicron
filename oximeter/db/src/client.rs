@@ -1462,6 +1462,102 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_select_timeseries_with_order() {
+        let (_, _, samples) = setup_select_test();
+        let mut db = ClickHouseInstance::new(0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let address = SocketAddr::new("::1".parse().unwrap(), db.port());
+        let log = Logger::root(slog::Discard, o!());
+        let client = Client::new(address, &log);
+        client
+            .init_db()
+            .await
+            .expect("Failed to initialize timeseries database");
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert samples");
+        let timeseries_name = "service:request_latency";
+
+        // First, query without an order. We should see all the results in ascending order.
+        let all_measurements = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        assert!(
+            all_measurements.len() > 1,
+            "need more than one measurement to test ordering"
+        );
+
+        // Explicitly specifying asc should give the same results
+        let timeseries_asc = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                Some(PaginationOrder::Ascending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+        assert_eq!(all_measurements, timeseries_asc);
+
+        // Now get the results in reverse order
+        let timeseries_desc = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                None,
+                Some(PaginationOrder::Descending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        let mut timeseries_asc_rev = timeseries_asc.clone();
+        timeseries_asc_rev.reverse();
+
+        assert_ne!(timeseries_desc, timeseries_asc);
+        assert_eq!(timeseries_desc, &timeseries_asc_rev);
+
+        // can use limit 1 to get single most recent measurement
+        let desc_limit_1 = &client
+            .select_timeseries_with(
+                timeseries_name,
+                &[],
+                None,
+                None,
+                Some(NonZeroU32::new(1).unwrap()),
+                Some(PaginationOrder::Descending),
+            )
+            .await
+            .expect("Failed to select timeseries")[0]
+            .measurements;
+
+        assert_eq!(desc_limit_1.len(), 1);
+        assert_eq!(
+            desc_limit_1.first().unwrap(),
+            timeseries_asc.last().unwrap()
+        );
+
+        db.cleanup().await.expect("Failed to cleanup database");
+    }
+
+    #[tokio::test]
     async fn test_get_schema_no_new_values() {
         let (mut db, client, _) = setup_filter_testcase().await;
         let schema = &client.schema.lock().unwrap().clone();
