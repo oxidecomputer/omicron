@@ -3,6 +3,7 @@ members = [
     "api_identity",
     "bootstore",
     "bootstrap-agent-client",
+    "certificates",
     "common",
     "ddm-admin-client",
     "dpd-client",
@@ -62,6 +63,7 @@ members = [
 
 default-members = [
     "bootstrap-agent-client",
+    "certificates",
     "common",
     "ddm-admin-client",
     "dpd-client",
@@ -201,6 +203,7 @@ nexus-client = { path = "nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
+omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }

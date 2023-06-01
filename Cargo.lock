@@ -3963,10 +3963,10 @@ dependencies = [
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
+ "omicron-certificates",
  "omicron-common 0.1.0",
  "omicron-passwords",
  "omicron-rpaths",
- "openssl",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -4357,6 +4357,15 @@ dependencies = [
  "serde",
  "serde_json",
  "unicode-normalization",
+]
+
+[[package]]
+name = "omicron-certificates"
+version = "0.1.0"
+dependencies = [
+ "omicron-common 0.1.0",
+ "openssl",
+ "thiserror",
 ]
 
 [[package]]
