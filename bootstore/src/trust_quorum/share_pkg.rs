@@ -8,7 +8,7 @@ use crate::Sha3_256Digest;
 use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit};
 use hkdf::Hkdf;
 use rand::{rngs::OsRng, RngCore};
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::collections::BTreeMap;
@@ -56,7 +56,7 @@ pub struct SharePkgV0 {
     #[zeroize(skip)]
     pub rack_uuid: Uuid,
     // We aren't planning on doing any reconfigurations with this version of
-    // the protocol. This is here in case we decide otherwise, and becaus an
+    // the protocol. This is here in case we decide otherwise, and because an
     // epoch is used for disk encryption purposes.
     pub epoch: u32,
     pub threshold: u8,
@@ -125,7 +125,7 @@ pub fn create_pkgs(
     let epoch = 0;
     // We always generate 255 shares to allow new sleds to come online
     let total_shares = 255;
-    let shares_per_sled = 255 / n;
+    let shares_per_sled = total_shares / n;
     let shares = rack_secret.split(threshold, total_shares)?;
     let share_digests = share_digests(&shares);
     let mut salt = [0u8; 32];
@@ -134,16 +134,23 @@ pub fn create_pkgs(
     let mut pkgs = Vec::with_capacity(n);
     for i in 0..n {
         // Each pkg gets a distinct subset of shares
-        let mut iter =
-            shares.iter().skip(i * shares_per_sled).take(shares_per_sled);
+        let mut iter = shares
+            .expose_secret()
+            .iter()
+            .skip(i * shares_per_sled)
+            .take(shares_per_sled);
         let share = iter.next().unwrap();
-        let plaintext: Vec<u8> = iter.fold(Vec::new(), |mut acc, x| {
-            acc.extend_from_slice(x);
-            acc
-        });
+        let plaintext_len = (shares_per_sled - 1) * SHARE_SIZE;
+        let plaintext: Secret<Vec<u8>> = Secret::new(iter.fold(
+            Vec::with_capacity(plaintext_len),
+            |mut acc, x| {
+                acc.extend_from_slice(x);
+                acc
+            },
+        ));
         let nonce = new_nonce(i);
         let encrypted_shares = cipher
-            .encrypt((&nonce).into(), plaintext.as_ref())
+            .encrypt((&nonce).into(), plaintext.expose_secret().as_ref())
             .map_err(|_| TrustQuorumError::FailedToEncrypt)?;
 
         let pkg = SharePkgV0 {
@@ -174,8 +181,9 @@ fn new_nonce(i: usize) -> [u8; 12] {
     nonce
 }
 
-fn share_digests(shares: &Vec<Vec<u8>>) -> Vec<Sha3_256Digest> {
+fn share_digests(shares: &Secret<Vec<Vec<u8>>>) -> Vec<Sha3_256Digest> {
     shares
+        .expose_secret()
         .iter()
         .map(|s| {
             Sha3_256Digest(Sha3_256::digest(&s).as_slice().try_into().unwrap())
@@ -189,8 +197,10 @@ fn derive_encryption_key(
     rack_secret: &RackSecret,
     salt: &[u8; 32],
 ) -> ChaCha20Poly1305 {
-    let prk =
-        Hkdf::<Sha3_256>::new(Some(&salt[..]), rack_secret.as_ref().as_bytes());
+    let prk = Hkdf::<Sha3_256>::new(
+        Some(&salt[..]),
+        rack_secret.expose_secret().as_bytes(),
+    );
 
     // The "info" string is context to bind the key to its purpose
     let mut key = Zeroizing::new([0u8; 32]);
@@ -208,13 +218,15 @@ fn decrypt_shares(
     nonce: [u8; 12],
     cipher: &ChaCha20Poly1305,
     ciphertext: &[u8],
-) -> Result<Vec<Vec<u8>>, TrustQuorumError> {
+) -> Result<Secret<Vec<Vec<u8>>>, TrustQuorumError> {
     let plaintext = Zeroizing::new(
         cipher
             .decrypt((&nonce).into(), ciphertext)
             .map_err(|_| TrustQuorumError::FailedToDecrypt)?,
     );
-    Ok(plaintext.chunks(SHARE_SIZE).map(|share| share.into()).collect())
+    Ok(Secret::new(
+        plaintext.chunks(SHARE_SIZE).map(|share| share.into()).collect(),
+    ))
 }
 
 // We don't want to risk debug-logging the actual share contents, so implement
@@ -287,9 +299,12 @@ mod tests {
             let shares =
                 decrypt_shares(pkg.nonce, &cipher, &pkg.encrypted_shares)
                     .unwrap();
-            assert_eq!(num_encrypted_shares_per_pkg, shares.len());
+            assert_eq!(
+                num_encrypted_shares_per_pkg,
+                shares.expose_secret().len()
+            );
             decrypted_shares.push(pkg.share.clone());
-            decrypted_shares.extend_from_slice(&shares);
+            decrypted_shares.extend_from_slice(shares.expose_secret());
         }
 
         assert_eq!(
