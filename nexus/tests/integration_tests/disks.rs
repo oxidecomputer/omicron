@@ -4,7 +4,7 @@
 
 //! Tests basic disk support in the API
 
-use super::metrics::{query_for_latest_metric, query_for_metrics};
+use super::metrics::{get_latest_system_metric, query_for_metrics};
 
 use chrono::Utc;
 use crucible_agent_client::types::State as RegionState;
@@ -1389,15 +1389,6 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
             PROJECT_NAME,
         )
     };
-    // Check the utilization info for the whole project too.
-    let utilization_url = |id: Uuid| {
-        format!(
-            "/v1/system/metrics/virtual_disk_space_provisioned?start_time={:?}&end_time={:?}&id={:?}&order=descending",
-            cptestctx.start_time,
-            Utc::now(),
-            id,
-        )
-    };
 
     // Try accessing metrics before we attach the disk to an instance.
     //
@@ -1409,7 +1400,12 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     assert!(measurements.items.is_empty());
 
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id)).await,
+        get_latest_system_metric(
+            cptestctx,
+            "virtual_disk_space_provisioned",
+            project_id,
+        )
+        .await,
         i64::from(disk.size)
     );
 
@@ -1432,7 +1428,12 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
 
     // Check the utilization info for the whole project too.
     assert_eq!(
-        query_for_latest_metric(client, &utilization_url(project_id)).await,
+        get_latest_system_metric(
+            cptestctx,
+            "virtual_disk_space_provisioned",
+            project_id,
+        )
+        .await,
         i64::from(disk.size)
     );
 }
