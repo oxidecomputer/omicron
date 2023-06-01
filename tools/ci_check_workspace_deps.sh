@@ -45,7 +45,7 @@ for crate in "${!crate_deps[@]}"; do
             echo "$dep exists as workspace dependency but also used as non-workspace dependency in $crate"
             exit=1
         # Ignore pq-sys and omicron-rpaths because they're special
-        elif [ "$dep" != "pq-sys" ] && [ "$dep" != "omicron-rpaths" ] && ["$dep" != "vsss-rs"]; then
+        elif [ "$dep" != "pq-sys" ] && [ "$dep" != "omicron-rpaths" ]; then
             # Check if we're the only crate that depends on this dependency
             if [ " ${reverse_crate_deps[$dep]} " != " $crate " ]; then
                 echo "$dep used by multiple crates (${reverse_crate_deps[$dep]}), but not a workspace dependency"
