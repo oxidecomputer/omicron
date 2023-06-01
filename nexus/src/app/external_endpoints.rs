@@ -28,6 +28,7 @@
 
 use super::silo::silo_dns_name;
 use crate::db::model::ServiceKind;
+use crate::ServerContext;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
@@ -219,7 +220,6 @@ impl ExternalEndpoints {
         //
         // We somewhat arbitrarily choose the first Silo we find that's not JIT.
         // This would usually be the recovery Silo.
-        // XXX-dap TODO-coverage
         let default_endpoint = silos_by_id
             .values()
             .filter(|s| {
@@ -649,22 +649,23 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
 }
 
 impl super::Nexus {
-    /// Returns the name of the server that the client is trying to reach
+    /// Returns the host and port of the server that the client is trying to
+    /// reach
     ///
     /// Recall that Nexus serves many external endpoints on the same set of IP
     /// addresses, each corresponding to a particular Silo.  We use the standard
     /// HTTP 1.1 "host" header or HTTP2 URI authority to determine which
     /// Silo's endpoint the client is trying to reach.
-    pub fn host_for_request<'a>(
+    pub fn authority_for_request(
         &self,
-        rqinfo: &'a dropshot::RequestInfo,
-    ) -> Result<&'a str, String> {
+        rqinfo: &dropshot::RequestInfo,
+    ) -> Result<http::uri::Authority, String> {
         if rqinfo.version() > hyper::Version::HTTP_11 {
             // For HTTP2, the server name is specified in the URL's "authority".
             rqinfo
                 .uri()
                 .authority()
-                .map(|a| a.as_str())
+                .cloned()
                 .ok_or_else(|| String::from("request URL missing authority"))
         } else {
             // For earlier versions of HTTP, the server name is specified by the
@@ -677,10 +678,14 @@ impl super::Nexus {
                 .map_err(|e| {
                     format!("failed to decode \"host\" header: {:#}", e)
                 })
+                .and_then(|hostport| {
+                    hostport.parse().map_err(|e| {
+                        format!("unsupported \"host\" header: {:#}", e)
+                    })
+                })
         }
     }
 
-    // XXX-dap TODO-coverage
     /// Attempts to determine which external endpoint the given request is
     /// attempting to reach
     ///
@@ -703,11 +708,17 @@ impl super::Nexus {
     /// case, we'll choose an arbitrary Silo.
     pub fn endpoint_for_request(
         &self,
-        rqinfo: &dropshot::RequestInfo,
+        rqctx: &dropshot::RequestContext<Arc<ServerContext>>,
     ) -> Result<Arc<ExternalEndpoint>, Error> {
-        let requested_host = self
-            .host_for_request(rqinfo)
+        let log = &rqctx.log;
+        let rqinfo = &rqctx.request;
+        let requested_authority = self
+            .authority_for_request(rqinfo)
             .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
+
+        let requested_host = requested_authority.host();
+        let log = log.new(o!("server_name" => requested_host.to_string()));
+        trace!(&log, "determining endpoint");
 
         // If we have not successfully loaded the endpoint configuration yet,
         // there's nothing we can do here.  We could try to do better (e.g., use
@@ -715,12 +726,19 @@ impl super::Nexus {
         // the database is down, and we're not going to get much further anyway.
         let endpoint_config = self.background_tasks.external_endpoints.borrow();
         let endpoints = endpoint_config.as_ref().ok_or_else(|| {
-            error!(&self.log, "received request with no endpoints loaded");
+            error!(&log, "received request with no endpoints loaded");
             Error::unavail("endpoints not loaded")
         })?;
 
         // See if there's an endpoint for the requested name.  If so, use it.
         if let Some(endpoint) = endpoints.by_dns_name.get(requested_host) {
+            trace!(
+                &log,
+                "received request for endpoint";
+                "silo_name" => ?endpoint.db_silo.name(),
+                "silo_id" => ?endpoint.silo_id,
+            );
+
             return Ok(endpoint.clone());
         }
 
@@ -736,11 +754,9 @@ impl super::Nexus {
             .as_ref()
             .ok_or_else(|| {
                 error!(
-                    &self.log,
-                    "received request for unknown host {:?} and no \
-                    default endpoint is available",
-                    requested_host;
-                    "host" => requested_host,
+                    &log,
+                    "received request for unknown host and no default \
+                    endpoint is available",
                 );
                 Error::invalid_request(&format!(
                     "HTTP request for unknown server name {:?}",

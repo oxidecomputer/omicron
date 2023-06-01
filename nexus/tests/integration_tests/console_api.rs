@@ -2,16 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::Context;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::header::HeaderName;
 use http::{header, method::Method, StatusCode};
 use std::env::current_dir;
 
+use crate::integration_tests::saml::SAML_RESPONSE_IDP_DESCRIPTOR;
+use base64::Engine;
+use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_test_utils::http_testing::{
     AuthnMode, NexusRequest, RequestBuilder, TestResponse,
 };
-use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::{
+    create_silo, grant_iam, object_create,
+};
 use nexus_test_utils::{
     load_test_config, test_setup_with_config, TEST_SUITE_PASSWORD,
 };
@@ -22,10 +28,12 @@ use omicron_nexus::authz::SiloRole;
 use omicron_nexus::db::fixed_data::silo::DEFAULT_SILO;
 use omicron_nexus::db::identity::{Asset, Resource};
 use omicron_nexus::external_api::params::{
-    ProjectCreate, UsernamePasswordCredentials,
+    self, ProjectCreate, UsernamePasswordCredentials,
 };
+use omicron_nexus::external_api::shared::SiloIdentityMode;
 use omicron_nexus::external_api::{shared, views};
 use omicron_sled_agent::sim;
+use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -177,11 +185,13 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     // request to console page route without auth should redirect to IdP
-    let expected = format!("/login/{}/local", cptestctx.silo_name);
     expect_redirect(
         testctx,
         "/projects/irrelevant-path",
-        &format!("{}?state=%2Fprojects%2Firrelevant-path", expected),
+        &format!(
+            "/login/{}/local?state=%2Fprojects%2Firrelevant-path",
+            cptestctx.silo_name
+        ),
     )
     .await;
 
@@ -447,7 +457,7 @@ async fn test_session_me_groups(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
+async fn test_login_redirect_simple(cptestctx: &ControlPlaneTestContext) {
     let testctx = &cptestctx.external_client;
 
     let expected = format!("/login/{}/local", cptestctx.silo_name);
@@ -472,6 +482,274 @@ async fn test_login_redirect(cptestctx: &ControlPlaneTestContext) {
 
     // empty state param gets dropped
     expect_redirect(testctx, "/login?state=", &expected).await;
+}
+
+#[nexus_test]
+async fn test_login_redirect_multiple_silos(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // With a fresh ControlPlaneTestContext, we have the built-in Silo (which
+    // cannot be logged into) and a recovery Silo (a local-only Silo).  We'll
+    // create a few other Silos:
+    //
+    // - saml-0-idps: a SAML Silo without any IdPs
+    // - saml-1-idp: a SAML Silo with one IdP
+    // - saml-2-idps: a SAML Silo with two IdPS
+    //
+    // Then we'll hit the endpoints for each of these Silos (including the
+    // recovery Silo) and test the login redirect behavior.
+
+    let client = &cptestctx.external_client;
+    let silo_saml0 =
+        create_silo(&client, "saml-0-idps", false, SiloIdentityMode::SamlJit)
+            .await;
+    let silo_saml1 =
+        create_silo(&client, "saml-1-idp", false, SiloIdentityMode::SamlJit)
+            .await;
+    let silo_saml2 =
+        create_silo(&client, "saml-2-idps", false, SiloIdentityMode::SamlJit)
+            .await;
+
+    for (i, silo) in [&silo_saml1, &silo_saml2].into_iter().enumerate() {
+        let nidps = i + 1;
+        for j in 0..nidps {
+            let idp_name = format!("idp{}", j);
+            let idp_params = params::SamlIdentityProviderCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: idp_name.parse().unwrap(),
+                    description: format!(
+                        "silo {:?} idp {:?}",
+                        &silo.identity.name, idp_name
+                    ),
+                },
+
+                idp_metadata_source:
+                    params::IdpMetadataSource::Base64EncodedXml {
+                        data: base64::engine::general_purpose::STANDARD
+                            .encode(SAML_RESPONSE_IDP_DESCRIPTOR),
+                    },
+
+                idp_entity_id: "https://some.idp.test/oxide_rack/".to_string(),
+                sp_client_id: "client_id".to_string(),
+                acs_url: "https://customer.test/oxide_rack/saml".to_string(),
+                slo_url: "https://customer.test/oxide_rack/saml".to_string(),
+                technical_contact_email: "technical@test.test".to_string(),
+
+                signing_keypair: None,
+
+                group_attribute_name: None,
+            };
+            let idp_create_url = format!(
+                "/v1/system/identity-providers/saml?silo={}",
+                &silo.identity.name
+            );
+            let _: views::SamlIdentityProvider =
+                object_create(client, &idp_create_url, &idp_params).await;
+        }
+    }
+
+    // For these tests, we need our reqwest client to act as though it resolved
+    // Nexus's IPs via DNS.  We could use our own external DNS server, but that
+    // won't always work because we want to exercise cases where the name isn't
+    // in DNS (e.g., because the Silo has been deleted or because it's a made-up
+    // name altogether).  So instead we just configure the reqwest client
+    // directly with these DNS resolutions.
+    let mut reqwest_builder = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none());
+    let port = client.bind_address.port();
+    for name in [
+        "not-a-silo",
+        cptestctx.silo_name.as_str(),
+        silo_saml0.identity.name.as_str(),
+        silo_saml1.identity.name.as_str(),
+        silo_saml2.identity.name.as_str(),
+    ] {
+        let dns_name = format!("{}.sys.{}", name, DNS_ZONE_EXTERNAL_TESTING);
+        // reqwest does not use this port.
+        reqwest_builder = reqwest_builder
+            .resolve(&dns_name, (client.bind_address.ip(), port).into());
+    }
+
+    let reqwest_client = reqwest_builder.build().unwrap();
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum Redirect {
+        Error(String),
+        Location(String),
+    }
+
+    async fn make_request(
+        client: &reqwest::Client,
+        silo_name: &str,
+        port: u16,
+    ) -> Redirect {
+        let url = format!(
+            "http://{}.sys.{}:{}/login",
+            silo_name, DNS_ZONE_EXTERNAL_TESTING, port,
+        );
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("GET {}", url))
+            .unwrap();
+        let status = response.status();
+        if status == http::StatusCode::BAD_REQUEST {
+            let error: dropshot::HttpErrorResponseBody = response
+                .json()
+                .await
+                .with_context(|| {
+                    format!("GET {:?}: failed to read 400 response body", url)
+                })
+                .unwrap();
+            Redirect::Error(error.message)
+        } else if status == http::StatusCode::FOUND {
+            let location = response
+                .headers()
+                .get(http::header::LOCATION)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "GET {:?}: missing \"location\" header on 302 response",
+                        url
+                    )
+                })
+                .to_str()
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "GET {:?}: parsing \"location\" header on 302 \
+                        response: {:#}",
+                        url, e
+                    );
+                });
+            Redirect::Location(String::from(location))
+        } else {
+            panic!("GET {:?}: unexpected response code", url);
+        }
+    }
+
+    // Wait for Nexus to finish updating its external endpoint configuration.
+    // This is asynchronous with respect to Silo creation.
+    let _ = wait_for_condition(
+        || async {
+            let url = format!(
+                "http://{}.sys.{}:{}/login",
+                silo_saml2.identity.name, DNS_ZONE_EXTERNAL_TESTING, port
+            );
+            let response = match reqwest_client.get(&url).send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    eprintln!("wait for nexus update: {:?}", error);
+                    if error.is_connect() {
+                        // DNS may not have been updated yet.
+                        return Err(CondCheckError::NotYet);
+                    }
+
+                    return Err(CondCheckError::Failed(error));
+                }
+            };
+
+            eprintln!("wait for nexus update: status {:?}", response.status());
+            if response.status() == http::StatusCode::BAD_REQUEST {
+                // Nexus may not have updated its endpoint configuration yet.
+                return Err(CondCheckError::NotYet);
+            }
+
+            // For any other response, we'll proceed.  It may be wrong, but the
+            // subsequent checks will identify that with a clearer message than
+            // we can do here.
+            Ok(())
+        },
+        &std::time::Duration::from_millis(50),
+        &std::time::Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+
+    // Recovery silo: redirect for local username/password login
+    assert_eq!(
+        make_request(&reqwest_client, cptestctx.silo_name.as_str(), port).await,
+        Redirect::Location(format!("/login/{}/local", &cptestctx.silo_name,)),
+    );
+    // SAML with no idps: no redirect possible
+    assert_eq!(
+        make_request(&reqwest_client, silo_saml0.identity.name.as_str(), port)
+            .await,
+        Redirect::Error(String::from(
+            "no identity providers are configured for Silo"
+        ))
+    );
+    // SAML with one idp: redirect to that idp
+    assert_eq!(
+        make_request(&reqwest_client, silo_saml1.identity.name.as_str(), port)
+            .await,
+        Redirect::Location(format!(
+            "/login/{}/saml/idp0",
+            silo_saml1.identity.name.as_str()
+        )),
+    );
+    // SAML with two idps: redirect to the first one
+    // This is arbitrary.  We just don't want /login to break if you add a
+    // second IdP.
+    assert_eq!(
+        make_request(&reqwest_client, silo_saml2.identity.name.as_str(), port)
+            .await,
+        Redirect::Location(format!(
+            "/login/{}/saml/idp0",
+            silo_saml2.identity.name.as_str()
+        )),
+    );
+
+    // Bogus Silo: this currently redirects you to _some_ Silo.
+    assert_matches::assert_matches!(
+        make_request(&reqwest_client, "not-a-silo", port).await,
+        Redirect::Location(_)
+    );
+
+    // Remove all of the Silos above.
+    for silo_name in [
+        &cptestctx.silo_name,
+        &silo_saml0.identity.name,
+        &silo_saml1.identity.name,
+        &silo_saml2.identity.name,
+    ] {
+        let url = format!("/v1/system/silos/{}", silo_name);
+        NexusRequest::object_delete(&client, &url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .with_context(|| format!("DELETE {:?}", url))
+            .unwrap();
+    }
+
+    // Try hitting one of the endpoints until we get an error.  This may take a
+    // bit since Nexus updating its endpoint configuration is asynchronous.
+    // (This is backwards from most uses of wait_for_condition because the
+    // *success* case is an error.)
+    let message = wait_for_condition::<_, (), _, _>(
+        || async {
+            match make_request(
+                &reqwest_client,
+                silo_saml1.identity.name.as_str(),
+                port,
+            )
+            .await
+            {
+                Redirect::Location(_) => Err(CondCheckError::NotYet),
+                Redirect::Error(message) => Ok(message),
+            }
+        },
+        &std::time::Duration::from_millis(50),
+        &std::time::Duration::from_secs(30),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        message,
+        format!(
+            "HTTP request for unknown server name \"{}.sys.{}\"",
+            silo_saml1.identity.name, DNS_ZONE_EXTERNAL_TESTING,
+        )
+    )
 }
 
 fn get_header_value(resp: TestResponse, header_name: HeaderName) -> String {

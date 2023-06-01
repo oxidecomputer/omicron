@@ -498,8 +498,7 @@ async fn get_login_url(
     redirect_url: Option<String>,
 ) -> Result<String, Error> {
     let nexus = &rqctx.context().nexus;
-    let rqinfo = &rqctx.request;
-    let endpoint = nexus.endpoint_for_request(rqinfo)?;
+    let endpoint = nexus.endpoint_for_request(rqctx)?;
     let silo = endpoint.silo();
 
     let login_uri = if silo.authentication_mode == AuthenticationMode::Local {
@@ -514,7 +513,7 @@ async fn get_login_url(
             .identity_provider_list(
                 opctx,
                 &silo_lookup,
-                &PaginatedBy::Id(DataPageParams {
+                &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
                     limit: NonZeroU32::try_from(2).unwrap(),

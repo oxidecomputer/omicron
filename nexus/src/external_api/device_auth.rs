@@ -71,8 +71,9 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let host = match nexus.host_for_request(&rqctx.request) {
-            Ok(host) => host,
+        let authority = nexus.authority_for_request(&rqctx.request);
+        let host = match &authority {
+            Ok(host) => host.as_str(),
             Err(error) => {
                 return build_oauth_response(
                     StatusCode::BAD_REQUEST,
