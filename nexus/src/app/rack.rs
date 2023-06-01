@@ -160,6 +160,7 @@ impl super::Nexus {
             .filter_map(|s| match &s.kind {
                 nexus_types::internal_api::params::ServiceKind::Nexus {
                     external_address,
+                    ..
                 } => Some(match external_address {
                     IpAddr::V4(addr) => DnsRecord::A(*addr),
                     IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),

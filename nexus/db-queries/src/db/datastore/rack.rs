@@ -319,7 +319,7 @@ impl DataStore {
             service.sled_id,
             service.zone_id,
             service.address,
-            service.kind.into(),
+            service.kind.clone().into(),
         );
         self.service_upsert_conn(conn, service_db).await.map_err(|e| {
             TxnError::CustomError(RackInitError::ServiceInsert(e))
@@ -328,12 +328,11 @@ impl DataStore {
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
         let service_ip = match service.kind {
-            ServiceKind::ExternalDns { external_address }
-            | ServiceKind::Nexus { external_address } => {
-                let name = service.kind.name();
+            ServiceKind::ExternalDns { external_address, ref nic }
+            | ServiceKind::Nexus { external_address, ref nic } => {
                 let db_ip = IncompleteExternalIp::for_service_explicit(
                     Uuid::new_v4(),
-                    &db::model::Name(name),
+                    &db::model::Name(nic.name.clone()),
                     &format!("{}", service.kind),
                     service.service_id,
                     service_pool.id(),
@@ -341,7 +340,7 @@ impl DataStore {
                 );
                 Some((external_address, db_ip))
             }
-            ServiceKind::Ntp { snat_cfg: Some(snat) } => {
+            ServiceKind::BoundaryNtp { snat, .. } => {
                 let db_ip = IncompleteExternalIp::for_service_explicit_snat(
                     Uuid::new_v4(),
                     service.service_id,
@@ -624,9 +623,16 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
+    use nexus_types::internal_api::params::ServiceNic;
+    use omicron_common::address::{
+        DNS_OPTE_IPV4_SUBNET, NEXUS_OPTE_IPV4_SUBNET, NTP_OPTE_IPV4_SUBNET,
+    };
     use omicron_common::api::external::http_pagination::PaginatedBy;
-    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, MacAddr,
+    };
     use omicron_common::api::internal::shared::SourceNatConfig;
+    use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -863,12 +869,24 @@ mod test {
         .unwrap()];
 
         let external_dns_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let external_dns_pip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let external_dns_id = Uuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp1_pip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let ntp1_id = Uuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
+        let ntp2_pip = NTP_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .unwrap();
         let ntp2_id = Uuid::new_v4();
         let ntp3_id = Uuid::new_v4();
         let services = vec![
@@ -879,6 +897,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::ExternalDns {
                     external_address: external_dns_ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "external-dns".parse().unwrap(),
+                        ip: external_dns_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -886,12 +910,18 @@ mod test {
                 sled_id: sled1.id(),
                 zone_id: Some(ntp1_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp {
-                    snat_cfg: Some(SourceNatConfig {
+                kind: internal_params::ServiceKind::BoundaryNtp {
+                    snat: SourceNatConfig {
                         ip: ntp1_ip,
                         first_port: 16384,
                         last_port: 32767,
-                    }),
+                    },
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "ntp1".parse().unwrap(),
+                        ip: ntp1_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -901,6 +931,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: nexus_ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus".parse().unwrap(),
+                        ip: nexus_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -908,12 +944,18 @@ mod test {
                 sled_id: sled2.id(),
                 zone_id: Some(ntp2_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp {
-                    snat_cfg: Some(SourceNatConfig {
+                kind: internal_params::ServiceKind::BoundaryNtp {
+                    snat: SourceNatConfig {
                         ip: ntp2_ip,
                         first_port: 0,
                         last_port: 16383,
-                    }),
+                    },
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "ntp2".parse().unwrap(),
+                        ip: ntp2_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -921,7 +963,7 @@ mod test {
                 sled_id: sled3.id(),
                 zone_id: Some(ntp3_id),
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 9090, 0, 0),
-                kind: internal_params::ServiceKind::Ntp { snat_cfg: None },
+                kind: internal_params::ServiceKind::InternalNtp,
             },
         ];
 
@@ -1087,6 +1129,12 @@ mod test {
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
         let nexus_id1 = Uuid::new_v4();
         let nexus_id2 = Uuid::new_v4();
+        let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
+        let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 2)
+            .unwrap();
         let mut services = vec![
             internal_params::ServicePutRequest {
                 service_id: nexus_id1,
@@ -1095,6 +1143,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_start),
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus1".parse().unwrap(),
+                        ip: nexus_pip1.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -1104,6 +1158,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 456, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: IpAddr::V4(nexus_ip_end),
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus2".parse().unwrap(),
+                        ip: nexus_pip2.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
         ];
@@ -1187,8 +1247,10 @@ mod test {
         // The address allocated for the service should match the input.
         assert_eq!(
             observed_external_ips[&observed_services[0].id()].ip.ip(),
-            if let internal_params::ServiceKind::Nexus { external_address } =
-                services[0].kind
+            if let internal_params::ServiceKind::Nexus {
+                external_address,
+                ..
+            } = services[0].kind
             {
                 external_address
             } else {
@@ -1197,8 +1259,10 @@ mod test {
         );
         assert_eq!(
             observed_external_ips[&observed_services[1].id()].ip.ip(),
-            if let internal_params::ServiceKind::Nexus { external_address } =
-                services[1].kind
+            if let internal_params::ServiceKind::Nexus {
+                external_address,
+                ..
+            } = services[1].kind
             {
                 external_address
             } else {
@@ -1264,6 +1328,9 @@ mod test {
         let sled = create_test_sled(&datastore).await;
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
         let services = vec![internal_params::ServicePutRequest {
             service_id: nexus_id,
@@ -1272,6 +1339,12 @@ mod test {
             address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
             kind: internal_params::ServiceKind::Nexus {
                 external_address: nexus_ip,
+                nic: ServiceNic {
+                    id: Uuid::new_v4(),
+                    name: "nexus".parse().unwrap(),
+                    ip: nexus_pip.into(),
+                    mac: MacAddr::random_system(),
+                },
             },
         }];
 
@@ -1308,7 +1381,13 @@ mod test {
         // Request two services which happen to be using the same IP address.
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let external_dns_id = Uuid::new_v4();
+        let external_dns_pip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
         let nexus_id = Uuid::new_v4();
+        let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
+            .unwrap();
 
         let services = vec![
             internal_params::ServicePutRequest {
@@ -1318,6 +1397,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::ExternalDns {
                     external_address: ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "external-dns".parse().unwrap(),
+                        ip: external_dns_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
             internal_params::ServicePutRequest {
@@ -1327,6 +1412,12 @@ mod test {
                 address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
                 kind: internal_params::ServiceKind::Nexus {
                     external_address: ip,
+                    nic: ServiceNic {
+                        id: Uuid::new_v4(),
+                        name: "nexus".parse().unwrap(),
+                        ip: nexus_pip.into(),
+                        mac: MacAddr::random_system(),
+                    },
                 },
             },
         ];

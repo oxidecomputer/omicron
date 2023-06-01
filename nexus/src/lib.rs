@@ -223,8 +223,8 @@ impl nexus_test_interface::NexusServer for Server {
         let internal_services_ip_pool_ranges = services
             .iter()
             .filter_map(|s| match s.kind {
-                ServiceKind::ExternalDns { external_address }
-                | ServiceKind::Nexus { external_address } => {
+                ServiceKind::ExternalDns { external_address, .. }
+                | ServiceKind::Nexus { external_address, .. } => {
                     Some(IpRange::from(external_address))
                 }
                 _ => None,
