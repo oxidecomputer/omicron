@@ -200,7 +200,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#7f772b32a0cd0
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -661,7 +661,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common 0.1.0",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "serde",
  "slog",
@@ -1993,7 +1993,7 @@ dependencies = [
  "progenitor-client",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -3311,7 +3311,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3956,9 +3956,9 @@ dependencies = [
  "chrono",
  "futures",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3973,13 +3973,10 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/omicron?branch=main#7f772b32a0cd02dac075669cb2ece41d1cc1ddf2"
 dependencies = [
  "chrono",
- "futures",
  "omicron-common 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
- "omicron-passwords 0.1.0 (git+https://github.com/oxidecomputer/omicron?branch=main)",
  "progenitor",
- "regress",
+ "regress 0.5.0",
  "reqwest",
- "schemars",
  "serde",
  "serde_json",
  "slog",
@@ -4003,7 +4000,7 @@ dependencies = [
  "nexus-types",
  "omicron-certificates",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "parse-display",
  "pq-sys",
@@ -4014,7 +4011,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sled-agent-client",
- "steno",
+ "steno 0.4.0",
  "thiserror",
  "uuid",
 ]
@@ -4056,7 +4053,7 @@ dependencies = [
  "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -4087,7 +4084,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -4144,7 +4141,7 @@ dependencies = [
  "nexus-test-interface",
  "nexus-types",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-sled-agent",
  "omicron-test-utils",
  "oximeter 0.1.0",
@@ -4184,14 +4181,14 @@ dependencies = [
  "futures",
  "newtype_derive",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "openssl",
  "openssl-probe",
  "openssl-sys",
  "schemars",
  "serde",
  "serde_json",
- "steno",
+ "steno 0.4.0",
  "uuid",
 ]
 
@@ -4428,7 +4425,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "ring",
  "schemars",
@@ -4440,7 +4437,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.4.0",
  "strum",
  "test-strategy",
  "thiserror",
@@ -4465,7 +4462,6 @@ dependencies = [
  "http",
  "hyper",
  "ipnetwork",
- "lazy_static",
  "macaddr",
  "parse-display",
  "progenitor",
@@ -4480,7 +4476,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "slog",
- "steno",
+ "steno 0.3.1",
  "strum",
  "thiserror",
  "tokio",
@@ -4630,7 +4626,7 @@ dependencies = [
  "nexus-types",
  "num-integer",
  "omicron-common 0.1.0",
- "omicron-passwords 0.1.0",
+ "omicron-passwords",
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -4669,7 +4665,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-dtrace",
- "steno",
+ "steno 0.4.0",
  "strum",
  "subprocess",
  "tempfile",
@@ -4727,19 +4723,6 @@ dependencies = [
  "criterion",
  "rand 0.8.5",
  "rust-argon2",
- "schemars",
- "serde",
- "serde_with",
- "thiserror",
-]
-
-[[package]]
-name = "omicron-passwords"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/omicron?branch=main#bd6c62807fbb2ea4fdae0b11c301124936ea41a2"
-dependencies = [
- "argon2",
- "rand 0.8.5",
  "schemars",
  "serde",
  "serde_with",
@@ -5058,7 +5041,7 @@ dependencies = [
  "hyper",
  "progenitor",
  "rand 0.8.5",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -5208,7 +5191,7 @@ source = "git+https://github.com/oxidecomputer/omicron?branch=main#7f772b32a0cd0
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.16",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -6402,6 +6385,16 @@ checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 
 [[package]]
 name = "regress"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d995d590bd8ec096d1893f414bf3f5e8b0ee4c9eed9a5642b9766ef2c8e2e8e9"
+dependencies = [
+ "hashbrown 0.13.2",
+ "memchr",
+]
+
+[[package]]
+name = "regress"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a9ecfa0cb04d0b04dddb99b8ccf4f66bc8dfd23df694b398570bd8ae3a50fb"
@@ -7388,7 +7381,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common 0.1.0",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "serde",
  "slog",
@@ -7750,6 +7743,28 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "steno"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee007f34597a281684e1ab95e5c62d4c330db52644ad81dbaa53204f1ff7ba9f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures",
+ "lazy_static",
+ "newtype_derive",
+ "petgraph",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "steno"
@@ -8690,7 +8705,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.6.0",
  "schemars",
  "serde_json",
  "syn 2.0.16",
@@ -9332,7 +9347,7 @@ dependencies = [
  "chrono",
  "installinator-common",
  "progenitor",
- "regress",
+ "regress 0.6.0",
  "reqwest",
  "schemars",
  "serde",
