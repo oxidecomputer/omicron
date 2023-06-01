@@ -1573,7 +1573,6 @@ async fn disk_metrics_list(
                 &[&format!("upstairs_uuid=={}", authz_disk.id())],
                 query,
                 limit,
-                PaginationOrder::Ascending,
             )
             .await?;
 
@@ -4336,12 +4335,11 @@ async fn system_metric(
 
     let query = query_params.into_inner();
     let limit = rqctx.page_limit(&query.pagination)?;
-    let direction = PaginationOrder::Ascending;
 
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus
-            .system_metric_lookup(&opctx, metric_name, query, limit, direction)
+            .system_metric_lookup(&opctx, metric_name, query, limit)
             .await?;
 
         Ok(HttpResponseOk(result))

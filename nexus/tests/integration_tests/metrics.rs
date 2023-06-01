@@ -28,7 +28,7 @@ pub async fn query_for_latest_metric(
     // prevent more confusing 'attempt to subtract with overflow' on next line
     assert!(measurements.items.len() > 0, "Expected at least one measurement");
 
-    let item = &measurements.items[measurements.items.len() - 1];
+    let item = &measurements.items[0];
     let datum = match item.datum() {
         Datum::I64(c) => c,
         _ => panic!("Unexpected datum type {:?}", item.datum()),

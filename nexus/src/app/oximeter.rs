@@ -218,19 +218,19 @@ impl super::Nexus {
         criteria: &[&str],
         query_params: PaginationParams<ResourceMetrics, ResourceMetrics>,
         limit: NonZeroU32,
-        order: PaginationOrder,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
         #[inline]
         fn no_results() -> dropshot::ResultsPage<Measurement> {
             dropshot::ResultsPage { next_page: None, items: Vec::new() }
         }
 
-        let (start_time, end_time, query) = match query_params.page {
+        let (start_time, end_time, order, query) = match query_params.page {
             // Generally, we want the time bounds to be inclusive for the
             // start time, and exclusive for the end time...
             dropshot::WhichPage::First(query) => (
                 Timestamp::Inclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
+                query.order,
                 query,
             ),
             // ... but for subsequent pages, we use the "last observed"
@@ -241,6 +241,7 @@ impl super::Nexus {
             dropshot::WhichPage::Next(query) => (
                 Timestamp::Exclusive(query.start_time),
                 Timestamp::Exclusive(query.end_time),
+                query.order,
                 query,
             ),
         };
@@ -264,7 +265,7 @@ impl super::Nexus {
                 Some(start_time),
                 Some(end_time),
                 Some(limit),
-                Some(order),
+                order,
             )
             .await
             .or_else(|err| {

@@ -7,7 +7,6 @@
 use crate::authz;
 use crate::external_api::http_entrypoints::SystemMetricName;
 use crate::external_api::http_entrypoints::SystemMetricParams;
-use dropshot::PaginationOrder;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::Error;
 use oximeter_db::Measurement;
@@ -20,7 +19,6 @@ impl super::Nexus {
         metric_name: SystemMetricName,
         query: SystemMetricParams,
         limit: NonZeroU32,
-        order: PaginationOrder,
     ) -> Result<dropshot::ResultsPage<Measurement>, Error> {
         let timeseries = match metric_name {
             SystemMetricName::VirtualDiskSpaceProvisioned
@@ -35,7 +33,6 @@ impl super::Nexus {
             &[&format!("id=={}", query.id)],
             query.pagination,
             limit,
-            order,
         )
         .await
     }

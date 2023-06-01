@@ -745,7 +745,7 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // Query the view of these metrics stored within Clickhouse
     let metric_url = |metric_type: &str, id: Uuid| {
         format!(
-            "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}",
+            "/v1/system/metrics/{metric_type}?start_time={:?}&end_time={:?}&id={id}&order=descending",
             cptestctx.start_time,
             Utc::now(),
         )
