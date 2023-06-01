@@ -74,11 +74,18 @@ use crate::rack_setup::plan::sled::{
 use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use dpd_client::types::{
+    LinkCreate, LinkId, LinkSettings, PortFec, PortId, PortSettings,
+    RouteSettingsV4,
+};
+use dpd_client::Client as DpdClient;
+use dpd_client::Ipv4Cidr;
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::{
     get_sled_address, CRUCIBLE_PANTRY_PORT, DENDRITE_PORT, NEXUS_INTERNAL_PORT,
     NTP_PORT, OXIMETER_PORT,
@@ -94,8 +101,12 @@ use sled_hardware::underlay::BootstrapInterface;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::iter;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use thiserror::Error;
+
+static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -142,6 +153,12 @@ pub enum SetupServiceError {
 
     #[error("Failed to access DNS servers: {0}")]
     Dns(#[from] DnsError),
+
+    #[error("Error during request to Dendrite: {0}")]
+    Dendrite(String),
+
+    #[error("Error during DNS lookup: {0}")]
+    DnsResolver(internal_dns::resolver::ResolveError),
 }
 
 // The workload / information allocated to a single sled.
@@ -759,6 +776,7 @@ impl ServiceInner {
                     infra_ip_last: config.infra_ip_last.clone(),
                     uplink_ip: config.uplink_ip.clone(),
                     uplink_port: config.uplink_port.clone(),
+                    uplink_port_speed: config.uplink_port_speed.clone().into(),
                 };
                 Some(value)
             }
@@ -987,6 +1005,119 @@ impl ServiceInner {
         // Set up internal DNS services first and write the initial
         // DNS configuration to the internal DNS servers.
         self.initialize_dns(&service_plan).await?;
+
+        // Initialize rack network before NTP comes online, otherwise boundary
+        // services will not be available and NTP will fail to sync
+        info!(self.log, "Checking for Rack Network Configuration");
+        if let Some(rack_network_config) = &config.rack_network_config {
+            info!(self.log, "Initializing Rack Network");
+            info!(self.log, "Looking up address for Dendrite");
+            let resolver = DnsResolver::new_from_subnet(
+                self.log.new(o!("component" => "DnsResolver")),
+                config.az_subnet(),
+            )
+            .expect("Failed to create DNS resolver");
+
+            let dpd_addr = resolver
+                .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
+                .await
+                .map_err(|e| SetupServiceError::DnsResolver(e))?;
+
+            let dpd = DpdClient::new(
+                &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
+                dpd_client::ClientState {
+                    tag: "sled-agent".to_string(),
+                    log: self.log.new(o!(
+                        "component" => "DpdClient"
+                    )),
+                },
+            );
+
+            info!(self.log, "Building Rack Network Configuration");
+            let body = dpd_client::types::Ipv6Entry {
+                addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
+                    SetupServiceError::BadConfig(format!(
+                        "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
+                    ))
+                })?,
+                tag: "rss".into(),
+            };
+
+            let mut dpd_port_settings = PortSettings {
+                tag: "rss".into(),
+                links: HashMap::new(),
+                v4_routes: HashMap::new(),
+                v6_routes: HashMap::new(),
+            };
+
+            // TODO handle breakouts
+            // https://github.com/oxidecomputer/omicron/issues/3062
+            let link_id = LinkId(0);
+            let addr: IpAddr = rack_network_config.uplink_ip.parse()
+                .map_err(|e| {
+                    SetupServiceError::BadConfig(format!(
+                    "unable to parse rack_network_config.uplink_up as IpAddr: {e}"))
+                })?;
+
+            let link_settings = LinkSettings {
+                // TODO Allow user to configure link properties
+                // https://github.com/oxidecomputer/omicron/issues/3061
+                params: LinkCreate {
+                    autoneg: false,
+                    kr: false,
+                    fec: PortFec::None,
+                    speed: rack_network_config.uplink_port_speed.clone().into(),
+                },
+                addrs: vec![addr],
+            };
+
+            dpd_port_settings.links.insert(link_id.to_string(), link_settings);
+
+            let port_id: PortId = rack_network_config.uplink_port.parse()
+                .map_err(|e| SetupServiceError::BadConfig(
+                        format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
+                ))?;
+
+            let nexthop: Option<Ipv4Addr> = Some(rack_network_config.gateway_ip.parse()
+                .map_err(|e| SetupServiceError::BadConfig(
+                        format!("unable to parse rack_network_config.gateway_ip as Ipv4Addr: {e}")
+                ))?);
+
+            dpd_port_settings.v4_routes.insert(
+                Ipv4Cidr { prefix: "0.0.0.0".parse().unwrap(), prefix_len: 0 }
+                    .to_string(),
+                RouteSettingsV4 { link_id: link_id.0, nexthop },
+            );
+
+            info!(self.log, "Waiting for dendrite to come online");
+            while dpd.dpd_uptime().await.is_err() {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+
+            info!(self.log, "Configuring boundary services loopback address on switch"; "config" => format!("{body:#?}"));
+            dpd.loopback_ipv6_create(&body).await.map_err(|e| {
+                SetupServiceError::Dendrite(format!(
+                    "unable to create inital switch loopback address: {e}"
+                ))
+            })?;
+
+            info!(self.log, "Configuring default uplink on switch"; "config" => format!("{dpd_port_settings:#?}"));
+            dpd.port_settings_apply(&port_id, &dpd_port_settings)
+                .await
+                .map_err(|e| {
+                    SetupServiceError::Dendrite(format!(
+                    "unable to apply initial uplink port configuration: {e}"
+                ))
+                })?;
+
+            info!(self.log, "advertising boundary services loopback address");
+            let mut ddmd_addr = dpd_addr;
+            ddmd_addr.set_port(8000);
+            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
+            ddmd_client.advertise_prefix(Ipv6Subnet::new(
+                BOUNDARY_SERVICES_ADDR.parse().unwrap(),
+            ));
+        }
 
         // Next start up the NTP services.
         // Note we also specify internal DNS services again because it

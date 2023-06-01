@@ -272,3 +272,39 @@ impl From<&omicron_common::api::internal::shared::SourceNatConfig>
         Self { ip: r.ip, first_port: r.first_port, last_port: r.last_port }
     }
 }
+
+impl From<omicron_common::api::internal::shared::PortSpeed>
+    for types::PortSpeed
+{
+    fn from(value: omicron_common::api::internal::shared::PortSpeed) -> Self {
+        match value {
+            omicron_common::api::internal::shared::PortSpeed::Speed0G => {
+                types::PortSpeed::Speed0G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed1G => {
+                types::PortSpeed::Speed1G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed10G => {
+                types::PortSpeed::Speed10G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed25G => {
+                types::PortSpeed::Speed25G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed40G => {
+                types::PortSpeed::Speed40G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed50G => {
+                types::PortSpeed::Speed50G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed100G => {
+                types::PortSpeed::Speed100G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed200G => {
+                types::PortSpeed::Speed200G
+            }
+            omicron_common::api::internal::shared::PortSpeed::Speed400G => {
+                types::PortSpeed::Speed400G
+            }
+        }
+    }
+}

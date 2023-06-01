@@ -73,6 +73,48 @@ pub struct RackNetworkConfig {
     pub infra_ip_last: String,
     /// Switchport to use for external connectivity
     pub uplink_port: String,
+    /// Speed for the Switchport
+    pub uplink_port_speed: PortSpeed,
     /// IP Address to apply to switchport (must be in infra_ip pool)
     pub uplink_ip: String,
+}
+
+/// Switchport Speed options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortSpeed {
+    #[serde(alias = "0G")]
+    Speed0G,
+    #[serde(alias = "1G")]
+    Speed1G,
+    #[serde(alias = "10G")]
+    Speed10G,
+    #[serde(alias = "25G")]
+    Speed25G,
+    #[serde(alias = "40G")]
+    Speed40G,
+    #[serde(alias = "50G")]
+    Speed50G,
+    #[serde(alias = "100G")]
+    Speed100G,
+    #[serde(alias = "200G")]
+    Speed200G,
+    #[serde(alias = "400G")]
+    Speed400G,
+}
+
+impl From<PortSpeed> for dpd_client::types::PortSpeed {
+    fn from(value: PortSpeed) -> Self {
+        match value {
+            PortSpeed::Speed0G => dpd_client::types::PortSpeed::Speed0G,
+            PortSpeed::Speed1G => dpd_client::types::PortSpeed::Speed1G,
+            PortSpeed::Speed10G => dpd_client::types::PortSpeed::Speed10G,
+            PortSpeed::Speed25G => dpd_client::types::PortSpeed::Speed25G,
+            PortSpeed::Speed40G => dpd_client::types::PortSpeed::Speed40G,
+            PortSpeed::Speed50G => dpd_client::types::PortSpeed::Speed50G,
+            PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
+            PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
+            PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+        }
+    }
 }
