@@ -34,6 +34,13 @@ progenitor::generate_api!(
         RotSlot = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         ImageVersion = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize]},
         StartUpdateOptions = { derives = [ Serialize, Deserialize, Default ]},
+        Ipv4Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        Ipv6Range = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        IpRange = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        BootstrapSledDescription = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
+        RackNetworkConfig = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default ] },
+        CurrentRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Default ] },
+        PutRssUserConfigInsensitive = { derives = [ PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize ] },
     },
     replace = {
         Duration = std::time::Duration,

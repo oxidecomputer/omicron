@@ -297,7 +297,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PutRssUserConfig"
+                "$ref": "#/components/schemas/PutRssUserConfigInsensitive"
               }
             }
           },
@@ -752,6 +752,21 @@
       "CurrentRssUserConfig": {
         "type": "object",
         "properties": {
+          "insensitive": {
+            "$ref": "#/components/schemas/CurrentRssUserConfigInsensitive"
+          },
+          "sensitive": {
+            "$ref": "#/components/schemas/CurrentRssUserConfigSensitive"
+          }
+        },
+        "required": [
+          "insensitive",
+          "sensitive"
+        ]
+      },
+      "CurrentRssUserConfigInsensitive": {
+        "type": "object",
+        "properties": {
           "bootstrap_sleds": {
             "type": "array",
             "items": {
@@ -766,7 +781,6 @@
             }
           },
           "external_dns_zone_name": {
-            "nullable": true,
             "type": "string"
           },
           "internal_services_ip_pool_ranges": {
@@ -781,28 +795,32 @@
               "type": "string"
             }
           },
+          "rack_network_config": {
+            "$ref": "#/components/schemas/RackNetworkConfig"
+          }
+        },
+        "required": [
+          "bootstrap_sleds",
+          "dns_servers",
+          "external_dns_zone_name",
+          "internal_services_ip_pool_ranges",
+          "ntp_servers",
+          "rack_network_config"
+        ]
+      },
+      "CurrentRssUserConfigSensitive": {
+        "type": "object",
+        "properties": {
           "num_external_certificates": {
             "type": "integer",
             "format": "uint",
             "minimum": 0
-          },
-          "rack_network_config": {
-            "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RackNetworkConfig"
-              }
-            ]
           },
           "recovery_silo_password_set": {
             "type": "boolean"
           }
         },
         "required": [
-          "bootstrap_sleds",
-          "dns_servers",
-          "internal_services_ip_pool_ranges",
-          "ntp_servers",
           "num_external_certificates",
           "recovery_silo_password_set"
         ]
@@ -1544,13 +1562,16 @@
           "hash"
         ]
       },
-      "PutRssUserConfig": {
+      "PutRssUserConfigInsensitive": {
         "type": "object",
         "properties": {
           "bootstrap_sleds": {
+            "description": "List of slot numbers only.\n\n`wicketd` will map this back to sleds with the correct `SpIdentifier` based on the `bootstrap_sleds` it provides in `CurrentRssUserConfigInsensitive`.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/SpIdentifier"
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
             },
             "uniqueItems": true
           },

@@ -7,7 +7,9 @@
 use crate::http_entrypoints::BootstrapSledDescription;
 use crate::http_entrypoints::CertificateUploadResponse;
 use crate::http_entrypoints::CurrentRssUserConfig;
-use crate::http_entrypoints::PutRssUserConfig;
+use crate::http_entrypoints::CurrentRssUserConfigInsensitive;
+use crate::http_entrypoints::CurrentRssUserConfigSensitive;
+use crate::http_entrypoints::PutRssUserConfigInsensitive;
 use crate::RackV1Inventory;
 use bootstrap_agent_client::types::Certificate;
 use gateway_client::types::SpType;
@@ -33,7 +35,7 @@ pub(crate) struct CurrentRssConfig {
     ntp_servers: Vec<String>,
     dns_servers: Vec<String>,
     internal_services_ip_pool_ranges: Vec<address::IpRange>,
-    external_dns_zone_name: Option<String>,
+    external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
     rack_network_config: Option<RackNetworkConfig>,
@@ -133,7 +135,7 @@ impl CurrentRssConfig {
 
     pub(crate) fn update(
         &mut self,
-        value: PutRssUserConfig,
+        value: PutRssUserConfigInsensitive,
         our_baseboard: Option<&Baseboard>,
     ) -> Result<(), String> {
         // Updating can only fail in two ways:
@@ -149,7 +151,7 @@ impl CurrentRssConfig {
         if let Some(Baseboard::Gimlet { identifier, model, revision }) =
             our_baseboard
         {
-            let our_id = self
+            let our_slot = self
                 .inventory
                 .iter()
                 .find_map(|sled| {
@@ -157,7 +159,7 @@ impl CurrentRssConfig {
                         && &sled.model == model
                         && i64::from(sled.revision) == *revision
                     {
-                        Some(sled.id)
+                        Some(sled.id.slot)
                     } else {
                         None
                     }
@@ -168,10 +170,10 @@ impl CurrentRssConfig {
                          running ({identifier}, model {model} rev {revision})",
                     )
                 })?;
-            if !value.bootstrap_sleds.contains(&our_id) {
+            if !value.bootstrap_sleds.contains(&our_slot) {
                 return Err(format!(
                     "Cannot remove the scrimlet where wicketd is running \
-                     ({identifier}, model {model} rev {revision}) \
+                     (sled {our_slot}: {identifier}, model {model} rev {revision}) \
                      from bootstrap_sleds"
                 ));
             }
@@ -180,16 +182,16 @@ impl CurrentRssConfig {
         // Next, confirm the user's list only consists of sleds in our
         // inventory.
         let mut bootstrap_sleds = BTreeSet::new();
-        for id in value.bootstrap_sleds {
+        for slot in value.bootstrap_sleds {
             let sled =
-                self.inventory.iter().find(|sled| sled.id == id).ok_or_else(
-                    || {
+                self.inventory
+                    .iter()
+                    .find(|sled| sled.id.slot == slot)
+                    .ok_or_else(|| {
                         format!(
-                            "cannot add unknown sled {} to bootstrap_sleds",
-                            id.slot
+                            "cannot add unknown sled {slot} to bootstrap_sleds",
                         )
-                    },
-                )?;
+                    })?;
             bootstrap_sleds.insert(sled.clone());
         }
 
@@ -198,7 +200,7 @@ impl CurrentRssConfig {
         self.dns_servers = value.dns_servers;
         self.internal_services_ip_pool_ranges =
             value.internal_services_ip_pool_ranges;
-        self.external_dns_zone_name = Some(value.external_dns_zone_name);
+        self.external_dns_zone_name = value.external_dns_zone_name;
         self.rack_network_config = Some(value.rack_network_config);
 
         Ok(())
@@ -216,18 +218,31 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
         };
 
         Self {
-            bootstrap_sleds,
-            ntp_servers: rss.ntp_servers.clone(),
-            dns_servers: rss.dns_servers.clone(),
-            internal_services_ip_pool_ranges: rss
-                .internal_services_ip_pool_ranges
-                .clone(),
-            external_dns_zone_name: rss.external_dns_zone_name.clone(),
-            rack_network_config: rss.rack_network_config.clone(),
-            num_external_certificates: rss.external_certificates.len(),
-            recovery_silo_password_set: rss
-                .recovery_silo_password_hash
-                .is_some(),
+            sensitive: CurrentRssUserConfigSensitive {
+                num_external_certificates: rss.external_certificates.len(),
+                recovery_silo_password_set: rss
+                    .recovery_silo_password_hash
+                    .is_some(),
+            },
+            insensitive: CurrentRssUserConfigInsensitive {
+                bootstrap_sleds,
+                ntp_servers: rss.ntp_servers.clone(),
+                dns_servers: rss.dns_servers.clone(),
+                internal_services_ip_pool_ranges: rss
+                    .internal_services_ip_pool_ranges
+                    .clone(),
+                external_dns_zone_name: rss.external_dns_zone_name.clone(),
+                rack_network_config: rss
+                    .rack_network_config
+                    .clone()
+                    .unwrap_or_else(|| RackNetworkConfig {
+                        gateway_ip: "".into(),
+                        infra_ip_first: "".into(),
+                        infra_ip_last: "".into(),
+                        uplink_port: "".into(),
+                        uplink_ip: "".into(),
+                    }),
+            },
         }
     }
 }

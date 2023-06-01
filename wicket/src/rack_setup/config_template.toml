@@ -1,0 +1,27 @@
+# TODO Explanatory block comment
+
+# TODO for all properties in this file:
+# * default value?
+# * guidance/documentation?
+# * should this be exposed at all, or should wicketd decide it autonomously?
+
+external_dns_zone_name = ""
+
+# "ntp.eng.oxide.computer"
+ntp_servers = [
+]
+
+# "1.1.1.1", "9.9.9.9"
+dns_servers = []
+
+# { first = "172.20.26.1", last = "172.20.26.10" },
+internal_services_ip_pool_ranges = []
+
+bootstrap_sleds = []
+
+[rack_network_config]
+gateway_ip = "172.20.15.17"
+infra_ip_first = "172.20.15.22"
+infra_ip_last = "172.20.15.22"
+uplink_port = "qsfp0"
+uplink_ip = "172.20.15.22"

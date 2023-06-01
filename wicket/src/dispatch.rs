@@ -12,7 +12,7 @@ use clap::Parser;
 use omicron_common::address::WICKETD_PORT;
 use slog::Drain;
 
-use crate::{upload::UploadArgs, Runner};
+use crate::{rack_setup::SetupArgs, upload::UploadArgs, Runner};
 
 pub fn exec() -> Result<()> {
     let wicketd_addr =
@@ -33,6 +33,7 @@ pub fn exec() -> Result<()> {
         );
         match args {
             ShellCommand::Upload(args) => args.exec(log, wicketd_addr),
+            ShellCommand::Setup(args) => args.exec(log, wicketd_addr),
         }
     } else {
         // Do not expose log messages via standard error since they'll show up
@@ -52,6 +53,9 @@ pub fn exec() -> Result<()> {
 enum ShellCommand {
     /// Upload an artifact to wicketd.
     Upload(UploadArgs),
+    /// Interact with rack setup configuration.
+    #[command(subcommand)]
+    Setup(SetupArgs),
 }
 
 fn setup_log(

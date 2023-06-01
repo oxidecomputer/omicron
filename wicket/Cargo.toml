@@ -37,6 +37,7 @@ textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 tui.workspace = true
 tui-tree-widget = "0.12.0"
 unicode-width.workspace = true

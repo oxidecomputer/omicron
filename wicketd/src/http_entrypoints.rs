@@ -88,31 +88,42 @@ pub struct BootstrapSledDescription {
     pub revision: u32,
 }
 
-// This is the subset of `RackInitializeRequest` that we return to wicket when
-// it asks how much information the user has already provided. It omits fields
-// that we determine ourselves, and replaces sensitive fields with "has it been
-// set" booleans.
+// This is the subset of `RackInitializeRequest` that the user fills in in clear
+// text (e.g., via an uploaded config file).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct CurrentRssUserConfig {
-    // Values provided as-is; not sensitive.
+pub struct CurrentRssUserConfigInsensitive {
     pub bootstrap_sleds: BTreeSet<BootstrapSledDescription>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<String>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
-    pub external_dns_zone_name: Option<String>,
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub external_dns_zone_name: String,
+    pub rack_network_config: RackNetworkConfig,
+}
 
-    // Sensitive values replaced with "has it been provided" markers.
-    // TODO: maybe replace with a vec of cert names?
+// This is a summary of the subset of `RackInitializeRequest` that is sensitive;
+// we only report a summary instead of returning actual data.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfigSensitive {
     pub num_external_certificates: usize,
     pub recovery_silo_password_set: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct CurrentRssUserConfig {
+    pub sensitive: CurrentRssUserConfigSensitive,
+    pub insensitive: CurrentRssUserConfigInsensitive,
 }
 
 // The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
 // provided by the wicket user uploading a TOML file, currently.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct PutRssUserConfig {
-    pub bootstrap_sleds: BTreeSet<SpIdentifier>,
+pub struct PutRssUserConfigInsensitive {
+    /// List of slot numbers only.
+    ///
+    /// `wicketd` will map this back to sleds with the correct `SpIdentifier`
+    /// based on the `bootstrap_sleds` it provides in
+    /// `CurrentRssUserConfigInsensitive`.
+    pub bootstrap_sleds: BTreeSet<u32>,
     pub ntp_servers: Vec<String>,
     pub dns_servers: Vec<String>,
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
@@ -172,7 +183,7 @@ async fn get_rss_config(
 }]
 async fn put_rss_config(
     rqctx: RequestContext<ServerContext>,
-    body: TypedBody<PutRssUserConfig>,
+    body: TypedBody<PutRssUserConfigInsensitive>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let ctx = rqctx.context();
 
