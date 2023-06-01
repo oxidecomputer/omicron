@@ -13,16 +13,50 @@
 //! that information from the trust quorum database, parse it, and write
 //! it to CockroachDB when we start it up.
 
-mod coordinator;
-mod db;
+pub mod trust_quorum;
 
-// Only public for integration tests
-pub mod messages;
+use serde::{Deserialize, Serialize};
 
-mod node;
-mod trust_quorum;
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sha3_256Digest([u8; 32]);
 
-pub use coordinator::Coordinator;
-pub use coordinator::Error;
-pub use node::Config;
-pub use node::Node;
+// We keep these in a module to prevent naming conflicts
+#[allow(unused)]
+pub mod scheme_params {
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct ChaCha20Poly1305;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Sha3_256;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Hkdf;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Tcp;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct No;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Curve25519;
+
+    #[derive(Default, Debug, Clone, Copy)]
+    pub struct Cbor;
+}
+
+/// A static description of the V0 scheme for trust quorum
+///
+/// This is primarily for informational purposes.
+use scheme_params::*;
+#[allow(unused)]
+#[derive(Default, Debug, Clone, Copy)]
+pub struct V0Scheme {
+    encryption_algorithm: ChaCha20Poly1305,
+    hash_algorithm: Sha3_256,
+    key_derivation: Hkdf,
+    trust_quorum_transport: Tcp,
+    trusted_group_membership: No,
+    shamir_curve: Curve25519,
+    serialization: Cbor,
+}
