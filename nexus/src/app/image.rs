@@ -416,12 +416,17 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::SiloImage(lookup) => {
-                let (_, authz_silo_image) =
-                    lookup.lookup_for(authz::Action::Modify).await?;
+                let (_, authz_silo_image, silo_image) =
+                    lookup.fetch_for(authz::Action::Modify).await?;
                 let (_, authz_project) =
                     project_lookup.lookup_for(authz::Action::Modify).await?;
                 self.db_datastore
-                    .silo_image_demote(opctx, &authz_silo_image, &authz_project)
+                    .silo_image_demote(
+                        opctx,
+                        &authz_silo_image,
+                        &authz_project,
+                        &silo_image,
+                    )
                     .await
             }
             ImageLookup::ProjectImage(_) => Err(Error::InvalidRequest {

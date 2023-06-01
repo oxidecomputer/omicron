@@ -229,6 +229,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo_image: &authz::SiloImage,
         authz_project: &authz::Project,
+        silo_image: &SiloImage,
     ) -> UpdateResult<Image> {
         opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
@@ -247,7 +248,10 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByResource(authz_silo_image),
+                    ErrorHandler::Conflict(
+                        ResourceType::ProjectImage,
+                        silo_image.name().as_str(),
+                    ),
                 )
             })?;
         Ok(image)
