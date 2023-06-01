@@ -3,7 +3,7 @@
 #: name = "helios / build trampoline OS image"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "1.68.2"
+#: rust_toolchain = "1.70.0"
 #: output_rules = [
 #:	"=/work/helios/image/output/os.tar.gz",
 #: ]
