@@ -118,26 +118,26 @@ pub struct LearnedSharePkgV0 {
 /// Create a package for each sled
 pub fn create_pkgs(
     rack_uuid: Uuid,
-    n: usize,
+    n: u8,
 ) -> Result<Secret<Vec<SharePkgV0>>, TrustQuorumError> {
     let rack_secret = RackSecret::new();
     let threshold = n / 2 + 1;
     let epoch = 0;
     // We always generate 255 shares to allow new sleds to come online
     let total_shares = 255;
-    let shares_per_sled = total_shares / n;
+    let shares_per_sled = (total_shares / n) as usize;
     let shares = rack_secret.split(threshold, total_shares)?;
     let share_digests = share_digests(&shares);
     let mut salt = [0u8; 32];
     OsRng.fill_bytes(&mut salt);
     let cipher = derive_encryption_key(&rack_uuid, &rack_secret, &salt);
-    let mut pkgs = Vec::with_capacity(n);
+    let mut pkgs = Vec::with_capacity(n as usize);
     for i in 0..n {
         // Each pkg gets a distinct subset of shares
         let mut iter = shares
             .expose_secret()
             .iter()
-            .skip(i * shares_per_sled)
+            .skip(i as usize * shares_per_sled)
             .take(shares_per_sled);
         let share = iter.next().unwrap();
         let plaintext_len = (shares_per_sled - 1) * SHARE_SIZE;
@@ -154,9 +154,9 @@ pub fn create_pkgs(
             .map_err(|_| TrustQuorumError::FailedToEncrypt)?;
 
         let pkg = SharePkgV0 {
-            rack_uuid: rack_uuid.clone(),
+            rack_uuid,
             epoch,
-            threshold: threshold.try_into().unwrap(),
+            threshold,
             share: share.clone(),
             share_digests: share_digests.clone(),
             salt,
@@ -174,10 +174,10 @@ pub fn create_pkgs(
 // We know we only have up to 32 packages (1 for each sled), so we fill the
 // first 11 bytes of the nonce with random bytes, and the last byte with
 // a counter.
-fn new_nonce(i: usize) -> [u8; 12] {
+fn new_nonce(i: u8) -> [u8; 12] {
     let mut nonce = [0u8; 12];
     OsRng.fill_bytes(&mut nonce[..11]);
-    nonce[11] = u8::try_from(i).unwrap();
+    nonce[11] = i;
     nonce
 }
 
@@ -186,7 +186,7 @@ fn share_digests(shares: &Secret<Vec<Vec<u8>>>) -> Vec<Sha3_256Digest> {
         .expose_secret()
         .iter()
         .map(|s| {
-            Sha3_256Digest(Sha3_256::digest(&s).as_slice().try_into().unwrap())
+            Sha3_256Digest(Sha3_256::digest(s).as_slice().try_into().unwrap())
         })
         .collect()
 }
@@ -205,7 +205,7 @@ fn derive_encryption_key(
     // The "info" string is context to bind the key to its purpose
     let mut key = Zeroizing::new([0u8; 32]);
     prk.expand_multi_info(
-        &[b"trust-quorum-v0-key-shares-", &rack_uuid.as_ref()],
+        &[b"trust-quorum-v0-key-shares-", rack_uuid.as_ref()],
         key.as_mut(),
     )
     .unwrap();
@@ -291,7 +291,7 @@ mod tests {
 
         // We divide all shares among each package, and leave one of them
         // unencrypted
-        let num_encrypted_shares_per_pkg = 255 / num_sleds - 1;
+        let num_encrypted_shares_per_pkg = (255 / num_sleds - 1) as usize;
 
         // Decrypt shares for each package
         let mut decrypted_shares: Vec<Vec<u8>> = vec![];
@@ -309,7 +309,7 @@ mod tests {
 
         assert_eq!(
             decrypted_shares.len(),
-            (num_encrypted_shares_per_pkg + 1) * num_sleds
+            (num_encrypted_shares_per_pkg + 1) * num_sleds as usize
         );
 
         let hashes = packages.expose_secret()[0].share_digests.clone();

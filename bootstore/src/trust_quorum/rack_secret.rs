@@ -60,13 +60,13 @@ impl RackSecret {
     /// `threshold` of the shares can be used to recover the secret.
     pub fn split(
         &self,
-        threshold: usize,
-        total_shares: usize,
+        threshold: u8,
+        total_shares: u8,
     ) -> Result<Secret<Vec<Vec<u8>>>, vsss_rs::Error> {
         let mut rng = OsRng::default();
         Ok(Secret::new(shamir::split_secret::<WrappedScalar, u8, Vec<u8>>(
-            threshold,
-            total_shares,
+            threshold as usize,
+            total_shares as usize,
             (*self.secret.expose_secret()).into(),
             &mut rng,
         )?))
