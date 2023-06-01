@@ -1,14 +1,3 @@
-use chrono::Utc;
-use diesel::prelude::*;
-use nexus_db_model::Name;
-use nexus_types::identity::Resource;
-use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::ResourceType;
-use omicron_common::api::external::UpdateResult;
-use ref_cast::RefCast;
-
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
@@ -23,8 +12,17 @@ use crate::db::model::ProjectImage;
 use crate::db::model::Silo;
 use crate::db::model::SiloImage;
 use crate::db::pagination::paginated;
-
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
+use diesel::prelude::*;
+use nexus_db_model::Name;
+use nexus_types::identity::Resource;
+use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
+use ref_cast::RefCast;
 use uuid::Uuid;
 
 use super::DataStore;
@@ -197,12 +195,13 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         authz_project_image: &authz::ProjectImage,
+        project_image: &ProjectImage,
     ) -> UpdateResult<Image> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use db::schema::image::dsl;
-        let image: Image = diesel::update(dsl::image)
+        let image = diesel::update(dsl::image)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_project_image.id()))
             .set((
@@ -215,9 +214,13 @@ impl DataStore {
             .map_err(|e| {
                 public_error_from_diesel_pool(
                     e,
-                    ErrorHandler::NotFoundByResource(authz_project_image),
+                    ErrorHandler::Conflict(
+                        ResourceType::SiloImage,
+                        project_image.name().as_str(),
+                    ),
                 )
             })?;
+
         Ok(image)
     }
 

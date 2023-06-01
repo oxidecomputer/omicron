@@ -387,8 +387,8 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                let (authz_silo, _, authz_project_image) =
-                    lookup.lookup_for(authz::Action::Modify).await?;
+                let (authz_silo, _, authz_project_image, project_image) =
+                    lookup.fetch_for(authz::Action::Modify).await?;
                 opctx
                     .authorize(authz::Action::CreateChild, &authz_silo)
                     .await?;
@@ -397,6 +397,7 @@ impl super::Nexus {
                         opctx,
                         &authz_silo,
                         &authz_project_image,
+                        &project_image,
                     )
                     .await
             }
