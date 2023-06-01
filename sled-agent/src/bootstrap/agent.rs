@@ -36,7 +36,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::HardwareManager;
+use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
@@ -199,6 +199,9 @@ pub struct Agent {
     // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
     // gets recreated.
     storage_key_requester: StorageKeyRequester,
+
+    /// Our sled's baseboard identity.
+    baseboard: Baseboard,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
@@ -398,6 +401,7 @@ impl Agent {
         .await?;
 
         let storage_resources = hardware_monitor.storage().clone();
+        let baseboard = hardware_monitor.baseboard().clone();
 
         let agent = Agent {
             log: ba_log,
@@ -414,6 +418,7 @@ impl Agent {
             global_zone_bootstrap_link_local_address,
             key_manager_handle: handle,
             storage_key_requester,
+            baseboard,
         };
 
         // Wait for at least the M.2 we booted from to show up.
@@ -444,6 +449,10 @@ impl Agent {
         }
 
         Ok(agent)
+    }
+
+    pub fn baseboard(&self) -> &Baseboard {
+        &self.baseboard
     }
 
     async fn start_hardware_monitor(

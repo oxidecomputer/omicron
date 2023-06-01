@@ -9,7 +9,7 @@ use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
 use key_manager::StorageKeyRequester;
-use sled_hardware::{DendriteAsic, HardwareManager, SledMode};
+use sled_hardware::{Baseboard, DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
 use std::net::Ipv6Addr;
 use thiserror::Error;
@@ -142,6 +142,7 @@ pub(crate) struct HardwareMonitor {
         Result<(HardwareManager, ServiceManager, StorageManager), Error>,
     >,
     storage_resources: StorageResources,
+    baseboard: Baseboard,
 }
 
 impl HardwareMonitor {
@@ -234,6 +235,7 @@ impl HardwareMonitor {
     ) -> Self {
         let (exit_tx, exit_rx) = oneshot::channel();
         let storage_resources = storage.resources().clone();
+        let baseboard = hardware.baseboard();
         let worker = HardwareMonitorWorker::new(
             log.clone(),
             exit_rx,
@@ -243,11 +245,15 @@ impl HardwareMonitor {
         );
         let handle = tokio::spawn(async move { worker.run().await });
 
-        Self { exit_tx, handle, storage_resources }
+        Self { exit_tx, handle, storage_resources, baseboard }
     }
 
     pub fn storage(&self) -> &StorageResources {
         &self.storage_resources
+    }
+
+    pub fn baseboard(&self) -> &Baseboard {
+        &self.baseboard
     }
 
     // Stops the task from executing
