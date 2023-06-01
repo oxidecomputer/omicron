@@ -7,7 +7,7 @@
 use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
-use crate::bootstrap::params::SledAgentRequest;
+use crate::bootstrap::params::StartSledAgentRequest;
 use crate::nexus::LazyNexusClient;
 use crate::services::ServiceManager;
 use crate::storage_manager::StorageManager;
@@ -35,7 +35,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: Logger,
-        request: SledAgentRequest,
+        request: StartSledAgentRequest,
         services: ServiceManager,
         storage: StorageManager,
     ) -> Result<Server, String> {

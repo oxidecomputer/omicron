@@ -41,9 +41,8 @@ pub enum UpdateStepId {
     TestStep,
     SetHostPowerState { state: PowerState },
     InterrogateRot,
-    ResetRot,
-    ResetSp,
-    SpComponentUpdate { stage: SpComponentUpdateStage },
+    InterrogateSp,
+    SpComponentUpdate,
     SettingInstallinatorImageId,
     ClearingInstallinatorImageId,
     SettingHostStartupOptions,
@@ -63,6 +62,29 @@ impl StepSpec for WicketdEngineSpec {
 }
 
 update_engine::define_update_engine!(pub WicketdEngineSpec);
+
+#[derive(JsonSchema)]
+pub enum SpComponentUpdateSpec {}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "id", rename_all = "snake_case")]
+pub enum SpComponentUpdateStepId {
+    Sending,
+    Preparing,
+    Writing,
+    SettingActiveBootSlot,
+    Resetting,
+}
+
+impl StepSpec for SpComponentUpdateSpec {
+    type Component = UpdateComponent;
+    type StepId = SpComponentUpdateStepId;
+    type StepMetadata = serde_json::Value;
+    type ProgressMetadata = serde_json::Value;
+    type CompletionMetadata = serde_json::Value;
+    type SkippedMetadata = serde_json::Value;
+    type Error = UpdateTerminalError;
+}
 
 #[derive(Debug, Error)]
 pub enum UpdateTerminalError {
@@ -92,6 +114,11 @@ pub enum UpdateTerminalError {
     RotResetFailed {
         #[source]
         error: anyhow::Error,
+    },
+    #[error("getting SP caboose failed")]
+    GetSpCabooseFailed {
+        #[source]
+        error: gateway_client::Error<gateway_client::types::Error>,
     },
     #[error("SP reset failed")]
     SpResetFailed {

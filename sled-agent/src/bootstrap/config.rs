@@ -4,7 +4,6 @@
 
 //! Interfaces for working with bootstrap agent configuration
 
-use crate::sp::SimSpConfig;
 use crate::updates::ConfigUpdates;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::PhysicalLink;
@@ -13,7 +12,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 pub const BOOTSTRAP_AGENT_HTTP_PORT: u16 = 80;
-pub const BOOTSTRAP_AGENT_SPROCKETS_PORT: u16 = 12346;
+pub const BOOTSTRAP_AGENT_RACK_INIT_PORT: u16 = 12346;
 
 /// Configuration for a bootstrap agent
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -22,5 +21,4 @@ pub struct Config {
     pub link: PhysicalLink,
     pub log: ConfigLogging,
     pub updates: ConfigUpdates,
-    pub sp_config: Option<SimSpConfig>,
 }

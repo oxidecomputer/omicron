@@ -4,6 +4,7 @@
 
 //! Nexus, the service that operates much of the control plane in an Oxide fleet
 
+use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::authn;
 use crate::authz;
@@ -26,10 +27,12 @@ use uuid::Uuid;
 
 // The implementation of Nexus is large, and split into a number of submodules
 // by resource.
+mod address_lot;
 pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
+mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;
@@ -47,6 +50,8 @@ mod sled;
 mod sled_instance;
 mod snapshot;
 mod switch;
+mod switch_interface;
+mod switch_port;
 pub mod test_interfaces;
 mod update;
 mod volume;
@@ -67,48 +72,6 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 
 // TODO-completeness: Support multiple external IPs
 pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 1;
-
-pub(crate) struct ExternalServers {
-    config: dropshot::ConfigDropshot,
-    https_port: u16,
-    http: Option<DropshotServer>,
-    https: Option<DropshotServer>,
-}
-
-impl ExternalServers {
-    pub fn new(config: dropshot::ConfigDropshot, https_port: u16) -> Self {
-        Self { config, https_port, http: None, https: None }
-    }
-
-    pub fn set_http(&mut self, http: DropshotServer) {
-        self.http = Some(http);
-    }
-
-    pub fn set_https(&mut self, https: DropshotServer) {
-        self.https = Some(https);
-    }
-
-    pub fn https_port(&self) -> u16 {
-        self.https_port
-    }
-
-    /// Returns a context object, if one exists.
-    pub fn get_context(&self) -> Option<Arc<crate::ServerContext>> {
-        if let Some(context) =
-            self.https.as_ref().map(|server| server.app_private())
-        {
-            // If an HTTPS server is already running, use that server context.
-            Some(context.clone())
-        } else if let Some(context) =
-            self.http.as_ref().map(|server| server.app_private())
-        {
-            // If an HTTP server is already running, use that server context.
-            Some(context.clone())
-        } else {
-            None
-        }
-    }
-}
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -134,7 +97,7 @@ pub struct Nexus {
     recovery_task: std::sync::Mutex<Option<db::RecoveryTask>>,
 
     /// External dropshot servers
-    external_servers: Mutex<ExternalServers>,
+    external_server: std::sync::Mutex<Option<DropshotServer>>,
 
     /// Internal dropshot server
     internal_server: std::sync::Mutex<Option<DropshotServer>>,
@@ -275,10 +238,7 @@ impl Nexus {
             authz: Arc::clone(&authz),
             sec_client: Arc::clone(&sec_client),
             recovery_task: std::sync::Mutex::new(None),
-            external_servers: Mutex::new(ExternalServers::new(
-                config.deployment.dropshot_external.clone(),
-                config.pkg.nexus_https_port,
-            )),
+            external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
@@ -375,26 +335,50 @@ impl Nexus {
         }
     }
 
+    pub async fn external_tls_config(
+        &self,
+        tls_enabled: bool,
+    ) -> Option<rustls::ServerConfig> {
+        if !tls_enabled {
+            return None;
+        }
+
+        // Wait for the background task to complete at least once.  We don't
+        // care about its value.  To do this, we need our own copy of the
+        // channel.
+        let mut rx = self.background_tasks.external_endpoints.clone();
+        let _ = rx.wait_for(|s| s.is_some()).await;
+        let mut rustls_cfg = rustls::ServerConfig::builder()
+            .with_safe_default_cipher_suites()
+            .with_safe_default_kx_groups()
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_cert_resolver(Arc::new(NexusCertResolver::new(
+                self.log.new(o!("component" => "NexusCertResolver")),
+                self.background_tasks.external_endpoints.clone(),
+            )));
+        rustls_cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+        Some(rustls_cfg)
+    }
+
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,
-        external_servers: ExternalServers,
+        external_server: DropshotServer,
         internal_server: DropshotServer,
     ) {
         // If any servers already exist, close them.
         let _ = self.close_servers().await;
 
         // Insert the new servers.
-        *self.external_servers.lock().await = external_servers;
+        self.external_server.lock().unwrap().replace(external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
     }
 
     pub async fn close_servers(&self) -> Result<(), String> {
-        let mut external_servers = self.external_servers.lock().await;
-        if let Some(server) = external_servers.http.take() {
-            server.close().await?;
-        }
-        if let Some(server) = external_servers.https.take() {
+        let external_server = self.external_server.lock().unwrap().take();
+        if let Some(server) = external_server {
             server.close().await?;
         }
         let internal_server = self.internal_server.lock().unwrap().take();
@@ -421,18 +405,14 @@ impl Nexus {
         Ok(())
     }
 
-    pub async fn get_http_external_server_address(
+    pub async fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
-        let external_servers = self.external_servers.lock().await;
-        external_servers.http.as_ref().map(|server| server.local_addr())
-    }
-
-    pub async fn get_https_external_server_address(
-        &self,
-    ) -> Option<std::net::SocketAddr> {
-        let external_servers = self.external_servers.lock().await;
-        external_servers.https.as_ref().map(|server| server.local_addr())
+        self.external_server
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|server| server.local_addr())
     }
 
     pub async fn get_internal_server_address(

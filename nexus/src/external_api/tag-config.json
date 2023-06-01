@@ -139,6 +139,12 @@
       "external_docs": {
         "url": "http://oxide.computer/docs/#xxx"
       }
+    },
+    "external-networking": {
+      "description": "External networking information",
+      "external_docs": {
+        "url": "http://oxide.computer/docs/#xxx"
+      }
     }
   }
 }

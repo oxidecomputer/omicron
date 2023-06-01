@@ -548,7 +548,7 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_not_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         setup_db(&pool).await;
 
@@ -578,7 +578,7 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&cfg);
+        let pool = db::Pool::new(&logctx.log, &cfg);
 
         setup_db(&pool).await;
 

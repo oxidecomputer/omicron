@@ -4,12 +4,14 @@
 
 //! Smoke tests for the omicron-dev command-line tool
 
+use anyhow::Context;
 use expectorate::assert_contents;
 use omicron_test_utils::dev::db::has_omicron_schema;
 use omicron_test_utils::dev::process_running;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_test_utils::dev::test_cmds::EXIT_USAGE;
 use oxide_client::ClientHiddenExt;
 use std::io::BufRead;
@@ -511,4 +513,39 @@ fn test_omicron_dev_db_wipe_no_args() {
         "tests/output/cmd-omicron-dev-db-wipe-noargs-stderr",
         &stderr_text,
     );
+}
+
+#[test]
+fn test_cert_create() {
+    let tmpdir = camino_tempfile::tempdir().unwrap();
+    println!("tmpdir: {}", tmpdir.path());
+    let output_base = format!("{}/test-", tmpdir.path());
+    let exec = Exec::cmd(path_to_omicron_dev())
+        .arg("cert-create")
+        .arg(output_base)
+        .arg("foo.example")
+        .arg("bar.example");
+    let (exit_status, _, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+    let cert_path = tmpdir.path().join("test-cert.pem");
+    let key_path = tmpdir.path().join("test-key.pem");
+    let cert_contents = std::fs::read(&cert_path)
+        .with_context(|| format!("reading certificate path {:?}", cert_path))
+        .unwrap();
+    let key_contents = std::fs::read(&key_path)
+        .with_context(|| format!("reading private key path: {:?}", key_path))
+        .unwrap();
+    let certs_pem = openssl::x509::X509::stack_from_pem(&cert_contents)
+        .context("parsing certificate")
+        .unwrap();
+    let private_key = openssl::pkey::PKey::private_key_from_pem(&key_contents)
+        .context("parsing private key")
+        .unwrap();
+    assert!(certs_pem
+        .iter()
+        .last()
+        .unwrap()
+        .public_key()
+        .unwrap()
+        .public_eq(&private_key));
 }

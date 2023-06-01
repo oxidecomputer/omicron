@@ -20,8 +20,8 @@ use illumos_utils::{
 };
 use installinator_common::{
     ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
-    StepProgress, StepResult, UpdateEngine, WriteComponent, WriteError,
-    WriteOutput, WriteSpec, WriteStepId,
+    StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
+    WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
 use omicron_common::update::ArtifactHashId;
 use slog::{info, warn, Logger};
@@ -464,7 +464,7 @@ impl ArtifactsToWrite<'_> {
             error
         })?;
 
-        StepResult::success(transport, ())
+        StepSuccess::new(transport).into()
     }
 
     // Attempt to write the control plane image.
@@ -506,7 +506,8 @@ impl ArtifactsToWrite<'_> {
             "finished writing {} control plane zones",
             self.control_plane_zones.zones.len()
         );
-        StepResult::success((), ())
+
+        StepSuccess::new(()).into()
     }
 }
 
@@ -550,7 +551,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                             WriteError::RemoveFilesError { path, error }
                         })?;
 
-                        StepResult::success((), ())
+                        StepSuccess::new(()).into()
                     },
                 )
                 .register();
@@ -582,7 +583,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         )
                         .await?;
 
-                        StepResult::success(transport, ())
+                        StepSuccess::new(transport).into()
                     },
                 )
                 .register();
@@ -613,7 +614,7 @@ impl ControlPlaneZoneWriteContext<'_> {
                         Zpool::export(zpool)?;
                     }
 
-                    StepResult::success((), ())
+                    StepSuccess::new(()).into()
                 },
             )
             .register();
@@ -1052,12 +1053,11 @@ mod tests {
                             &mut control_plane_transport,
                         )
                         .await;
-                    StepResult::success(
-                        (),
-                        InstallinatorCompletionMetadata::Write {
+                    StepSuccess::new(())
+                        .with_metadata(InstallinatorCompletionMetadata::Write {
                             output: write_output,
-                        },
-                    )
+                        })
+                        .into()
                 },
             )
             .register();
@@ -1085,7 +1085,10 @@ mod tests {
                     match last_outcome {
                         StepOutcome::Success {
                             metadata:
-                                InstallinatorCompletionMetadata::Write { output },
+                                Some(InstallinatorCompletionMetadata::Write {
+                                    output,
+                                }),
+                            ..
                         } => {
                             assert_eq!(
                                 &output

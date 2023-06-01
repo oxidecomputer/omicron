@@ -110,6 +110,10 @@ impl Server {
                             config.hardware.physical_ram,
                         )
                         .unwrap(),
+                        reservoir_size: NexusTypes::ByteCount::try_from(
+                            config.hardware.reservoir_ram,
+                        )
+                        .unwrap(),
                     },
                 )
                 .await)
@@ -286,15 +290,19 @@ impl Server {
         if let Some(external_dns_internal_addr) =
             rss_args.external_dns_internal_addr
         {
+            let ip = *external_dns_internal_addr.ip();
             services.push(NexusTypes::ServicePutRequest {
                 address: external_dns_internal_addr.to_string(),
                 kind: NexusTypes::ServiceKind::ExternalDns {
-                    external_address: (*external_dns_internal_addr.ip()).into(),
+                    external_address: ip.into(),
                 },
                 service_id: Uuid::new_v4(),
                 sled_id: config.id,
                 zone_id: Some(Uuid::new_v4()),
             });
+
+            internal_services_ip_pool_ranges
+                .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));
         }
 
         let recovery_silo = NexusTypes::RecoverySiloConfig {
@@ -314,15 +322,22 @@ impl Server {
                 .unwrap(),
         };
 
+        let certs = match &rss_args.tls_certificate {
+            Some(c) => vec![c.clone()],
+            None => vec![],
+        };
+
         let rack_init_request = NexusTypes::RackInitializationRequest {
             services,
             datasets,
             internal_services_ip_pool_ranges,
-            certs: vec![],
+            certs,
             internal_dns_zone_config: d2n_params(&dns_config),
             external_dns_zone_name:
                 internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_owned(),
             recovery_silo,
+            external_port_count: 1,
+            rack_network_config: None,
         };
 
         Ok((
@@ -387,6 +402,9 @@ pub struct RssArgs {
     /// Specify the (internal) address of an external DNS server so that Nexus
     /// will know about it and keep it up to date
     pub external_dns_internal_addr: Option<SocketAddrV6>,
+    /// Specify a certificate and associated private key for the initial Silo's
+    /// initial TLS certificates
+    pub tls_certificate: Option<NexusTypes::Certificate>,
 }
 
 /// Run an instance of the `Server`

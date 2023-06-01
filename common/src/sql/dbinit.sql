@@ -84,6 +84,7 @@ CREATE TABLE omicron.public.sled (
     /* CPU & RAM summary for the sled */
     usable_hardware_threads INT8 CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
     usable_physical_ram INT8 NOT NULL,
+    reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
 
     /* The IP address and bound port of the sled agent server. */
     ip INET NOT NULL,
@@ -1619,9 +1620,6 @@ CREATE UNIQUE INDEX ON omicron.public.external_ip (
  * Sagas
  */
 
-/*
- * TODO This may eventually have 'paused', 'needs-operator', and 'needs-support'
- */
 CREATE TYPE omicron.public.saga_state AS ENUM (
     'running',
     'unwinding',
@@ -2207,6 +2205,264 @@ CREATE TABLE omicron.public.role_assignment (
         identity_type
      )
 );
+
+/*******************************************************************/
+
+/*
+ * External Networking
+ *
+ * **For more details on external networking see RFD 267**
+ */
+
+CREATE TYPE omicron.public.address_lot_kind AS ENUM (
+    'infra',
+    'pool'
+);
+
+CREATE TABLE omicron.public.address_lot (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    kind omicron.public.address_lot_kind NOT NULL
+);
+
+CREATE UNIQUE INDEX ON omicron.public.address_lot (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.address_lot_block (
+    id UUID PRIMARY KEY,
+    address_lot_id UUID NOT NULL,
+    first_address INET NOT NULL,
+    last_address INET NOT NULL
+);
+
+CREATE INDEX ON omicron.public.address_lot_block (
+    address_lot_id
+);
+
+CREATE TABLE omicron.public.address_lot_rsvd_block (
+    id UUID PRIMARY KEY,
+    address_lot_id UUID NOT NULL,
+    first_address INET NOT NULL,
+    last_address INET NOT NULL
+);
+
+CREATE INDEX ON omicron.public.address_lot_rsvd_block (
+    address_lot_id
+);
+
+CREATE TABLE omicron.public.loopback_address (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    address_lot_block_id UUID NOT NULL,
+    rsvd_address_lot_block_id UUID NOT NULL,
+    rack_id UUID NOT NULL,
+    switch_location TEXT NOT NULL,
+    address INET NOT NULL
+);
+
+/* TODO https://github.com/oxidecomputer/omicron/issues/3001 */
+
+CREATE UNIQUE INDEX ON omicron.public.loopback_address (
+    address, rack_id, switch_location
+);
+
+CREATE TABLE omicron.public.switch_port (
+    id UUID PRIMARY KEY,
+    rack_id UUID,
+    switch_location TEXT,
+    port_name TEXT,
+    port_settings_id UUID,
+
+    CONSTRAINT switch_port_rack_locaction_name_unique UNIQUE (
+        rack_id, switch_location, port_name
+    )
+);
+
+/* port settings groups included from port settings objects */
+CREATE TABLE omicron.public.switch_port_settings_groups (
+    port_settings_id UUID,
+    port_settings_group_id UUID,
+
+    PRIMARY KEY (port_settings_id, port_settings_group_id)
+);
+
+CREATE TABLE omicron.public.switch_port_settings_group (
+    id UUID PRIMARY KEY,
+    /* port settings in this group */
+    port_settings_id UUID NOT NULL,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.switch_port_settings_group (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.switch_port_settings (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.switch_port_settings (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TYPE omicron.public.switch_port_geometry AS ENUM (
+    'Qsfp28x1',
+    'Qsfp28x2',
+    'Sfp28x4'
+);
+
+CREATE TABLE omicron.public.switch_port_settings_port_config (
+    port_settings_id UUID PRIMARY KEY,
+    geometry omicron.public.switch_port_geometry
+);
+
+CREATE TABLE omicron.public.switch_port_settings_link_config (
+    port_settings_id UUID,
+    lldp_service_config_id UUID NOT NULL,
+    link_name TEXT,
+    mtu INT4,
+
+    PRIMARY KEY (port_settings_id, link_name)
+);
+
+CREATE TABLE omicron.public.lldp_service_config (
+    id UUID PRIMARY KEY,
+    lldp_config_id UUID,
+    enabled BOOL NOT NULL
+);
+
+CREATE TABLE omicron.public.lldp_config (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    chassis_id TEXT,
+    system_name TEXT,
+    system_description TEXT,
+    management_ip TEXT
+);
+
+CREATE UNIQUE INDEX ON omicron.public.lldp_config (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TYPE omicron.public.switch_interface_kind AS ENUM (
+    'primary',
+    'vlan',
+    'loopback'
+);
+
+CREATE TABLE omicron.public.switch_port_settings_interface_config (
+    port_settings_id UUID,
+    id UUID PRIMARY KEY,
+    interface_name TEXT NOT NULL,
+    v6_enabled BOOL NOT NULL,
+    kind omicron.public.switch_interface_kind
+);
+
+CREATE UNIQUE INDEX ON omicron.public.switch_port_settings_interface_config (
+    port_settings_id, interface_name
+);
+
+CREATE TABLE omicron.public.switch_vlan_interface_config (
+    interface_config_id UUID,
+    vid INT4,
+
+    PRIMARY KEY (interface_config_id, vid)
+);
+
+CREATE TABLE omicron.public.switch_port_settings_route_config (
+    port_settings_id UUID,
+    interface_name TEXT,
+    dst INET,
+    gw INET,
+
+    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
+    PRIMARY KEY (port_settings_id, interface_name, dst, gw)
+);
+
+CREATE TABLE omicron.public.switch_port_settings_bgp_peer_config (
+    port_settings_id UUID,
+    bgp_announce_set_id UUID NOT NULL,
+    bgp_config_id UUID NOT NULL,
+    interface_name TEXT,
+    addr INET,
+
+    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
+    PRIMARY KEY (port_settings_id, interface_name, addr)
+);
+
+CREATE TABLE omicron.public.bgp_config (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    asn INT8 NOT NULL,
+    vrf TEXT
+);
+
+CREATE UNIQUE INDEX ON omicron.public.bgp_config (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.bgp_announce_set (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX ON omicron.public.bgp_announce_set (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE omicron.public.bgp_announcement (
+    announce_set_id UUID,
+    address_lot_block_id UUID NOT NULL,
+    network INET,
+
+    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
+    PRIMARY KEY (announce_set_id, network)
+);
+
+CREATE TABLE omicron.public.switch_port_settings_address_config (
+    port_settings_id UUID,
+    address_lot_block_id UUID NOT NULL,
+    rsvd_address_lot_block_id UUID NOT NULL,
+    address INET,
+    interface_name TEXT,
+
+    /* TODO https://github.com/oxidecomputer/omicron/issues/3013 */
+    PRIMARY KEY (port_settings_id, address, interface_name)
+);
+
 
 /*******************************************************************/
 

@@ -443,7 +443,7 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&cfg));
+        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
         let db_datastore =
             Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
 

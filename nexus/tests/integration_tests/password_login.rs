@@ -144,7 +144,7 @@ async fn test_local_user_basic(client: &ClientTestContext, silo: &views::Silo) {
 
     // Log out of the first session.
     NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/logout")
+        RequestBuilder::new(client, Method::POST, "/v1/logout")
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .authn_as(AuthnMode::Session(session_token.to_string()))
@@ -390,7 +390,7 @@ async fn expect_login_failure(
     password: params::Password,
 ) {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}/local", silo_name);
+    let login_url = format!("/v1/login/{}/local", silo_name);
     let error: dropshot::HttpErrorResponseBody =
         NexusRequest::expect_failure_with_body(
             client,
@@ -430,10 +430,10 @@ async fn expect_login_success(
     password: params::Password,
 ) -> String {
     let start = std::time::Instant::now();
-    let login_url = format!("/login/{}/local", silo_name);
+    let login_url = format!("/v1/login/{}/local", silo_name);
     let response = RequestBuilder::new(client, Method::POST, &login_url)
         .body(Some(&params::UsernamePasswordCredentials { username, password }))
-        .expect_status(Some(StatusCode::SEE_OTHER))
+        .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("expected successful login, but it failed");

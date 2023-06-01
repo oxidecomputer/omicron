@@ -63,7 +63,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
         let name = allocator.next();
         debug_assert!(name.starts_with(VNIC_PREFIX));
         debug_assert!(name.starts_with(VNIC_PREFIX_CONTROL));
-        Dladm::create_vnic(&self.data_link, &name, mac, None)?;
+        Dladm::create_vnic(&self.data_link, &name, mac, None, 9000)?;
         Ok(Link {
             name,
             deleted: false,
@@ -99,7 +99,7 @@ impl<DL: VnicSource + Clone> VnicAllocator<DL> {
 
     pub fn new_bootstrap(&self) -> Result<Link, CreateVnicError> {
         let name = self.next();
-        Dladm::create_vnic(&self.data_link, &name, None, None)?;
+        Dladm::create_vnic(&self.data_link, &name, None, None, 1500)?;
         Ok(Link {
             name,
             deleted: false,

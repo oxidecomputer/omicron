@@ -10,7 +10,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Args, Parser, Subcommand};
 use installinator_common::{
     InstallinatorCompletionMetadata, InstallinatorComponent, InstallinatorSpec,
-    InstallinatorStepId, StepContext, StepHandle, StepProgress, UpdateEngine,
+    InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
+    StepWarning, UpdateEngine,
 };
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
@@ -204,10 +205,13 @@ impl InstallOpts {
 
                     let address = host_phase_2_artifact.addr;
 
-                    StepResult::success(
-                        host_phase_2_artifact,
-                        InstallinatorCompletionMetadata::Download { address },
-                    )
+                    StepSuccess::new(host_phase_2_artifact)
+                        .with_metadata(
+                            InstallinatorCompletionMetadata::Download {
+                                address,
+                            },
+                        )
+                        .into()
                 },
             )
             .register();
@@ -229,10 +233,13 @@ impl InstallOpts {
 
                     let address = control_plane_artifact.addr;
 
-                    StepResult::success(
-                        control_plane_artifact,
-                        InstallinatorCompletionMetadata::Download { address },
-                    )
+                    StepSuccess::new(control_plane_artifact)
+                        .with_metadata(
+                            InstallinatorCompletionMetadata::Download {
+                                address,
+                            },
+                        )
+                        .into()
                 },
             )
             .register();
@@ -273,12 +280,9 @@ impl InstallOpts {
                     .unwrap()?;
 
                     let zones_to_install = zones.zones.len();
-                    StepResult::success(
-                        zones,
-                        InstallinatorCompletionMetadata::ControlPlaneZones {
-                            zones_to_install,
-                        },
-                    )
+                    StepSuccess::new(zones).with_metadata(InstallinatorCompletionMetadata::ControlPlaneZones {
+                        zones_to_install,
+                    }).into()
                 },
             )
             .register();
@@ -313,7 +317,7 @@ impl InstallOpts {
                     };
 
                     if slots_not_written.is_empty() {
-                        StepResult::success((), metadata)
+                        StepSuccess::new(()).with_metadata(metadata).into()
                     } else {
                         // Some slots were not properly written out.
                         let mut message =
@@ -324,7 +328,9 @@ impl InstallOpts {
                                 message.push_str(", ");
                             }
                         }
-                        StepResult::warning((), metadata, message)
+                        StepWarning::new((), message)
+                            .with_metadata(metadata)
+                            .into()
                     }
                 },
             )
@@ -381,10 +387,11 @@ async fn scan_hardware_with_retries(
 
     let destination = result?;
     let disks_found = destination.num_target_disks();
-    StepResult::success(
-        destination,
-        InstallinatorCompletionMetadata::HardwareScan { disks_found },
-    )
+    StepSuccess::new(destination)
+        .with_metadata(InstallinatorCompletionMetadata::HardwareScan {
+            disks_found,
+        })
+        .into()
 }
 
 async fn fetch_artifact(

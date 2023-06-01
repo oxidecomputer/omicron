@@ -240,7 +240,7 @@ impl<R: CryptoRng + RngCore> Hasher<R> {
 /// Parses the given PHC-format password hash string and returns it only if it
 /// meets some basic requirements (which match the way we generate password
 /// hashes).
-pub fn parse_phc_hash(s: &str) -> Result<PasswordHashString, String> {
+fn parse_phc_hash(s: &str) -> Result<PasswordHashString, String> {
     let hash = PasswordHashString::new(s)
         .map_err(|e| format!("password hash: {}", e))?;
     verify_strength(&hash)?;

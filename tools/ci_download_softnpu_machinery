@@ -12,16 +12,17 @@
 if [[ ! -f out/softnpu/softnpu ]]; then
     echo "fetching softnpu"
     # This comes from a separate repo from the below artifacts,
-    # and lacks public Buildomat URLs based on the commit.
-    curl -OL https://buildomat.eng.oxide.computer/wg/0/artefact/01GTD3CPEENJZ9K1VA0J3GYD5D/WZ2Rw4MGOeSr06SEfmyuMfsp7i5rgwzvENWnAUjShI8FGryp/01GTD3D91TCD903Z0BAYSA31JR/01GTD3T8VFSZTE59Y0SVAR4CWC/softnpu
+    SOFTNPU_COMMIT="88f5f1334364e5580fe778c44ac0746a35927351"
+    COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/softnpu/image/$SOFTNPU_COMMIT"
+    curl -OL "$COMMIT_URL/softnpu"
     chmod +x softnpu
     mkdir -p out/softnpu
     mv softnpu out/softnpu/
 fi
 
 # Commit and base URL that's pinned for softnpu tools
-SOFTNPU_COMMIT="9fcec13bd4a4e25035003413f085f448b250884a"
-COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/sidecar-lite/release/$SOFTNPU_COMMIT"
+SIDECAR_LITE_COMMIT="b74895bce931202209a1b958be6ec3062d51742b"
+COMMIT_URL="https://buildomat.eng.oxide.computer/public/file/oxidecomputer/sidecar-lite/release/$SIDECAR_LITE_COMMIT"
 
 # This is an ASIC administration program.
 if [[ ! -f out/softnpu/scadm ]]; then
