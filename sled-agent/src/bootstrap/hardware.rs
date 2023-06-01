@@ -8,6 +8,7 @@ use crate::config::{Config as SledConfig, SledMode as SledModeConfig};
 use crate::services::ServiceManager;
 use crate::storage_manager::{StorageManager, StorageResources};
 use illumos_utils::dladm::{Etherstub, EtherstubVnic};
+use key_manager::StorageKeyRequester;
 use sled_hardware::{Baseboard, DendriteAsic, HardwareManager, SledMode};
 use slog::Logger;
 use std::net::Ipv6Addr;
@@ -147,6 +148,7 @@ pub(crate) struct HardwareMonitor {
 impl HardwareMonitor {
     // Spawns a new task which monitors for hardware and launches the switch
     // zone if the necessary Tofino drivers are detected.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         log: &Logger,
         sled_config: &SledConfig,
@@ -155,6 +157,7 @@ impl HardwareMonitor {
         underlay_etherstub_vnic: EtherstubVnic,
         bootstrap_etherstub: Etherstub,
         switch_zone_bootstrap_address: Ipv6Addr,
+        storage_key_requester: StorageKeyRequester,
     ) -> Result<Self, Error> {
         // Combine the `sled_mode` config with the build-time
         // switch type to determine the actual sled mode.
@@ -190,7 +193,8 @@ impl HardwareMonitor {
         let hardware = HardwareManager::new(log, sled_mode)
             .map_err(|e| Error::Hardware(e))?;
 
-        let storage_manager = StorageManager::new(&log).await;
+        let storage_manager =
+            StorageManager::new(&log, storage_key_requester).await;
 
         // If our configuration asks for synthetic zpools, insert them now.
         if let Some(pools) = &sled_config.zpools {
