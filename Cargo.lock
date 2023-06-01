@@ -2607,7 +2607,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
 dependencies = [
  "bitflags",
  "hubpack 0.1.2",
@@ -2622,7 +2622,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=da51768e10dbe260cc6302bcfd2ac379e275a313#da51768e10dbe260cc6302bcfd2ac379e275a313"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=146a687f7413bfe580869bb6017f3bfe8b4710b1#146a687f7413bfe580869bb6017f3bfe8b4710b1"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3481,9 +3481,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "hkdf",
+ "omicron-common 0.1.0",
  "secrecy",
  "sha3",
- "sled-hardware",
  "thiserror",
  "tokio",
  "zeroize",
@@ -3963,10 +3963,10 @@ dependencies = [
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
+ "omicron-certificates",
  "omicron-common 0.1.0",
  "omicron-passwords",
  "omicron-rpaths",
- "openssl",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -4360,6 +4360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-certificates"
+version = "0.1.0"
+dependencies = [
+ "omicron-common 0.1.0",
+ "openssl",
+ "thiserror",
+]
+
+[[package]]
 name = "omicron-common"
 version = "0.1.0"
 dependencies = [
@@ -4720,6 +4729,7 @@ dependencies = [
  "internal-dns",
  "ipnetwork",
  "itertools",
+ "key-manager",
  "macaddr",
  "mockall",
  "nexus-client 0.1.0",
@@ -7351,6 +7361,7 @@ dependencies = [
  "futures",
  "illumos-devinfo",
  "illumos-utils",
+ "key-manager",
  "libc",
  "libefi-illumos",
  "macaddr",

@@ -7819,6 +7819,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "kind": {
+            "description": "Desired use of `AddressLot`",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AddressLotKind"
+              }
+            ]
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -7841,6 +7849,7 @@
         "required": [
           "description",
           "id",
+          "kind",
           "name",
           "time_created",
           "time_modified"

@@ -2157,6 +2157,21 @@ pub struct AddressLotCreateResponse {
 pub struct AddressLot {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
+
+    /// Desired use of `AddressLot`
+    pub kind: AddressLotKind,
+}
+
+/// The kind associated with an address lot.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressLotKind {
+    /// Infrastructure address lots are used for network infrastructure like
+    /// addresses assigned to rack switches.
+    Infra,
+
+    /// Pool address lots are used by IP pools.
+    Pool,
 }
 
 /// An address lot block is a part of an address lot and contains a range of
