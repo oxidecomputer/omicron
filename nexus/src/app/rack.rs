@@ -350,7 +350,14 @@ impl super::Nexus {
                     &opctx,
                     rack_id,
                     switch_location.into(),
-                    first_address.into(),
+                    ipnetwork::IpNetwork::new(
+                        loopback_address_params.address,
+                        loopback_address_params.mask,
+                    )
+                    .map_err(|_| {
+                        Error::invalid_request("invalid loopback address")
+                    })?
+                    .into(),
                 )?
                 .lookup_for(authz::Action::Read)
                 .await

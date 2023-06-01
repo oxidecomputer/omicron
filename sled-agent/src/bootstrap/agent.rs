@@ -11,6 +11,7 @@ use super::hardware::HardwareMonitor;
 use super::params::RackInitializeRequest;
 use super::params::StartSledAgentRequest;
 use super::rss_handle::RssHandle;
+use super::secret_retriever::LocalSecretRetriever;
 use super::views::SledAgentResponse;
 use crate::config::Config as SledConfig;
 use crate::config::SidecarRevision;
@@ -30,16 +31,18 @@ use illumos_utils::zfs::{
 };
 use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
+use key_manager::{KeyManager, StorageKeyRequester};
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::api::external::Error as ExternalError;
 use serde::{Deserialize, Serialize};
 use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::HardwareManager;
+use sled_hardware::{Baseboard, HardwareManager};
 use slog::Logger;
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 /// The number of QSFP28 ports on sidecar revisions A and B
 const SIDECAR_REV_A_B_N_QSFP28_PORTS: u8 = 32;
@@ -186,6 +189,19 @@ pub struct Agent {
     ddmd_client: DdmAdminClient,
 
     global_zone_bootstrap_link_local_address: Ipv6Addr,
+
+    // We maintain the handle just to show ownership, but don't use it
+    // as the KeyManager task should run forever
+    #[allow(unused)]
+    key_manager_handle: JoinHandle<()>,
+
+    // We maintain a copy of the `StorageKeyRequester` so we can pass it through
+    // from the `HardwareManager` to the `StorageManager` when the `HardwareManger`
+    // gets recreated.
+    storage_key_requester: StorageKeyRequester,
+
+    /// Our sled's baseboard identity.
+    baseboard: Baseboard,
 }
 
 const SLED_AGENT_REQUEST_FILE: &str = "sled-agent-request.toml";
@@ -266,6 +282,23 @@ impl Agent {
         let link = config.link.clone();
         let ip = BootstrapInterface::GlobalZone.ip(&link)?;
 
+        // We expect this directory to exist for Key Management
+        // It's purposefully in the ramdisk and files only exist long enough
+        // to create and mount encrypted datasets.
+        info!(
+            log, "Ensuring zfs key directory exists";
+            "path" => sled_hardware::disk::KEYPATH_ROOT,
+        );
+        tokio::fs::create_dir_all(sled_hardware::disk::KEYPATH_ROOT)
+            .await
+            .map_err(|err| BootstrapError::Io {
+                message: format!(
+                    "Creating zfs key directory {}",
+                    sled_hardware::disk::KEYPATH_ROOT
+                ),
+                err,
+            })?;
+
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let bootstrap_etherstub_vnic = Dladm::ensure_etherstub_vnic(
             &bootstrap_etherstub,
@@ -315,6 +348,7 @@ impl Agent {
         // currently part of the ramdisk.
         let zoned = true;
         let do_format = true;
+        let encryption_details = None;
         Zfs::ensure_filesystem(
             ZONE_ZFS_RAMDISK_DATASET,
             Mountpoint::Path(Utf8PathBuf::from(
@@ -322,6 +356,7 @@ impl Agent {
             )),
             zoned,
             do_format,
+            encryption_details,
         )?;
 
         // Before we start monitoring for hardware, ensure we're running from a
@@ -345,6 +380,13 @@ impl Agent {
         ]);
         execute(cmd).map_err(|e| BootstrapError::EnablingRouting(e))?;
 
+        // Spawn the `KeyManager` which is needed by the the StorageManager to
+        // retrieve encryption keys.
+        let (mut key_manager, storage_key_requester) =
+            KeyManager::new(LocalSecretRetriever {});
+
+        let handle = tokio::spawn(async move { key_manager.run().await });
+
         // Begin monitoring for hardware to handle tasks like initialization of
         // the switch zone.
         info!(log, "Bootstrap Agent monitoring for hardware");
@@ -354,10 +396,12 @@ impl Agent {
             &config.link,
             &sled_config,
             global_zone_bootstrap_link_local_address,
+            storage_key_requester.clone(),
         )
         .await?;
 
         let storage_resources = hardware_monitor.storage().clone();
+        let baseboard = hardware_monitor.baseboard().clone();
 
         let agent = Agent {
             log: ba_log,
@@ -372,6 +416,9 @@ impl Agent {
             sled_config,
             ddmd_client,
             global_zone_bootstrap_link_local_address,
+            key_manager_handle: handle,
+            storage_key_requester,
+            baseboard,
         };
 
         // Wait for at least the M.2 we booted from to show up.
@@ -404,6 +451,10 @@ impl Agent {
         Ok(agent)
     }
 
+    pub fn baseboard(&self) -> &Baseboard {
+        &self.baseboard
+    }
+
     async fn start_hardware_monitor(
         &self,
     ) -> Result<HardwareMonitor, BootstrapError> {
@@ -412,6 +463,7 @@ impl Agent {
             &self.config.link,
             &self.sled_config,
             self.global_zone_bootstrap_link_local_address,
+            self.storage_key_requester.clone(),
         )
         .await
     }
@@ -421,6 +473,7 @@ impl Agent {
         link: &illumos_utils::dladm::PhysicalLink,
         sled_config: &SledConfig,
         global_zone_bootstrap_link_local_address: Ipv6Addr,
+        storage_key_requester: StorageKeyRequester,
     ) -> Result<HardwareMonitor, BootstrapError> {
         let underlay_etherstub = underlay_etherstub()?;
         let underlay_etherstub_vnic =
@@ -428,6 +481,7 @@ impl Agent {
         let bootstrap_etherstub = bootstrap_etherstub()?;
         let switch_zone_bootstrap_address =
             BootstrapInterface::SwitchZone.ip(&link)?;
+
         let hardware_monitor = HardwareMonitor::new(
             &log,
             &sled_config,
@@ -436,6 +490,7 @@ impl Agent {
             underlay_etherstub_vnic,
             bootstrap_etherstub,
             switch_zone_bootstrap_address,
+            storage_key_requester,
         )
         .await?;
         Ok(hardware_monitor)
