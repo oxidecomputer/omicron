@@ -980,14 +980,14 @@ pub struct InsertQuery {
 
 impl InsertQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
-        let vpc_id_str = interface.vpc_id.to_string();
+        let vpc_id_str = interface.subnet.vpc_id.to_string();
         let subnet_id_str = interface.subnet.identity.id.to_string();
         let kind = interface.kind;
         let parent_id_str = interface.parent_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
         let mac_sql = interface.mac.map(|mac| mac.into());
         let next_mac_subquery =
-            NextMacAddress::new(interface.vpc_id, interface.kind);
+            NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
             interface.subnet.ipv4_block.0 .0,
             interface.subnet.identity.id,
@@ -1045,7 +1045,7 @@ impl QueryFragment<Pg> for InsertQuery {
         push_interface_validation_cte(
             out.reborrow(),
             &self.interface.identity.id,
-            &self.interface.vpc_id,
+            &self.interface.subnet.vpc_id,
             &self.vpc_id_str,
             &self.interface.subnet.identity.id,
             &self.subnet_id_str,
@@ -1793,7 +1793,6 @@ mod tests {
 
     // VPC with several distinct subnets.
     struct Network {
-        vpc_id: Uuid,
         subnets: Vec<VpcSubnet>,
     }
 
@@ -1834,7 +1833,7 @@ mod tests {
                 );
                 subnets.push(subnet);
             }
-            Self { vpc_id, subnets }
+            Self { subnets }
         }
 
         fn available_ipv4_addresses(&self) -> Vec<usize> {
@@ -1939,7 +1938,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
@@ -1970,7 +1968,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-a".parse().unwrap(),
@@ -2003,7 +2000,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             Uuid::new_v4(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-b".parse().unwrap(),
@@ -2042,7 +2038,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", i).parse().unwrap(),
@@ -2086,7 +2081,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2106,7 +2100,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             new_instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2136,7 +2129,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
             service_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "service-nic".parse().unwrap(),
@@ -2166,7 +2158,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
             service_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "service-nic".parse().unwrap(),
@@ -2188,7 +2179,6 @@ mod tests {
         let new_interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
             new_service_id,
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "new-service-nic".parse().unwrap(),
@@ -2218,7 +2208,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2238,7 +2227,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[1].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2270,7 +2258,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2287,7 +2274,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2316,7 +2302,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2359,7 +2344,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-c".parse().unwrap(),
@@ -2378,7 +2362,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net2.vpc_id,
                 context.net2.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-a".parse().unwrap(),
@@ -2415,7 +2398,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 context.net1.subnets[0].clone(),
                 IdentityMetadataCreateParams {
                     name: "interface-c".parse().unwrap(),
@@ -2444,7 +2426,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets[0].clone(),
             IdentityMetadataCreateParams {
                 name: "interface-d".parse().unwrap(),
@@ -2477,7 +2458,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("if{}", i).parse().unwrap(),
@@ -2512,7 +2492,7 @@ mod tests {
         assert_eq!(inserted.description(), incomplete.identity.description);
         assert_eq!(inserted.kind, incomplete.kind);
         assert_eq!(inserted.parent_id, incomplete.parent_id);
-        assert_eq!(inserted.vpc_id, incomplete.vpc_id);
+        assert_eq!(inserted.vpc_id, incomplete.subnet.vpc_id);
         assert_eq!(inserted.subnet_id, incomplete.subnet.id());
         let (mac_in_range, kind) = match incomplete.kind {
             NetworkInterfaceKind::Instance => {
@@ -2545,7 +2525,6 @@ mod tests {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance.id(),
-                context.net1.vpc_id,
                 subnet.clone(),
                 IdentityMetadataCreateParams {
                     name: format!("interface-{}", slot).parse().unwrap(),
@@ -2582,7 +2561,6 @@ mod tests {
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance.id(),
-            context.net1.vpc_id,
             context.net1.subnets.last().unwrap().clone(),
             IdentityMetadataCreateParams {
                 name: "interface-8".parse().unwrap(),

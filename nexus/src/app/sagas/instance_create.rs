@@ -672,7 +672,6 @@ async fn create_custom_network_interface(
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
-        authz_vpc.id(),
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
@@ -756,19 +755,17 @@ async fn create_default_primary_network_interface(
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
-    let (.., authz_vpc, authz_subnet, db_subnet) =
-        LookupPath::new(&opctx, &datastore)
-            .project_id(saga_params.project_id)
-            .vpc_name(&internal_default_name)
-            .vpc_subnet_name(&internal_default_name)
-            .fetch()
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., _, authz_subnet, db_subnet) = LookupPath::new(&opctx, &datastore)
+        .project_id(saga_params.project_id)
+        .vpc_name(&internal_default_name)
+        .vpc_subnet_name(&internal_default_name)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
-        authz_vpc.id(),
         db_subnet.clone(),
         interface_params.identity.clone(),
         interface_params.ip,
