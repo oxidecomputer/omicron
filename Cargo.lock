@@ -3451,6 +3451,7 @@ dependencies = [
  "omicron-common 0.1.0",
  "secrecy",
  "sha3",
+ "slog",
  "thiserror",
  "tokio",
  "zeroize",
