@@ -10,8 +10,8 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use super::SagaInitError;
+use crate::app::sagas::retry_until_known_result;
 use crate::db::lookup::LookupPath;
-use crate::retry_until_known_result;
 use crate::{authn, authz};
 use nexus_db_model::Generation;
 use nexus_types::external_api::params;
@@ -272,9 +272,10 @@ async fn sibfu_call_pantry_import_from_url_for_disk(
         },
     };
 
-    let response = retry_until_known_result!(log, {
-        client.import_from_url(&disk_id, &request)
+    let response = retry_until_known_result(log, || async {
+        client.import_from_url(&disk_id, &request).await
     })
+    .await
     .map_err(|e| {
         ActionError::action_failed(format!(
             "import from url failed with {:?}",
@@ -308,14 +309,16 @@ async fn sibfu_wait_for_import_from_url(
     );
 
     loop {
-        let result =
-            retry_until_known_result!(log, { client.is_job_finished(&job_id) })
-                .map_err(|e| {
-                    ActionError::action_failed(format!(
-                        "is_job_finished failed with {:?}",
-                        e
-                    ))
-                })?;
+        let result = retry_until_known_result(log, || async {
+            client.is_job_finished(&job_id).await
+        })
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "is_job_finished failed with {:?}",
+                e
+            ))
+        })?;
 
         if result.job_is_finished {
             break;
@@ -332,14 +335,13 @@ async fn sibfu_wait_for_import_from_url(
         endpoint,
     );
 
-    let response =
-        retry_until_known_result!(log, { client.job_result_ok(&job_id) })
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "job_result_ok failed with {:?}",
-                    e
-                ))
-            })?;
+    let response = retry_until_known_result(log, || async {
+        client.job_result_ok(&job_id).await
+    })
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!("job_result_ok failed with {:?}", e))
+    })?;
 
     if !response.job_result_ok {
         return Err(ActionError::action_failed(format!("Job {job_id} failed")));

@@ -6,6 +6,7 @@ use super::{NexusActionContext, NexusSaga, SagaInitError, ACTION_GENERATE_ID};
 use crate::app::instance::WriteBackUpdatedInstance;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
     MAX_NICS_PER_INSTANCE,
@@ -15,7 +16,6 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::ByteCount as DbByteCount;
 use crate::db::queries::network_interface::InsertError as InsertNicError;
 use crate::external_api::params;
-use crate::retry_until_known_result;
 use crate::{authn, authz, db};
 use chrono::Utc;
 use nexus_db_model::NetworkInterfaceKind;
@@ -436,13 +436,12 @@ async fn sic_remove_network_config(
 
     debug!(log, "deleting nat mapping for entry: {target_ip:#?}");
 
-    let result = retry_until_known_result!(log, {
-        dpd_client.ensure_nat_entry_deleted(
-            log,
-            target_ip.ip,
-            *target_ip.first_port,
-        )
-    });
+    let result = retry_until_known_result(log, || async {
+        dpd_client
+            .ensure_nat_entry_deleted(log, target_ip.ip, *target_ip.first_port)
+            .await
+    })
+    .await;
 
     match result {
         Ok(_) => {

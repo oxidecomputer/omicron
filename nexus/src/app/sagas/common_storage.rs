@@ -6,11 +6,11 @@
 
 use super::*;
 
+use crate::app::sagas::retry_until_known_result;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
 use crate::db::lookup::LookupPath;
-use crate::retry_until_known_result;
 use crate::Nexus;
 use anyhow::anyhow;
 use crucible_agent_client::{
@@ -326,9 +326,10 @@ pub async fn call_pantry_attach_for_disk(
         volume_construction_request,
     };
 
-    retry_until_known_result!(log, {
-        client.attach(&disk_id.to_string(), &attach_request)
+    retry_until_known_result(log, || async {
+        client.attach(&disk_id.to_string(), &attach_request).await
     })
+    .await
     .map_err(|e| {
         ActionError::action_failed(format!("pantry attach failed with {:?}", e))
     })?;
@@ -347,13 +348,13 @@ pub async fn call_pantry_detach_for_disk(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    retry_until_known_result!(log, { client.detach(&disk_id.to_string()) })
-        .map_err(|e| {
-            ActionError::action_failed(format!(
-                "pantry detach failed with {:?}",
-                e
-            ))
-        })?;
+    retry_until_known_result(log, || async {
+        client.detach(&disk_id.to_string()).await
+    })
+    .await
+    .map_err(|e| {
+        ActionError::action_failed(format!("pantry detach failed with {:?}", e))
+    })?;
 
     Ok(())
 }

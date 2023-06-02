@@ -98,10 +98,10 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::retry_until_known_result;
 use crate::db::identity::{Asset, Resource};
 use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::retry_until_known_result;
 use crate::{authn, authz, db};
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
@@ -681,13 +681,16 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             info!(log, "instance {} sled agent created ok", instance_id);
 
             // Send a snapshot request to propolis through sled agent
-            retry_until_known_result!(log, {
-                sled_agent_client.instance_issue_disk_snapshot_request(
-                    &instance.id(),
-                    &disk.id(),
-                    &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
-                )
+            retry_until_known_result(log, || async {
+                sled_agent_client
+                    .instance_issue_disk_snapshot_request(
+                        &instance.id(),
+                        &disk.id(),
+                        &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+                    )
+                    .await
             })
+            .await
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
             Ok(())
@@ -734,12 +737,15 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result!(log, {
-            client.region_delete_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-        })?;
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await?;
     }
     Ok(())
 }
@@ -1007,14 +1013,17 @@ async fn ssc_call_pantry_snapshot_for_disk(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    retry_until_known_result!(log, {
-        client.snapshot(
-            &params.disk_id.to_string(),
-            &crucible_pantry_client::types::SnapshotRequest {
-                snapshot_id: snapshot_id.to_string(),
-            },
-        )
+    retry_until_known_result(log, || async {
+        client
+            .snapshot(
+                &params.disk_id.to_string(),
+                &crucible_pantry_client::types::SnapshotRequest {
+                    snapshot_id: snapshot_id.to_string(),
+                },
+            )
+            .await
     })
+    .await
     .map_err(|e| {
         ActionError::action_failed(Error::internal_error(&e.to_string()))
     })?;
@@ -1050,12 +1059,15 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
         let url = format!("http://{}", dataset.address());
         let client = CrucibleAgentClient::new(&url);
 
-        retry_until_known_result!(log, {
-            client.region_delete_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-        })?;
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
+        })
+        .await?;
     }
     Ok(())
 }
@@ -1197,34 +1209,42 @@ async fn ssc_start_running_snapshot(
         info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
 
         // Validate with the Crucible agent that the snapshot exists
-        let crucible_region = retry_until_known_result!(log, {
-            client.region_get(&RegionId(region.id().to_string()))
+        let crucible_region = retry_until_known_result(log, || async {
+            client.region_get(&RegionId(region.id().to_string())).await
         })
+        .await
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
         info!(log, "crucible region {:?}", crucible_region);
 
-        let crucible_snapshot = retry_until_known_result!(log, {
-            client.region_get_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
+        let crucible_snapshot = retry_until_known_result(log, || async {
+            client
+                .region_get_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
         })
+        .await
         .map_err(|e| e.to_string())
         .map_err(ActionError::action_failed)?;
 
         info!(log, "crucible snapshot {:?}", crucible_snapshot);
 
         // Start the snapshot running
-        let crucible_running_snapshot = retry_until_known_result!(log, {
-            client.region_run_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
-        })
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
+        let crucible_running_snapshot =
+            retry_until_known_result(log, || async {
+                client
+                    .region_run_snapshot(
+                        &RegionId(region.id().to_string()),
+                        &snapshot_id.to_string(),
+                    )
+                    .await
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .map_err(ActionError::action_failed)?;
 
         info!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
 
@@ -1289,12 +1309,15 @@ async fn ssc_start_running_snapshot_undo(
         use crucible_agent_client::Error::ErrorResponse;
         use http::status::StatusCode;
 
-        retry_until_known_result!(log, {
-            client.region_delete_running_snapshot(
-                &RegionId(region.id().to_string()),
-                &snapshot_id.to_string(),
-            )
+        retry_until_known_result(log, || async {
+            client
+                .region_delete_running_snapshot(
+                    &RegionId(region.id().to_string()),
+                    &snapshot_id.to_string(),
+                )
+                .await
         })
+        .await
         .map(|_| ())
         // NOTE: If we later create a volume record and delete it, the
         // running snapshot may be deleted (see:

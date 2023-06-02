@@ -6,9 +6,9 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
+use crate::app::sagas::retry_until_known_result;
 use crate::db;
 use crate::db::lookup::LookupPath;
-use crate::retry_until_known_result;
 use crate::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, ResourceType};
@@ -167,13 +167,12 @@ async fn sid_delete_network_config(
     for entry in external_ips {
         debug!(log, "deleting nat mapping for entry: {entry:#?}");
 
-        let result = retry_until_known_result!(log, {
-            dpd_client.ensure_nat_entry_deleted(
-                log,
-                entry.ip,
-                *entry.first_port,
-            )
-        });
+        let result = retry_until_known_result(log, || async {
+            dpd_client
+                .ensure_nat_entry_deleted(log, entry.ip, *entry.first_port)
+                .await
+        })
+        .await;
 
         match result {
             Ok(_) => {

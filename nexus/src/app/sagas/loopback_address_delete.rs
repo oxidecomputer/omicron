@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::NexusActionContext;
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -10,7 +11,6 @@ use crate::authn;
 use crate::authz;
 use crate::db::model::{LoopbackAddress, Name};
 use crate::external_api::params;
-use crate::retry_until_known_result;
 use anyhow::{anyhow, Error};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{IpNet, NameOrId};
@@ -177,8 +177,9 @@ async fn slc_loopback_address_delete(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    retry_until_known_result!(log, {
-        dpd_client.ensure_loopback_deleted(log, params.address.ip())
+    retry_until_known_result(log, || async {
+        dpd_client.ensure_loopback_deleted(log, params.address.ip()).await
     })
+    .await
     .map_err(|e| ActionError::action_failed(e.to_string()))
 }

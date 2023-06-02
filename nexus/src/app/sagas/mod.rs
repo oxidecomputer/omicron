@@ -309,6 +309,8 @@ pub(crate) use __emit_action;
 pub(crate) use __stringify_ident;
 pub(crate) use declare_saga_actions;
 
+use futures::Future;
+
 /// Retry a progenitor client operation until a known result is returned.
 ///
 /// Saga execution relies on the outcome of an external call being known: since
@@ -317,18 +319,26 @@ pub(crate) use declare_saga_actions;
 /// is seen.
 ///
 /// Note that retrying is only valid if the call itself is idempotent.
-#[macro_export]
-macro_rules! retry_until_known_result {
-    ( $log:ident, $func:block ) => {{
-        use omicron_common::backoff;
+pub(crate) async fn retry_until_known_result<F, T, E, Fut>(
+    log: &slog::Logger,
+    mut f: F,
+) -> Result<T, progenitor_client::Error<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    E: std::fmt::Debug,
+{
+    use omicron_common::backoff;
 
-        backoff::retry_notify(
-            backoff::retry_policy_internal_service(),
-            || async {
-                match ($func).await {
+    backoff::retry_notify(
+        backoff::retry_policy_internal_service(),
+        move || {
+            let fut = f();
+            async move {
+                match fut.await {
                     Err(progenitor_client::Error::CommunicationError(e)) => {
                         warn!(
-                            $log,
+                            log,
                             "saw transient communication error {}, retrying...",
                             e,
                         );
@@ -362,23 +372,21 @@ macro_rules! retry_until_known_result {
                     }
 
                     Err(e) => {
-                        warn!($log, "saw permanent error {}, aborting", e,);
+                        warn!(log, "saw permanent error {}, aborting", e,);
 
                         Err(backoff::BackoffError::Permanent(e))
                     }
 
                     Ok(v) => Ok(v),
                 }
-            },
-            |error: progenitor_client::Error<_>, delay| {
-                warn!(
-                    $log,
-                    "failed external call ({:?}), will retry in {:?}",
-                    error,
-                    delay,
-                );
-            },
-        )
-        .await
-    }};
+            }
+        },
+        |error: progenitor_client::Error<_>, delay| {
+            warn!(
+                log,
+                "failed external call ({:?}), will retry in {:?}", error, delay,
+            );
+        },
+    )
+    .await
 }

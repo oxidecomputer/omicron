@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -10,7 +11,6 @@ use crate::authn;
 use crate::authz;
 use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
-use crate::retry_until_known_result;
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -148,12 +148,15 @@ async fn slc_loopback_address_create(
     let dpd_client: Arc<dpd_client::Client> =
         Arc::clone(&osagactx.nexus().dpd_client);
 
-    retry_until_known_result!(log, {
-        dpd_client.ensure_loopback_created(
-            log,
-            params.loopback_address.address,
-            NEXUS_DPD_TAG,
-        )
+    retry_until_known_result(log, || async {
+        dpd_client
+            .ensure_loopback_created(
+                log,
+                params.loopback_address.address,
+                NEXUS_DPD_TAG,
+            )
+            .await
     })
+    .await
     .map_err(|e| ActionError::action_failed(e.to_string()))
 }

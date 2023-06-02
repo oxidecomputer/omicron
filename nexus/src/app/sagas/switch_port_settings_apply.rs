@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
+use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
 use crate::db::datastore::UpdatePrecondition;
-use crate::retry_until_known_result;
 use crate::{authn, db};
 use anyhow::Error;
 use db::datastore::SwitchPortSettingsCombinedResult;
@@ -215,9 +215,10 @@ async fn spa_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    retry_until_known_result!(log, {
-        dpd_client.port_settings_apply(&port_id, &dpd_port_settings)
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
     })
+    .await
     .map_err(|e| ActionError::action_failed(e.to_string()))?;
 
     Ok(())
@@ -248,9 +249,10 @@ async fn spa_undo_ensure_switch_port_settings(
     let id = match orig_port_settings_id {
         Some(id) => id,
         None => {
-            retry_until_known_result!(log, {
-                dpd_client.port_settings_clear(&port_id)
+            retry_until_known_result(log, || async {
+                dpd_client.port_settings_clear(&port_id).await
             })
+            .await
             .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
             return Ok(());
@@ -265,9 +267,10 @@ async fn spa_undo_ensure_switch_port_settings(
     let dpd_port_settings = api_to_dpd_port_settings(&settings)
         .map_err(ActionError::action_failed)?;
 
-    retry_until_known_result!(log, {
-        dpd_client.port_settings_apply(&port_id, &dpd_port_settings)
+    retry_until_known_result(log, || async {
+        dpd_client.port_settings_apply(&port_id, &dpd_port_settings).await
     })
+    .await
     .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     Ok(())

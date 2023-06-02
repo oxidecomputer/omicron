@@ -4,6 +4,7 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::app::sagas::retry_until_known_result;
 use crate::authz;
 use crate::db;
 use crate::db::identity::Asset;
@@ -14,7 +15,6 @@ use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
-use crate::retry_until_known_result;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
 use omicron_common::api::external::DataPageParams;
@@ -388,9 +388,10 @@ impl super::Nexus {
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            retry_until_known_result!(log, {
-                                client.set_v2p(&nic_id, &mapping)
+                            retry_until_known_result(&log, || async {
+                                client.set_v2p(&nic_id, &mapping).await
                             })
+                            .await
                         },
                     )));
                 }
@@ -495,9 +496,10 @@ impl super::Nexus {
                     // the same information is a no-op.
                     join_handles.push(tokio::spawn(futures::future::lazy(
                         move |_ctx| async move {
-                            retry_until_known_result!(log, {
-                                client.del_v2p(&nic_id, &mapping)
+                            retry_until_known_result(&log, || async {
+                                client.del_v2p(&nic_id, &mapping).await
                             })
+                            .await
                         },
                     )));
                 }
