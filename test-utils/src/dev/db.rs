@@ -947,7 +947,7 @@ where
     T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     fn from((client, connection): ClientConnPair<S, T>) -> Self {
-        let join_handle = tokio::spawn(async move { connection.await });
+        let join_handle = tokio::spawn(connection);
         Client { client, conn_task: join_handle }
     }
 }
