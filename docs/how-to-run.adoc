@@ -166,6 +166,7 @@ gateway_ip = "192.168.1.199"    <--- ip address of your default gateway / router
 infra_ip_first = "192.168.1.30" <--- first address of pool used for rack networking
 infra_ip_last = "192.168.1.50"  <--- last address of pool used for rack networking
 uplink_port = "qsfp0"           <--- for "softnpu" environments, this will always be "qsfp0"
+uplink_port_speed = "40G"       <--- uplink interface speed
 uplink_ip = "192.168.1.32"      <--- address to assign to the uplink port
 ----
 

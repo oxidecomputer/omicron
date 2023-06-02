@@ -13,13 +13,15 @@ use futures::FutureExt;
 use futures::StreamExt;
 use illumos_utils::zpool::{ZpoolKind, ZpoolName};
 use illumos_utils::{zfs::Mountpoint, zpool::ZpoolInfo};
+use key_manager::StorageKeyRequester;
 use nexus_client::types::PhysicalDiskDeleteRequest;
 use nexus_client::types::PhysicalDiskKind;
 use nexus_client::types::PhysicalDiskPutRequest;
 use nexus_client::types::ZpoolPutRequest;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError};
 use omicron_common::backoff;
-use sled_hardware::{Disk, DiskIdentity, DiskVariant, UnparsedDisk};
+use omicron_common::disk::DiskIdentity;
+use sled_hardware::{Disk, DiskVariant, UnparsedDisk};
 use slog::Logger;
 use std::collections::hash_map;
 use std::collections::HashMap;
@@ -287,6 +289,10 @@ struct StorageWorker {
     nexus_notifications: FuturesOrdered<NotifyFut>,
     rx: mpsc::Receiver<StorageWorkerRequest>,
     underlay: Arc<Mutex<Option<UnderlayAccess>>>,
+
+    // A mechanism for requesting disk encryption keys from the
+    // [`key_manager::KeyManager`]
+    key_requester: StorageKeyRequester,
 }
 
 #[derive(Clone, Debug)]
@@ -308,11 +314,13 @@ impl StorageWorker {
         let zoned = true;
         let fs_name = &dataset_name.full();
         let do_format = true;
+        let encryption_details = None;
         Zfs::ensure_filesystem(
             &dataset_name.full(),
             Mountpoint::Path(Utf8PathBuf::from("/data")),
             zoned,
             do_format,
+            encryption_details,
         )?;
         // Ensure the dataset has a usable UUID.
         if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
@@ -420,7 +428,13 @@ impl StorageWorker {
 
         // Ensure all disks conform to the expected partition layout.
         for disk in unparsed_disks.into_iter() {
-            match sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
+            match sled_hardware::Disk::new(
+                &self.log,
+                disk,
+                Some(&self.key_requester),
+            )
+            .await
+            .map_err(|err| {
                 warn!(self.log, "Could not ensure partitions: {err}");
                 err
             }) {
@@ -513,11 +527,16 @@ impl StorageWorker {
         info!(self.log, "Upserting disk: {disk:?}");
 
         // Ensure the disk conforms to an expected partition layout.
-        let disk =
-            sled_hardware::Disk::new(&self.log, disk).map_err(|err| {
-                warn!(self.log, "Could not ensure partitions: {err}");
-                err
-            })?;
+        let disk = sled_hardware::Disk::new(
+            &self.log,
+            disk,
+            Some(&self.key_requester),
+        )
+        .await
+        .map_err(|err| {
+            warn!(self.log, "Could not ensure partitions: {err}");
+            err
+        })?;
 
         let mut disks = resources.disks.lock().await;
         let disk = DiskWrapper::Real {
@@ -535,7 +554,18 @@ impl StorageWorker {
         info!(self.log, "Upserting synthetic disk for: {zpool_name:?}");
 
         let mut disks = resources.disks.lock().await;
-        sled_hardware::Disk::ensure_zpool_ready(&self.log, &zpool_name)?;
+        let synthetic_id = DiskIdentity {
+            vendor: "fake_vendor".to_string(),
+            serial: "fake_serial".to_string(),
+            model: zpool_name.id().to_string(),
+        };
+        sled_hardware::Disk::ensure_zpool_ready(
+            &self.log,
+            &zpool_name,
+            &synthetic_id,
+            Some(&self.key_requester),
+        )
+        .await?;
         let disk = DiskWrapper::Synthetic { zpool_name };
         self.upsert_disk_locked(resources, &mut disks, disk).await
     }
@@ -867,7 +897,7 @@ pub struct StorageManager {
 
 impl StorageManager {
     /// Creates a new [`StorageManager`] which should manage local storage.
-    pub async fn new(log: &Logger) -> Self {
+    pub async fn new(log: &Logger, key_requester: StorageKeyRequester) -> Self {
         let log = log.new(o!("component" => "StorageManager"));
         let resources = StorageResources {
             disks: Arc::new(Mutex::new(HashMap::new())),
@@ -886,6 +916,7 @@ impl StorageManager {
                         nexus_notifications: FuturesOrdered::new(),
                         rx,
                         underlay: Arc::new(Mutex::new(None)),
+                        key_requester,
                     };
 
                     worker.do_work(resources).await

@@ -294,7 +294,7 @@ async fn test_db_run() {
         .connect(tokio_postgres::NoTls)
         .await
         .expect("failed to connect to newly setup database");
-    let conn_task = tokio::spawn(async { connection.await });
+    let conn_task = tokio::spawn(connection);
 
     assert!(has_omicron_schema(&client).await);
 
@@ -394,7 +394,7 @@ async fn test_run_all() {
         .connect(tokio_postgres::NoTls)
         .await
         .expect("failed to connect to newly setup database");
-    let conn_task = tokio::spawn(async { connection.await });
+    let conn_task = tokio::spawn(connection);
     assert!(has_omicron_schema(&client).await);
     drop(client);
     conn_task

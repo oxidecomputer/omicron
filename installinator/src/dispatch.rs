@@ -117,7 +117,7 @@ impl DebugHardwareScan {
         // Finding the write destination from the gimlet hardware logs details
         // about what it's doing sufficiently for this subcommand; just create a
         // write destination and then discard it.
-        _ = WriteDestination::from_hardware(log)?;
+        _ = WriteDestination::from_hardware(log).await?;
         Ok(())
     }
 }
@@ -365,11 +365,7 @@ async fn scan_hardware_with_retries(
     let mut retry = 0;
     let result = loop {
         let log = log.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            WriteDestination::from_hardware(&log)
-        })
-        .await
-        .unwrap();
+        let result = WriteDestination::from_hardware(&log).await;
 
         match result {
             Ok(destination) => break Ok(destination),

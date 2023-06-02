@@ -11,16 +11,6 @@ use crate::db::lookup::LookupPath;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
-use dpd_client::types::Ipv6Entry;
-use dpd_client::types::LinkCreate;
-use dpd_client::types::LinkId;
-use dpd_client::types::LinkSettings;
-use dpd_client::types::PortFec;
-use dpd_client::types::PortId;
-use dpd_client::types::PortSettings;
-use dpd_client::types::PortSpeed;
-use dpd_client::types::RouteSettingsV4;
-use dpd_client::Ipv4Cidr;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -48,12 +38,8 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::Ipv6Addr;
 use std::str::FromStr;
 use uuid::Uuid;
-
-use super::sagas::NEXUS_DPD_TAG;
 
 impl super::Nexus {
     pub async fn racks_list(
@@ -238,9 +224,9 @@ impl super::Nexus {
         // Currently calling some of the apis directly, but should we be using sagas
         // going forward via self.run_saga()? Note that self.create_runnable_saga and
         // self.execute_saga are currently not available within this scope.
-        info!(self.log, "checking for rack networking configuration");
+        info!(self.log, "Checking for Rack Network Configuration");
         if let Some(rack_network_config) = &request.rack_network_config {
-            info!(self.log, "configuring rack networking");
+            info!(self.log, "Recording Rack Network Configuration");
             let address_lot_name =
                 Name::from_str("initial-infra").map_err(|e| {
                     Error::internal_error(&format!(
@@ -350,7 +336,14 @@ impl super::Nexus {
                     &opctx,
                     rack_id,
                     switch_location.into(),
-                    first_address.into(),
+                    ipnetwork::IpNetwork::new(
+                        loopback_address_params.address,
+                        loopback_address_params.mask,
+                    )
+                    .map_err(|_| {
+                        Error::invalid_request("invalid loopback address")
+                    })?
+                    .into(),
                 )?
                 .lookup_for(authz::Action::Read)
                 .await
@@ -365,20 +358,6 @@ impl super::Nexus {
                     )
                     .await?;
             }
-
-            let body = Ipv6Entry {
-                addr: Ipv6Addr::from_str("fd00:99::1").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse `fd00:99::1` as `Ipv6Addr`: {e}"
-                    ))
-                })?,
-                tag: NEXUS_DPD_TAG.into(),
-            };
-            self.dpd_client.loopback_ipv6_create(&body).await.map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
 
             let name = Name::from_str("default-uplink").map_err(|e| {
                 Error::internal_error(&format!(
@@ -455,59 +434,8 @@ impl super::Nexus {
                     .await?;
             }
 
-            let mut dpd_port_settings = PortSettings {
-                tag: NEXUS_DPD_TAG.into(),
-                links: HashMap::new(),
-                v4_routes: HashMap::new(),
-                v6_routes: HashMap::new(),
-            };
-
-            // TODO handle breakouts
-            // https://github.com/oxidecomputer/omicron/issues/3062
-            let link_id = LinkId(0);
-            let addr = IpAddr::from_str(&rack_network_config.uplink_ip)
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                    "unable to parse rack_network_config.uplink_up as IpAddr: {e}"))
-                })?;
-
-            let link_settings = LinkSettings {
-                // TODO Allow user to configure link properties
-                // https://github.com/oxidecomputer/omicron/issues/3061
-                params: LinkCreate {
-                    autoneg: false,
-                    kr: false,
-                    fec: PortFec::None,
-                    speed: PortSpeed::Speed100G,
-                },
-                addrs: vec![addr],
-            };
-
-            dpd_port_settings.links.insert(link_id.to_string(), link_settings);
-
-            let port_id: PortId = PortId::from_str(&rack_network_config.uplink_port)
-                .map_err(|e| Error::internal_error(
-                        &format!("could not use value provided to rack_network_config.uplink_port as PortID: {e}")
-                ))?;
-
-            let nexthop = Some(Ipv4Addr::from_str(&rack_network_config.gateway_ip)
-                .map_err(|e| Error::internal_error(
-                        &format!("unable to parse rack_network_config.gateway_ip as Ipv4Addr: {e}")
-                ))?);
-
-            dpd_port_settings.v4_routes.insert(
-                Ipv4Cidr {
-                    prefix: Ipv4Addr::from_str("0.0.0.0").unwrap(),
-                    prefix_len: 0,
-                }
-                .to_string(),
-                RouteSettingsV4 { link_id: link_id.0, nexthop },
-            );
-
-            self.dpd_client
-                .port_settings_apply(&port_id, &dpd_port_settings)
-                .await
-                .map_err(|e| Error::internal_error(&format!("unable to apply initial uplink port configuration: {e}")))?;
+            // TODO - https://github.com/oxidecomputer/omicron/issues/3277
+            // record port speed
         };
 
         Ok(())
