@@ -211,6 +211,8 @@ pub enum CertificateUploadResponse {
     WaitingOnKey,
     /// A cert chain and its key have been accepted.
     CertKeyAccepted,
+    /// A cert chain and its key are valid, but have already been uploaded.
+    CertKeyDuplicateIgnored,
 }
 
 /// Add an external certificate.

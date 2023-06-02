@@ -17,6 +17,7 @@ use std::io::Read;
 use std::mem;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use wicketd_client::types::CertificateUploadResponse;
 use wicketd_client::types::NewPasswordHash;
 use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_client::types::PutRssUserConfigInsensitive;
@@ -38,8 +39,23 @@ pub(crate) enum SetupArgs {
     /// Set the current rack configuration from a filled-in TOML template
     SetConfig,
 
+    /// Reset the configuration to its original (empty) state
+    ResetConfig,
+
     /// Set the password for the recovery user of the recovery silo
     SetPasswd,
+
+    /// Upload a certificate chain
+    ///
+    /// This cert chain must be PEM encoded. Uploading a cert chain should be
+    /// paired with uploading its private key via `upload-key`.
+    UploadCert,
+
+    /// Upload the private key of a certificate chain
+    ///
+    /// This key must be PEM encoded. Uploading a key should be paired with
+    /// uploading its cert chain via `upload-cert`.
+    UploadKey,
 }
 
 impl SetupArgs {
@@ -95,6 +111,14 @@ impl SetupArgs {
 
                 slog::info!(log, "config upload complete");
             }
+            SetupArgs::ResetConfig => {
+                slog::info!(log, "instructing wicketd to reset config...");
+                client
+                    .delete_rss_config()
+                    .await
+                    .context("failed to clear config")?;
+                slog::info!(log, "configuration reset");
+            }
             SetupArgs::SetPasswd => {
                 let hash = read_and_hash_password(&log)?;
                 let hash = NewPasswordHash(hash.to_string());
@@ -106,6 +130,93 @@ impl SetupArgs {
                     )
                     .await
                     .context("failed to upload password hash to wicketd")?;
+                slog::info!(log, "password set");
+            }
+            SetupArgs::UploadCert => {
+                slog::info!(log, "reading cert from stdin...");
+                let mut cert = Vec::new();
+                io::stdin()
+                    .read_to_end(&mut cert)
+                    .context("failed to read certificate from stdin")?;
+
+                slog::info!(log, "uploading cert to wicketd...");
+                let result = client
+                    .post_rss_config_cert(&cert)
+                    .await
+                    .context("failed to upload cert to wicketd")?
+                    .into_inner();
+
+                match result {
+                    CertificateUploadResponse::WaitingOnCert => {
+                        slog::warn!(
+                            log,
+                            "wicketd waiting on cert \
+                            (but we just uploaded it? this is a bug!)"
+                        );
+                    }
+                    CertificateUploadResponse::WaitingOnKey => {
+                        slog::info!(
+                            log,
+                            "certificated uploaded; now upload its key"
+                        );
+                    }
+                    CertificateUploadResponse::CertKeyAccepted => {
+                        slog::info!(
+                            log,
+                            "certificate uploaded; \
+                             matches previously-uploaded key"
+                        );
+                    }
+                    CertificateUploadResponse::CertKeyDuplicateIgnored => {
+                        slog::warn!(
+                            log,
+                            "certificate/key pair valid but already uploaded"
+                        );
+                    }
+                }
+            }
+            SetupArgs::UploadKey => {
+                slog::info!(log, "reading key from stdin...");
+                let mut key = Zeroizing::new(Vec::new());
+                io::stdin()
+                    .read_to_end(&mut key)
+                    .context("failed to read key from stdin")?;
+
+                slog::info!(log, "uploading key to wicketd...");
+                let result = client
+                    .post_rss_config_key(&key)
+                    .await
+                    .context("failed to upload key to wicketd")?
+                    .into_inner();
+
+                match result {
+                    CertificateUploadResponse::WaitingOnCert => {
+                        slog::info!(
+                            log,
+                            "key uploaded; now upload its certificate"
+                        );
+                    }
+                    CertificateUploadResponse::WaitingOnKey => {
+                        slog::warn!(
+                            log,
+                            "wicketd waiting on key \
+                            (but we just uploaded it? this is a bug!)"
+                        );
+                    }
+                    CertificateUploadResponse::CertKeyAccepted => {
+                        slog::info!(
+                            log,
+                            "key uploaded; \
+                             matches previously-uploaded certificate"
+                        );
+                    }
+                    CertificateUploadResponse::CertKeyDuplicateIgnored => {
+                        slog::warn!(
+                            log,
+                            "certificate/key pair valid but already uploaded"
+                        );
+                    }
+                }
             }
         }
 

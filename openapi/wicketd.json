@@ -732,6 +732,21 @@
             "required": [
               "status"
             ]
+          },
+          {
+            "description": "A cert chain and its key are valid, but have already been uploaded.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cert_key_duplicate_ignored"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
           }
         ]
       },
