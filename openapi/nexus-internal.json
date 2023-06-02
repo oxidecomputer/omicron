@@ -2280,6 +2280,15 @@
       "PhysicalDiskPutResponse": {
         "type": "object"
       },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
       "PortSpeed": {
         "description": "Switchport Speed options",
         "type": "string",
@@ -2465,6 +2474,14 @@
             "description": "Switchport to use for external connectivity",
             "type": "string"
           },
+          "uplink_port_fec": {
+            "description": "Forward Error Correction setting for the uplink port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
           "uplink_port_speed": {
             "description": "Speed for the Switchport",
             "allOf": [
@@ -2480,6 +2497,7 @@
           "infra_ip_last",
           "uplink_ip",
           "uplink_port",
+          "uplink_port_fec",
           "uplink_port_speed"
         ]
       },

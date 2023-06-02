@@ -427,7 +427,8 @@ impl super::Nexus {
                     .await?;
             }
 
-            // TODO - record port speed
+            // TODO - https://github.com/oxidecomputer/omicron/issues/3277
+            // record port speed
         };
 
         Ok(())

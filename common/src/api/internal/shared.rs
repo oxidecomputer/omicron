@@ -75,6 +75,8 @@ pub struct RackNetworkConfig {
     pub uplink_port: String,
     /// Speed for the Switchport
     pub uplink_port_speed: PortSpeed,
+    /// Forward Error Correction setting for the uplink port
+    pub uplink_port_fec: PortFec,
     /// IP Address to apply to switchport (must be in infra_ip pool)
     pub uplink_ip: String,
 }
@@ -115,6 +117,25 @@ impl From<PortSpeed> for dpd_client::types::PortSpeed {
             PortSpeed::Speed100G => dpd_client::types::PortSpeed::Speed100G,
             PortSpeed::Speed200G => dpd_client::types::PortSpeed::Speed200G,
             PortSpeed::Speed400G => dpd_client::types::PortSpeed::Speed400G,
+        }
+    }
+}
+
+/// Switchport FEC options
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PortFec {
+    Firecode,
+    None,
+    Rs,
+}
+
+impl From<PortFec> for dpd_client::types::PortFec {
+    fn from(value: PortFec) -> Self {
+        match value {
+            PortFec::Firecode => dpd_client::types::PortFec::Firecode,
+            PortFec::None => dpd_client::types::PortFec::None,
+            PortFec::Rs => dpd_client::types::PortFec::Rs,
         }
     }
 }

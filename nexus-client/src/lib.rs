@@ -308,3 +308,19 @@ impl From<omicron_common::api::internal::shared::PortSpeed>
         }
     }
 }
+
+impl From<omicron_common::api::internal::shared::PortFec> for types::PortFec {
+    fn from(value: omicron_common::api::internal::shared::PortFec) -> Self {
+        match value {
+            omicron_common::api::internal::shared::PortFec::Firecode => {
+                types::PortFec::Firecode
+            }
+            omicron_common::api::internal::shared::PortFec::None => {
+                types::PortFec::None
+            }
+            omicron_common::api::internal::shared::PortFec::Rs => {
+                types::PortFec::Rs
+            }
+        }
+    }
+}

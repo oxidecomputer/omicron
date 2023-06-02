@@ -158,7 +158,7 @@ pub enum SetupServiceError {
     Dendrite(String),
 
     #[error("Error during DNS lookup: {0}")]
-    DnsResolver(internal_dns::resolver::ResolveError),
+    DnsResolver(#[from] internal_dns::resolver::ResolveError),
 }
 
 // The workload / information allocated to a single sled.
@@ -777,6 +777,7 @@ impl ServiceInner {
                     uplink_ip: config.uplink_ip.clone(),
                     uplink_port: config.uplink_port.clone(),
                     uplink_port_speed: config.uplink_port_speed.clone().into(),
+                    uplink_port_fec: config.uplink_port_fec.clone().into(),
                 };
                 Some(value)
             }
@@ -1015,13 +1016,11 @@ impl ServiceInner {
             let resolver = DnsResolver::new_from_subnet(
                 self.log.new(o!("component" => "DnsResolver")),
                 config.az_subnet(),
-            )
-            .expect("Failed to create DNS resolver");
+            )?;
 
             let dpd_addr = resolver
                 .lookup_socket_v6(internal_dns::ServiceName::Dendrite)
-                .await
-                .map_err(|e| SetupServiceError::DnsResolver(e))?;
+                .await?;
 
             let dpd = DpdClient::new(
                 &format!("http://[{}]:{}", dpd_addr.ip(), dpd_addr.port()),
@@ -1034,6 +1033,8 @@ impl ServiceInner {
             );
 
             info!(self.log, "Building Rack Network Configuration");
+            // TODO - https://github.com/oxidecomputer/omicron/issues/3278
+            // dynamically determine where boundary services address should be configured
             let body = dpd_client::types::Ipv6Entry {
                 addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
                     SetupServiceError::BadConfig(format!(
@@ -1089,8 +1090,18 @@ impl ServiceInner {
                 RouteSettingsV4 { link_id: link_id.0, nexthop },
             );
 
-            info!(self.log, "Waiting for dendrite to come online");
-            while dpd.dpd_uptime().await.is_err() {
+            loop {
+                info!(self.log, "Checking dendrite uptime");
+                match dpd.dpd_uptime().await {
+                    Ok(uptime) => {
+                        info!(self.log, "Dendrite online"; "uptime" => uptime.to_string());
+                        break;
+                    }
+                    Err(e) => {
+                        info!(self.log, "Unable to check Dendrite uptime"; "reason" => format!("{e}"));
+                    }
+                }
+                info!(self.log, "Waiting for dendrite to come online");
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
 
