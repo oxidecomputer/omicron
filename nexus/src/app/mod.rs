@@ -32,7 +32,7 @@ pub mod background;
 mod certificate;
 mod device_auth;
 mod disk;
-mod external_endpoints;
+pub mod external_endpoints;
 mod external_ip;
 mod iam;
 mod image;

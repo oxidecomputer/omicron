@@ -649,43 +649,6 @@ impl rustls::server::ResolvesServerCert for NexusCertResolver {
 }
 
 impl super::Nexus {
-    /// Returns the host and port of the server that the client is trying to
-    /// reach
-    ///
-    /// Recall that Nexus serves many external endpoints on the same set of IP
-    /// addresses, each corresponding to a particular Silo.  We use the standard
-    /// HTTP 1.1 "host" header or HTTP2 URI authority to determine which
-    /// Silo's endpoint the client is trying to reach.
-    pub fn authority_for_request(
-        &self,
-        rqinfo: &dropshot::RequestInfo,
-    ) -> Result<http::uri::Authority, String> {
-        if rqinfo.version() > hyper::Version::HTTP_11 {
-            // For HTTP2, the server name is specified in the URL's "authority".
-            rqinfo
-                .uri()
-                .authority()
-                .cloned()
-                .ok_or_else(|| String::from("request URL missing authority"))
-        } else {
-            // For earlier versions of HTTP, the server name is specified by the
-            // "Host" header.
-            rqinfo
-                .headers()
-                .get(http::header::HOST)
-                .ok_or_else(|| String::from("request missing \"host\" header"))?
-                .to_str()
-                .map_err(|e| {
-                    format!("failed to decode \"host\" header: {:#}", e)
-                })
-                .and_then(|hostport| {
-                    hostport.parse().map_err(|e| {
-                        format!("unsupported \"host\" header: {:#}", e)
-                    })
-                })
-        }
-    }
-
     /// Attempts to determine which external endpoint the given request is
     /// attempting to reach
     ///
@@ -712,8 +675,7 @@ impl super::Nexus {
     ) -> Result<Arc<ExternalEndpoint>, Error> {
         let log = &rqctx.log;
         let rqinfo = &rqctx.request;
-        let requested_authority = self
-            .authority_for_request(rqinfo)
+        let requested_authority = authority_for_request(rqinfo)
             .map_err(|e| Error::invalid_request(&format!("{:#}", e)))?;
 
         let requested_host = requested_authority.host();
@@ -767,13 +729,49 @@ impl super::Nexus {
     }
 }
 
+/// Returns the host and port of the server that the client is trying to
+/// reach
+///
+/// Recall that Nexus serves many external endpoints on the same set of IP
+/// addresses, each corresponding to a particular Silo.  We use the standard
+/// HTTP 1.1 "host" header or HTTP2 URI authority to determine which
+/// Silo's endpoint the client is trying to reach.
+pub fn authority_for_request(
+    rqinfo: &dropshot::RequestInfo,
+) -> Result<http::uri::Authority, String> {
+    if rqinfo.version() > hyper::Version::HTTP_11 {
+        // For HTTP2, the server name is specified in the URL's "authority".
+        rqinfo
+            .uri()
+            .authority()
+            .cloned()
+            .ok_or_else(|| String::from("request URL missing authority"))
+    } else {
+        // For earlier versions of HTTP, the server name is specified by the
+        // "Host" header.
+        rqinfo
+            .headers()
+            .get(http::header::HOST)
+            .ok_or_else(|| String::from("request missing \"host\" header"))?
+            .to_str()
+            .map_err(|e| format!("failed to decode \"host\" header: {:#}", e))
+            .and_then(|hostport| {
+                hostport.parse().map_err(|e| {
+                    format!("unsupported \"host\" header: {:#}", e)
+                })
+            })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::ExternalEndpoints;
     use super::TlsCertificate;
+    use crate::app::external_endpoints::authority_for_request;
     use crate::app::external_endpoints::ExternalEndpointError;
     use crate::app::external_endpoints::NexusCertResolver;
     use chrono::Utc;
+    use dropshot::endpoint;
     use dropshot::test_util::LogContext;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -787,6 +785,10 @@ mod test {
     use nexus_types::external_api::shared;
     use nexus_types::identity::Resource;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use serde::Serialize;
+    use std::net::SocketAddr;
     use uuid::Uuid;
 
     fn create_silo(silo_id: Option<Uuid>, name: &str) -> Silo {
@@ -1214,6 +1216,200 @@ mod test {
             cert_resolver.do_resolve(Some("silo4.sys.oxide1.test")).unwrap();
         assert_eq!(resolved_c4.cert, c4.certified_key.cert);
 
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_authority() {
+        // Tests for authority_for_request().  The function itself is pretty
+        // simple.  That makes it easy to test fairly exhaustively.  It's also
+        // useful to verify that we're doing what we think we're doing
+        // (identifying the name that the client thinks they're connecting to).
+
+        // First, set up a Dropshot server that just echoes back whatever
+        // authority_for_request() returns for a given request.
+        let logctx = omicron_test_utils::dev::test_setup_log("test_authority");
+        let mut api = dropshot::ApiDescription::new();
+        api.register(echo_server_name).unwrap();
+        let server = dropshot::HttpServerStarter::new(
+            &dropshot::ConfigDropshot::default(),
+            api,
+            (),
+            &logctx.log,
+        )
+        .expect("failed to create dropshot server")
+        .start();
+        let local_addr = server.local_addr();
+        let port = local_addr.port();
+
+        #[derive(Debug, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+        struct AuthorityResponse {
+            host: String,
+            port: Option<u16>,
+        }
+
+        #[endpoint(method = GET, path = "/server_name")]
+        async fn echo_server_name(
+            rqctx: dropshot::RequestContext<()>,
+        ) -> Result<
+            dropshot::HttpResponseOk<Result<AuthorityResponse, String>>,
+            dropshot::HttpError,
+        > {
+            Ok(dropshot::HttpResponseOk(
+                authority_for_request(&rqctx.request).map(|authority| {
+                    AuthorityResponse {
+                        host: authority.host().to_string(),
+                        port: authority.port_u16(),
+                    }
+                }),
+            ))
+        }
+
+        // Generally, the "authority" for a request is determined by the URL
+        // provided to the client.  We can test basically two cases this way: an
+        // authority with a host and port and an authority with an IP address
+        // and port.  We can't test any cases that require the client to connect
+        // to a different host/port than what's in the URL.  So we can't test
+        // the case of an authority with no port number in it (since our server
+        // doesn't run on port 80).
+        //
+        // With HTTP 1.1, you can generally override the authority by specifying
+        // your own "host" header.  That lets us exercise the case of an
+        // authority that has no port number, even though the client would be
+        // connecting to a URL with a port number in it.  It might also let us
+        // test other cases, like an authority with an invalid DNS name.
+        // However, it's not clear any of this is possible with HTTP 2 or later.
+
+        async fn test_v2_host(
+            hostname: &str,
+            addr: SocketAddr,
+        ) -> AuthorityResponse {
+            let v2_client = reqwest::ClientBuilder::new()
+                .http2_prior_knowledge()
+                .resolve(hostname, addr)
+                .build()
+                .unwrap();
+            test_request(&v2_client, &format!("{}:{}", hostname, addr.port()))
+                .await
+        }
+
+        async fn test_v2_ip(addr: SocketAddr) -> AuthorityResponse {
+            let v2_client = reqwest::ClientBuilder::new()
+                .http2_prior_knowledge()
+                .build()
+                .unwrap();
+            test_request(&v2_client, &addr.to_string()).await
+        }
+
+        async fn test_v1_host(
+            hostname: &str,
+            addr: SocketAddr,
+            override_host: Option<&str>,
+        ) -> AuthorityResponse {
+            let mut v1_builder = reqwest::ClientBuilder::new()
+                .http1_only()
+                .resolve(hostname, addr);
+            if let Some(host) = override_host {
+                let mut headers = http::header::HeaderMap::new();
+                headers.insert(http::header::HOST, host.try_into().unwrap());
+                v1_builder = v1_builder.default_headers(headers);
+            }
+            let v1_client = v1_builder.build().unwrap();
+            test_request(&v1_client, &format!("{}:{}", hostname, addr.port()))
+                .await
+        }
+
+        async fn test_v1_ip(
+            addr: SocketAddr,
+            override_host: Option<&str>,
+        ) -> AuthorityResponse {
+            let mut v1_builder = reqwest::ClientBuilder::new().http1_only();
+            if let Some(host) = override_host {
+                let mut headers = http::header::HeaderMap::new();
+                headers.append(http::header::HOST, host.try_into().unwrap());
+                v1_builder = v1_builder.default_headers(headers);
+            }
+            let v1_client = v1_builder.build().unwrap();
+            test_request(&v1_client, &addr.to_string()).await
+        }
+
+        async fn test_request(
+            client: &reqwest::Client,
+            connect_host: &str,
+        ) -> AuthorityResponse {
+            let url = format!("http://{}/server_name", connect_host);
+
+            let result = client
+                .get(&url)
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("GET {:?}: {:#}", url, e));
+            let status = result.status();
+            println!("status: {:?}", status);
+            if status != http::StatusCode::OK {
+                panic!("GET {:?}: unexpected status: {:?}", url, status);
+            }
+
+            let body: Result<AuthorityResponse, String> =
+                result.json().await.unwrap_or_else(|e| {
+                    panic!("GET {:?}: parse json: {:#}", url, e);
+                });
+            println!("body: {:?}", body);
+            body.unwrap()
+        }
+
+        // HTTP 2: regular hostname (with port)
+        let authority = test_v2_host("foo.example.com", local_addr).await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, Some(port));
+
+        // HTTP 2: IP address (with port)
+        let authority = test_v2_ip(local_addr).await;
+        assert_eq!(authority.host, local_addr.ip().to_string());
+        assert_eq!(authority.port, Some(port));
+
+        // HTTP 1.1: regular hostname, no overridden "host" header.
+        let authority = test_v1_host("foo.example.com", local_addr, None).await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, Some(port));
+
+        // HTTP 1.1: regular hostname, override "host" header with port.
+        let authority = test_v1_host(
+            "foo.example.com",
+            local_addr,
+            Some("foo.example.com:123"),
+        )
+        .await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, Some(123));
+
+        // HTTP 1.1: regular hostname, override "host" header with no port.
+        let authority = test_v1_host(
+            "foo.example.com",
+            local_addr,
+            Some("foo.example.com"),
+        )
+        .await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, None);
+
+        // HTTP 1.1: IP address, no overridden "host" header.
+        let authority = test_v1_ip(local_addr, None).await;
+        assert_eq!(authority.host, local_addr.ip().to_string());
+        assert_eq!(authority.port, Some(port));
+
+        // HTTP 1.1: IP address, override "host" header with port.
+        let authority =
+            test_v1_ip(local_addr, Some("foo.example.com:123")).await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, Some(123));
+
+        // HTTP 1.1: IP address, override "host" header with no port.
+        let authority = test_v1_ip(local_addr, Some("foo.example.com")).await;
+        assert_eq!(authority.host, "foo.example.com");
+        assert_eq!(authority.port, None);
+
+        server.close().await.expect("failed to shut down dropshot server");
         logctx.cleanup_successful();
     }
 }

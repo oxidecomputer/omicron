@@ -11,8 +11,11 @@
 
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::db::model::DeviceAccessToken;
 use crate::ServerContext;
+use crate::{
+    app::external_endpoints::authority_for_request,
+    db::model::DeviceAccessToken,
+};
 use dropshot::{
     endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
@@ -71,7 +74,7 @@ pub async fn device_auth_request(
     let params = params.into_inner();
     let handler = async {
         let opctx = nexus.opctx_external_authn();
-        let authority = nexus.authority_for_request(&rqctx.request);
+        let authority = authority_for_request(&rqctx.request);
         let host = match &authority {
             Ok(host) => host.as_str(),
             Err(error) => {
