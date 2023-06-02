@@ -111,6 +111,15 @@ impl Client {
             }
             None => BTreeMap::new(),
         };
+
+        // Error if a limit is specified with a query that resolves to multiple
+        // timeseries. Because query results are ordered in part by timeseries
+        // key, results with a limit will selected measurements in a way that is
+        // arbitrary with respect to the query.
+        if limit.is_some() && info.len() != 1 {
+            return Err(Error::InvalidLimitQuery);
+        }
+
         if info.is_empty() {
             Ok(vec![])
         } else {
@@ -1395,11 +1404,15 @@ mod tests {
             .expect("Failed to insert samples");
         let timeseries_name = "service:request_latency";
 
+        // So we have to define criteria that resolve to a single timeseries
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
+
         // First, query without a limit. We should see all the results.
         let all_measurements = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 None,
                 None,
                 None,
@@ -1421,10 +1434,25 @@ mod tests {
         let limit =
             NonZeroU32::new(u32::try_from(all_measurements.len() / 2).unwrap())
                 .unwrap();
-        let timeseries = &client
+
+        // We expect queries with a limit to fail when they fail to resolve to a
+        // single timeseries, so run a query without any criteria to test that
+        client
             .select_timeseries_with(
                 timeseries_name,
                 &[],
+                None,
+                None,
+                Some(limit),
+                None,
+            )
+            .await
+            .expect_err("Should fail to select timeseries");
+
+        let timeseries = &client
+            .select_timeseries_with(
+                timeseries_name,
+                criteria,
                 None,
                 None,
                 Some(limit),
@@ -1442,7 +1470,7 @@ mod tests {
         let timeseries = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 Some(query::Timestamp::Exclusive(
                     timeseries.measurements.last().unwrap().timestamp(),
                 )),
@@ -1480,11 +1508,16 @@ mod tests {
             .expect("Failed to insert samples");
         let timeseries_name = "service:request_latency";
 
+        // Limits only work with a single timeseries, so we have to use criteria
+        // that resolve to a single timeseries
+        let criteria =
+            &["name==oximeter", "route==/a", "method==GET", "status_code==200"];
+
         // First, query without an order. We should see all the results in ascending order.
         let all_measurements = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 None,
                 None,
                 None,
@@ -1503,7 +1536,7 @@ mod tests {
         let timeseries_asc = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 None,
                 None,
                 None,
@@ -1518,7 +1551,7 @@ mod tests {
         let timeseries_desc = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 None,
                 None,
                 None,
@@ -1538,7 +1571,7 @@ mod tests {
         let desc_limit_1 = &client
             .select_timeseries_with(
                 timeseries_name,
-                &[],
+                criteria,
                 None,
                 None,
                 Some(NonZeroU32::new(1).unwrap()),
