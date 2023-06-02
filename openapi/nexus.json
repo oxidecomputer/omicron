@@ -4747,16 +4747,6 @@
           },
           {
             "in": "query",
-            "name": "id",
-            "description": "The UUID of the container being queried",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "query",
             "name": "limit",
             "description": "Maximum number of items returned by a single call",
             "schema": {
@@ -4790,6 +4780,16 @@
             "schema": {
               "type": "string",
               "format": "date-time"
+            }
+          },
+          {
+            "in": "query",
+            "name": "id",
+            "description": "The UUID of the container being queried",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
             }
           }
         ],
