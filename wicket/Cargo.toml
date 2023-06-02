@@ -21,6 +21,7 @@ itertools.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 reqwest.workspace = true
+rpassword.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -41,7 +42,9 @@ toml_edit.workspace = true
 tui.workspace = true
 tui-tree-widget = "0.12.0"
 unicode-width.workspace = true
+zeroize.workspace = true
 
+omicron-passwords.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true

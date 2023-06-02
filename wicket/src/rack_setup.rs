@@ -5,14 +5,22 @@
 //! Support for rack setup configuration via wicketd.
 
 use crate::wicketd::create_wicketd_client;
+use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use clap::Subcommand;
+use omicron_passwords::Password;
+use omicron_passwords::PasswordHashString;
+use slog::Logger;
 use std::io;
 use std::io::Read;
+use std::mem;
 use std::net::SocketAddrV6;
 use std::time::Duration;
+use wicketd_client::types::NewPasswordHash;
+use wicketd_client::types::PutRssRecoveryUserPasswordHash;
 use wicketd_client::types::PutRssUserConfigInsensitive;
+use zeroize::Zeroizing;
 
 mod config_toml;
 
@@ -29,12 +37,15 @@ pub(crate) enum SetupArgs {
 
     /// Set the current rack configuration from a filled-in TOML template
     SetConfig,
+
+    /// Set the password for the recovery user of the recovery silo
+    SetPasswd,
 }
 
 impl SetupArgs {
     pub(crate) fn exec(
         self,
-        log: slog::Logger,
+        log: Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
         let runtime =
@@ -45,7 +56,7 @@ impl SetupArgs {
 
     async fn exec_impl(
         self,
-        log: slog::Logger,
+        log: Logger,
         wicketd_addr: SocketAddrV6,
     ) -> Result<()> {
         let client = create_wicketd_client(&log, wicketd_addr, WICKETD_TIMEOUT);
@@ -84,8 +95,49 @@ impl SetupArgs {
 
                 slog::info!(log, "config upload complete");
             }
+            SetupArgs::SetPasswd => {
+                let hash = read_and_hash_password(&log)?;
+                let hash = NewPasswordHash(hash.to_string());
+
+                slog::info!(log, "uploading password hash to wicketd...");
+                client
+                    .put_rss_config_recovery_user_password_hash(
+                        &PutRssRecoveryUserPasswordHash { hash },
+                    )
+                    .await
+                    .context("failed to upload password hash to wicketd")?;
+            }
         }
 
         Ok(())
     }
+}
+
+fn read_and_hash_password(log: &Logger) -> Result<PasswordHashString> {
+    let pass1 = rpassword::prompt_password(
+        "Password for recovery user of recovery silo: ",
+    )
+    .context("failed to read password")?;
+    let pass1 = Zeroizing::new(pass1);
+
+    let pass2 = rpassword::prompt_password(
+        "Confirm password for recovery user of recovery silo: ",
+    )
+    .context("failed to read password confirmation")?;
+    let pass2 = Zeroizing::new(pass2);
+
+    if pass1 != pass2 {
+        bail!("passwords do not match");
+    }
+    mem::drop(pass2);
+
+    let password = Password::new(&pass1).context("invalid password")?;
+    mem::drop(pass1);
+
+    slog::info!(log, "hashing password...");
+    let mut hasher = omicron_passwords::Hasher::default();
+    let hash = hasher.create_password(&password).context("invalid password")?;
+    println!("{hash}");
+
+    Ok(hash)
 }
