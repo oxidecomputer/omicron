@@ -75,8 +75,7 @@ use crate::storage_manager::StorageResources;
 use camino::Utf8PathBuf;
 use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortFec, PortId, PortSettings,
-    RouteSettingsV4,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
 };
 use dpd_client::Client as DpdClient;
 use dpd_client::Ipv4Cidr;
@@ -1066,7 +1065,7 @@ impl ServiceInner {
                 params: LinkCreate {
                     autoneg: false,
                     kr: false,
-                    fec: PortFec::None,
+                    fec: rack_network_config.uplink_port_fec.clone().into(),
                     speed: rack_network_config.uplink_port_speed.clone().into(),
                 },
                 addrs: vec![addr],
