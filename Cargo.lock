@@ -4339,6 +4339,7 @@ dependencies = [
  "api_identity 0.1.0",
  "backoff",
  "chrono",
+ "dpd-client",
  "dropshot",
  "expectorate",
  "futures",

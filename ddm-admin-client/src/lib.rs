@@ -60,7 +60,10 @@ impl Client {
         Self::new(log, SocketAddrV6::new(Ipv6Addr::LOCALHOST, DDMD_PORT, 0, 0))
     }
 
-    fn new(log: &Logger, ddmd_addr: SocketAddrV6) -> Result<Self, DdmError> {
+    pub fn new(
+        log: &Logger,
+        ddmd_addr: SocketAddrV6,
+    ) -> Result<Self, DdmError> {
         let dur = std::time::Duration::from_secs(60);
         let log =
             log.new(slog::o!("DdmAdminClient" => SocketAddr::V6(ddmd_addr)));
