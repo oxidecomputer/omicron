@@ -38,7 +38,7 @@ use installinator_common::M2Slot;
 use installinator_common::WriteOutput;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff;
-use omicron_common::update::ArtifactId;
+use omicron_common::update::ArtifactHash;
 use slog::error;
 use slog::info;
 use slog::o;
@@ -89,7 +89,7 @@ struct SpUpdateData {
 
 #[derive(Debug)]
 struct UploadTrampolinePhase2ToMgsStatus {
-    id: ArtifactId,
+    hash: ArtifactHash,
     // The upload task retries forever until it succeeds, so we don't need to
     // keep a "tried but failed" variant here; we just need to know the ID of
     // the uploaded image once it's done.
@@ -162,10 +162,11 @@ impl UpdateTracker {
                 match upload_trampoline_phase_2_to_mgs.as_mut() {
                     Some(prev) => {
                         // We've previously started an upload - does it match
-                        // this update's artifact ID? If not, cancel the old
-                        // task (which might still be trying to upload) and
-                        // start a new one with our current image.
-                        if prev.status.borrow().id != plan.trampoline_phase_2.id
+                        // this artifact? If not, cancel the old task (which
+                        // might still be trying to upload) and start a new one
+                        // with our current image.
+                        if prev.status.borrow().hash
+                            != plan.trampoline_phase_2.hash
                         {
                             // It does _not_ match - we have a new plan with a
                             // different trampoline image. If the old task is
@@ -330,7 +331,7 @@ impl UpdateTracker {
         let artifact = plan.trampoline_phase_2.clone();
         let (status_tx, status_rx) =
             watch::channel(UploadTrampolinePhase2ToMgsStatus {
-                id: artifact.id.clone(),
+                hash: artifact.hash,
                 uploaded_image_id: None,
             });
         let task = tokio::spawn(upload_trampoline_phase_2_to_mgs(
@@ -1606,7 +1607,7 @@ async fn upload_trampoline_phase_2_to_mgs(
 
     // Notify all receivers that we've uploaded the image.
     _ = status.send(UploadTrampolinePhase2ToMgsStatus {
-        id: artifact.id,
+        hash: artifact.hash,
         uploaded_image_id: Some(uploaded_image_id),
     });
 
