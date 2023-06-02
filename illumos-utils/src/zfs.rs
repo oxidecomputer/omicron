@@ -178,11 +178,17 @@ impl Zfs {
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
     ) -> Result<(), EnsureFilesystemError> {
-        if Self::dataset_exists(name, &mountpoint)? {
+        let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
+        if exists {
             if encryption_details.is_none() {
-                // If the dataset exists, we're done.
+                // If the dataset exists, we're done. Unencrypted datasets are
+                // automatically mounted.
                 return Ok(());
             } else {
+                if mounted {
+                    // The dataset exists and is mounted
+                    return Ok(());
+                }
                 // We need to load the encryption key and mount the filesystem
                 return Self::mount_encrypted_dataset(name, &mountpoint);
             }
@@ -239,27 +245,34 @@ impl Zfs {
         Ok(())
     }
 
-    // Return true if the dataset exists, false otherwise.
+    // Return (true, mounted) if the dataset exists, (false, false) otherwise,
+    // where mounted is if the dataset is mounted.
     fn dataset_exists(
         name: &str,
         mountpoint: &Mountpoint,
-    ) -> Result<bool, EnsureFilesystemError> {
+    ) -> Result<(bool, bool), EnsureFilesystemError> {
         let mut command = std::process::Command::new(ZFS);
-        let cmd = command.args(&["list", "-Hpo", "name,type,mountpoint", name]);
+        let cmd = command.args(&[
+            "list",
+            "-Hpo",
+            "name,type,mountpoint,mounted",
+            name,
+        ]);
         // If the list command returns any valid output, validate it.
         if let Ok(output) = execute(cmd) {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let values: Vec<&str> = stdout.trim().split('\t').collect();
-            if values != &[name, "filesystem", &mountpoint.to_string()] {
+            if &values[..3] != &[name, "filesystem", &mountpoint.to_string()] {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
                     mountpoint: mountpoint.clone(),
                     err: EnsureFilesystemErrorRaw::Output(stdout.to_string()),
                 });
             }
-            Ok(true)
+            let mounted = values[3] == "yes";
+            Ok((true, mounted))
         } else {
-            Ok(false)
+            Ok((false, false))
         }
     }
 
