@@ -344,6 +344,11 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    pub fn log() -> slog::Logger {
+        let drain = slog::Discard;
+        slog::Logger::root(drain, o!())
+    }
+
     pub struct TestSecretRetriever {
         ikms: BTreeMap<u64, [u8; 32]>,
     }
@@ -389,7 +394,7 @@ mod tests {
 
     #[tokio::test]
     async fn disk_encryption_key_epoch_0() {
-        let (mut km, _) = KeyManager::new(TestSecretRetriever::new());
+        let (mut km, _) = KeyManager::new(&log(), TestSecretRetriever::new());
         km.load_latest_secret().await.unwrap();
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),
@@ -413,7 +418,7 @@ mod tests {
 
     #[tokio::test]
     async fn different_disks_produce_different_keys() {
-        let (mut km, _) = KeyManager::new(TestSecretRetriever::new());
+        let (mut km, _) = KeyManager::new(&log(), TestSecretRetriever::new());
         km.load_latest_secret().await.unwrap();
         let id_1 = DiskIdentity {
             vendor: "a".to_string(),
@@ -441,7 +446,7 @@ mod tests {
         // Load a distinct secret (IKM) for epoch 1
         retriever.insert(1, [1u8; 32]);
 
-        let (mut km, _) = KeyManager::new(retriever);
+        let (mut km, _) = KeyManager::new(&log(), retriever);
         km.load_latest_secret().await.unwrap();
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),
@@ -463,7 +468,7 @@ mod tests {
         // Load a distinct secret (IKM) for epoch 1
         retriever.insert(1, [1u8; 32]);
 
-        let (mut km, _) = KeyManager::new(retriever);
+        let (mut km, _) = KeyManager::new(&log(), retriever);
 
         let disk_id = DiskIdentity {
             vendor: "a".to_string(),

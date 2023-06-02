@@ -2593,9 +2593,9 @@ mod test {
         }
     }
 
-    async fn spawn_key_manager() -> StorageKeyRequester {
+    async fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(TestSecretRetriever {});
+            KeyManager::new(log, TestSecretRetriever {});
 
         tokio::spawn(async move { key_manager.run().await });
         storage_key_requester
@@ -2608,7 +2608,7 @@ mod test {
             omicron_test_utils::dev::test_setup_log("test_ensure_service");
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2655,7 +2655,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         let mgr = ServiceManager::new(
             log.clone(),
@@ -2703,7 +2703,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2743,7 +2743,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
         let _expectations = expect_new_service();
         let mgr = ServiceManager::new(
             logctx.log.clone(),
@@ -2788,7 +2788,7 @@ mod test {
         );
         let log = logctx.log.clone();
         let test_config = TestConfig::new().await;
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
 
         // First, spin up a ServiceManager, create a new service, and tear it
         // down.
@@ -2837,7 +2837,7 @@ mod test {
         // and we want to keep the channel buffer size management simple. So
         // for tests, just create another key manager and `storage_key_requester`.
         // They all manage the same hardcoded test secrets and will derive the same keys.
-        let storage_key_requester = spawn_key_manager().await;
+        let storage_key_requester = spawn_key_manager(&log).await;
         // Observe that the old service is not re-initialized.
         let mgr = ServiceManager::new(
             logctx.log.clone(),
