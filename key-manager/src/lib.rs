@@ -11,6 +11,7 @@ use async_trait::async_trait;
 use hkdf::Hkdf;
 use secrecy::{ExposeSecret, Secret};
 use sha3::Sha3_256;
+use slog::{o, warn, Logger};
 use tokio::sync::{mpsc, oneshot};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -161,10 +162,15 @@ pub struct KeyManager<S: SecretRetriever> {
     // Receives requests from a `StorageKeyRequester`, which is expected to run
     // in the `StorageWorker` task.
     storage_rx: mpsc::Receiver<StorageKeyRequest>,
+
+    log: Logger,
 }
 
 impl<S: SecretRetriever> KeyManager<S> {
-    pub fn new(secret_retriever: S) -> (KeyManager<S>, StorageKeyRequester) {
+    pub fn new(
+        log: &Logger,
+        secret_retriever: S,
+    ) -> (KeyManager<S>, StorageKeyRequester) {
         // There are up to 10 U.2 drives per sleds, but only one request should
         // come in at a time from a single worker. We leave a small buffer for
         // the possibility of asynchronous requests without responses that we
@@ -176,6 +182,7 @@ impl<S: SecretRetriever> KeyManager<S> {
             secret_retriever,
             prks: BTreeMap::new(),
             storage_rx: rx,
+            log: log.new(o!("component" => "KeyManager")),
         };
 
         (key_manager, storage_key_requester)
@@ -186,20 +193,24 @@ impl<S: SecretRetriever> KeyManager<S> {
     /// This should be spawned into a tokio task
     pub async fn run(&mut self) {
         loop {
-            tokio::select! {
-                Some(request) = self.storage_rx.recv() => {
-                    use StorageKeyRequest::*;
-                    match request {
-                        GetKey{epoch, disk_id, responder} => {
-                            let rsp = self.disk_encryption_key(epoch, &disk_id).await;
-                            let _ = responder.send(rsp);
-                        }
-                        LoadLatestSecret{responder} => {
-                            let rsp = self.load_latest_secret().await;
-                            let _ = responder.send(rsp);
-                        }
+            if let Some(request) = self.storage_rx.recv().await {
+                use StorageKeyRequest::*;
+                match request {
+                    GetKey { epoch, disk_id, responder } => {
+                        let rsp =
+                            self.disk_encryption_key(epoch, &disk_id).await;
+                        let _ = responder.send(rsp);
+                    }
+                    LoadLatestSecret { responder } => {
+                        let rsp = self.load_latest_secret().await;
+                        let _ = responder.send(rsp);
                     }
                 }
+            } else {
+                warn!(
+                    self.log,
+                    "Failed to receive from a storage key requester",
+                );
             }
         }
     }

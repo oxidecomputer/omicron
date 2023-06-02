@@ -383,7 +383,7 @@ impl Agent {
         // Spawn the `KeyManager` which is needed by the the StorageManager to
         // retrieve encryption keys.
         let (mut key_manager, storage_key_requester) =
-            KeyManager::new(LocalSecretRetriever {});
+            KeyManager::new(&log, LocalSecretRetriever {});
 
         let handle = tokio::spawn(async move { key_manager.run().await });
 
