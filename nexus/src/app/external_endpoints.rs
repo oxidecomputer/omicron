@@ -708,9 +708,18 @@ impl super::Nexus {
         // not happen in deployed systems where we expect people to have set up
         // DNS to find the external endpoints.  But in development, we don't
         // always have DNS set up.  People may use an IP address to get here.
-        // As a best-effort, we'll pick a default endpoint for this case.  (We
-        // may want to put this behind a policy knob that differs in
-        // production.)
+        // To accommodate this use case, we make a best-effort to pick a default
+        // endpoint when we can't find one for the name we were given.
+        //
+        // If this ever does happen in a production system, this might be
+        // confusing.  The best thing to do in a production system is probably
+        // to return an error saying that the requested server name was unknown.
+        // Instead, we'll wind up choosing some Silo here.  This has no impact
+        // on authenticated requests because for those we use the authenticated
+        // identity's Silo.  (That's as of this writing.  Again, we may want to
+        // disallow this and produce an error instead.)  If the request is not
+        // authenticated, we may wind up sending them to a login page for this
+        // Silo that may not be the Silo they meant.
         endpoints
             .default_endpoint
             .as_ref()
